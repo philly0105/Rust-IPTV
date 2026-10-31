@@ -297,11 +297,20 @@ interface ProgrammeWords {
 interface ProgrammeText {
   start: number;
   end: number;
-  /** Tokenized once, for every programme of the index, by the candidate map (`prepareMatch`); `guideProgramme` reuses it. */
+  /**
+   * The distinct words of the title and description that are in `hitsOf`, the teams' first words of the games
+   * the candidate map was prepared for (`prepareMatch`). Kept instead of every word: a programme without a
+   * first word of each team names no game of theirs (`mayNameBoth`), and those are nearly all of a guide.
+   */
+  hits?: readonly string[];
+  hitsOf?: ReadonlySet<string>;
+  /** Every word, tokenized once a programme may name the game being matched (`guideProgramme`). */
   words?: ProgrammeWords;
 }
 
 const programmeTexts = new WeakMap<EpgProgram, ProgrammeText>();
+const NO_HITS: readonly string[] = Object.freeze([]);
+const NO_WORDS: readonly string[] = Object.freeze([]);
 
 function programmeText(p: EpgProgram): ProgrammeText {
   let t = programmeTexts.get(p);
@@ -319,6 +328,42 @@ function programmeWords(p: EpgProgram, t: ProgrammeText): ProgrammeWords {
     t.words = { title, description, label: p.category ? [...title, ...textTokens(p.category)] : title };
   }
   return t.words;
+}
+
+/** Whether `matchGame` kept every word of a programme: a test of what a prepared guide holds on to. */
+export function programmeWordsKeptForTests(p: EpgProgram): boolean {
+  return programmeTexts.get(p)?.words !== undefined;
+}
+
+/** The distinct words of `title` and `description` that are in `words`. */
+function hitsAmong(title: readonly string[], description: readonly string[], words: ReadonlySet<string>): readonly string[] {
+  let hits: string[] | undefined;
+  for (const w of title) if (words.has(w) && !hits?.includes(w)) (hits ??= []).push(w);
+  for (const w of description) if (words.has(w) && !hits?.includes(w)) (hits ??= []).push(w);
+  return hits ?? NO_HITS;
+}
+
+/** The first words of a game's teams (`teamFirstWords`), with the last word set checked for holding them all. */
+interface FirstWords {
+  home: readonly string[];
+  away: readonly string[];
+  checked?: ReadonlySet<string>;
+  covered?: boolean;
+}
+
+/**
+ * False when a programme's `hits` show it holds no first word of one of the teams, so `programmeNames` would
+ * turn it down; true when it may name both, or when its hits were taken against words that lack some of this
+ * game's (a game added after the guide was prepared), which says nothing.
+ */
+function mayNameBoth(t: ProgrammeText, first: FirstWords): boolean {
+  const { hits, hitsOf } = t;
+  if (!hits || !hitsOf) return true;
+  if (first.checked !== hitsOf) {
+    first.checked = hitsOf;
+    first.covered = first.home.every((w) => hitsOf.has(w)) && first.away.every((w) => hitsOf.has(w));
+  }
+  return !first.covered || (first.home.some((w) => hits.includes(w)) && first.away.some((w) => hits.includes(w)));
 }
 
 /** Abbreviations count in titles ("NBA: BOS @ NYK"), not in descriptions, whose prose is full of short words. */
@@ -384,9 +429,16 @@ const MIN_GUIDE_OVERLAP = 30 * MINUTE;
  * The programme of `list` that is this game: it names both teams, is not a pregame or postgame show or a
  * recording (`isReplay`, or another game of the series: `sameSeriesGame`), and covers the game itself (for a
  * timed game, at least 30 minutes or half the programme of [start, start + typical length], so a show that only
- * touches the window does not count); the most overlap wins.
+ * touches the window does not count); the most overlap wins. Only a programme that may name both teams
+ * (`mayNameBoth`) is tokenized whole.
  */
-function guideProgramme(list: readonly EpgProgram[], game: Game, window: { from: number; to: number }, series: number | null): EpgProgram | null {
+function guideProgramme(
+  list: readonly EpgProgram[],
+  game: Game,
+  window: { from: number; to: number },
+  series: number | null,
+  first: FirstWords,
+): EpgProgram | null {
   const timed = game.timeValid && !game.timeNote;
   const core = timed ? { from: game.startMs, to: game.startMs + TYPICAL_LENGTH_MS[game.league] } : window;
   let best: EpgProgram | null = null;
@@ -396,6 +448,7 @@ function guideProgramme(list: readonly EpgProgram[], game: Game, window: { from:
     if (!(t.start < window.to && t.end > window.from)) continue;
     const overlap = Math.min(t.end, core.to) - Math.max(t.start, core.from);
     if (timed && overlap < Math.min(MIN_GUIDE_OVERLAP, (t.end - t.start) / 2)) continue;
+    if (!mayNameBoth(t, first)) continue;
     const words = programmeWords(p, t);
     if (isShow(words.title) || isReplay(words) || !sameSeriesGame(words, series) || !programmeNames(words, game)) continue;
     if (overlap > bestOverlap) {
@@ -598,24 +651,24 @@ function addPosition(map: Map<string, number[]>, key: string, i: number): void {
   else if (list[list.length - 1] !== i) list.push(i);
 }
 
-/** Adds the channels at [from, to) of the index. Their programmes are tokenized here, and matching reuses that. */
-function addChannels(
-  c: Candidates,
-  index: readonly IndexedChannel[],
-  programs: ReadonlyMap<ItemKey, EpgProgram[]>,
-  keys: readonly ItemKey[],
-  from: number,
-  to: number,
-): void {
-  for (let i = from; i < to; i++) {
-    const ch = index[i]!;
-    for (const w of ch.tokens) addPosition(c.byWord, w, i);
-    if (ch.network !== null) addPosition(c.byNetwork, ch.network, i);
-    if (ch.teamName !== null) addPosition(c.byTeamName, ch.teamName, i);
-    for (const p of programs.get(keys[i]!) ?? []) {
-      const words = programmeWords(p, programmeText(p));
-      for (const w of words.title) addPosition(c.byWord, w, i);
-      for (const w of words.description) addPosition(c.byWord, w, i);
+/**
+ * Adds the channel at position `i` of the index, with its programmes. Their words go into the map and are
+ * dropped: with `words` (the teams' first words of the games to match), each programme keeps the few of them
+ * it holds (`ProgrammeText.hits`), and matching tokenizes again only the programmes those let through.
+ */
+function addChannel(c: Candidates, ch: IndexedChannel, i: number, list: readonly EpgProgram[] | undefined, words?: ReadonlySet<string>): void {
+  for (const w of ch.tokens) addPosition(c.byWord, w, i);
+  if (ch.network !== null) addPosition(c.byNetwork, ch.network, i);
+  if (ch.teamName !== null) addPosition(c.byTeamName, ch.teamName, i);
+  for (const p of list ?? []) {
+    const t = programmeText(p);
+    const title = t.words?.title ?? textTokens(p.title);
+    const description = t.words?.description ?? (p.description ? textTokens(p.description) : NO_WORDS);
+    for (const w of title) addPosition(c.byWord, w, i);
+    for (const w of description) addPosition(c.byWord, w, i);
+    if (words && !t.words) {
+      t.hits = hitsAmong(title, description, words);
+      t.hitsOf = words;
     }
   }
 }
@@ -634,39 +687,76 @@ function candidatesOf(index: readonly IndexedChannel[], programs: ReadonlyMap<It
   let c = candidateMaps.get(index)?.get(programs);
   if (!c) {
     c = { byWord: new Map(), byNetwork: new Map(), byTeamName: new Map() };
-    addChannels(c, index, programs, indexMeta(index).keys, 0, index.length);
+    const { keys } = indexMeta(index);
+    for (let i = 0; i < index.length; i++) addChannel(c, index[i]!, i, programs.get(keys[i]!));
     storeCandidates(index, programs, c);
   }
   return c;
 }
 
-/** Channels `prepareMatch` adds between two yields to the page. */
-export const PREPARE_SLICE = 250;
+/** The first words of every team of `games` (`teamFirstWords`), sorted: what `prepareMatch` keeps of a programme. */
+export function firstWordsOf(games: readonly Game[]): string[] {
+  const out = new Set<string>();
+  for (const g of games) for (const team of [g.home, g.away]) for (const w of teamFirstWords(teamKeys(team, g.league))) out.add(w);
+  return [...out].sort();
+}
 
-/** Hands the main thread back to the page (input, paint, timers) between two slices. */
+/** The most channels `prepareMatch` adds between two yields to the page. */
+export const PREPARE_SLICE = 250;
+/** How long one slice of `prepareMatch` may hold the main thread, so a slow machine or a big guide never makes it a long task. */
+export const PREPARE_BUDGET_MS = 8;
+
+let yieldChannel: MessageChannel | undefined;
+const yielded: (() => void)[] = [];
+
+/**
+ * Hands the main thread back to the page (input, paint, timers) between two slices: `scheduler.yield` where
+ * the webview has it (WebView2), else a message posted to itself, a task of its own like a zero timeout but
+ * without the 4 ms a chain of nested timeouts waits each time in WebKit. Under Node (the tests), which runs a
+ * chain of such messages without letting timers in, `setImmediate`, as React's scheduler does.
+ */
 function yieldToPage(): Promise<void> {
   const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
-  return scheduler?.yield ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0));
+  if (scheduler?.yield) return scheduler.yield();
+  if (typeof setImmediate === 'function') return new Promise((resolve) => setImmediate(resolve));
+  if (typeof MessageChannel === 'undefined') return new Promise((resolve) => setTimeout(resolve, 0));
+  if (!yieldChannel) {
+    yieldChannel = new MessageChannel();
+    yieldChannel.port1.onmessage = () => yielded.shift()?.();
+    // Node's ports keep the process alive while listened to, which would hold a test run open.
+    (yieldChannel.port1 as Partial<{ unref(): void }>).unref?.();
+  }
+  const port = yieldChannel.port2;
+  return new Promise((resolve) => {
+    yielded.push(resolve);
+    port.postMessage(null);
+  });
 }
 
 /**
- * Builds what `matchGame` needs for `index` and `programs` ahead, {@link PREPARE_SLICE} channels at a time
- * with a yield to the page between slices: tokenizing the guide text of a big index (8,000 channels with 12
- * programmes each) takes about a second, which in one go would freeze the window. Resolves false when
- * `signal` aborted first.
+ * Builds what `matchGame` needs for `index` and `programs` ahead, in slices of at most
+ * {@link PREPARE_BUDGET_MS} (and {@link PREPARE_SLICE} channels) with a yield to the page between them:
+ * tokenizing the guide text of a big index (8,000 channels with 12 programmes each) takes about a second,
+ * which in one go would freeze the window. `words`, the first words of the teams to match
+ * (`teamFirstWords`), lets the programmes keep only those of their words (`addChannel`). Resolves false
+ * when `signal` aborted first.
  */
 export async function prepareMatch(
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   signal?: AbortSignal,
+  words?: ReadonlySet<string>,
 ): Promise<boolean> {
   if (candidateMaps.get(index)?.get(programs)) return !signal?.aborted;
   const c: Candidates = { byWord: new Map(), byNetwork: new Map(), byTeamName: new Map() };
   const { keys } = indexMeta(index);
-  for (let from = 0; from < index.length; from += PREPARE_SLICE) {
-    if (from > 0) await yieldToPage();
+  for (let i = 0; i < index.length; ) {
+    if (i > 0) await yieldToPage();
     if (signal?.aborted) return false;
-    addChannels(c, index, programs, keys, from, Math.min(from + PREPARE_SLICE, index.length));
+    const start = performance.now();
+    const end = Math.min(i + PREPARE_SLICE, index.length);
+    do addChannel(c, index[i]!, i, programs.get(keys[i]!), words);
+    while (++i < end && performance.now() - start < PREPARE_BUDGET_MS);
   }
   storeCandidates(index, programs, c);
   return true;
@@ -688,6 +778,8 @@ interface GameRoutes {
   marketsListed: ReadonlySet<string>;
   /** `seriesGame`: which game of a playoff series it is. */
   series: number | null;
+  /** The teams' first words, which a programme must hold to name the game (`mayNameBoth`). */
+  first: FirstWords;
 }
 
 /**
@@ -705,7 +797,8 @@ function routesOf(game: Game, shared?: ReadonlySet<string>): GameRoutes {
     game.broadcasts.some((b) => b.market === 'national' && EXCLUSIVE_STREAMERS.has(networkIdForBroadcast(b.name) ?? ''));
   const marketsListed = new Set(game.broadcasts.map((b) => b.market).filter((m) => m !== 'national'));
   const markets = [...teamMarkets(game.home), ...teamMarkets(game.away)];
-  return { window: gameWindow(game), networks, locals, markets, national, marketsListed, series: seriesGame(game) };
+  const first = { home: teamFirstWords(teamKeys(game.home, game.league)), away: teamFirstWords(teamKeys(game.away, game.league)) };
+  return { window: gameWindow(game), networks, locals, markets, national, marketsListed, series: seriesGame(game), first };
 }
 
 const HOME = 1;
@@ -721,8 +814,8 @@ const BOTH = 3;
  */
 function candidatePositions(c: Candidates, size: number, game: Game, routes: GameRoutes): number[] {
   const mark = new Uint8Array(size);
-  for (const w of teamFirstWords(teamKeys(game.home, game.league))) for (const i of c.byWord.get(w) ?? NO_POSITIONS) mark[i] = HOME;
-  for (const w of teamFirstWords(teamKeys(game.away, game.league))) {
+  for (const w of routes.first.home) for (const i of c.byWord.get(w) ?? NO_POSITIONS) mark[i] = HOME;
+  for (const w of routes.first.away) {
     for (const i of c.byWord.get(w) ?? NO_POSITIONS) if (mark[i] === HOME) mark[i] = BOTH;
   }
   for (const team of [game.home, game.away]) {
@@ -824,7 +917,7 @@ function pickStations(held: Iterable<HeldStation>): HeldStation[] {
 
 function matchAt(
   game: Game,
-  { window, networks, locals, markets, national, marketsListed, series }: GameRoutes,
+  { window, networks, locals, markets, national, marketsListed, series, first }: GameRoutes,
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now: number | undefined,
@@ -844,7 +937,7 @@ function matchAt(
     const key = meta.keys[i]!;
     // A spin-off's guide is its station's, mapped by name: the spin-off shows none of it.
     const list = ch.spinOff ? undefined : programs.get(key);
-    const program = list ? guideProgramme(list, game, window, series) : null;
+    const program = list ? guideProgramme(list, game, window, series, first) : null;
     let reason: MatchReason;
     let regional = false;
     let station: 'market' | 'spare' | null = null;

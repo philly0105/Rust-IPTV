@@ -2,19 +2,22 @@
 // date agreement rule, team channels, network matches with their avoid lists and package services, regional
 // flags (NFL Sunday CBS/FOX, RSNs, local stations), guide matches by title and by description, the order and
 // dedup of the result, and the candidate filter, which must find what a scan over every channel finds.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { itemKey, type Channel, type EpgProgram, type ItemKey } from '@/api/types';
 
 import { toIndexed, type IndexedChannel } from '../hooks/useChannelIndex';
 import {
+  PREPARE_BUDGET_MS,
   PREPARE_SLICE,
+  firstWordsOf,
   isEventChannel,
   isTeamChannel,
   matchGame,
   matchGameScanForTests,
   nameTimeAgrees,
   prepareMatch,
+  programmeWordsKeptForTests,
   sharedNetworks,
   type StreamMatch,
 } from '../lib/match';
@@ -1048,14 +1051,71 @@ describe('candidates', () => {
   it('prepares a big index in slices, yielding to the page between them, with the same result', async () => {
     const big = Array.from({ length: PREPARE_SLICE * 2 + 1 }, (_, i) => indexed(i === PREPARE_SLICE + 3 ? 'Knicks at Celtics' : `Sports ${i}`));
     const bigPrograms = guide([[big[7]!, [programme('Knicks at Celtics', '2026-10-23T23:00Z', '2026-10-24T01:30Z')]]]);
-    let ticked = false;
-    setTimeout(() => (ticked = true), 0);
-    const prepared = prepareMatch(big, bigPrograms);
-    expect(ticked).toBe(false);
+    // Under Node the yield is a setImmediate (a webview's is scheduler.yield or a message to itself, below).
+    const yields = vi.spyOn(globalThis, 'setImmediate');
+    let settled = false;
+    const prepared = prepareMatch(big, bigPrograms).finally(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
     await expect(prepared).resolves.toBe(true);
-    expect(ticked).toBe(true);
+    // At least one yield per 250 channels, more when a slice runs out of time first.
+    expect(yields.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(names(matchGame(NBA_GAME, big, bigPrograms))).toEqual(['Sports 7', 'Knicks at Celtics']);
     expect(matchGame(NBA_GAME, big, bigPrograms)).toEqual(matchGameScanForTests(NBA_GAME, big, bigPrograms));
+  });
+
+  it(`ends a slice after ${PREPARE_BUDGET_MS} ms, however few channels it holds`, async () => {
+    const few = Array.from({ length: 20 }, (_, i) => indexed(`Sports ${i}`));
+    // A slow machine: every channel takes 5 ms, so a slice holds two.
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => (clock += 5));
+    const yields = vi.spyOn(globalThis, 'setImmediate');
+    await expect(prepareMatch(few, NONE)).resolves.toBe(true);
+    expect(yields.mock.calls.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it('yields with scheduler.yield where the webview has it, else with a message to itself rather than a timeout', async () => {
+    const big = () => Array.from({ length: PREPARE_SLICE + 1 }, (_, i) => indexed(`Sports ${i}`));
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      const schedulerYield = vi.fn(() => Promise.resolve());
+      vi.stubGlobal('scheduler', { yield: schedulerYield });
+      await prepareMatch(big(), NONE);
+      expect(schedulerYield).toHaveBeenCalled();
+      vi.unstubAllGlobals();
+      // WebKitGTK and WKWebView: no scheduler.yield, and no setImmediate either.
+      vi.stubGlobal('setImmediate', undefined);
+      const posted = vi.spyOn(MessagePort.prototype, 'postMessage');
+      await prepareMatch(big(), NONE);
+      expect(posted).toHaveBeenCalled();
+      expect(timeouts).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('matches a guide prepared for the games’ teams as one read whole, keeping every word only of programmes that may name a game', async () => {
+    const now = Date.parse('2026-10-23T18:00Z');
+    // Fresh programme objects, which nothing has tokenized: every programme is read whole, as before preparing.
+    const fresh = (map: Map<ItemKey, EpgProgram[]>) => new Map([...map].map(([key, list]) => [key, list.map((p) => ({ ...p }))]));
+    const reference = games.map((g) => matchGame(g, index, fresh(programs), now));
+    // Prepared for some of the games only: the others are matched as an unprepared guide would be.
+    const prepared = fresh(programs);
+    await prepareMatch(index, prepared, undefined, new Set(firstWordsOf(games.slice(0, 3))));
+    expect(games.map((g) => matchGame(g, index, prepared, now))).toEqual(reference);
+    const all = fresh(programs);
+    await prepareMatch(index, all, undefined, new Set(firstWordsOf(games)));
+    expect(games.map((g) => matchGame(g, index, all, now))).toEqual(reference);
+
+    const nbaTv = indexed('NBA TV');
+    const highlights = programme('SportsCenter', '2026-10-23T23:00Z', '2026-10-24T00:00Z', 'Highlights and news from around the league.');
+    const show = programme('Celtics Tonight', '2026-10-24T00:00Z', '2026-10-24T01:00Z', 'Boston news.');
+    const game = programme('NBA Basketball', '2026-10-24T00:00Z', '2026-10-24T02:00Z', 'Knicks at Celtics.');
+    const tv = guide([[nbaTv, [highlights, show, game]]]);
+    await prepareMatch([nbaTv], tv, undefined, new Set(firstWordsOf([NBA_GAME])));
+    expect(matchGame(NBA_GAME, [nbaTv], tv)[0]?.program).toBe(game);
+    // Neither names both teams: none of their words outlive the preparing.
+    expect([highlights, show, game].map(programmeWordsKeptForTests)).toEqual([false, false, true]);
   });
 
   it('stops preparing when its signal aborts', async () => {

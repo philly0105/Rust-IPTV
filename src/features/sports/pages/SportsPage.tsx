@@ -191,7 +191,11 @@ export function SportsPage() {
   // Live games the day list also holds share its matches; the others (yesterday's late games, or
   // every live game while another day is picked) get a pass of their own, over their own window.
   const liveOnly = useMemo(() => leagueLive.filter((g) => !dayKeys.has(g.key)), [leagueLive, dayKeys]);
-  const dayStreams = useGameStreams(leagueDay, hasSources);
+  // The day's guide is asked over every league's games once the league was changed on this visit (or with
+  // All on show), so switching tabs asks and prepares nothing again. A league that opens remembered keeps
+  // its own, narrower window until then.
+  const [wideWindow, setWideWindow] = useState(false);
+  const dayStreams = useGameStreams(leagueDay, hasSources, wideWindow || league === null ? allDay.games : leagueDay);
   const liveStreams = useGameStreams(liveOnly, hasSources);
   const liveGames = useMemo(
     () => filterGames(leagueLive, null, query).filter((g) => !filterMyTeams || followsGame(followed, g)),
@@ -230,6 +234,7 @@ export function SportsPage() {
   const pickLeague = (next: League | null) => {
     rememberLeague(next);
     setRemembered(next);
+    setWideWindow(true);
     setParam('league', next);
   };
   // A day, league or filter changed from the pinned toolbar part way down a long day would open the

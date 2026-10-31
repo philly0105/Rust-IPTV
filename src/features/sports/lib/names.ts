@@ -84,12 +84,19 @@ export function isBackupFeed(name: string): boolean {
   );
 }
 
+/** A channel name's tag ("US| ", "UK: ") and the words after it (`splitName`). */
+export interface SplitName {
+  tag: string[] | null;
+  tokens: string[];
+}
+
 /**
  * A channel name's tag and words. `stripCountryPrefix` cuts at the first pipe whatever comes before it, so a
  * "tag" of more than two words is part of the name ("NBA 04: Hornets x Nets | 7:30PM ET"): then the whole
- * name is read and there is no tag.
+ * name is read and there is no tag. The index splits each name once and hands the split to the readers that
+ * take one (`foreignFeed`, `isStationSpinOff`).
  */
-function splitName(name: string): { tag: string[] | null; tokens: string[] } {
+export function splitName(name: string): SplitName {
   const trimmed = name.trim();
   const rest = stripCountryPrefix(trimmed);
   if (rest !== trimmed && trimmed.endsWith(rest)) {
@@ -140,8 +147,9 @@ const FOREIGN_WORDS = new Set(
 const FOREIGN_TAGS = new Set([...FOREIGN_CODES, ...FOREIGN_WORDS]);
 const HOME_TAGS = new Set(['us', 'usa', 'ca', 'can', 'en', 'na', 'am']);
 
-function region(name: string): 'home' | 'foreign' | null {
-  const { tag, tokens } = splitName(name);
+type Region = 'home' | 'foreign' | null;
+
+function regionOf({ tag, tokens }: SplitName): Region {
   for (const w of tag ?? tokens.slice(0, 1)) {
     if (HOME_TAGS.has(w)) return 'home';
     if ((tag ? FOREIGN_TAGS : FOREIGN_WORDS).has(w)) return 'foreign';
@@ -149,13 +157,33 @@ function region(name: string): 'home' | 'foreign' | null {
   return null;
 }
 
+function region(name: string): Region {
+  return regionOf(splitName(name));
+}
+
+/** Group names a cache below holds before it starts over; a source has a few dozen. */
+const GROUP_CACHE_MAX = 2000;
+
+/** `read(groupName)`, kept per group name: a source repeats its few dozen groups over thousands of rows. */
+function cachedByGroup<T extends object | string | null>(cache: Map<string, T>, groupName: string, read: (name: string) => T): T {
+  let value = cache.get(groupName);
+  if (value === undefined) {
+    if (cache.size >= GROUP_CACHE_MAX) cache.clear();
+    value = read(groupName);
+    cache.set(groupName, value);
+  }
+  return value;
+}
+
+const groupRegions = new Map<string, Region>();
+
 /**
  * True for a feed from outside North America: its name's tag says so ("BR: ESPN", "AU| FOX FOOTY"), or, when
  * the name has no country tag, its group's does ("ESPN" in "LATAM| DEPORTES"). Such a feed shares a US
- * network's name but not its programming.
+ * network's name but not its programming. `split` is the name's `splitName`, when the caller has it.
  */
-export function foreignFeed(name: string, groupName?: string | null): boolean {
-  return (region(name) ?? (groupName ? region(groupName) : null)) === 'foreign';
+export function foreignFeed(name: string, groupName?: string | null, split?: SplitName): boolean {
+  return (regionOf(split ?? splitName(name)) ?? (groupName ? cachedByGroup(groupRegions, groupName, region) : null)) === 'foreign';
 }
 
 const tokenSets = new WeakMap<readonly string[], Set<string>>();
@@ -862,10 +890,11 @@ export function affiliateMarket(tokens: readonly string[]): string[] | null {
 const FREE_LINEUPS = new Set(['prime', 'rk', 'roku', 'tubi', 'pluto', 'plex', 'xumo', 'freevee', 'localnow']);
 
 /** The tag and first word of a name: where it says which lineup it is from ("PRIME: ...", "RK: ...", "US| ROKU"). */
-function leadWords(name: string): string[] {
-  const { tag, tokens } = splitName(name);
+function leadWordsOf({ tag, tokens }: SplitName): readonly string[] {
   return [...(tag ?? []), ...tokens.slice(0, 1)];
 }
+
+const groupLeadWords = new Map<string, readonly string[]>();
 
 /** A news channel's words: "news", but not the city of Newport News. */
 export function namesNews(tokens: readonly string[]): boolean {
@@ -881,13 +910,17 @@ const SISTER_WORDS = new Set(['plus', 'xtra', 'extra']);
  * number ("FOX 9 PLUS HD [MINNEAPOLIS]", "FOX 10 XTRA HD [PHOENIX]", independent stations its owner brands
  * so), or any of its channels on a free streaming service's lineup, by the name's tag or its group's ("PRIME:
  * FOX 5 NEW YORK", "RK: ABC 20/20", "PRIME: CW GOLD"). On one real account that was every station named
- * after Prime or Roku. False for every other network: "US: PRIME MLB NETWORK" is MLB Network.
+ * after Prime or Roku. False for every other network: "US: PRIME MLB NETWORK" is MLB Network. `split` is the
+ * name's `splitName`, when the caller has it.
  */
-export function isStationSpinOff(network: string, name: string, groupName?: string | null): boolean {
+export function isStationSpinOff(network: string, name: string, groupName?: string | null, split?: SplitName): boolean {
   if (!AFFILIATED.has(network) && networkAlias(network)?.kind !== 'local') return false;
-  const tokens = splitName(name).tokens;
+  const named = split ?? splitName(name);
+  const { tokens } = named;
   if (namesNews(tokens) || tokens.some((t, i) => SISTER_WORDS.has(t) && NUMBER.test(tokens[i - 1] ?? ''))) return true;
-  return [...leadWords(name), ...(groupName ? leadWords(groupName) : [])].some((w) => FREE_LINEUPS.has(w));
+  const free = (w: string) => FREE_LINEUPS.has(w);
+  if (leadWordsOf(named).some(free)) return true;
+  return !!groupName && cachedByGroup(groupLeadWords, groupName, (g) => Object.freeze(leadWordsOf(splitName(g)))).some(free);
 }
 
 /** Cities a team's location stands for where its market's stations name another ("New England" is Boston). */

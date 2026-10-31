@@ -8,6 +8,7 @@
  */
 
 import { ExternalLink, Star } from 'lucide-react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Badge, LivePill, Menu, MetaLine, cn, displayChannelName, formatClock, formatDay, openExternalUrl, useMultiviewMenuItem } from '../deps';
@@ -116,7 +117,11 @@ export interface GameCardProps {
   ctx: StreamContext;
 }
 
-export function GameCard({ game, streams, streamsLoading, showStreams, showLeague, ctx }: GameCardProps) {
+/**
+ * Memoized: its props are plain values, the game object a poll leaves as it was, the cached match list and the
+ * page's memoized stream context, so typing in the search or a poll answer re-renders only the cards that changed.
+ */
+export const GameCard = memo(function GameCard({ game, streams, streamsLoading, showStreams, showLeague, ctx }: GameCardProps) {
   const { t } = useTranslation('sports');
   const title = t('matchup', { away: game.away.displayName, home: game.home.displayName });
   const networks = [...new Set(game.broadcasts.map((b) => b.name))];
@@ -229,4 +234,4 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
       ) : null}
     </li>
   );
-}
+});

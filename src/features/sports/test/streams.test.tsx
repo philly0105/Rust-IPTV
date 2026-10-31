@@ -1,6 +1,8 @@
 // The Sports matching hooks against a mocked core: the channel index (sports groups paged whole, hidden and
 // other groups skipped, network searches classified and deduplicated, 'catalog.' keys), the guide window
-// (chunked refs, the EPG offset both ways), and useGameStreams end to end with the bounded fallback search.
+// (chunked refs, the EPG offset both ways), and useGameStreams end to end with the bounded fallback search,
+// a guide asked over every league's games that a league switch leaves as it was, and preparing it again
+// only for new teams.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -18,6 +20,18 @@ vi.mock('@/api/transport', async (importOriginal) => ({
   isDesktop: false,
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
+/** How often the guide was handed to prepareMatch. */
+const prepares = vi.hoisted(() => ({ count: 0 }));
+vi.mock('../lib/match', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../lib/match')>();
+  return {
+    ...mod,
+    prepareMatch: (...args: Parameters<typeof mod.prepareMatch>) => {
+      prepares.count += 1;
+      return mod.prepareMatch(...args);
+    },
+  };
+});
 
 const { queryClient, invalidate } = await import('@/api/query');
 const { itemKey } = await import('@/api/types');
@@ -661,6 +675,68 @@ describe('useGameStreams', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     await tick(20);
     expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toEqual([]);
+  });
+
+  it('asks the guide once over every league’s games, so changing the games on screen asks and prepares nothing again', async () => {
+    const now = Date.now();
+    const nba = game('nba', KNICKS, CELTICS, now + 4 * HOUR);
+    const nfl = game('nfl', STEELERS, BUCS, now + 9 * HOUR);
+    const day = [nba, nfl];
+    const slot = ch('s1', 'p1', 'US| SPORTS 1');
+    const at = (t: number) => new Date(t).toISOString();
+    const programmes: EpgProgram[] = [
+      // The NFL teams named while the NBA game is on: inside the day's window, outside the NFL game's own.
+      { channelId: 'p1', title: 'Steelers at Buccaneers', start: at(nba.startMs), end: at(nba.startMs + 2 * HOUR) },
+      { channelId: 'p1', title: 'NFL Football', description: 'Steelers at Buccaneers.', start: at(nfl.startMs), end: at(nfl.startMs + 3 * HOUR) },
+    ];
+    serve([slot], {
+      // Only what overlaps the asked window, as the core answers.
+      guide: (a) => ({ [itemKey(slot.ref)]: programmes.filter((p) => p.start < a.to && a.from < p.end) }),
+    });
+    let games = [nba];
+    const loading: boolean[] = [];
+    const { result, rerender } = renderHook(
+      () => {
+        const r = useGameStreams(games, true, day);
+        loading.push(r.loading);
+        return r;
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.streams.get(nba.key)).toEqual([]);
+    const asked = callsOf('epg.grid').length;
+    const prepared = prepares.count;
+    loading.length = 0;
+    // Another league's tab, then All.
+    games = [nfl];
+    rerender();
+    expect(result.current.streams.get(nfl.key)!.map((m) => [m.reason, m.program!.title])).toEqual([['guide', 'NFL Football']]);
+    games = day;
+    rerender();
+    expect(result.current.streams.get(nfl.key)!.map((m) => m.reason)).toEqual(['guide']);
+    await tick(20);
+    expect(callsOf('epg.grid')).toHaveLength(asked);
+    expect(prepares.count).toBe(prepared);
+    expect(loading).not.toContain(true);
+  });
+
+  it('prepares the guide again for new teams, not for a poll’s new objects of the same games', async () => {
+    const now = Date.now();
+    const nba = game('nba', KNICKS, CELTICS, now + 4 * HOUR);
+    serve([ch('s1', 'p1', 'US| SPORTS 1')]);
+    let games = [nba];
+    const { result, rerender } = renderHook(() => useGameStreams(games), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const prepared = prepares.count;
+    games = [{ ...nba, broadcasts: [...nba.broadcasts] }];
+    rerender();
+    await tick(20);
+    expect(prepares.count).toBe(prepared);
+    // Another game at the same time: the guide window holds, the teams to prepare for do not.
+    games = [nba, game('nba', team('MIA', 'Miami', 'Heat'), team('ORL', 'Orlando', 'Magic'), now + 4 * HOUR)];
+    rerender();
+    await waitFor(() => expect(prepares.count).toBe(prepared + 1));
   });
 
   it(`runs at most ${FALLBACK_CONCURRENCY} fallback searches at once`, async () => {

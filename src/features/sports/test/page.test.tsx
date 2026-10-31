@@ -1,7 +1,8 @@
 // The /sports page: the league tabs with their counts and the Eastern day strip in the URL, the team
 // search and the "With streams" filter, Live now ahead of any day and the day's Upcoming and Final
 // games, game cards in every state, the matched stream rows with their reason and the action the
-// game's phase allows (Watch, Replay, Record), Show all, and the loading, empty, error and no-source states.
+// game's phase allows (Watch, Replay, Record), Show all, and the loading, empty, error and no-source states,
+// the games the guide window is asked over, and which cards render again.
 // The game and stream hooks and the player are mocked; nothing here reaches ESPN or the core.
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +20,18 @@ vi.mock('@/api/transport', async (importOriginal) => ({
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
 // Multi-view's parental gate lets every channel up here; the gate has tests of its own.
 vi.mock('@/features/multiview/parentalGate', () => ({ ensureUnlocked: async () => true, requestPin: async () => true }));
+/** Game card renders, counted where each one asks for its multi-view menu item (nothing else on the page does). */
+const cards = vi.hoisted(() => ({ renders: 0 }));
+vi.mock('../deps', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../deps')>();
+  return {
+    ...mod,
+    useMultiviewMenuItem: (...args: Parameters<typeof mod.useMultiviewMenuItem>) => {
+      cards.renders += 1;
+      return mod.useMultiviewMenuItem(...args);
+    },
+  };
+});
 
 /** What the mocked hooks answer, and what the page asked them for. */
 const data = vi.hoisted(() => ({
@@ -32,6 +45,8 @@ const data = vi.hoisted(() => ({
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
   streamCalls: [] as { keys: string[]; enabled: boolean }[],
+  /** The games each useGameStreams call asked the guide window over. */
+  windowCalls: [] as string[][],
   /** One stable answer per (day, leagues), as React Query's combine gives. */
   cache: new Map<string, unknown>(),
 }));
@@ -53,8 +68,9 @@ vi.mock('../hooks/useGames', () => ({
   },
 }));
 vi.mock('../hooks/useGameStreams', () => ({
-  useGameStreams: (games: readonly { key: string }[], enabled = true) => {
+  useGameStreams: (games: readonly { key: string }[], enabled = true, windowGames = games) => {
     data.streamCalls.push({ keys: games.map((g) => g.key), enabled });
+    data.windowCalls.push(windowGames.map((g) => g.key));
     return enabled ? { streams: data.streams, loading: data.streamsLoading } : { streams: new Map(), loading: false };
   },
 }));
@@ -145,6 +161,7 @@ beforeEach(() => {
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
   data.streamCalls.length = 0;
+  data.windowCalls.length = 0;
   data.cache.clear();
   player.played.length = 0;
   player.catchups.length = 0;
@@ -277,6 +294,54 @@ describe('sports page', () => {
     open('/sports?league=cricket');
     expect(screen.getByRole('tab', { name: /^All / }).getAttribute('aria-selected')).toBe('true');
     expect(data.dayCalls.at(-1)?.leagues).toEqual(ALL);
+  });
+
+  it('asks the day’s guide over every league once the league changes, and over a remembered league’s games until then', async () => {
+    const nba = h.game('1');
+    const nfl = h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
+    const playing = h.liveGame('9', { startMs: Date.now() - 26 * h.HOUR, etDate: etDate(Date.now() - 26 * h.HOUR) });
+    data.live = [playing];
+    setDay([nba, nfl]);
+    localStorage.setItem('tsrust.sportsLeague', 'nba');
+    await openReady();
+    // The day pass, then the live pass, which keeps its own games' window throughout.
+    expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1']);
+    expect(data.windowCalls.at(-2)).toEqual(['nba:1']);
+    expect(data.windowCalls.at(-1)).toEqual(['nba:9']);
+    fireEvent.click(screen.getByRole('tab', { name: /^NFL / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nfl:2']));
+    expect(data.windowCalls.at(-2)).toEqual(['nba:1', 'nfl:2']);
+    expect(data.windowCalls.at(-1)).toEqual([]);
+    fireEvent.click(screen.getByRole('tab', { name: /^NBA / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1']));
+    expect(data.windowCalls.at(-2)).toEqual(['nba:1', 'nfl:2']);
+    cleanup();
+
+    // All on show: every league's games from the start.
+    localStorage.removeItem('tsrust.sportsLeague');
+    data.windowCalls.length = 0;
+    await openReady();
+    expect(data.windowCalls.at(-2)).toEqual(['nba:1', 'nfl:2']);
+  });
+
+  it('renders a game card again only when its own game changes', async () => {
+    const games = ['1', '2', '3', '4'].map((id) => h.game(id));
+    setDay(games);
+    await openReady();
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(4);
+    const search = (value: string) => act(() => useShellStore.getState().header!.search!.onChange(value));
+    // A search that hides no game renders the page again, and none of its cards.
+    cards.renders = 0;
+    search(' ');
+    await waitFor(() => expect(useShellStore.getState().header?.search?.value).toBe(' '));
+    expect(cards.renders).toBe(0);
+    // A poll that moved one game on.
+    const id = `day|${today()}|${ALL.join()}`;
+    const answer = data.cache.get(id) as { games: Game[] };
+    data.cache.set(id, { ...answer, games: [{ ...games[0]!, shortDetail: 'Delayed' }, ...games.slice(1)] });
+    search('  ');
+    await waitFor(() => expect(useShellStore.getState().header?.search?.value).toBe('  '));
+    expect(cards.renders).toBe(1);
   });
 
   it('leads with Live now whatever day is picked', async () => {

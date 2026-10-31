@@ -1,8 +1,12 @@
 // Sports name matching: the tokenizer, team keys for pros and college (schools that share words, St/State,
 // accents and apostrophes, mascots), team channel names, league marks, the network alias table and its avoid
-// lists, ESPN's broadcast names, and which live groups the index reads (with a real provider's groups).
+// lists, ESPN's broadcast names, which live groups the index reads (with a real provider's groups), and an
+// index row read from one split of its name as each reader reads the name alone.
 import { describe, expect, it } from 'vitest';
 
+import { channelQuality } from '@/lib/channelQuality';
+
+import { toIndexed } from '../hooks/useChannelIndex';
 import {
   NETWORKS,
   affiliateMarket,
@@ -15,6 +19,7 @@ import {
   mentionsBoth,
   mentionsTeam,
   nameTokens,
+  namesNews,
   networkIdForBroadcast,
   networkIdForChannel,
   otherLeague,
@@ -25,6 +30,7 @@ import {
   textTokens,
 } from '../lib/names';
 import type { Game, GameTeam, League } from '../lib/types';
+import { SLATE_CHANNEL_LIST } from './slate';
 
 /** An ESPN team; names as ESPN writes them (see /tmp/sports-map raw scoreboards). */
 function team(abbreviation: string, location: string, name: string, shortDisplayName = name, displayName = `${location} ${name}`): GameTeam {
@@ -860,5 +866,62 @@ describe("regional networks under the spellings one real account uses", () => {
     expect(id('US: SPORTSNET LA')).toBe('spectrum-sportsnet-la');
     // FOX's own avoid list still holds for the rest of its sports brands.
     expect(id('US: FOX SPORTS SOCCER HD')).toBeNull();
+  });
+});
+
+describe('an index row', () => {
+  /** The row as each reader reads the name on its own, splitting it again every time. */
+  function readAlone(name: string, group: string | null) {
+    const tokens = nameTokens(name);
+    const foreign = foreignFeed(name, group);
+    let network: string | null = null;
+    let affiliate: string[] | null = null;
+    let spinOff = false;
+    if (!foreign) {
+      network = networkIdForChannel(tokens);
+      let read = tokens;
+      const all = textTokens(name);
+      if (network === null && all.length !== tokens.length) {
+        network = networkIdForChannel(all);
+        read = all;
+      }
+      spinOff = network !== null ? isStationSpinOff(network, name, group) : namesNews(tokens);
+      if (spinOff) network = null;
+      if (network !== null) affiliate = affiliateMarket(read);
+    }
+    const backup = isBackupFeed(name);
+    return { tokens, network, foreign, teamName: teamChannelName(tokens), backup, affiliate, spinOff, quality: channelQuality(name) };
+  }
+
+  it('reads one split of the name, and each group once, as every reader reads them alone', () => {
+    const source = { id: 's1', kind: 'xtream', name: 'Home' } as const;
+    const names = [
+      'PRIME: FOX 5 NEW YORK', 'US: FOX 9 PLUS HD [MINNEAPOLIS]', 'NCAAF 02: ESPN2', 'ESPN+ | Texas vs Georgia', 'NBA 04: Hornets x Nets | 7:30PM ET',
+      'RK: KTRK ABC13 HOUSTON', 'US: CBS NEWS PHOENIX (KPHO)', 'NFL | 02 - ESPN', 'US: PRIME MLB NETWORK', 'PRIME: CBS CINCINNATI NEWS (WKRC)',
+      'FOX 10 XTRA HD [PHOENIX]', 'US: SLING MLB NETWORK', 'BR: ESPN', 'ESPN', '  US| ESPN  ', ' - ESPN', 'ESPN - ', 'NBA: BOSTON CELTICS ᴴᴰ',
+      'US: FOX 26 (KRIV) HOUSTON HD', 'MyNetwork KSBI 52 Oklahoma City', 'FOX 5 Washington (WTTG)', 'UK ESPN', 'LATINO| ESPN Deportes',
+    ];
+    const groups = ['Sports', 'US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'LATAM| DEPORTES', 'US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'UK| SPORTS', 'LATINO', ''];
+    const rows = [
+      ...SLATE_CHANNEL_LIST.map((c) => ({ ...c })),
+      ...names.flatMap((name, i) =>
+        groups.map((categoryName) => ({
+          ref: { sourceId: 's1', contentType: 'live' as const, itemId: `n${i}` },
+          name,
+          categoryId: 'c1',
+          categoryName,
+          isRadio: false,
+        })),
+      ),
+    ];
+    // Twice, so the second pass reads every group from what the first one kept.
+    for (let pass = 0; pass < 2; pass++) {
+      for (const row of rows) {
+        const { tokens, network, foreign, teamName, backup, affiliate, spinOff, quality } = toIndexed({ ...row }, source, true);
+        expect({ tokens, network, foreign, teamName, backup, affiliate, spinOff, quality }, `${row.name} in ${row.categoryName}`).toEqual(
+          readAlone(row.name, row.categoryName ?? null),
+        );
+      }
+    }
   });
 });

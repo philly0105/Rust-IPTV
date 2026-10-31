@@ -15,7 +15,7 @@ import { useNow } from '@/features/parental/time';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import { gameWindow } from '../lib/espn';
-import { isCurrentGame, isEventChannel, matchGame, prepareMatch, sharedNetworks, type StreamMatch } from '../lib/match';
+import { firstWordsOf, isCurrentGame, isEventChannel, matchGame, prepareMatch, sharedNetworks, type StreamMatch } from '../lib/match';
 import type { Game, GameTeam, League } from '../lib/types';
 import { sportsRead } from './sportsRead';
 import { toIndexed, useChannelIndex, type IndexedChannel } from './useChannelIndex';
@@ -136,15 +136,22 @@ interface Prepared {
  * Matched streams per `game.key` for `games`, which should be the games on screen: the fallback searches run
  * for them. `loading` while the index, the guide window or a fallback search is still on its first answer,
  * or while the latest index and guide are being prepared for matching, unless they only refresh the last ones.
+ * The guide is asked over the window of `windowGames` as well as `games`, and prepared for their teams too:
+ * given every league's games of the day, a league switch only changes `games`, so the guide stays as asked
+ * and prepared, and only the games not seen yet are matched.
  */
 export function useGameStreams(
   games: readonly Game[],
   enabled = true,
+  windowGames: readonly Game[] = games,
 ): { streams: ReadonlyMap<string, StreamMatch[]>; loading: boolean } {
   const on = enabled && games.length > 0;
   const index = useChannelIndex(on);
   const sources = useVisibleSources().data;
-  const { from, to } = useMemo(() => unionWindow(games), [games]);
+  const span = useMemo(() => (windowGames === games ? games : [...windowGames, ...games]), [games, windowGames]);
+  const { from, to } = useMemo(() => unionWindow(span), [span]);
+  // By content, as a string: a poll's new game objects with the same teams must not prepare the guide again.
+  const words = useMemo(() => firstWordsOf(span).join(' '), [span]);
   // The whole index first: refs arriving source by source would ask the guide again for each.
   const guide = useGuideWindow(index.channels, from, to, on && !index.loading);
   const now = useNow(MINUTE);
@@ -159,11 +166,11 @@ export function useGameStreams(
   useEffect(() => {
     if (!on) return;
     const ctrl = new AbortController();
-    void prepareMatch(channels, programs, ctrl.signal).then((done) => {
+    void prepareMatch(channels, programs, ctrl.signal, new Set(words.split(' '))).then((done) => {
       if (done && !ctrl.signal.aborted) setPrepared({ channels, programs, complete, from, to });
     });
     return () => ctrl.abort();
-  }, [on, channels, programs, complete, from, to]);
+  }, [on, channels, programs, complete, from, to, words]);
   const ready = prepared?.channels === channels && prepared.programs === programs;
   // While a guide refresh or an index edit is prepared, the last pair stays current if it held complete
   // answers for the same games' window: the matches, their fallback hits and `loading` stay as they were.

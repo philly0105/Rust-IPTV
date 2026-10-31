@@ -25,9 +25,9 @@ import {
   isBackupFeed,
   isSportsGroup,
   isStationSpinOff,
-  nameTokens,
   namesNews,
   networkIdForChannel,
+  splitName,
   teamChannelName,
   textTokens,
 } from '../lib/names';
@@ -96,12 +96,16 @@ interface Described {
 
 const described = new WeakMap<Channel, Described>();
 
-/** Tokens, network, origin, team and quality of a channel row, kept per row: a refetch with unchanged rows keeps the objects. */
+/**
+ * Tokens, network, origin, team and quality of a channel row, kept per row: a refetch with unchanged rows keeps
+ * the objects. The name is split once (`splitName`) for every reader of it.
+ */
 function describe(channel: Channel): Described {
   let d = described.get(channel);
   if (!d) {
-    const tokens = nameTokens(channel.name);
-    const foreign = foreignFeed(channel.name, channel.categoryName);
+    const split = splitName(channel.name);
+    const { tokens } = split;
+    const foreign = foreignFeed(channel.name, channel.categoryName, split);
     // A feed from abroad is not the US network of its name ("BR: ESPN", "AU| FOX FOOTY").
     let network: string | null = null;
     let affiliate: string[] | null = null;
@@ -110,7 +114,8 @@ function describe(channel: Channel): Described {
       network = networkIdForChannel(tokens);
       let read: readonly string[] = tokens;
       // The cut tag may be a service's ("ESPN+ | Texas vs Georgia") or a slot's league word ("NFL | 02 - ESPN").
-      if (network === null) {
+      // Without a tag the split read the whole name already, the same words unless spaces pad it.
+      if (network === null && (split.tag !== null || channel.name !== channel.name.trim())) {
         const all = textTokens(channel.name);
         if (all.length !== tokens.length) {
           network = networkIdForChannel(all);
@@ -119,7 +124,7 @@ function describe(channel: Channel): Described {
       }
       // A station's news stream or free streaming copy shows no game ("PRIME: FOX 5 NEW YORK"), and neither
       // does a news channel no network took, whatever call sign it names ("US: CBS NEWS PHOENIX (KPHO)").
-      spinOff = network !== null ? isStationSpinOff(network, channel.name, channel.categoryName) : namesNews(tokens);
+      spinOff = network !== null ? isStationSpinOff(network, channel.name, channel.categoryName, split) : namesNews(tokens);
       if (spinOff) network = null;
       if (network !== null) affiliate = affiliateMarket(read);
     }
@@ -171,7 +176,8 @@ export function toIndexed(channel: Channel, source: Pick<Source, 'id' | 'kind' |
  * query (shown and hidden in one answer), and hidden ones are skipped here: `catalog.channels` with a
  * `categoryId` would list a hidden group's channels. Up to {@link GROUP_CONCURRENCY} groups are read at once,
  * each group's pages in order, and the rows come back in the groups' order, so the index is the same as read
- * one group after another.
+ * one group after another. Each page's rows are described as the page arrives, a task per page, so building
+ * the index in render finds them all described rather than reading thousands of names in one go.
  */
 async function loadSportsGroups(client: QueryClient, sourceId: string, signal: AbortSignal): Promise<Channel[]> {
   const args = categoriesArgs(sourceId, 'live');
@@ -191,6 +197,7 @@ async function loadSportsGroups(client: QueryClient, sourceId: string, signal: A
         const query = { offset, limit: INDEX_PAGE_LIMIT };
         const page = (await sportsRead('catalog.channels', { sourceId, categoryId: groups[i]!.id, query }, signal)) as Page<Channel>;
         if (failed) return;
+        for (const ch of page.items) describe(ch);
         rows.push(...page.items);
         offset += page.items.length;
         if (page.items.length === 0 || offset >= page.total) break;

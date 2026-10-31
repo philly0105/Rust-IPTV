@@ -153,6 +153,31 @@ pub struct SearchResult {
     pub series: Vec<SeriesItem>,
 }
 
+/// Most titles one `catalog.matchTitles` call takes. The UI sends at most
+/// 20: a "More like this" rail, or one kind of an actor's "Known for".
+pub const MAX_MATCH_TITLES: usize = 40;
+
+/// One title `catalog.matchTitles` looks up: a TMDB brief's title, with its
+/// year and TMDB id when TMDB gave them.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchTitle {
+    pub title: String,
+    #[serde(default)]
+    pub year: Option<i64>,
+    #[serde(default)]
+    pub tmdb_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchTitlesArgs {
+    pub source_id: String,
+    /// `movie` or `series`.
+    pub content_type: ContentType,
+    pub titles: Vec<MatchTitle>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentlyAddedArgs {
@@ -596,6 +621,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                 english,
                 quality,
                 hide,
+                true,
             )?
             .into_iter();
             let mut next = || found.next().unwrap_or_default();
@@ -636,6 +662,45 @@ pub async fn recently_added(
         }
         _ => VodOrSeriesList::Movies(rows.into_iter().map(NamedRow::into_vod).collect()),
     })
+}
+
+/// `catalog.matchTitles`: for each of up to [`MAX_MATCH_TITLES`] TMDB titles,
+/// the source's rows that may be it, one list per title in their order (see
+/// [`super::match_titles`]); the UI picks the match from each list. "More
+/// like this" and an actor's "Known for" sent one ranked `catalog.search` per
+/// title instead: 20 to 40 at once on the 8 pooled connections, 10-60 ms
+/// each, plus a 50-120 ms substring pass for a title with no word-prefix hit.
+/// Now one `db_call` and one settings and parental read per rail, and a base
+/// title the source has costs an index probe.
+pub async fn match_titles(
+    state: Arc<AppState>,
+    a: MatchTitlesArgs,
+) -> Result<Vec<VodOrSeriesList>, RpcError> {
+    let ct = a.content_type;
+    if !matches!(ct, ContentType::Movie | ContentType::Series) {
+        return Err(RpcError::invalid(
+            "matchTitles supports contentType 'movie' or 'series'",
+        ));
+    }
+    if a.titles.len() > MAX_MATCH_TITLES {
+        return Err(RpcError::invalid(format!(
+            "catalog.matchTitles takes at most {MAX_MATCH_TITLES} titles"
+        )));
+    }
+    let english = english_only(&state);
+    let hide = hide(&state).await?;
+    let lists = state
+        .db_call(move |c| super::match_titles(c, &a.source_id, ct, &a.titles, english, hide))
+        .await?;
+    Ok(lists
+        .into_iter()
+        .map(|rows| match ct {
+            ContentType::Series => {
+                VodOrSeriesList::Series(rows.into_iter().map(NamedRow::into_series).collect())
+            }
+            _ => VodOrSeriesList::Movies(rows.into_iter().map(NamedRow::into_vod).collect()),
+        })
+        .collect())
 }
 
 pub async fn same_title(state: Arc<AppState>, a: RefArgs) -> Result<Vec<VodItem>, RpcError> {
@@ -681,6 +746,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("catalog.search", search);
     r.add("catalog.recentlyAdded", recently_added);
     r.add("catalog.sameTitle", same_title);
+    r.add("catalog.matchTitles", match_titles);
     r.add("catalog.allLiveChannels", all_live_channels);
     // vod: `catalog.yearFacets` (Run 2 C4) is registered by the vodfilter
     // module, which owns its handler.

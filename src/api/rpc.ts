@@ -138,6 +138,13 @@ export interface CatalogSearchResult {
   series: SeriesItem[];
 }
 
+/** One title `catalog.matchTitles` looks up: a TMDB brief's title, year and id. */
+export interface CatalogTitleQuery {
+  title: string;
+  year?: number;
+  tmdbId?: number;
+}
+
 /**
  * One answer of `catalog.items`, in the order of its refs: what `catalog.item` returns for the ref,
  * or the error it fails with (`not_found`, with `details.parentalLocked` for an item Hide mode locks).
@@ -406,6 +413,16 @@ export interface RpcMap {
   >;
   /** Same title_base + year in other sources (multi-source VOD resolution). */
   'catalog.sameTitle': Cmd<{ ref: ItemRef }, VodItem[]>;
+  /**
+   * For each TMDB title ("More like this", "Known for"; at most 40, more -> invalid), the rows of
+   * one source that may be it, one list per title in order: the rows with that base title, then,
+   * when none of them fits the year or TMDB id, catalog.search's word-prefix hits (no substring
+   * pass). Same filters as catalog.search; the caller picks the match (`matchBrief`).
+   */
+  'catalog.matchTitles': Cmd<
+    { sourceId: string; contentType: 'movie' | 'series'; titles: CatalogTitleQuery[] },
+    (VodItem | SeriesItem)[][]
+  >;
   /** Remote control publication only; capped at 20000. */
   'catalog.allLiveChannels': Cmd<{ sourceId: string }, Channel[]>;
 
@@ -815,6 +832,7 @@ export const RPC_COMMANDS = [
   'catalog.search',
   'catalog.recentlyAdded',
   'catalog.sameTitle',
+  'catalog.matchTitles',
   'catalog.allLiveChannels',
   'catalog.yearFacets',
   'm3u.raw',

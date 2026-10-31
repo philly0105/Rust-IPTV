@@ -98,6 +98,7 @@ pub const CANCEL_ON_DISCONNECT: &[&str] = &[
     "epg.nowNext",
     "epg.channelsSearch",
     "catalog.search",
+    "catalog.matchTitles",
     "catalog.channels",
     "catalog.movies",
     "catalog.series",

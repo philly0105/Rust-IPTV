@@ -1920,6 +1920,7 @@ pub fn search_named(
         english_only,
         None,
         hide,
+        true,
     )?;
     Ok(found.pop().unwrap_or_default())
 }
@@ -1929,12 +1930,15 @@ pub fn search_named(
 /// rows per group, in one ranked pass: one FTS match for every group instead
 /// of one each, ranked on the narrow `items_rank` rows with a top-`limit`
 /// per group (ties by rowid), then the full rows of the winners. When the
-/// word-prefix match finds nothing in any group, every group falls back to
-/// a substring match, again one statement for all of them, over the title
-/// index rather than the table (wide rows: URLs, JSON). A group with
-/// word-prefix hits answers exactly as a [`search_named`] call of its own
-/// would; a group without them is empty unless no group has any. `quality`
-/// (the Live TV quality filter) drops live channels only.
+/// word-prefix match finds nothing in any group and `substring` is set,
+/// every group falls back to a substring match, again one statement for all
+/// of them, over the title index rather than the table (wide rows: URLs,
+/// JSON). A group with word-prefix hits answers exactly as a
+/// [`search_named`] call of its own would; a group without them is empty
+/// unless no group has any. `quality` (the Live TV quality filter) drops
+/// live channels only. `catalog.matchTitles` ([`match_titles`]) clears
+/// `substring`: its titles are whole words, and the pass would cost it
+/// 50-120 ms for each title the source lacks.
 #[allow(clippy::too_many_arguments)]
 pub fn search_groups(
     conn: &Connection,
@@ -1945,6 +1949,7 @@ pub fn search_groups(
     english_only: bool,
     quality: Option<quality::QualityFilter>,
     hide: Option<Hide>,
+    substring: bool,
 ) -> CoreResult<Vec<Vec<NamedRow>>> {
     let mut out: Vec<Vec<NamedRow>> = vec![Vec::new(); groups.len()];
     let text = query.trim();
@@ -2104,7 +2109,7 @@ pub fn search_groups(
     // A list without word-prefix hits next to lists with some stays empty;
     // filling it scanned every title of the library (50-120 ms on 220k
     // items) for the few in-word matches.
-    let missing: Vec<usize> = if out.iter().all(Vec::is_empty) {
+    let missing: Vec<usize> = if substring && out.iter().all(Vec::is_empty) {
         (0..groups.len())
             .filter(|g| !groups[*g].is_empty())
             .collect()
@@ -2421,6 +2426,98 @@ pub fn same_title(conn: &Connection, r: &ItemRef, hide: Option<Hide>) -> CoreRes
     Ok(rows)
 }
 
+/// Most candidate rows [`match_titles`] returns per title from each of its
+/// two passes: what one `catalog.search` call of the UI's lookup read, room
+/// for a remake or two sharing the name.
+pub const MATCH_TITLE_HITS: usize = 8;
+
+/// The rows of `?3` (a source) and `?1` (a type) whose base title is `?2`
+/// (case-insensitive), under the given English-only and parental clauses
+/// and outside hidden categories, shortest full title first. The source is
+/// `+` so the index on the base title drives: several indexes start with the
+/// source and type, which would read every title of the source.
+fn exact_title_sql(english: &str, locked: &str) -> String {
+    format!(
+        "{SELECT_NAMED} WHERE i.content_type = ?1 AND i.title_base = ?2 COLLATE NOCASE AND +i.source_id = ?3 AND COALESCE(c.hidden, 0) = 0{english}{locked} ORDER BY length(i.title), i.position LIMIT {MATCH_TITLE_HITS}"
+    )
+}
+
+/// `catalog.matchTitles`: for each title (a TMDB brief of "More like this"
+/// or an actor's "Known for"), the rows of one source and type the UI picks
+/// its match from (`matchBrief`: the same TMDB id, else the same folded base
+/// title within a year). First the rows whose base title equals the title
+/// (idx_items_title_base, a fraction of a millisecond). When none of them
+/// can be it ([`may_be`]), and only then, the word-prefix ranked pass of
+/// `catalog.search` ([`search_groups`]) adds its best rows after them, so
+/// accents, punctuation the tokenizer drops, a remake under another base
+/// title with the brief's TMDB id, and the rows a ranked search would have
+/// offered are all still found. The substring pass is skipped. Every row
+/// passes the filters of `catalog.search`: hidden categories,
+/// `english_only`, parental `hide`.
+pub fn match_titles(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    titles: &[rpc::MatchTitle],
+    english_only: bool,
+    hide: Option<Hide>,
+) -> CoreResult<Vec<Vec<NamedRow>>> {
+    let locked = match hide {
+        Some(h) => parental::filter::item_row(conn, h)?,
+        None => String::new(),
+    };
+    let sql = exact_title_sql(english_clause(conn, english_only)?, &locked);
+    let mut out = Vec::with_capacity(titles.len());
+    for t in titles {
+        let title = t.title.trim();
+        if title.is_empty() {
+            out.push(Vec::new());
+            continue;
+        }
+        let mut rows = conn
+            .prepare_cached(&sql)?
+            .query_map(params![content_type.as_str(), title, source_id], read_named)?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.iter().any(|n| may_be(t, &n.row)) {
+            let ranked = search_groups(
+                conn,
+                title,
+                Some(source_id),
+                &[&[content_type]],
+                MATCH_TITLE_HITS,
+                english_only,
+                None,
+                hide,
+                false,
+            )?;
+            let exact: HashSet<String> = rows.iter().map(|n| n.row.item_id.clone()).collect();
+            rows.extend(
+                ranked
+                    .into_iter()
+                    .flatten()
+                    .filter(|n| !exact.contains(&n.row.item_id)),
+            );
+        }
+        out.push(rows);
+    }
+    Ok(out)
+}
+
+/// True when `row`, whose base title equals the brief `t`'s, may be its
+/// title as the UI's matcher decides: the same TMDB id when both have one,
+/// else years at most one apart or unknown on either side. A row with
+/// another TMDB id, or a year further off, sends [`match_titles`] on to the
+/// ranked pass, which can find the right one (a remake, a renamed release).
+fn may_be(t: &rpc::MatchTitle, row: &ItemRow) -> bool {
+    match (t.tmdb_id, row.extra_i64("tmdbId")) {
+        (Some(want), Some(have)) => want == have,
+        _ => match (t.year, row.year) {
+            (Some(a), Some(b)) => (a - b).abs() <= 1,
+            _ => true,
+        },
+    }
+}
+
 /// Every visible live channel of a source in playlist order (capped at 20 000).
 /// `english_only` drops channels that are clearly in another language,
 /// `quality` the ones the quality filter drops, `hide` parentally locked ones.
@@ -2667,6 +2764,40 @@ mod tests {
             "hidden flag survives a rewrite"
         );
         assert_eq!(source_counts(&c, "s").unwrap(), (3, 0, 0));
+    }
+
+    /// `catalog.matchTitles` probes each title through the base-title index
+    /// under every filter shape, rather than walking the source's titles
+    /// through an index that starts with the source and type.
+    #[test]
+    fn exact_title_probe_reads_the_base_title_index() {
+        let (_d, pool) = conn();
+        let c = pool.get().unwrap();
+        c.execute(
+            "INSERT INTO parental_locks(source_id, content_type, kind, target_id, created_at) VALUES ('s', 'movie', 'item', 'm1', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let locked = parental::filter::item_row(&c, Hide { auto_adult: true }).unwrap();
+        assert!(locked.contains("parental_locks"), "{locked}");
+        for (english, locked) in [
+            ("", ""),
+            (language::STORED_SQL, locked.as_str()),
+            (language::ENGLISH_ONLY_SQL, ""),
+        ] {
+            let sql = exact_title_sql(english, locked);
+            let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan: Vec<String> = stmt
+                .query_map(params!["movie", "Heat", "s"], |r| r.get(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(
+                plan.iter()
+                    .any(|d| d.contains("USING INDEX idx_items_title_base")),
+                "{english:?} {locked:?}: {plan:?}"
+            );
+        }
     }
 
     /// R1-3: the readers leave an M3U series row's episode list out of

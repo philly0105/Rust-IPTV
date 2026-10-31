@@ -232,6 +232,11 @@ pub const INSIDE_BRIEF_SQL: &str =
 /// overlap by days).
 ///
 /// `with_description: false` leaves every description out.
+///
+/// `now_next` stops after the first feed that leaves two adjacent programmes
+/// at `from`, the one on air and the next, instead of reading on until the
+/// whole range is covered (see [`now_next_with`]).
+#[allow(clippy::too_many_arguments)]
 fn rows(
     conn: &Connection,
     channel_id: &str,
@@ -240,6 +245,7 @@ fn rows(
     limit: i64,
     shift: i64,
     with_description: bool,
+    now_next: bool,
 ) -> CoreResult<Vec<Row>> {
     let (from, to) = (from - shift, to - shift);
     let mut feeds = conn.prepare_cached(FEED_SQL)?;
@@ -288,14 +294,21 @@ fn rows(
         fill_feed_gaps(&mut out, list);
         // Most channels have complete coverage in their first feed. Do not read
         // duplicate schedules once there are no gaps left in the requested range.
-        let mut covered_to = from;
+        // `n` counts the contiguous run from `from`: n >= 1 means out[0] is on
+        // air (the walk starts at `from`), n >= 2 that out[1] starts where it
+        // stops. Later feeds only add whole programmes inside gaps
+        // ([`fill_feed_gaps`]), so neither can change any more. Now/next's 24 h
+        // target is rarely covered by 16 rows of 30-60 min programmes, so
+        // without this it read every feed carrying the channel.
+        let (mut covered_to, mut n) = (from, 0usize);
         for r in &out {
             if r.start > covered_to {
                 break;
             }
             covered_to = covered_to.max(r.stop);
+            n += 1;
         }
-        if covered_to >= to {
+        if covered_to >= to || (now_next && n >= 2) {
             break;
         }
     }
@@ -390,6 +403,7 @@ pub fn programs_with(
         MAX_PER_CHANNEL,
         shift,
         with_description,
+        false,
     )?
     .into_iter()
     .map(|r| to_program(channel_id, r))
@@ -415,16 +429,26 @@ pub fn now_next_with(
     shift: i64,
     with_description: bool,
 ) -> CoreResult<EpgNowNext> {
-    // A day ahead is plenty to find "next"; the limit bounds the work.
+    // A day ahead is plenty to find "next"; the limit bounds the work. The
+    // feeds stop once the one on air and the next are fixed.
     let list = rows(
         conn,
         channel_id,
         now,
         now + 86_400,
-        16,
+        NOW_NEXT_ROWS,
         shift,
         with_description,
+        true,
     )?;
+    Ok(pick_now_next(channel_id, list, now))
+}
+
+/// Programmes per feed [`now_next_with`] reads.
+const NOW_NEXT_ROWS: i64 = 16;
+
+/// The programme on air at `now` and the one after it, from [`rows`].
+fn pick_now_next(channel_id: &str, list: Vec<Row>, now: i64) -> EpgNowNext {
     let mut out = EpgNowNext::default();
     let mut it = list.into_iter().peekable();
     while let Some(r) = it.next() {
@@ -440,7 +464,7 @@ pub fn now_next_with(
             break;
         }
     }
-    Ok(out)
+    out
 }
 
 /// One `epg.channelsSearch` hit.
@@ -704,6 +728,186 @@ mod tests {
         assert_eq!(feed(now + 5 * h, now + 6 * h), None);
         let nn = now_next(&conn, "c", now, 0).unwrap();
         assert_eq!(nn.now.unwrap().title, "good");
+    }
+
+    /// Feeds `f0`, `f1`, ... in priority order, each with its programmes of
+    /// channel `c` as `(start, stop, title)`.
+    fn feeds(lists: &[Vec<(i64, i64, &str)>]) -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        for (i, list) in lists.iter().enumerate() {
+            let url = format!("f{i}");
+            conn.execute("INSERT INTO epg_sources(url) VALUES (?1)", [&url])
+                .unwrap();
+            for (start, stop, title) in list {
+                conn.execute(
+                    "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, 'c', ?2, ?3, ?4)",
+                    params![url, start, stop, title],
+                )
+                .unwrap();
+            }
+        }
+        conn
+    }
+
+    /// Times [`INSIDE_BRIEF_SQL`] ran on `conn`: one per feed `rows` read.
+    fn feeds_read(conn: &Connection) -> i32 {
+        conn.prepare_cached(INSIDE_BRIEF_SQL)
+            .unwrap()
+            .get_status(rusqlite::StatementStatus::Run)
+    }
+
+    /// R2-2: now/next stops reading feeds once the programme on air and the
+    /// next one are adjacent, and answers what the full coverage walk (the
+    /// rule before, which grid and programs keep) answered: from the first
+    /// feed, from a later feed filling the gap at now, from a later feed
+    /// filling a gap between now and next, with nothing on air, with a first
+    /// feed that ends with the programme on air, and under a shift.
+    #[test]
+    fn now_next_stops_at_the_first_adjacent_pair_with_the_same_answer() {
+        let now = 1_800_000_000;
+        let h = 3600;
+        let m = 60;
+        let other = vec![
+            (now - 2 * h, now + h / 2, "other on"),
+            (now + h / 2, now + 2 * h, "other next"),
+        ];
+        let third = vec![
+            (now - h, now + h, "third on"),
+            (now + h, now + 3 * h, "third next"),
+            (now + 3 * h, now + 4 * h, "third later"),
+        ];
+        type Feed = Vec<(i64, i64, &'static str)>;
+        let cases: Vec<(&str, Vec<Feed>, i64, &str, &str)> = vec![
+            (
+                "first feed",
+                vec![
+                    vec![
+                        (now - h, now + 30 * m, "on"),
+                        (now + 30 * m, now + h, "next"),
+                    ],
+                    other.clone(),
+                    third.clone(),
+                ],
+                0,
+                "on",
+                "next",
+            ),
+            (
+                "gap at now",
+                vec![
+                    vec![
+                        (now - 2 * h, now - h, "ended"),
+                        (now + h, now + 2 * h, "later"),
+                    ],
+                    vec![
+                        (now - h, now + h, "fills now"),
+                        (now + h, now + 2 * h, "dup"),
+                    ],
+                    third.clone(),
+                ],
+                0,
+                "fills now",
+                "later",
+            ),
+            (
+                "gap between now and next",
+                vec![
+                    vec![
+                        (now - h, now + h, "on"),
+                        (now + 2 * h, now + 3 * h, "after gap"),
+                    ],
+                    vec![(now + h, now + 2 * h, "fills gap")],
+                    third.clone(),
+                ],
+                0,
+                "on",
+                "fills gap",
+            ),
+            (
+                "nothing on air",
+                vec![
+                    vec![(now + h, now + 2 * h, "soon")],
+                    vec![(now + 2 * h, now + 3 * h, "later")],
+                    vec![(now + 30 * m, now + h, "sooner")],
+                ],
+                0,
+                "",
+                "sooner",
+            ),
+            (
+                "first feed ends with the programme on air",
+                vec![
+                    vec![(now - h, now + h, "last one")],
+                    other.clone(),
+                    third.clone(),
+                ],
+                0,
+                "last one",
+                "third next",
+            ),
+            (
+                "shifted",
+                vec![
+                    vec![(now - 3 * h, now - h, "on"), (now - h, now, "next")],
+                    other.clone(),
+                    third.clone(),
+                ],
+                2 * h,
+                "on",
+                "next",
+            ),
+        ];
+        for (name, lists, shift, on, next) in cases {
+            let conn = feeds(&lists);
+            let full = rows(
+                &conn,
+                "c",
+                now,
+                now + 86_400,
+                NOW_NEXT_ROWS,
+                shift,
+                false,
+                false,
+            )
+            .unwrap();
+            let before = pick_now_next("c", full, now);
+            let nn = now_next_with(&conn, "c", now, shift, false).unwrap();
+            assert_eq!(nn, before, "{name}");
+            assert_eq!(
+                nn.now.as_ref().map_or("", |p| p.title.as_str()),
+                on,
+                "{name}"
+            );
+            assert_eq!(
+                nn.next.as_ref().map_or("", |p| p.title.as_str()),
+                next,
+                "{name}"
+            );
+        }
+        // The first feed fixes both: the other two are never read.
+        let conn = feeds(&[
+            vec![
+                (now - h, now + 30 * m, "on"),
+                (now + 30 * m, now + h, "next"),
+            ],
+            other,
+            third,
+        ]);
+        rows(
+            &conn,
+            "c",
+            now,
+            now + 86_400,
+            NOW_NEXT_ROWS,
+            0,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(feeds_read(&conn), 3, "the coverage walk reads all three");
+        now_next_with(&conn, "c", now, 0, false).unwrap();
+        assert_eq!(feeds_read(&conn), 4, "now/next reads the first only");
     }
 
     /// The brief statements differ from the full ones only in the

@@ -59,12 +59,18 @@ function installCore() {
   rpc.handlers['positions.forSeries'] = (a) => rows.filter((r) => r.ref.itemId === (a as { ref: ItemRef }).ref.itemId);
   rpc.handlers['positions.remove'] = (a) => drop(a as PlaybackPosition);
   rpc.handlers['userstate.setWatched'] = (raw) => {
-    const a = raw as { ref: ItemRef; episodeId?: string; watched: boolean };
-    const old = rows.find((r) => key(r) === key(a));
-    drop(a);
-    if (!a.watched) return;
-    const at = old?.durationSeconds ?? old?.positionSeconds ?? 0;
-    rows.push({ ...(old ?? { ref: a.ref, ...(a.episodeId ? { episodeId: a.episodeId } : {}) }), positionSeconds: at, watched: true, updatedAt: NOW } as PlaybackPosition);
+    const a = raw as { ref: ItemRef; episodeId?: string; episodeIds?: string[]; series?: boolean; watched: boolean };
+    // A batch writes each episode, then with `series` the series row.
+    const targets = a.episodeIds
+      ? [...a.episodeIds.map((episodeId) => ({ ref: a.ref, episodeId })), ...(a.series ? [{ ref: a.ref }] : [])]
+      : [{ ref: a.ref, ...(a.episodeId ? { episodeId: a.episodeId } : {}) }];
+    for (const t of targets) {
+      const old = rows.find((r) => key(r) === key(t));
+      drop(t);
+      if (!a.watched) continue;
+      const at = old?.durationSeconds ?? old?.positionSeconds ?? 0;
+      rows.push({ ...(old ?? t), positionSeconds: at, watched: true, updatedAt: NOW } as PlaybackPosition);
+    }
   };
   rpc.handlers['positions.set'] = (raw) => {
     const a = raw as PlaybackPosition & { updatedAt?: string; watched?: boolean };

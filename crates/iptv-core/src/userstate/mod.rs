@@ -864,6 +864,44 @@ pub fn set_watched(
     Ok(())
 }
 
+/// Most episode ids one `userstate.setWatched` call may mark, so a server
+/// client cannot hold the write lock with an unbounded transaction.
+pub const MAX_WATCHED_EPISODES: usize = 10_000;
+
+/// Marks several episodes of `r` watched or unwatched (Mark season or series
+/// watched), each row as [`set_watched`] writes it and in list order, then,
+/// with `series`, the item's own row. One IMMEDIATE transaction: a long
+/// series is one write instead of one per episode, and it lands whole or not
+/// at all. Blank ids, or more than [`MAX_WATCHED_EPISODES`], are invalid.
+pub fn set_watched_episodes(
+    conn: &mut Connection,
+    r: &ItemRef,
+    episode_ids: &[String],
+    series: bool,
+    watched: bool,
+) -> CoreResult<()> {
+    validate_ref(r)?;
+    if episode_ids.len() > MAX_WATCHED_EPISODES {
+        return Err(CoreError::invalid(format!(
+            "episodeIds takes at most {MAX_WATCHED_EPISODES} ids, got {}",
+            episode_ids.len()
+        )));
+    }
+    // A blank id would write the series' own row instead of an episode's.
+    if episode_ids.iter().any(|e| e.trim().is_empty()) {
+        return Err(CoreError::invalid("episodeIds must not contain blank ids"));
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    for ep in episode_ids {
+        set_watched(&tx, r, Some(ep), watched)?;
+    }
+    if series {
+        set_watched(&tx, r, None, watched)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Every position stored under a ref (a series: one per episode), newest first.
 pub fn positions_for_series(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<PlaybackPosition>> {
     let mut stmt = conn.prepare_cached(&format!(

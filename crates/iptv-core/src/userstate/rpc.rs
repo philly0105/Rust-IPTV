@@ -99,6 +99,12 @@ struct SetWatchedArgs {
     item_ref: ItemRef,
     #[serde(default)]
     episode_id: Option<String>,
+    /// Several episodes in one write (Mark season or series watched).
+    #[serde(default)]
+    episode_ids: Option<Vec<String>>,
+    /// With `episodeIds`: also set the series' own row, after the episodes.
+    #[serde(default)]
+    series: bool,
     watched: bool,
 }
 
@@ -288,9 +294,35 @@ pub fn register(r: &mut RpcRouter) {
     r.add(
         "userstate.setWatched",
         |state, a: SetWatchedArgs| async move {
+            if a.episode_id.is_some() && (a.episode_ids.is_some() || a.series) {
+                return Err(RpcError::invalid(
+                    "episodeId cannot be combined with episodeIds or series",
+                ));
+            }
             let item_ref = a.item_ref.clone();
-            let episode_id = a.episode_id.clone();
             let watched = a.watched;
+            let mark = if watched {
+                super::watched::EpisodeMark::Watched
+            } else {
+                super::watched::EpisodeMark::Unmarked
+            };
+            if let Some(ids) = a.episode_ids {
+                let first = ids.first().cloned();
+                let series = a.series;
+                state
+                    .db_write(move |c| {
+                        super::set_watched_episodes(c, &a.item_ref, &ids, series, watched)
+                    })
+                    .await?;
+                // With `series` the batch wrote the series row itself;
+                // otherwise one sync covers the whole set, since any of its
+                // ids names the same series.
+                if let (false, Some(ep)) = (series, first) {
+                    super::watched::sync_series_mark(&state, &item_ref, &ep, mark).await?;
+                }
+                return Ok(());
+            }
+            let episode_id = a.episode_id.clone();
             state
                 .db_write(move |c| {
                     super::set_watched(c, &a.item_ref, a.episode_id.as_deref(), a.watched)
@@ -298,11 +330,6 @@ pub fn register(r: &mut RpcRouter) {
                 .await?;
             // An episode mark keeps its series' own mark in step.
             if let Some(ep) = episode_id {
-                let mark = if watched {
-                    super::watched::EpisodeMark::Watched
-                } else {
-                    super::watched::EpisodeMark::Unmarked
-                };
                 super::watched::sync_series_mark(&state, &item_ref, &ep, mark).await?;
             }
             Ok::<(), RpcError>(())

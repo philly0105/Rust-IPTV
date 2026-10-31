@@ -4,10 +4,11 @@
 //!
 //! Movies get the row by finishing (`position_set` at [`super::COMPLETE_RATIO`])
 //! or by "Mark as watched". A series gets it by "Mark series as watched"
-//! (`userstate.setWatched` without an episode id), and also when an episode
-//! write leaves every episode the provider lists watched ([`sync_series_mark`],
-//! the same rule as the detail page's `seriesWatchedWrite`): finishing the last
-//! episode in the player, a mark from Recently watched or the remote.
+//! (`userstate.setWatched` without an episode id, or with `series` beside its
+//! `episodeIds`), and also when an episode write leaves every episode the
+//! provider lists watched ([`sync_series_mark`], the same rule as the detail
+//! page's `seriesWatchedWrite`): finishing the last episode in the player, a
+//! mark from Recently watched or the remote, a season marked in one batch.
 //! Unmarking any episode clears the series row. The VOD grids read this for
 //! the tick on posters (`positions.watchedContains`, one call per loaded
 //! page), and "Hide watched" filters the same rows in SQL

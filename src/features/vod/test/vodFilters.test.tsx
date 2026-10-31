@@ -362,12 +362,9 @@ describe('Mark series watched', () => {
     };
     renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
     fireEvent.click(await screen.findByRole('button', { name: 'Mark series watched' }));
-    // The episodes first, then the item-level row that ticks the poster.
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(2));
-    expect(callsOf('userstate.setWatched').map((c) => c.args)).toEqual([
-      { ref: sref, episodeId: 'e11', watched: true },
-      { ref: sref, watched: true },
-    ]);
+    // The episodes and the item-level row that ticks the poster, in one write.
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(1));
+    expect(callsOf('userstate.setWatched').map((c) => c.args)).toEqual([{ ref: sref, episodeIds: ['e11'], watched: true, series: true }]);
     await screen.findByRole('button', { name: 'Mark series unwatched' });
   });
 });

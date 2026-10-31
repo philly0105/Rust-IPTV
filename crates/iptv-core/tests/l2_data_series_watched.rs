@@ -198,3 +198,178 @@ async fn an_unknown_episode_list_never_marks_the_series() {
         .await;
     assert_eq!(v.as_array().unwrap().len(), 1);
 }
+
+impl App {
+    async fn try_call(&self, cmd: &str, args: Value) -> Result<Value, iptv_core::RpcError> {
+        self.router.dispatch(self.state.clone(), cmd, args).await
+    }
+
+    /// Episode ids with a watched row, sorted.
+    async fn watched_episodes(&self, r: &ItemRef) -> Vec<String> {
+        let rows = self.call("positions.forSeries", json!({"ref": r})).await;
+        let mut eps: Vec<String> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["watched"] == true)
+            .filter_map(|p| p["episodeId"].as_str().map(str::to_owned))
+            .collect();
+        eps.sort();
+        eps
+    }
+}
+
+#[tokio::test]
+async fn a_season_or_series_marks_in_one_call() {
+    let a = app().await;
+    let r = series("310");
+    a.episodes(&r, &["e1", "e2", "e3"]);
+
+    // A season that leaves an episode unwatched does not mark the series.
+    a.call(
+        "userstate.setWatched",
+        json!({"ref": r, "episodeIds": ["e1", "e2"], "watched": true}),
+    )
+    .await;
+    assert_eq!(a.watched_episodes(&r).await, ["e1", "e2"]);
+    assert!(!a.series_watched(&r).await);
+
+    // The batch that finishes the list marks it, as one episode would.
+    a.call(
+        "userstate.setWatched",
+        json!({"ref": r, "episodeIds": ["e3"], "watched": true}),
+    )
+    .await;
+    assert!(a.series_watched(&r).await);
+
+    // Unmarking a batch clears its episodes and the series row.
+    a.call(
+        "userstate.setWatched",
+        json!({"ref": r, "episodeIds": ["e1", "e3"], "watched": false}),
+    )
+    .await;
+    assert_eq!(a.watched_episodes(&r).await, ["e2"]);
+    assert!(!a.series_watched(&r).await);
+}
+
+#[tokio::test]
+async fn the_series_flag_writes_the_series_row_with_the_episodes() {
+    let a = app().await;
+    // No cached episode list and an unreachable provider: only the flag can
+    // mark the series.
+    let r = series("311");
+    a.call(
+        "userstate.setWatched",
+        json!({"ref": r, "episodeIds": ["a", "b"], "watched": true, "series": true}),
+    )
+    .await;
+    assert_eq!(a.watched_episodes(&r).await, ["a", "b"]);
+    assert!(a.series_watched(&r).await);
+
+    a.call(
+        "userstate.setWatched",
+        json!({"ref": r, "episodeIds": ["a", "b"], "watched": false, "series": true}),
+    )
+    .await;
+    assert!(a.watched_episodes(&r).await.is_empty());
+    assert!(!a.series_watched(&r).await);
+
+    // No episodes left to change: the flag alone marks the series.
+    a.call(
+        "userstate.setWatched",
+        json!({"ref": r, "episodeIds": [], "watched": true, "series": true}),
+    )
+    .await;
+    assert!(a.series_watched(&r).await);
+    assert!(a.watched_episodes(&r).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_bad_batch_is_invalid_and_writes_nothing() {
+    let a = app().await;
+    let r = series("312");
+    let over: Vec<String> = (0..=iptv_core::userstate::MAX_WATCHED_EPISODES)
+        .map(|i| format!("e{i}"))
+        .collect();
+    let bad = [
+        json!({"ref": r, "episodeId": "e1", "episodeIds": ["e2"], "watched": true}),
+        json!({"ref": r, "episodeId": "e1", "series": true, "watched": true}),
+        json!({"ref": r, "episodeIds": over, "watched": true}),
+        // A blank id would stand for the series row; the valid ids before
+        // it are not written either.
+        json!({"ref": r, "episodeIds": ["e1", " "], "watched": true}),
+    ];
+    for args in bad {
+        let e = a.try_call("userstate.setWatched", args).await.unwrap_err();
+        assert_eq!(e.code, iptv_core::RpcErrorCode::Invalid, "{}", e.message);
+    }
+    assert!(a.watched_episodes(&r).await.is_empty());
+    assert!(!a.series_watched(&r).await);
+
+    // An unknown source is not_found, for the batch as for one episode.
+    let gone: ItemRef =
+        serde_json::from_value(json!({"sourceId": "nope", "contentType": "series", "itemId": "1"}))
+            .unwrap();
+    let e = a
+        .try_call(
+            "userstate.setWatched",
+            json!({"ref": gone, "episodeIds": ["e1", "e2"], "watched": true, "series": true}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, iptv_core::RpcErrorCode::NotFound);
+}
+
+/// Marking a long series watched: one `userstate.setWatched` per episode, all
+/// in flight at once as the detail page used to send them, against one
+/// batched call. Each single call is its own gated write plus a series sync
+/// that rebuilds the episode list and reads every watched row.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "timing only; run with --release -- --ignored --nocapture"]
+async fn time_marking_a_long_series() {
+    let a = Arc::new(app().await);
+    for n in [200usize, 1000] {
+        let ids: Vec<String> = (0..n).map(|i| format!("e{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+
+        let single = series(&format!("single-{n}"));
+        a.episodes(&single, &refs);
+        let t = std::time::Instant::now();
+        let calls = ids.iter().map(|ep| {
+            let (a, r, ep) = (a.clone(), single.clone(), ep.clone());
+            tokio::spawn(async move {
+                a.call(
+                    "userstate.setWatched",
+                    json!({"ref": r, "episodeId": ep, "watched": true}),
+                )
+                .await
+            })
+        });
+        for c in calls.collect::<Vec<_>>() {
+            c.await.unwrap();
+        }
+        a.call(
+            "userstate.setWatched",
+            json!({"ref": single, "watched": true}),
+        )
+        .await;
+        let per_episode = t.elapsed();
+        assert!(a.series_watched(&single).await);
+
+        let batch = series(&format!("batch-{n}"));
+        a.episodes(&batch, &refs);
+        let t = std::time::Instant::now();
+        a.call(
+            "userstate.setWatched",
+            json!({"ref": batch, "episodeIds": ids, "watched": true, "series": true}),
+        )
+        .await;
+        let batched = t.elapsed();
+        assert!(a.series_watched(&batch).await);
+        assert_eq!(a.watched_episodes(&batch).await.len(), n);
+
+        println!(
+            "series_watched: {n} episodes: {per_episode:?} one call per episode, {batched:?} one batched call"
+        );
+    }
+}

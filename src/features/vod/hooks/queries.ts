@@ -503,18 +503,20 @@ export interface SetWatchedArgs {
 
 /**
  * Marks a movie, or a set of episodes, watched or unwatched through
- * `userstate.setWatched` (B2-fix1), then refreshes positions.
+ * `userstate.setWatched` (B2-fix1), then refreshes positions. A set of
+ * episodes is one call: the core writes them, then the series row, in one
+ * transaction, so a long series is not hundreds of writes queued at the core.
  */
 export function useSetWatched() {
   const qc = useQueryClient();
   return useMutation<void, RpcError, SetWatchedArgs>({
     mutationFn: async ({ ref, episodeIds, watched, series }) => {
-      if (!episodeIds) {
-        await rpcRaw('userstate.setWatched', { ref, watched });
+      if (!episodeIds?.length) {
+        // A movie, or the series row alone when no episode is left to change.
+        if (!episodeIds || series) await rpcRaw('userstate.setWatched', { ref, watched });
         return;
       }
-      await Promise.all(episodeIds.map((episodeId) => rpcRaw('userstate.setWatched', { ref, episodeId, watched })));
-      if (series) await rpcRaw('userstate.setWatched', { ref, watched });
+      await rpcRaw('userstate.setWatched', { ref, episodeIds, watched, ...(series ? { series } : {}) });
     },
     onSettled: () => invalidateWatched(qc),
   });

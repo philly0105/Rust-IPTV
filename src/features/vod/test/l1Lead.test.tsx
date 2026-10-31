@@ -114,13 +114,19 @@ describe('SeriesDetailPage watched marks (L1-vod-1, L1-vod-14)', () => {
     rpcMock.handlers['positions.forSeries'] = () => [pos('e11', true)];
     renderAt('/s/src1/series/s1', seriesRoute);
     fireEvent.click(await screen.findByRole('button', { name: 'Mark series watched' }));
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(3));
-    expect(callsOf('userstate.setWatched')).toEqual([
-      { ref: sref, episodeId: 'e12', watched: true },
-      { ref: sref, episodeId: 'e21', watched: true },
-      { ref: sref, watched: true },
-    ]);
+    // One write: the episodes, then the series row, in the core's one transaction.
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(1));
+    expect(callsOf('userstate.setWatched')).toEqual([{ ref: sref, episodeIds: ['e12', 'e21'], watched: true, series: true }]);
     await waitFor(() => expect(useToastStore.getState().toasts.map((t) => t.title)).toEqual(['Severance marked watched']));
+  });
+
+  it('a long series is marked in one call, not one per episode', async () => {
+    const eps = Array.from({ length: 200 }, (_, i) => ep(`l${i}`, 1, i + 1));
+    rpcMock.handlers['xtream.seriesDetail'] = (): SeriesDetail => ({ ...seriesDetail, seasons: [{ number: 1, episodes: eps }] });
+    renderAt('/s/src1/series/s1', seriesRoute);
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark series watched' }));
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(callsOf('userstate.setWatched')).toEqual([{ ref: sref, episodeIds: eps.map((e) => e.id), watched: true, series: true }]);
   });
 
   it('marking seasons one after another keeps one toast, naming the season', async () => {
@@ -136,11 +142,8 @@ describe('SeriesDetailPage watched marks (L1-vod-1, L1-vod-14)', () => {
     rpcMock.handlers['positions.forSeries'] = () => [pos(undefined, true), pos('e11', true), pos('e12', true), pos('e21', true)];
     renderAt('/s/src1/series/s1', seriesRoute);
     fireEvent.click(await screen.findByRole('button', { name: 'Mark S01E01 as unwatched' }));
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(2));
-    expect(callsOf('userstate.setWatched')).toEqual([
-      { ref: sref, episodeId: 'e11', watched: false },
-      { ref: sref, watched: false },
-    ]);
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(1));
+    expect(callsOf('userstate.setWatched')).toEqual([{ ref: sref, episodeIds: ['e11'], watched: false, series: true }]);
   });
 });
 

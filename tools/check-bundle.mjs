@@ -51,8 +51,8 @@ const CONTROLS = /^Controls-[\w-]+\.js$/;
  *
  * `cards`: Home's cards module (`shell/dashboard/cards.tsx`, about 39 kB with My List, the VOD
  * prefetch and the rails it brings). Live, the guide, Search and Scheduled used it only for
- * `joinList`, which is a leaf now (`src/lib/joinList.ts`). My List, the VOD landing and the detail
- * pages draw its cards and may load it.
+ * `joinList`, which lives in `src/lib/intl.ts` now, and `itemPath`, in `src/shell/railLinks.ts`.
+ * My List, the VOD landing and the detail pages draw its cards and may load it.
  */
 const CARDS = /^cards-[\w-]+\.js$/;
 const ROUTES = [
@@ -189,6 +189,6 @@ for (const route of NO_CARDS) {
   if (cards.length > 0) cardLeaks.push(`The ${route.name} route chunk statically loads Home's cards module (${cards.join(', ')}).`);
 }
 if (cardLeaks.length > 0) {
-  fail(`${cardLeaks.join(' ')} Import joinList from '@/lib/joinList' and itemPath from '@/shell/itemPath', not from '@/shell/dashboard/cards'; see docs/architecture/performance.md.`);
+  fail(`${cardLeaks.join(' ')} Import joinList from '@/lib/intl' and itemPath from '@/shell/railLinks', not from '@/shell/dashboard/cards'; see docs/architecture/performance.md.`);
 }
 console.log("size:check: no player code in the Home or Settings route chunks' static imports, none of the player's UI in Search's, the category grid's or Sports', no player controls in Live's or the guide's, and no Home cards in Live's, the guide's, Search's or Scheduled's.");

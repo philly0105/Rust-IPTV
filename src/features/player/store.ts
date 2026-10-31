@@ -39,7 +39,11 @@ import { __resetNowNextForTests, fetchNowNext, holdNowNext, passNowNext, peekNow
 import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
 import { hideModeNow, lockedNow, onPlaybackHidden } from './parentalLocks';
 import { reportAnswered } from './playbackReport';
+import { isPastEnd, isWatchedReplay, MIN_RESUME_SECONDS } from './resumeRules';
 import { traceTimeshift } from './timeshiftDiagnostics';
+
+// The resume rules live in their own module so pages that only label titles need not load the store.
+export { isWatchedReplay, MIN_RESUME_SECONDS };
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 
@@ -170,8 +174,6 @@ let allowedRefKey: string | null = null;
  * (`replayFromRef`) would otherwise resume from that old row and undo the user's choice.
  */
 let startOverKey: string | null = null;
-/** Saved positions this close to the start are not worth a resume (and no "Resumed at 0:03"). */
-export const MIN_RESUME_SECONDS = 5;
 /**
  * The double-click window: above the longest double-click time Windows allows (900 ms), so a
  * slow double click still counts. A click on an ended item waits this long before it replays
@@ -1411,30 +1413,6 @@ async function withResume(source: PlayerSource): Promise<PlayerSource> {
 
 function savedPosition(source: PlayerSource & { ref: ItemRef }): Promise<PlaybackPosition | null> {
   return rpc('positions.get', source.episodeId ? { ref: source.ref, episodeId: source.episodeId } : { ref: source.ref });
-}
-
-/** Share of the duration from which an item counts as finished (the core marks it watched there). */
-const FINISHED_RATIO = 0.95;
-
-function isPastEnd(seconds: number, duration: number | undefined): boolean {
-  return !!duration && seconds >= duration * FINISHED_RATIO;
-}
-
-/** Share of the duration a watched movie's replay must reach before it is a resume point again. */
-const REPLAY_RESUME_RATIO = 0.05;
-
-/**
- * A watched movie replayed part-way (Run 2): the core keeps its watched flag on a partial save of
- * an item-level row and stores the replay position. That position is a resume point when the
- * duration is known and it lies between 5 % and 95 % of it; the watched tick stays. Episodes
- * lose the flag on a partial save instead, so a watched episode row is always finished.
- */
-export function isWatchedReplay(
-  pos: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched' | 'episodeId' | 'ref'>>,
-): boolean {
-  if (pos.watched !== true || pos.episodeId || pos.ref?.contentType === 'series') return false;
-  const d = pos.durationSeconds;
-  return !!d && d > 0 && pos.positionSeconds >= d * REPLAY_RESUME_RATIO && !isPastEnd(pos.positionSeconds, d);
 }
 
 /** A saved row for an item that was finished or marked watched: not a resume point (but see {@link isWatchedReplay}). */

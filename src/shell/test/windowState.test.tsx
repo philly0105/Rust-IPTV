@@ -40,8 +40,15 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }));
 
+// pip itself pulls in the player store; the effect reads only the flag (pipState), so loading it here is a regression.
+const pipLoads = vi.hoisted(() => ({ count: 0 }));
+vi.mock('@/features/player/pip', async (orig) => {
+  pipLoads.count++;
+  return orig();
+});
+
 const { useWindowStatePersistence, WINDOW_SAVE_DEBOUNCE_MS } = await import('../effects');
-const { usePipStore } = await import('@/features/player/pip');
+const { usePipStore } = await import('@/features/player/pipState');
 
 async function flush(ms = 0) {
   await act(async () => {
@@ -59,6 +66,19 @@ afterEach(() => {
 });
 
 describe('desktop window state', () => {
+  it('reads the PiP flag without loading pip and the player store', async () => {
+    vi.useFakeTimers();
+    rpcMock.handlers['window.getState'] = () => null;
+    rpcMock.handlers['window.setState'] = () => undefined;
+    renderHook(() => useWindowStatePersistence());
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.some((c) => c.cmd === 'window.setState')).toBe(true);
+    expect(pipLoads.count).toBe(0);
+    // pip re-exports the same store, so the player's PiP button and this effect see one flag.
+    const pip = await import('@/features/player/pip');
+    expect(pip.usePipStore).toBe(usePipStore);
+  });
+
   it('leaves the OS window restore to tauri-plugin-window-state', async () => {
     vi.useFakeTimers();
     rpcMock.handlers['window.getState'] = () => ({ x: 1, y: 2, width: 1000, height: 700, maximized: true });

@@ -9,7 +9,7 @@ import { plainChannelName } from '@/lib/channelName';
 import { parseGuideShift } from '@/lib/guideShift';
 
 import { Button, Dialog, ErrorState, SearchInput, Skeleton, cn, fieldClass, useToast, errorDescription } from '@/ui';
-import { joinList } from '@/shell/dashboard/cards';
+import { joinList } from '@/lib/intl';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { ChannelLogo } from './ChannelLogo';

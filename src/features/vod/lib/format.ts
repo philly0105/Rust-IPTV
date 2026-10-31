@@ -1,5 +1,5 @@
 import type { PlaybackPosition } from '@/api/types';
-import { isWatchedReplay, MIN_RESUME_SECONDS } from '@/features/player/store';
+import { isWatchedReplay, MIN_RESUME_SECONDS } from '@/features/player/resumeRules';
 import { formatDurationParts, resetDurationFormatCache, type DurationFormatOptions } from '@/lib/duration';
 
 type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> &

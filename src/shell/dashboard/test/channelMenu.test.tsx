@@ -30,11 +30,13 @@ vi.mock('@/api/events', () => ({
 }));
 vi.mock('@/features/player', () => ({
   playItem: (...a: unknown[]) => (playerMock.playItem as (...x: unknown[]) => Promise<void>)(...a),
+  // A list rail's play sets the list's zapping on the store once the channel plays.
+  usePlayerStore: { setState: () => undefined },
+}));
+vi.mock('@/features/player/dock', () => ({
   restorePlayback: async () => false,
   PlayerDock: () => <div data-testid="player-dock" />,
   ExternalPlaybackFooter: () => null,
-  // A list rail's play sets the list's zapping on the store once the channel plays.
-  usePlayerStore: { setState: () => undefined },
 }));
 
 const { ShellLayout } = await import('../../ShellLayout');

@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const loads = vi.hoisted(() => ({ count: 0 }));
-vi.mock('@/features/player', () => {
+vi.mock('@/features/player/dock', () => {
   loads.count++;
   return { restorePlayback: async () => false, PlayerDock: () => null, ExternalPlaybackFooter: () => null };
 });

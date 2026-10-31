@@ -26,7 +26,8 @@ const { Settings2 } = await import('lucide-react');
 const { useNarrow } = await import('./useNarrow');
 const { usePlayerStore, __resetPlayerForTests, reportProgress } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
-const { Controls, RecordControl, keepSpares, playerMenuJustClosed } = await import('./Controls');
+const { Controls, RecordControl, keepSpares } = await import('./Controls');
+const { playerMenuJustClosed } = await import('../menuDismiss');
 const { usePipStore } = await import('../pip');
 
 const commands = {

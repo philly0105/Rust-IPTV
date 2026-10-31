@@ -38,11 +38,13 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 vi.mock('@/features/player', () => ({
   playItem: async () => undefined,
+}));
+vi.mock('@/features/player/dock', () => ({
   restorePlayback: async () => false,
   PlayerDock: () => null,
   ExternalPlaybackFooter: () => null,
 }));
-vi.mock('@/features/player/pip', () => ({ usePipStore: { getState: () => ({ active: false }) } }));
+vi.mock('@/features/player/pipState', () => ({ usePipStore: { getState: () => ({ active: false }) } }));
 
 const { ShellLayout } = await import('../ShellLayout');
 const { useThemeStore, resetWindowThemeForTests } = await import('../theme');

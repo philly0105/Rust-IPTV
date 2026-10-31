@@ -12,7 +12,7 @@ import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } f
 import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from '@/features/mylist/components/MyListButton';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
-import { intlLocale, listSeparator } from '@/lib/intl';
+import { intlLocale, isolate, joinList } from '@/lib/intl';
 import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
@@ -22,28 +22,9 @@ import { kindShortKey } from '../sourceKind';
 /** The focusable card; its focus ring, hover lift and press are drawn on the artwork (CARD_ART). */
 const cardRoot = cn(CARD_ROOT, 'block w-full rounded-md text-start');
 
-/**
- * A letter or a digit in any script. Tried after the ASCII class (P2-HOME-6): the Unicode property
- * test was 3 ms of a cold Home at a 4x slowdown, for its two or three parts per card, and nearly
- * every part (a Latin title, a year, a count) has an ASCII letter or digit.
- */
-const ASCII_WORD = /[A-Za-z0-9]/;
-const ANY_WORD = /[\p{L}\p{N}]/u;
-
-/** First-strong isolate (U+2068 ... U+2069): a part's own script sets its direction. */
-const isolate = (part: string) => (ASCII_WORD.test(part) || ANY_WORD.test(part) ? `\u2068${part}\u2069` : part);
-
-/**
- * Joins short facts ("120 channels", "40 movies") with the locale's separator,
- * each fact bidi-isolated so a Latin name or a year keeps its place in an RTL
- * list and vice versa. Falsy and empty parts are dropped. Exported for tests.
- */
-export function joinList(parts: readonly (string | number | false | null | undefined)[], language: string): string {
-  return parts
-    .filter((p): p is string | number => p !== false && p !== null && p !== undefined && p !== '')
-    .map((p) => isolate(String(p)))
-    .join(listSeparator(language));
-}
+// joinList lives with the other locale helpers, so a page that only joins facts (the guide, the
+// EPG mapping dialog) does not load the cards; the cards' callers and tests still find it here.
+export { joinList };
 
 /** In-app path for an item's detail (movie/series) or browse (live/radio) page. */
 export function itemPath(ref: ItemRef): string {

@@ -35,13 +35,14 @@ import { SHELL_BOTTOM_INSET, TabBar, TAB_BAR_HEIGHT } from './TabBar';
 // the first route's chunks, and the player request waits for that and then for the browser's
 // first idle moment, so it never competes with the page being opened. It starts at once when
 // there is playback to restore, and on the first pointer or key press (the start of any play
-// intent; a page that plays imports the player itself, so by then the chunk is usually in).
-type PlayerModule = typeof import('@/features/player');
+// intent). Pages that draw the stage import only the `@/features/player` barrel, which leaves
+// the dock and the controls out, so they come from here: `@/features/player/dock`.
+type PlayerModule = typeof import('@/features/player/dock');
 let loadedPlayer: PlayerModule | null = null;
 let playerModule: Promise<PlayerModule> | null = null;
 
 function loadPlayerModule(): Promise<PlayerModule> {
-  playerModule ??= import('@/features/player').then((m) => (loadedPlayer = m));
+  playerModule ??= import('@/features/player/dock').then((m) => (loadedPlayer = m));
   return playerModule;
 }
 

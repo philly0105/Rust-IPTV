@@ -61,7 +61,10 @@ const playerState = vi.hoisted(() => ({ source: null as unknown, mode: 'web', to
 vi.mock('@/features/player', () => ({
   usePlayerStore: { getState: () => playerState },
   playItem: (...a: unknown[]) => (playerMock.playItem as (...x: unknown[]) => Promise<void>)(...a),
+}));
+vi.mock('@/features/player/dock', () => ({
   restorePlayback: async () => false,
+  usePlayerStore: { getState: () => playerState },
   PlayerDock: () => <div data-testid="player-dock" />,
   ExternalPlaybackFooter: () => null,
 }));

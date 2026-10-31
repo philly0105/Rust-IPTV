@@ -29,6 +29,8 @@ vi.mock('@/api/events', () => ({
 }));
 vi.mock('@/features/player', () => ({
   playItem: async () => {},
+}));
+vi.mock('@/features/player/dock', () => ({
   restorePlayback: async () => false,
   PlayerDock: () => null,
   ExternalPlaybackFooter: () => null,

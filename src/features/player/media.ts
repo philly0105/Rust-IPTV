@@ -8,7 +8,7 @@ import { create } from 'zustand';
 
 import type { MpvState, PlayerExternalEvent, PlayerSource, RpcErrorCode } from '@/api/types';
 
-import { EMPTY_TRACKS, type EngineTracks } from './engines';
+import { EMPTY_TRACKS, type EngineTracks } from './trackTypes';
 
 export interface TimeRange {
   start: number;

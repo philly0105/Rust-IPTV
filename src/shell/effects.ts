@@ -15,6 +15,8 @@ import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/qu
 import { isDesktop, rpc } from '@/api/transport';
 import type { ImportProgressEvent, Settings, Source, SourceKind, WindowState } from '@/api/types';
 import { progressStore } from '@/features/library/lib/progress';
+// Only the PiP flag: pip itself pulls in the player store, which the shell loads after the first route.
+import { usePipStore } from '@/features/player/pipState';
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
 import { addSourcePathFromDeepLink } from '@/features/sources/lib/links';
 import { applyLanguage, languageActive, languageUnresolved } from '@/i18n';
@@ -584,9 +586,6 @@ export function useWindowStatePersistence(): void {
     void (async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        // pip pulls in the player store and engines; loading it here keeps them out of the
-        // main chunk (C4 entry budget). It is desktop-only, like the rest of this effect.
-        const { usePipStore } = await import('@/features/player/pip');
         const win = getCurrentWindow();
         let lastNormal: WindowState | null = await rpc('window.getState').catch(() => null);
         if (disposed) return;

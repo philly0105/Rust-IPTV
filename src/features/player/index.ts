@@ -1,4 +1,8 @@
-/** Public surface of the player feature (SPEC C8). */
+/**
+ * Public surface of the player feature (SPEC C8). Pages import it for the stage and the store, so
+ * it must not export anything that reaches the dock or the controls: the shell loads those from
+ * `./dock`.
+ */
 export {
   usePlayerStore,
   playItem,
@@ -12,8 +16,5 @@ export {
 } from './store';
 export { useChannelZap } from './useChannelZap';
 export { preloadEngines } from './enginePreload';
-export { PlayerDock } from './components/PlayerDock';
 export { PlayerStage, type PlayerStageProps } from './components/PlayerStage';
-export { RadioPlayer } from './components/RadioPlayer';
-export { ExternalPlaybackFooter } from './components/ExternalPlaybackFooter';
 export { stopExternalPlayback } from './external';

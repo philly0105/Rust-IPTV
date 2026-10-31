@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/features/player', () => ({}));
+vi.mock('@/features/player/dock', () => ({}));
 
 const { PLAYER_IDLE_TIMEOUT_MS, PLAYER_PREFETCH_DELAY_MS, PLAYER_SCROLL_QUIET_MS, schedulePlayerLoad } = await import('../ShellLayout');
 

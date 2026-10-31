@@ -1,7 +1,7 @@
 // The one place app language codes become Intl locales (F-INTL-LOCALE).
 import { describe, expect, it } from 'vitest';
 
-import { dateTimeFormat, formatList, intlLocale, listSeparator, numberFormat, relativeTimeFormat } from './intl';
+import { dateTimeFormat, formatList, intlLocale, joinList, listSeparator, numberFormat, relativeTimeFormat } from './intl';
 
 describe('intlLocale', () => {
   it('maps app codes and i18next keys to tags Intl knows', () => {
@@ -43,6 +43,25 @@ describe('listSeparator', () => {
     expect(listSeparator('zh-TW')).toBe('、');
     expect(listSeparator('ary')).toBe('، ');
     expect(listSeparator('ar')).toBe('، ');
+  });
+});
+
+describe('joinList', () => {
+  const iso = (s: string) => `⁨${s}⁩`;
+
+  it("isolates each part and joins with the language's separator", () => {
+    expect(joinList(['120 channels', 40], 'en')).toBe(`${iso('120 channels')}, ${iso('40')}`);
+    expect(joinList(['映画', '2016'], 'ja')).toBe(`${iso('映画')}、${iso('2016')}`);
+    expect(joinList(['أفلام', 'BBC'], 'ar')).toBe(`${iso('أفلام')}، ${iso('BBC')}`);
+  });
+
+  it('drops empty and falsy parts but keeps zero', () => {
+    expect(joinList(['a', false, null, undefined, '', 0], 'en')).toBe(`${iso('a')}, ${iso('0')}`);
+    expect(joinList([], 'en')).toBe('');
+  });
+
+  it('leaves a part with no letter or digit as it is', () => {
+    expect(joinList(['—', 'x'], 'en')).toBe(`—, ${iso('x')}`);
   });
 });
 

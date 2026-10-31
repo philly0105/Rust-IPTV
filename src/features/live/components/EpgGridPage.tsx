@@ -42,8 +42,7 @@ import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, t
 
 import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
-import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
-import { joinList } from '@/shell/dashboard/cards';
+import { dateTimeFormat, intlLocale, joinList, relativeTimeFormat } from '@/lib/intl';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.

@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { sameRef, type ItemRef } from '@/api/types';
 import { usePlayerStore } from '@/features/player';
-import { playerMenuJustClosed } from '@/features/player/components/Controls';
+import { playerMenuJustClosed } from '@/features/player/menuDismiss';
 
 export interface WatchState {
   /** This item is playing in an in-app surface (inline or embedded mpv): the page is in watch state. */

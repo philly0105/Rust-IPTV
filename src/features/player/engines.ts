@@ -16,22 +16,12 @@ import { intlLocale } from '@/lib/intl';
 
 import { archiveRequest } from './archiveRequest';
 import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
+import { EMPTY_TRACKS, type EngineTracks, type TrackOption } from './trackTypes';
 import type { TsSeeker } from './tsSeek';
 import { traceTimeshift } from './timeshiftDiagnostics';
 
-export interface TrackOption {
-  id: string;
-  label: string;
-  selected: boolean;
-}
-
-export interface EngineTracks {
-  /** Video renditions; only reported when there is more than one. `auto` is implied. */
-  qualities: TrackOption[];
-  qualityAuto: boolean;
-  audio: TrackOption[];
-  text: TrackOption[];
-}
+export { EMPTY_TRACKS };
+export type { EngineTracks, TrackOption };
 
 export interface EngineError {
   message: string;
@@ -109,8 +99,6 @@ export interface Engine {
  * only a few seconds behind the playhead and hls.js picks no rendition above the tile's size.
  */
 export type EngineProfile = 'main' | 'tile';
-
-export const EMPTY_TRACKS: EngineTracks = { qualities: [], qualityAuto: true, audio: [], text: [] };
 
 /** Returned when the caller gave up while a library was loading: it must not touch the element. */
 const NOOP_ENGINE: Engine = { kind: 'native', setQuality() {}, setAudio() {}, setText() {}, recover() {}, destroy() {} };

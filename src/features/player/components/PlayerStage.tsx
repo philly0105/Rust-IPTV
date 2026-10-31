@@ -1,5 +1,10 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 
+// The stage's own rules (the light theme's accent and focus inside it, the external and radio
+// stages' dark glass) must be there at the page's first render, before the shell loads the dock,
+// which imports the same file.
+import '../player.css';
+
 import { cn } from '../cn';
 import { pushStageTarget } from '../stage';
 import { registerStage, usePlayerStore } from '../store';

@@ -86,6 +86,29 @@ export function listSeparator(language: string | null | undefined): string {
   return ', ';
 }
 
+/**
+ * A letter or a digit in any script. Tried after the ASCII class (P2-HOME-6): the Unicode property
+ * test was 3 ms of a cold Home at a 4x slowdown, for its two or three parts per card, and nearly
+ * every part (a Latin title, a year, a count) has an ASCII letter or digit.
+ */
+const ASCII_WORD = /[A-Za-z0-9]/;
+const ANY_WORD = /[\p{L}\p{N}]/u;
+
+/** First-strong isolate (U+2068 ... U+2069): a part's own script sets its direction. */
+export const isolate = (part: string) => (ASCII_WORD.test(part) || ANY_WORD.test(part) ? `\u2068${part}\u2069` : part);
+
+/**
+ * Joins short facts ("120 channels", "40 movies") with the locale's separator,
+ * each fact bidi-isolated so a Latin name or a year keeps its place in an RTL
+ * list and vice versa. Falsy and empty parts are dropped.
+ */
+export function joinList(parts: readonly (string | number | false | null | undefined)[], language: string): string {
+  return parts
+    .filter((p): p is string | number => p !== false && p !== null && p !== undefined && p !== '')
+    .map((p) => isolate(String(p)))
+    .join(listSeparator(language));
+}
+
 const formatters = new Map<string, unknown>();
 
 function cached<T>(kind: string, locale: string | undefined, opts: object | undefined, make: () => T): T {

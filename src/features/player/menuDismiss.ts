@@ -27,6 +27,23 @@ export function consumeMenuDismiss(target: EventTarget | null): boolean {
   return n.target === target || (target instanceof Node && n.target instanceof Node && target.contains(n.target));
 }
 
+/** When an Escape last closed a player menu (see `playerMenuJustClosed`). */
+let menuEscapeAt = Number.NEGATIVE_INFINITY;
+
+/** Escape closed a player menu. */
+export function noteMenuEscape(): void {
+  menuEscapeAt = Date.now();
+}
+
+/**
+ * True right after Escape closed a player menu. A page-level Escape (close the player) lets such
+ * a key go: a held or doubled Escape must not run on from closing the menu into stopping playback.
+ * Here rather than with the menus, so a detail page can ask without loading the controls.
+ */
+export function playerMenuJustClosed(withinMs = 600): boolean {
+  return Date.now() - menuEscapeAt < withinMs;
+}
+
 /** Testing only. */
 export function __resetMenuDismissForTests(): void {
   noted = null;

@@ -391,7 +391,8 @@ impl<'c> StagingWriter<'c> {
 /// old entries and search rows go before its programmes and the new ones
 /// are written after the copy, or the whole index is written again when
 /// that costs less. A stale one stays marked stale and is rebuilt after the
-/// swap (C5).
+/// swap (C5). So does one whose upkeep failed ([`index_step`]): the index
+/// never fails the swap.
 pub fn commit_staging(
     conn: &mut Connection,
     url: &str,
@@ -400,10 +401,12 @@ pub fn commit_staging(
 ) -> CoreResult<u64> {
     let key = staging_key(url);
     super::search::register_fold(conn)?;
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let upkeep = swap_upkeep(&tx, url)?;
-    if let Some(upkeep) = upkeep {
-        super::search::unindex_before_swap(&tx, url, upkeep)?;
+    let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut upkeep = swap_upkeep(&tx, url)?;
+    if let Some(u) = upkeep {
+        if !index_step(&mut tx, |c| super::search::unindex_before_swap(c, url, u))? {
+            upkeep = None;
+        }
     }
     tx.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
     tx.execute("DELETE FROM epg_channels WHERE epg_url = ?1", [url])?;
@@ -425,10 +428,14 @@ pub fn commit_staging(
         params![url, key],
     )?;
     tx.execute("DELETE FROM epg_sources WHERE url = ?1", [&key])?;
-    match upkeep {
-        Some(upkeep) => super::search::index_after_swap(&tx, url, upkeep)?,
-        // The guide search index was stale already (rebuilt after the swap).
-        None => super::search::invalidate_index(&tx)?,
+    let kept = match upkeep {
+        Some(u) => index_step(&mut tx, |c| super::search::index_after_swap(c, url, u))?,
+        None => false,
+    };
+    if !kept {
+        // The guide search index was stale already, or its upkeep failed:
+        // rebuilt after the swap, starting from 'delete-all'.
+        super::search::invalidate_index(&tx)?;
     }
     tx.execute(
         "UPDATE epg_sources SET status = 'ok', error = NULL, last_fetch_at = ?2, channel_count = ?3,
@@ -437,6 +444,34 @@ pub fn commit_staging(
     )?;
     tx.commit()?;
     Ok(programs)
+}
+
+/// Runs one guide search index step of a swap under a savepoint and says
+/// whether it held. The index is only a cache of the programme table: a step
+/// that fails (a corrupt FTS5 index answers its per-row `'delete'` with
+/// SQLITE_CORRUPT_VTAB) is rolled back and logged, and the swap goes on with
+/// the index marked stale (RB-F review). Failing the swap instead failed
+/// every later refresh of the feed, and with the per-feed upkeep chosen on
+/// each one, nothing rebuilt the index any more. When SQLite rolled the whole
+/// transaction back (a full disk, an I/O error), the error is returned.
+fn index_step(
+    tx: &mut rusqlite::Transaction<'_>,
+    step: impl FnOnce(&Connection) -> CoreResult<()>,
+) -> CoreResult<bool> {
+    let result = (|| {
+        let sp = tx.savepoint()?;
+        step(&sp)?;
+        sp.commit()?;
+        CoreResult::Ok(())
+    })();
+    match result {
+        Ok(()) => Ok(true),
+        Err(e) if tx.is_autocommit() => Err(e),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not keep the guide search index in step; it is rebuilt after the swap");
+            Ok(false)
+        }
+    }
 }
 
 /// How the swap of `url` keeps the guide search index in step: `None` while
@@ -760,6 +795,75 @@ mod tests {
         super::super::search::invalidate_index(&conn).unwrap();
         assert_eq!(swap(&mut conn, "c", &feed("late", &["z"], 2)), None);
         assert!(!super::super::search::index_ready(&conn).unwrap());
+    }
+
+    /// RB-F review: a failed index upkeep step no longer fails the swap. It
+    /// is rolled back, the new programmes are stored and the index is marked
+    /// stale for the rebuild after the swap, which leaves it as a rebuild
+    /// writes it, before the swap (feed entries not removed) or after it
+    /// (new entries not added), on either upkeep path.
+    #[test]
+    fn a_failed_index_upkeep_still_swaps_the_programmes_in() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        for url in ["a", "b", "c"] {
+            conn.execute("INSERT INTO epg_sources(url) VALUES (?1)", [url])
+                .unwrap();
+        }
+        let feed = |tag: &'static str, n: i64| -> Vec<(&'static str, i64, &'static str)> {
+            (0..n)
+                .map(|i| ("x", 1_800_000_000 + i * 1800, tag))
+                .collect()
+        };
+        for url in ["a", "b", "c"] {
+            refresh(&mut conn, url, &feed("Café news", 6));
+        }
+        let fail_on = |conn: &Connection, event: &str| {
+            conn.execute_batch(&format!(
+                "CREATE TRIGGER broken_index BEFORE {event} ON epg_search_rows
+                 BEGIN SELECT RAISE(ABORT, 'broken index'); END;"
+            ))
+            .unwrap();
+        };
+        let mend = |conn: &mut Connection, step: &str| {
+            conn.execute_batch("DROP TRIGGER broken_index;").unwrap();
+            assert!(!super::super::search::index_ready(conn).unwrap(), "{step}");
+            super::super::search::rebuild_index(conn).unwrap();
+            assert_matches_a_rebuild(conn, step);
+        };
+        let titles = |conn: &Connection, url: &str| -> Vec<String> {
+            conn.prepare("SELECT title FROM epg_programs WHERE epg_url = ?1")
+                .unwrap()
+                .query_map([url], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        super::super::search::rebuild_index(&mut conn).unwrap();
+
+        use SwapUpkeep::{Feed, Whole};
+        fail_on(&conn, "DELETE");
+        assert_eq!(refresh(&mut conn, "a", &feed("Δέλτα", 4)), Some(Feed));
+        assert_eq!(titles(&conn, "a"), ["Δέλτα"; 4]);
+        mend(&mut conn, "failed before the swap");
+
+        fail_on(&conn, "INSERT");
+        assert_eq!(refresh(&mut conn, "b", &feed("Ωμέγα", 3)), Some(Feed));
+        assert_eq!(titles(&conn, "b"), ["Ωμέγα"; 3]);
+        mend(&mut conn, "failed after the swap");
+
+        fail_on(&conn, "INSERT");
+        assert_eq!(refresh(&mut conn, "c", &feed("Thời sự", 40)), Some(Whole));
+        assert_eq!(titles(&conn, "c").len(), 40);
+        let status: (String, i64) = conn
+            .query_row(
+                "SELECT status, program_count FROM epg_sources WHERE url = 'c'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, ("ok".to_string(), 40));
+        mend(&mut conn, "whole index failed");
     }
 
     /// R2-1: a feed's search rows are deleted through

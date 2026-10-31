@@ -8,6 +8,7 @@ use crate::rpc::RpcRouter;
 use crate::state::AppState;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Default per-type limit of `catalog.search`.
@@ -359,12 +360,26 @@ enum Gone {
     Locked,
 }
 
-/// The `catalog.item` read of `r` on an open connection, so `catalog.items`
-/// runs it for each of its refs inside one `db_call`.
+/// The `catalog.item` read of `r` on an open connection.
 fn lookup(
     c: &Connection,
     r: &ItemRef,
     hide: Option<crate::parental::Hide>,
+) -> CoreResult<Result<AnyItem, Gone>> {
+    let mut found = [find(c, r, hide, &mut HashMap::new())?];
+    finish_channels(c, &mut found)?;
+    let [found] = found;
+    Ok(found)
+}
+
+/// [`lookup`] without the channel post-processing ([`finish_channels`]),
+/// which `catalog.items` applies once over every ref's answer. `m3u` caches
+/// [`super::is_m3u_source`] per source id across the refs of one call.
+fn find(
+    c: &Connection,
+    r: &ItemRef,
+    hide: Option<crate::parental::Hide>,
+    m3u: &mut HashMap<String, bool>,
 ) -> CoreResult<Result<AnyItem, Gone>> {
     let Some(named) = super::get_named(c, r)? else {
         return Ok(Err(Gone::Missing));
@@ -377,20 +392,49 @@ fn lookup(
     }
     // An M3U movie plays and downloads from the playlist's own link;
     // Xtream and Stalker movies get theirs from their streamUrl.
-    let mut item =
-        if named.row.content_type == ContentType::Movie && super::is_m3u_source(c, &r.source_id)? {
-            AnyItem::Vod(named.into_m3u_vod())
-        } else {
-            to_any(named)
+    let is_m3u_movie = named.row.content_type == ContentType::Movie
+        && match m3u.get(&r.source_id) {
+            Some(known) => *known,
+            None => {
+                let known = super::is_m3u_source(c, &r.source_id)?;
+                m3u.insert(r.source_id.clone(), known);
+                known
+            }
         };
-    // guide: M3U catch-up overrides are applied on read.
-    if let AnyItem::Channel(ch) = &mut item {
-        crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;
-        // C2: a hidden channel is still returned (the hidden-channels
-        // dialog and the player open it), with its custom name.
-        crate::channeledit::apply_names(c, std::slice::from_mut(ch))?;
+    Ok(Ok(if is_m3u_movie {
+        AnyItem::Vod(named.into_m3u_vod())
+    } else {
+        to_any(named)
+    }))
+}
+
+/// Applies the M3U catch-up overrides (guide) and the custom names (C2) to
+/// every channel among `found`, in one call each: both read their
+/// per-source data (the source's config, every custom name of the source)
+/// once per call, so `catalog.items` with 42 favourite channels ran about
+/// 150 statements and 42 config parses one ref at a time. A hidden channel
+/// is still returned (the hidden-channels dialog and the player open it),
+/// with its custom name.
+fn finish_channels(c: &Connection, found: &mut [Result<AnyItem, Gone>]) -> CoreResult<()> {
+    let mut at = Vec::new();
+    let mut channels = Vec::new();
+    for (i, slot) in found.iter_mut().enumerate() {
+        if matches!(slot, Ok(AnyItem::Channel(_))) {
+            if let Ok(AnyItem::Channel(ch)) = std::mem::replace(slot, Err(Gone::Missing)) {
+                at.push(i);
+                channels.push(ch);
+            }
+        }
     }
-    Ok(Ok(item))
+    if channels.is_empty() {
+        return Ok(());
+    }
+    crate::catchup::m3u::apply_overrides(c, &mut channels)?;
+    crate::channeledit::apply_names(c, &mut channels)?;
+    for (i, ch) in at.into_iter().zip(channels) {
+        found[i] = Ok(AnyItem::Channel(ch));
+    }
+    Ok(())
 }
 
 /// `catalog.item`'s answer for a lookup of the item `id`.
@@ -447,15 +491,19 @@ pub async fn items(state: Arc<AppState>, a: RefsArgs) -> Result<Vec<ItemAnswer>,
     let hide = hide(&state).await?;
     let found = state
         .db_call(move |c| {
-            a.refs
-                .into_iter()
-                .map(|r| Ok((lookup(c, &r, hide)?, r.item_id)))
-                .collect::<CoreResult<Vec<_>>>()
+            let mut m3u = HashMap::new();
+            let mut found = a
+                .refs
+                .iter()
+                .map(|r| find(c, r, hide, &mut m3u))
+                .collect::<CoreResult<Vec<_>>>()?;
+            finish_channels(c, &mut found)?;
+            Ok(found.into_iter().zip(a.refs).collect::<Vec<_>>())
         })
         .await?;
     Ok(found
         .into_iter()
-        .map(|(l, id)| match item_answer(&id, l) {
+        .map(|(l, r)| match item_answer(&r.item_id, l) {
             Ok(item) => ItemAnswer::Item {
                 item: Box::new(item),
             },

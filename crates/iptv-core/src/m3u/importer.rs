@@ -16,7 +16,7 @@ use crate::sources::{self, Importer, ProgressGate};
 use crate::state::AppState;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -263,17 +263,32 @@ pub fn playlist_sha(bytes: &[u8]) -> String {
 
 /// First 16 hex chars of sha256(s).
 pub fn hash16(s: &str) -> String {
-    let d = Sha256::digest(s.as_bytes());
-    hex::encode(&d[..8])
+    hex::encode(hash8(s))
+}
+
+/// The first 8 bytes of sha256(s), which [`hash16`] writes in hex.
+fn hash8(s: &str) -> [u8; 8] {
+    prefix8(Sha256::digest(s.as_bytes()).as_slice())
+}
+
+fn prefix8(digest: &[u8]) -> [u8; 8] {
+    let mut out = [0u8; 8];
+    out.copy_from_slice(&digest[..8]);
+    out
 }
 
 /// m3u item id: 16 hex chars of sha256(url + '\n' + name) (C2).
 pub fn item_id(url: &str, name: &str) -> String {
+    hex::encode(item_digest(url, name))
+}
+
+/// The 8 bytes [`item_id`] writes in hex.
+fn item_digest(url: &str, name: &str) -> [u8; 8] {
     let mut h = Sha256::new();
     h.update(url.as_bytes());
     h.update(b"\n");
     h.update(name.as_bytes());
-    hex::encode(&h.finalize()[..8])
+    prefix8(h.finalize().as_slice())
 }
 
 /// m3u category id: 16 hex chars of sha256(group name) (C4 m3u notes).
@@ -321,14 +336,71 @@ pub(super) fn url_path_lower(url: &str) -> String {
     path.to_ascii_lowercase()
 }
 
+/// `extra` of an M3U row, serialized by [`RowBuilder`] into
+/// `ItemRow::extra_json` as each row is built. The fields of it and of its
+/// objects are declared in the key order a `serde_json::Map` (a BTreeMap)
+/// writes, so the stored text is the same as when the row carried a map
+/// that the writer serialized and freed inside the write transaction (a
+/// leaf node, key Strings and a copied tvg-name: about 0.43 µs a row)
+/// (R3-7).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EntryExtra<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catchup: Option<CatchupExtra<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    headers: Option<HeadersExtra<'a>>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    kodi_props: BTreeMap<&'a str, &'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tvg_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tvg_shift: Option<&'a str>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    vlc_opts: BTreeMap<&'a str, &'a str>,
+}
+
+/// `extra.catchup` of an M3U row (keys in map order: days, source, type).
+#[derive(serde::Serialize)]
+struct CatchupExtra<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    days: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<&'a str>,
+    #[serde(rename = "type")]
+    kind: &'a str,
+}
+
+/// `extra.headers` of an M3U row (keys in map order).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HeadersExtra<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    referrer: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_agent: Option<&'a str>,
+}
+
+/// `#EXTVLCOPT` / `#KODIPROP` pairs as the map they are stored as: in key
+/// order, a repeated key keeping its last value.
+fn last_wins(pairs: &[(String, String)]) -> BTreeMap<&str, &str> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect()
+}
+
 /// Turns parser entries into catalog rows: stable ids (with a suffix for exact
 /// duplicates), categories in first-seen order per content type, channel
 /// numbers (tvg-chno, else one running index shared by live and radio, so a
 /// radio number never repeats a live one). [`RowBuilder::push`] holds series
 /// episodes back; [`RowBuilder::take_series`] gives one row per show.
 pub struct RowBuilder {
-    source_id: String,
-    seen_ids: HashSet<String>,
+    /// Ids given so far, as the 8 bytes their hex spells: 8 bytes an entry
+    /// where a String took about 60 (12 MB per 200k entries) (R3-7).
+    seen_ids: HashSet<u64>,
     /// Group name -> [`group_id`].
     group_ids: HashMap<String, String>,
     categories: HashMap<ContentType, (Vec<CategoryRow>, HashSet<String>)>,
@@ -381,9 +453,11 @@ impl Legacy {
 }
 
 impl RowBuilder {
-    pub fn new(source_id: &str) -> Self {
+    /// A builder for one import of a source. Its rows leave `source_id`
+    /// empty: the writer stores its own (`CatalogWriter::insert`), and a copy
+    /// per row is waste (R3-7). The parameter stays for callers.
+    pub fn new(_source_id: &str) -> Self {
         Self {
-            source_id: source_id.to_string(),
             seen_ids: HashSet::new(),
             group_ids: HashMap::new(),
             categories: HashMap::new(),
@@ -411,21 +485,22 @@ impl RowBuilder {
     }
 
     /// The id of an entry: its hash, with a suffix for an exact duplicate.
+    /// Ids are compared as their 8 bytes, which their hex spells one to one.
     fn unique_id(&mut self, url: &str, name: &str) -> String {
-        let mut id = item_id(url, name);
-        if self.seen_ids.contains(&id) {
+        let mut id = item_digest(url, name);
+        if self.seen_ids.contains(&u64::from_be_bytes(id)) {
             let mut n = 2u32;
             loop {
-                let candidate = hash16(&format!("{url}\n{name}\n#{n}"));
-                if !self.seen_ids.contains(&candidate) {
+                let candidate = hash8(&format!("{url}\n{name}\n#{n}"));
+                if !self.seen_ids.contains(&u64::from_be_bytes(candidate)) {
                     id = candidate;
                     break;
                 }
                 n += 1;
             }
         }
-        self.seen_ids.insert(id.clone());
-        id
+        self.seen_ids.insert(u64::from_be_bytes(id));
+        hex::encode(id)
     }
 
     /// The category id of `group` for type `ct`, declared on first sight.
@@ -525,13 +600,6 @@ impl RowBuilder {
             _ => None,
         };
 
-        let mut extra = serde_json::Map::new();
-        if let Some(v) = &e.tvg_name {
-            extra.insert("tvgName".into(), v.clone().into());
-        }
-        if let Some(v) = &e.tvg_shift {
-            extra.insert("tvgShift".into(), v.clone().into());
-        }
         let has_catchup = e.catchup.is_some() || e.catchup_source.is_some();
         let catchup_type = e
             .catchup
@@ -540,46 +608,23 @@ impl RowBuilder {
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| "default".into());
         let catchup_ok = has_catchup && catalog::catchup_usable(&catchup_type);
-        if has_catchup {
-            let mut c = serde_json::Map::new();
-            c.insert("type".into(), catchup_type.into());
-            if let Some(d) = e.catchup_days {
-                c.insert("days".into(), d.into());
-            }
-            if let Some(s) = &e.catchup_source {
-                c.insert("source".into(), s.clone().into());
-            }
-            extra.insert("catchup".into(), c.into());
-        }
-        if e.user_agent.is_some() || e.referrer.is_some() || e.origin.is_some() {
-            let mut h = serde_json::Map::new();
-            if let Some(v) = &e.user_agent {
-                h.insert("userAgent".into(), v.clone().into());
-            }
-            if let Some(v) = &e.referrer {
-                h.insert("referrer".into(), v.clone().into());
-            }
-            if let Some(v) = &e.origin {
-                h.insert("origin".into(), v.clone().into());
-            }
-            extra.insert("headers".into(), h.into());
-        }
-        if !e.vlc_opts.is_empty() {
-            let m: serde_json::Map<String, serde_json::Value> = e
-                .vlc_opts
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone().into()))
-                .collect();
-            extra.insert("vlcOpts".into(), m.into());
-        }
-        if !e.kodi_props.is_empty() {
-            let m: serde_json::Map<String, serde_json::Value> = e
-                .kodi_props
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone().into()))
-                .collect();
-            extra.insert("kodiProps".into(), m.into());
-        }
+        let has_headers = e.user_agent.is_some() || e.referrer.is_some() || e.origin.is_some();
+        let extra_json = catalog::extra_text(&EntryExtra {
+            catchup: has_catchup.then_some(CatchupExtra {
+                days: e.catchup_days,
+                source: e.catchup_source.as_deref(),
+                kind: &catchup_type,
+            }),
+            headers: has_headers.then_some(HeadersExtra {
+                origin: e.origin.as_deref(),
+                referrer: e.referrer.as_deref(),
+                user_agent: e.user_agent.as_deref(),
+            }),
+            kodi_props: last_wins(&e.kodi_props),
+            tvg_name: e.tvg_name.as_deref(),
+            tvg_shift: e.tvg_shift.as_deref(),
+            vlc_opts: last_wins(&e.vlc_opts),
+        });
 
         let (title_base, year) = if ct == ContentType::Movie {
             let (b, y) = catalog::title_base(&e.name);
@@ -603,7 +648,7 @@ impl RowBuilder {
         };
 
         ItemRow {
-            source_id: self.source_id.clone(),
+            source_id: String::new(),
             content_type: ct,
             item_id: id,
             category_id: cat_id,
@@ -629,8 +674,8 @@ impl RowBuilder {
             container_extension,
             is_radio: ct == ContentType::Radio,
             archive_hours,
-            extra: serde_json::Value::Object(extra),
-            extra_json: None,
+            extra: serde_json::Value::Null,
+            extra_json,
             position,
         }
     }
@@ -2259,5 +2304,158 @@ mod tests {
         assert_eq!(read_text_lossy(&p).unwrap(), text);
         std::fs::write(&p, b"#EXTM3U\n#EXTINF:-1,Caf\xe9\n").unwrap();
         assert_eq!(read_text_lossy(&p).unwrap(), "#EXTM3U\n#EXTINF:-1,Café\n");
+    }
+
+    /// The text `CatalogWriter::insert` stored for an M3U row before R3-7:
+    /// the `serde_json::Map` `row_as` built, serialized.
+    fn old_extra(e: &M3uEntry) -> String {
+        use serde_json::{Map, Value};
+        let mut extra = Map::new();
+        if let Some(v) = &e.tvg_name {
+            extra.insert("tvgName".into(), v.clone().into());
+        }
+        if let Some(v) = &e.tvg_shift {
+            extra.insert("tvgShift".into(), v.clone().into());
+        }
+        if e.catchup.is_some() || e.catchup_source.is_some() {
+            let kind = e
+                .catchup
+                .as_deref()
+                .map(|t| t.trim().to_ascii_lowercase())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "default".into());
+            let mut c = Map::new();
+            c.insert("type".into(), kind.into());
+            if let Some(d) = e.catchup_days {
+                c.insert("days".into(), d.into());
+            }
+            if let Some(s) = &e.catchup_source {
+                c.insert("source".into(), s.clone().into());
+            }
+            extra.insert("catchup".into(), c.into());
+        }
+        if e.user_agent.is_some() || e.referrer.is_some() || e.origin.is_some() {
+            let mut h = Map::new();
+            if let Some(v) = &e.user_agent {
+                h.insert("userAgent".into(), v.clone().into());
+            }
+            if let Some(v) = &e.referrer {
+                h.insert("referrer".into(), v.clone().into());
+            }
+            if let Some(v) = &e.origin {
+                h.insert("origin".into(), v.clone().into());
+            }
+            extra.insert("headers".into(), h.into());
+        }
+        for (key, pairs) in [("vlcOpts", &e.vlc_opts), ("kodiProps", &e.kodi_props)] {
+            if !pairs.is_empty() {
+                let m: Map<String, Value> = pairs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone().into()))
+                    .collect();
+                extra.insert(key.into(), m.into());
+            }
+        }
+        if extra.is_empty() {
+            "{}".into()
+        } else {
+            Value::Object(extra).to_string()
+        }
+    }
+
+    /// R3-7: the M3U extra serialized from borrowing structs is byte for
+    /// byte the map it replaced, for every combination of catch-up,
+    /// header, tvg and option keys, repeated option keys (the last wins)
+    /// and text that needs escaping.
+    #[test]
+    fn entry_extra_text_matches_the_map_it_replaced() {
+        let some = |s: &str| Some(s.to_string());
+        let pairs = |p: &[(&str, &str)]| -> Vec<(String, String)> {
+            p.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let mut b = RowBuilder::new("s");
+        let mut checked = 0;
+        for mask in 0u32..(1 << 9) {
+            let bit = |i: u32| mask & (1 << i) != 0;
+            let e = M3uEntry {
+                name: format!("Ch {mask}"),
+                url: format!("http://h/{mask}.ts"),
+                tvg_name: bit(0).then(|| "Ünï \"quoted\" \\ name\t📺".to_string()),
+                tvg_shift: bit(1).then(|| "-1.5".to_string()),
+                catchup: if bit(2) { some(" XC ") } else { None },
+                catchup_days: bit(3).then_some(7),
+                catchup_source: bit(4).then(|| "?utc={utc}&lutc={lutc}".to_string()),
+                user_agent: bit(5).then(|| "UA/1.0 (x)".to_string()),
+                referrer: (bit(5) && bit(6)).then(|| "http://r/".to_string()),
+                origin: bit(6).then(|| "http://o".to_string()),
+                vlc_opts: if bit(7) {
+                    pairs(&[
+                        ("http-user-agent", "A"),
+                        ("network-caching", "1000"),
+                        ("http-user-agent", "B"),
+                    ])
+                } else {
+                    Vec::new()
+                },
+                kodi_props: if bit(8) {
+                    pairs(&[
+                        ("inputstream.adaptive.license_type", "clearkey"),
+                        ("inputstream.adaptive.license_key", "k1:v1"),
+                        ("inputstream.adaptive.license_type", "org.w3.clearkey"),
+                    ])
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            };
+            let want = old_extra(&e);
+            let row = b.row(e);
+            assert!(row.extra.is_null() && row.source_id.is_empty());
+            assert_eq!(
+                row.extra_json.as_deref().unwrap_or("{}"),
+                want,
+                "mask {mask:#b}"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 512);
+    }
+
+    /// R3-7: ids given as 8-byte keys are the ids the String set gave,
+    /// duplicate suffixes included.
+    #[test]
+    fn duplicate_ids_match_the_string_set() {
+        let entries: Vec<(String, String)> = (0..300)
+            .map(|i| (format!("http://h/{}.ts", i % 7), format!("Ch {}", i % 5)))
+            .collect();
+        let mut seen: HashSet<String> = HashSet::new();
+        let want: Vec<String> = entries
+            .iter()
+            .map(|(url, name)| {
+                let mut id = item_id(url, name);
+                if seen.contains(&id) {
+                    let mut n = 2u32;
+                    loop {
+                        let candidate = hash16(&format!("{url}\n{name}\n#{n}"));
+                        if !seen.contains(&candidate) {
+                            id = candidate;
+                            break;
+                        }
+                        n += 1;
+                    }
+                }
+                seen.insert(id.clone());
+                id
+            })
+            .collect();
+        let mut b = RowBuilder::new("s");
+        let got: Vec<String> = entries
+            .iter()
+            .map(|(url, name)| b.unique_id(url, name))
+            .collect();
+        assert_eq!(got, want);
+        assert_eq!(got.iter().collect::<HashSet<_>>().len(), 300);
     }
 }

@@ -556,13 +556,14 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     const at = defaultStart(Date.now());
     rpc.handlers['sources.list'] = () => [{ id: 'src1', kind: 'xtream', name: 'Demo', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } }];
     rpc.handlers['settings.get'] = () => settings({ epgShortFallback: false });
-    rpc.handlers['catchup.table'] = (a) => {
-      const ref = (a as { ref: Channel['ref'] }).ref;
-      return Array.from({ length: 30 }, (_, k) => program(`${ref.itemId} P${k - 12}`, at + (k - 12) * HOUR, at + (k - 11) * HOUR));
+    rpc.handlers['catchup.programs'] = (a) => {
+      const { ref, from, to } = a as { ref: Channel['ref']; from: string; to: string };
+      return Array.from({ length: 30 }, (_, k) => program(`${ref.itemId} P${k - 12}`, at + (k - 12) * HOUR, at + (k - 11) * HOUR))
+        .filter((p) => Date.parse(p.end) > Date.parse(from) && Date.parse(p.start) < Date.parse(to));
     };
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     const cell = await screen.findByRole('button', { name: /^c2 P0,/ });
-    await waitFor(() => expect(rpc.of('catchup.table').length).toBeGreaterThanOrEqual(6));
+    await waitFor(() => expect(rpc.of('catchup.programs').length).toBeGreaterThanOrEqual(6));
     const grid = screen.getByTestId('epg-grid');
     Object.defineProperty(grid, 'clientWidth', { configurable: true, value: 800 });
     const position = () => cellTrackLeft(cell) - grid.scrollLeft;

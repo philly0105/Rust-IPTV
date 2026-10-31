@@ -54,7 +54,7 @@ import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
-import { useXtreamGridPrograms } from '../hooks/useXtreamGridPrograms';
+import { useXtreamGridPrograms, xtreamGridRange } from '../hooks/useXtreamGridPrograms';
 import { useShortEpgEnabled, useShortEpgPreviews } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
@@ -969,23 +969,10 @@ export function EpgGridPage() {
     return { list: undefined, fresh: false };
   };
   const gridList = (k: ItemKey): EpgProgram[] | undefined => gridEntry(k).list;
-  const shortRefs = useMemo(() => {
-    const out: ItemRef[] = [];
-    if (!shortEpgOn) return out;
-    for (let i = shortRows.first; i <= shortRows.last; i++) {
-      const ch = getChannel(i);
-      if (!ch) continue;
-      const list = gridList(itemKey(ch.ref));
-      if (list && list.length === 0) out.push(ch.ref);
-    }
-    return out;
-    // gridList reads gridA/gridB, listed by their answers, and the window.
-  }, [shortEpgOn, shortRows, getChannel, gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData, quickGrid.data, shownTime, dataStart, dataEnd, prefetchVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-  const shortFor = useShortEpgPreviews(sourceId, shortEpgOn, shortRefs, now);
-  const hasShortData = shortRefs.some((r) => (shortFor(r)?.length ?? 0) > 0);
   // Xtream's simple data table can reach days before the bulk XMLTV download. Warm visible rows
   // when XMLTV has a gap within the six-hour scroll buffer, before a horizontal move exposes it.
-  // A vertical fling still drops queued offscreen calls; at most two are in flight.
+  // A vertical fling still drops queued offscreen calls; at most two are in flight. Each row asks
+  // for the days around the data window (`catchup.programs`), not the panel's whole table (F3-1).
   const xtreamOn = kind === 'xtream';
   const xtreamRefs = useMemo(() => {
     const out: ItemRef[] = [];
@@ -1005,11 +992,42 @@ export function EpgGridPage() {
     // gridEntry reads the two grid answers and their windows.
   }, [xtreamOn, pageMeasured, dataStart, dataEnd, wantedDataStart, wantedDataEnd, shortRows, first, last, shownTime, offsetMs, now, getChannel,
     gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData, prefetchVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-  const xtreamFor = useXtreamGridPrograms(sourceId, xtreamOn, xtreamRefs, now);
-  const hasXtreamData = xtreamRefs.some((ref) => {
-    const programs = xtreamFor(ref);
-    return !!programs && hasProgramInRange(programs, shownTime[0] - offsetMs, shownTime[1] - offsetMs);
-  });
+  // The range is whole UTC days around the data window, so a six-hour data step asks nothing new.
+  const xtreamGrid = useXtreamGridPrograms(sourceId, xtreamOn, xtreamRefs, now, xtreamGridRange(dataStart, dataEnd, offsetMs));
+  const xtreamFor = xtreamGrid.get;
+  const shortRefs = useMemo(() => {
+    const out: ItemRef[] = [];
+    if (!shortEpgOn) return out;
+    const guideNow = now - offsetMs;
+    for (let i = shortRows.first; i <= shortRows.last; i++) {
+      const ch = getChannel(i);
+      if (!ch) continue;
+      const list = gridList(itemKey(ch.ref));
+      if (!list || list.length !== 0) continue;
+      // The panel's archive table already holds what its short guide would add, the airing
+      // programme and the hours after it: both come from the panel's one EPG. A row whose table
+      // covers the short guide's reach is not asked twice (F3-1); one whose table has a hole there
+      // or ends sooner still is.
+      const table = xtreamFor(ch.ref);
+      if (table && table.length > 0 && !hasGuideGap(table, guideNow, guideNow + SHORT_EPG_REACH_MS)) continue;
+      out.push(ch.ref);
+    }
+    return out;
+    // gridList reads gridA/gridB, listed by their answers, and the window.
+  }, [shortEpgOn, shortRows, getChannel, gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData, quickGrid.data, shownTime, dataStart, dataEnd, prefetchVersion, xtreamFor, now, offsetMs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shortFor = useShortEpgPreviews(sourceId, shortEpgOn, shortRefs, now);
+  const hasShortData = shortRefs.some((r) => (shortFor(r)?.length ?? 0) > 0);
+  // Any row on screen that shows provider programmes in the visible time, also one whose answer is
+  // left from an earlier range or probe (a window wholly ahead probes nothing, yet shows them).
+  // Read last, only once everything else says the guide is empty.
+  const showsXtreamData = () => {
+    for (let i = shortRows.first; xtreamOn && i <= shortRows.last; i++) {
+      const ch = getChannel(i);
+      const programs = ch ? xtreamFor(ch.ref) : undefined;
+      if (programs && hasProgramInRange(programs, shownTime[0] - offsetMs, shownTime[1] - offsetMs)) return true;
+    }
+    return false;
+  };
   // Each row's display list is kept while its sources are the same objects, so a memoised row
   // sees the same array from render to render (L2-perf-ui-1).
   const programsCache = useRef(new Map<ItemKey, { list?: EpgProgram[]; portal?: EpgProgram[]; xtream?: EpgProgram[]; short?: readonly EpgProgram[]; offset: number; start: number; end: number; out: EpgProgram[] | undefined }>());
@@ -1072,7 +1090,7 @@ export function EpgGridPage() {
       const ch = getChannel(v.index);
       return !!ch && gridEntry(itemKey(ch.ref)).fresh;
     }) &&
-    xtreamRefs.every((ref) => xtreamFor(ref) !== undefined) &&
+    xtreamRefs.every((ref) => xtreamGrid.has(ref)) &&
     shortRefs.every((ref) => shortFor(ref) !== undefined)
   );
   const noEpgAnywhere =
@@ -1080,8 +1098,8 @@ export function EpgGridPage() {
     gridsLoaded &&
     xtreamGuideSettled &&
     !hasShortData && // guide
-    !hasXtreamData &&
-    !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0));
+    !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0)) &&
+    !showsXtreamData();
 
   // ---- navigation ---------------------------------------------------------
   // Clicks and key repeat can outrun renders: each move starts from here, not from a stale render.

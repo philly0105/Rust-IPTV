@@ -948,12 +948,21 @@ pub fn continue_watching_filtered(
         Some(h) => crate::parental::filter::by_ref(conn, "k", h)?,
         None => String::new(),
     };
-    // Unwatched rows newest first through idx_positions_resume (0027), each
-    // kept only when it is its item's newest row (the primary key finds the
-    // item's rows), stopping at the limit. It replaced a ROW_NUMBER() rank
-    // of every row, watched history included: 4.7 ms at 4,283 rows against
-    // 0.13 ms, with the same rows and tie-breaks (R4-3).
-    let mut stmt = conn.prepare_cached(&format!(
+    let mut stmt = conn.prepare_cached(&continue_watching_sql(&locked))?;
+    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The continue-watching statement, with the parental clause `locked`
+/// (empty, or `AND ...` on alias `k`); `?1` is the limit and `?2` the
+/// shortest resumable position. Unwatched rows newest first through
+/// idx_positions_resume (0027), each kept only when it is its item's newest
+/// row (the primary key finds the item's rows), stopping at the limit. It
+/// replaced a ROW_NUMBER() rank of every row, watched history included:
+/// 4.7 ms at 4,283 rows against 0.13 ms, with the same rows and tie-breaks
+/// (R4-3). A test explains this exact statement.
+fn continue_watching_sql(locked: &str) -> String {
+    format!(
         "SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
                 k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
                 i.title, COALESCE(i.poster_url, i.logo_url)
@@ -965,9 +974,7 @@ pub fn continue_watching_filtered(
                           ORDER BY n.updated_at DESC, n.rowid DESC LIMIT 1){locked}
          ORDER BY k.updated_at DESC, k.rowid DESC
          LIMIT ?1"
-    ))?;
-    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    )
 }
 
 /// A continue-watching row: the position columns, then the catalog title
@@ -1347,23 +1354,41 @@ mod tests {
                 .collect();
         assert_eq!(hidden, ["m1", "sh3", "gone", "sh4"]);
         // The outer scan reads unwatched rows newest first, so it stops at
-        // the limit instead of sorting the whole history.
-        let sql = "EXPLAIN QUERY PLAN SELECT k.rowid FROM playback_positions k
-             WHERE k.watched = 0 AND k.position_seconds > 5
-               AND k.rowid = (SELECT n.rowid FROM playback_positions n
-                              WHERE n.source_id = k.source_id AND n.content_type = k.content_type AND n.item_id = k.item_id
-                              ORDER BY n.updated_at DESC, n.rowid DESC LIMIT 1)
-             ORDER BY k.updated_at DESC, k.rowid DESC LIMIT 20";
-        let plan: Vec<String> = c
-            .prepare(sql)
-            .unwrap()
-            .query_map([], |r| r.get(3))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert!(
-            plan.iter().any(|l| l.contains("idx_positions_resume")),
-            "{plan:?}"
-        );
+        // the limit instead of sorting the whole history. Explained on the
+        // statement continue_watching_filtered prepares (RB-D review: a
+        // hand-copied one would not notice an edit that loses the index),
+        // with and without the parental clause.
+        for hide in [None, Some(Hide { auto_adult: true })] {
+            let locked = match hide {
+                Some(h) => crate::parental::filter::by_ref(&c, "k", h).unwrap(),
+                None => String::new(),
+            };
+            let sql = format!("EXPLAIN QUERY PLAN {}", continue_watching_sql(&locked));
+            // (parent, detail): the outer query's steps have parent 0.
+            let plan: Vec<(i64, String)> = c
+                .prepare(&sql)
+                .unwrap()
+                .query_map(params![20, MIN_RESUME_SECONDS], |r| {
+                    Ok((r.get(1)?, r.get(3)?))
+                })
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let outer: Vec<&str> = plan
+                .iter()
+                .filter(|(parent, _)| *parent == 0)
+                .map(|(_, d)| d.as_str())
+                .collect();
+            assert!(
+                outer.contains(&"SCAN k USING INDEX idx_positions_resume"),
+                "hide {hide:?}: {plan:?}"
+            );
+            // Only ties on updated_at are sorted (by rowid), never the
+            // whole history.
+            assert!(
+                !outer.contains(&"USE TEMP B-TREE FOR ORDER BY"),
+                "hide {hide:?}: {plan:?}"
+            );
+        }
     }
 }

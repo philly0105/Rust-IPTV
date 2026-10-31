@@ -106,9 +106,8 @@ fn fuzz_parse_str_and_row_builder() {
                     assert!(h > 0 && h <= 366 * 24, "archive_hours {h}");
                 }
             }
-            let (series, _) = b.take_series();
-            for s in &series {
-                let eps = iptv_core::m3u::series::stored_episodes(&s.extra);
+            for s in b.take_series() {
+                let eps = iptv_core::m3u::series::row_episodes(&s);
                 assert!(!eps.is_empty(), "a series row without episodes");
             }
             let _ = b.categories();

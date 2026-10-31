@@ -5,7 +5,7 @@
 
 use super::body::{sniff, too_large_error, MinRate, MAX_PLAYLIST_BYTES, SNIFF_BYTES};
 use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
-use super::series::{EpisodeAt, LegacyEpisode, SeriesGrouper};
+use super::series::{EpisodeAt, SeriesGrouper, SeriesRows};
 use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
 use crate::db::now_rfc3339;
 use crate::error::{CoreError, CoreResult};
@@ -489,11 +489,13 @@ impl RowBuilder {
         None
     }
 
-    /// The series rows of every episode [`RowBuilder::push`] held back, and
-    /// the episodes earlier imports stored as movies that user state refers to.
-    /// An episode matched by identity only takes the old row when it was the
-    /// only movie entry with that identity and no entry kept the old id.
-    pub fn take_series(&mut self) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
+    /// The series rows of every episode [`RowBuilder::push`] held back, built
+    /// one show at a time as they are taken, and then
+    /// ([`SeriesRows::legacy`]) the episodes earlier imports stored as movies
+    /// that user state refers to. An episode matched by identity only takes
+    /// the old row when it was the only movie entry with that identity and
+    /// no entry kept the old id. The rows do not borrow the builder.
+    pub fn take_series(&mut self) -> SeriesRows {
         let mut series = std::mem::take(&mut self.series);
         for (key, old, at) in std::mem::take(&mut self.legacy.candidates) {
             let unique = self.legacy.counts.get(&key) == Some(&1);
@@ -501,7 +503,7 @@ impl RowBuilder {
                 series.adopt(at, old);
             }
         }
-        series.into_rows(&self.source_id)
+        series.rows()
     }
 
     /// The row of one entry, as a movie, channel or radio station (never
@@ -1116,19 +1118,22 @@ fn write_catalog(
         if let Some(err) = parser.take_io_error() {
             return Err(CoreError::Io(err));
         }
-        // One row per show, with its episodes (m3u/series.rs).
-        let (series_rows, legacy) = builder.take_series();
-        for row in &series_rows {
+        // One row per show, with its episodes (m3u/series.rs), each built
+        // and written before the next, so no show's episode text outlives
+        // its insert (R3-3).
+        let mut series_rows = builder.take_series();
+        for row in series_rows.by_ref() {
             let seen = declared.entry(row.content_type).or_default();
             let new = builder.categories_from(row.content_type, *seen);
             if !new.is_empty() {
                 writer.declare_categories(row.content_type, new);
                 *seen += new.len();
             }
-            if writer.insert(row)? {
-                remapper.saw(row);
+            if writer.insert(&row)? {
+                remapper.saw(&row);
             }
         }
+        let legacy = series_rows.legacy();
         let stats = parser.stats();
         let header = parser.header().clone();
         if !stats.saw_header && stats.entries == 0 {
@@ -1606,6 +1611,7 @@ async fn fetch_conditional(
 mod tests {
     use super::*;
     use crate::m3u::parser::parse_str;
+    use crate::m3u::series::LegacyEpisode;
 
     /// Local HTTP stub answering every connection with `head` (then holding
     /// the socket open); returns its URL and a connection counter.
@@ -2100,12 +2106,12 @@ mod tests {
         assert_eq!(rows[1].item_id, before[3].item_id, "duplicate suffix kept");
         assert_eq!(rows[2].item_id, before[4].item_id);
 
-        let (series, legacy) = b.take_series();
+        let (series, legacy) = b.take_series().collect_all();
         assert_eq!(series.len(), 1);
         assert_eq!(series[0].content_type, ContentType::Series);
         assert_eq!(series[0].title, "Dark");
         assert_eq!(series[0].category_id, group_id("Drama"));
-        let eps = crate::m3u::series::stored_episodes(&series[0].extra);
+        let eps = crate::m3u::series::row_episodes(&series[0]);
         assert_eq!(eps.len(), 2);
         assert_eq!(legacy.len(), 1);
         assert_eq!(legacy[0].movie_id, before[2].item_id);
@@ -2155,7 +2161,7 @@ mod tests {
             for e in parse_str(text).0 {
                 assert!(b.push(e).is_none(), "an episode");
             }
-            b.take_series()
+            b.take_series().collect_all()
         };
 
         let rotated = format!(
@@ -2164,7 +2170,7 @@ mod tests {
             line("Drama", "Dark S01 E02", "NEW", 2)
         );
         let (series, legacy) = adopt(&rotated);
-        let eps = crate::m3u::series::stored_episodes(&series[0].extra);
+        let eps = crate::m3u::series::row_episodes(&series[0]);
         assert_eq!(legacy.len(), 2);
         assert_eq!(legacy[0].movie_id, before[0].item_id);
         assert_eq!(legacy[0].episode_id, eps[0].id);

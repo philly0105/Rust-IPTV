@@ -208,16 +208,17 @@ export async function cursorPosition(): Promise<{ x: number; y: number } | null>
 }
 
 /**
- * Cursor position in CSS px relative to the webview viewport (same space as
- * `getBoundingClientRect`), or null on the web. Lets the fullscreen chrome react only to
- * movement over the video, not anywhere on the screen.
+ * A desktop cursor position (`cursorPosition`, physical px) in CSS px relative to the webview
+ * viewport (same space as `getBoundingClientRect`), or null on the web. Lets the fullscreen
+ * chrome react only to movement over the video, not anywhere on the screen. Reads the window's
+ * origin and scale each time (two IPC calls), so a moved window or a new screen is never stale.
  */
-export async function cursorInViewport(): Promise<{ x: number; y: number } | null> {
+export async function screenToViewport(p: { x: number; y: number }): Promise<{ x: number; y: number } | null> {
   if (!isDesktop) return null;
   try {
-    const { cursorPosition: read, getCurrentWindow } = await import('@tauri-apps/api/window');
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const win = getCurrentWindow();
-    const [p, origin, scale] = await Promise.all([read(), win.innerPosition(), win.scaleFactor()]);
+    const [origin, scale] = await Promise.all([win.innerPosition(), win.scaleFactor()]);
     return { x: (p.x - origin.x) / scale, y: (p.y - origin.y) / scale };
   } catch {
     return null;

@@ -69,10 +69,14 @@ vi.mock('@/api/events', () => ({
   },
 }));
 
-/** Where the desktop cursor is, in viewport CSS px (the root measures as BOX). */
+/** Where the desktop cursor is, in viewport CSS px (the root measures as BOX; the window sits at 0, 0 at scale 1). */
 let cursor = { x: 10, y: 10 };
+/** One IPC call each: the cursor, and the window's origin and scale (two calls) that place it. */
+const cursorReads = vi.fn(async () => cursor);
+const placeReads = vi.fn(async (p: { x: number; y: number }) => p);
 vi.mock('@/api/window', () => ({
-  cursorInViewport: async () => cursor,
+  cursorPosition: () => cursorReads(),
+  screenToViewport: (p: { x: number; y: number }) => placeReads(p),
   enterPipWindow: async () => true,
   exitPipWindow: async () => undefined,
   recoverPipWindow: async () => false,
@@ -83,7 +87,7 @@ vi.mock('@/api/window', () => ({
 
 const { usePlayerStore, __resetPlayerForTests, DOUBLE_CLICK_MS, setSettingsCache } = await import('../store');
 const { useMediaStore } = await import('../media');
-const { boundsClear, rectOf } = await import('../mpvBounds');
+const { boundsClear, OVERLAY_SELECTOR, rectOf } = await import('../mpvBounds');
 const { HIDDEN_BOUNDS, MPV_FALLBACK_TOAST } = await import('./MpvSurface');
 const { clearMpvUnavailable } = await import('../mpvExtras');
 const { PlayerSurface } = await import('./PlayerSurface');
@@ -344,6 +348,46 @@ describe('MpvSurface bounds', () => {
     preview.style.left = '540px';
     await tick(40);
     expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 0, y: 400, width: 800, height: 40 }, { x: 540, y: 360, width: 64, height: 24 }] });
+  });
+
+  it('while nothing but the surface shapes the window, the 400 ms poll reads only its rect, and measures in full every 2 s (F2-3)', async () => {
+    vi.useFakeTimers();
+    // The bar below the surface instead of over it, and room around it in the host: the native
+    // window is the surface's own rect.
+    const [bar, surface] = [RECTS[1]!, RECTS[0]!];
+    RECTS[0] = ['[data-mpv-surface]', { left: 0, top: 0, width: 780, height: 500 }];
+    RECTS[1] = ['[data-player-controls]', { left: 0, top: 500, width: 800, height: 60 }];
+    onTestFinished(() => {
+      RECTS[1] = bar;
+      RECTS[0] = surface;
+    });
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    render(surfaceTree);
+    const advance = async (ms: number): Promise<void> => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    await advance(100);
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    await advance(100);
+    expect(lastLayout()).toEqual({ bounds: { x: 0, y: 0, width: 780, height: 500 }, holes: [] });
+    // A full measure now (a resize), then count: each one matches the overlay selector once.
+    window.dispatchEvent(new Event('resize'));
+    await advance(50);
+    const selectors = vi.spyOn(document, 'querySelectorAll');
+    const fullMeasures = (): number => selectors.mock.calls.filter(([sel]) => sel === OVERLAY_SELECTOR).length;
+    await advance(1500);
+    // Before, each of these three ticks measured in full.
+    expect(fullMeasures()).toBe(0);
+    // The 5th tick since the last full measure measures in full: the net for changes no observer sees.
+    await advance(400);
+    expect(fullMeasures()).toBe(1);
+    // A move without a resize (the mini player dragged) is caught by the next tick.
+    RECTS[0] = ['[data-mpv-surface]', { left: 20, top: 0, width: 780, height: 500 }];
+    await advance(400);
+    expect(fullMeasures()).toBe(2);
+    expect(lastLayout()).toEqual({ bounds: { x: 20, y: 0, width: 780, height: 500 }, holes: [] });
   });
 
   it('a live stream that mpv reports as dropped becomes a player error, so recovery can retry it (L2-desktop-2)', async () => {
@@ -765,6 +809,19 @@ describe('fullscreen overlay chrome', () => {
     act(() => usePlayerStore.setState({ status: 'playing' }));
     return advance;
   };
+
+  it('a resting cursor costs one IPC call a tick: the window is asked where it is only once the cursor moved (F2-3)', async () => {
+    const advance = await startFullscreen();
+    cursorReads.mockClear();
+    placeReads.mockClear();
+    await advance(1000);
+    // Before, every 200 ms tick sent three calls (cursor, window origin, scale).
+    expect(cursorReads).toHaveBeenCalledTimes(5);
+    expect(placeReads).not.toHaveBeenCalled();
+    cursor = { x: 300, y: 200 };
+    await advance(200);
+    expect(placeReads).toHaveBeenCalledTimes(1);
+  });
 
   it('keyboard focus on a control keeps the chrome up', async () => {
     const advance = await startFullscreen();

@@ -164,21 +164,23 @@ impl Runtime {
         self.plans.insert(r.key(), plan);
     }
 
-    /// Drops the season plans and page sizes of a source (after a resync).
-    /// Listed rows stay: details and playback of a title opened before the
-    /// resync keep working.
+    /// Drops the season plans of a source (after a resync). Listed rows
+    /// stay: details and playback of a title opened before the resync keep
+    /// working. So do the page sizes (R5-6): `vod::list_page` corrects a
+    /// wrong one from the next answer, and dropping them only cost the next
+    /// grid page a second portal wave.
     pub fn forget_listings(&self, source_id: &str) {
-        let prefix = format!("{source_id}|");
-        self.plans.remove_prefix(&prefix);
-        self.page_sizes.retain(|k, _| !k.starts_with(&prefix));
+        self.plans.remove_prefix(&format!("{source_id}|"));
     }
 
     /// Drops everything cached in memory for a source (it was removed, or
     /// now points at another portal). See [`forget_source`] for the
     /// persisted rows.
     pub fn forget_source(&self, source_id: &str) {
-        self.items.remove_prefix(&format!("{source_id}|"));
+        let prefix = format!("{source_id}|");
+        self.items.remove_prefix(&prefix);
         self.forget_listings(source_id);
+        self.page_sizes.retain(|k, _| !k.starts_with(&prefix));
         self.bulk_epg.remove(source_id);
     }
 }
@@ -414,5 +416,22 @@ mod tests {
         lru.remove_prefix("k1");
         assert!(!lru.contains_key("k10"));
         assert!(!lru.is_empty());
+    }
+
+    /// R5-6: a resync kept dropping the learned page sizes, so the first
+    /// grid page after every sync went out in two waves. Only a source
+    /// that is forgotten (removed, or pointed at another portal) drops them.
+    #[test]
+    fn a_resync_keeps_page_sizes_and_forgetting_the_source_drops_them() {
+        let rt = Runtime::default();
+        rt.page_sizes.insert("s1|vod".into(), 14);
+        rt.page_sizes.insert("s2|vod".into(), 20);
+        rt.plans.insert("s1|series|7".into(), Arc::new(Vec::new()));
+        rt.forget_listings("s1");
+        assert!(!rt.plans.contains_key("s1|series|7"));
+        assert_eq!(rt.page_sizes.get("s1|vod").map(|v| *v), Some(14));
+        rt.forget_source("s1");
+        assert!(!rt.page_sizes.contains_key("s1|vod"));
+        assert_eq!(rt.page_sizes.get("s2|vod").map(|v| *v), Some(20));
     }
 }

@@ -4,6 +4,7 @@
 use super::mapping;
 use super::protocol::{self as p, into_list, n};
 use super::session::{Req, StalkerClient, LONG_TIMEOUT};
+use super::vod::Kind;
 use super::Runtime;
 use crate::catalog::{self, CategoryRow, ItemRow};
 use crate::error::{CoreError, CoreResult};
@@ -80,15 +81,31 @@ async fn list(client: &StalkerClient, req: Req) -> CoreResult<Vec<Value>> {
 }
 
 /// First-page `total_items` of a VOD/series listing; `None` when the portal
-/// did not answer (or answered without a total).
-async fn remote_total(client: &StalkerClient, kind: &str) -> Option<i64> {
-    let req = Req::new(kind, "get_ordered_list")
+/// did not answer (or answered without a total). The page's
+/// `max_page_items` seeds the source's page size (R5-6), so the first grid
+/// page after a sync or a restart sends its portal pages in one wave
+/// instead of two. Ministra's page size is portal-wide; `list_page`
+/// corrects a wrong one.
+async fn remote_total(
+    rt: &Runtime,
+    client: &StalkerClient,
+    source_id: &str,
+    kind: Kind,
+) -> Option<i64> {
+    let req = Req::new(kind.as_str(), "get_ordered_list")
         .p("category", "*")
         .p("sortby", "added")
         .p("p", 1);
     match client.call(req).await {
-        Ok(js) => n(&js, "total_items"),
+        Ok(js) => {
+            if let Some(size) = n(&js, "max_page_items").filter(|s| *s > 0) {
+                rt.page_sizes
+                    .insert(super::vod::page_size_key(source_id, kind), size);
+            }
+            n(&js, "total_items")
+        }
         Err(err) => {
+            let kind = kind.as_str();
             tracing::info!(kind, error = %err, "stalker portal total unavailable; keeping the previous count");
             None
         }
@@ -99,8 +116,11 @@ async fn remote_total(client: &StalkerClient, kind: &str) -> Option<i64> {
 /// portal). An unanswered total keeps the stored count:
 /// `sources::run_import` records whatever the summary carries.
 async fn totals(state: &Arc<AppState>, client: &StalkerClient, source_id: &str) -> (i64, i64) {
-    let (movies, series) =
-        tokio::join!(remote_total(client, "vod"), remote_total(client, "series"));
+    let rt = Runtime::get(state);
+    let (movies, series) = tokio::join!(
+        remote_total(&rt, client, source_id, Kind::Vod),
+        remote_total(&rt, client, source_id, Kind::Series)
+    );
     if movies.is_none() || series.is_none() {
         let sid = source_id.to_string();
         let (_, old_movies, old_series) = state
@@ -516,7 +536,7 @@ async fn run(
     let count = |ct: ContentType| counts.get(&ct).copied().unwrap_or(0) as i64;
     let (channel_count, radio_count) = (count(ContentType::Live), count(ContentType::Radio));
     let radio_count = radio_count + kept_radio;
-    // Plans and page sizes may have changed; listed rows stay usable.
+    // Plans may have changed; listed rows stay usable.
     Runtime::get(state).forget_listings(source_id);
 
     Ok(ImportSummary {

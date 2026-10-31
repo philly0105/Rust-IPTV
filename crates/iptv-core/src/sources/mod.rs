@@ -1323,20 +1323,42 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
     };
     let id = uuid::Uuid::new_v4().to_string();
     let auto_refresh = args.auto_refresh.unwrap_or(false);
+    // Pasted text is hashed, and written to disk when large, before the
+    // write gate: under it, every user write waited for that (RB-D review).
+    // The id is new, so nothing else touches its file meanwhile.
+    let raw = match raw_text {
+        Some(text) => {
+            let (data_dir, id) = (state.data_dir.clone(), id.clone());
+            Some(
+                tokio::task::spawn_blocking(move || store::PlacedRaw::place(&data_dir, &id, text))
+                    .await
+                    .map_err(CoreError::from)??,
+            )
+        }
+        None => None,
+    };
+    let placed = raw
+        .as_ref()
+        .and_then(|r| r.file().map(std::path::Path::to_path_buf));
     {
         let _same = identity_lock(&state).lock_owned().await;
         let id = id.clone();
-        let data_dir = state.data_dir.clone();
         let duplicate = state
             .db_write(move |c| {
                 if let Some((other_id, other_name)) = store::find_same(c, &config, None)? {
                     return Ok(Some((other_id, duplicate_error(&config, &other_name))));
                 }
-                let raw = raw_text.as_deref().map(|t| (data_dir.as_path(), t));
-                store::insert(c, &id, &name, auto_refresh, &config, raw)?;
+                store::insert(c, &id, &name, auto_refresh, &config, raw.as_ref())?;
                 Ok(None)
             })
-            .await?;
+            .await;
+        if !matches!(duplicate, Ok(None)) {
+            // No source was inserted: its playlist copy goes too.
+            if let Some(file) = &placed {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+        let duplicate = duplicate?;
         // Nothing was created: the error names the source that already exists.
         if let Some((other_id, error)) = duplicate {
             return Err(AddError {
@@ -1808,39 +1830,58 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         }
         None => None,
     };
-    let _same = match claim {
-        Some(_) => Some(identity_lock(state).lock_owned().await),
-        None => None,
-    };
     let data_dir = state.data_dir.clone();
     // Large new text waits next to the cached copy until the transaction
     // commits, so a refused update leaves the stored playlist as it was.
     // `pending` is true while this update's staged text is not committed.
     let staged = crate::m3u::staged_playlist_path(&data_dir, id);
-    let staged_in = staged.clone();
     let pending = Arc::new(AtomicBool::new(false));
     let pending_in = pending.clone();
+    // New text is checked and staged before the write gate and the write
+    // lock (RB-D review): parsing and writing a paste of hundreds of MB
+    // takes 0.3-2 s on a slow disk, and every user write queued behind it.
+    // Imports of the source are held off (`_import`), so nothing else
+    // touches the staged copy meanwhile. `raw` is what `m3u_raw.raw` gets:
+    // the text, or "" when it was staged on disk.
+    let raw = match text {
+        Some(t) => {
+            let t = tokio::task::spawn_blocking(move || {
+                if crate::m3u::rpc::preview(&t).channel_count == 0 {
+                    return Err(CoreError::Invalid(
+                        "this is not an M3U playlist (no channels found); paste the playlist text"
+                            .into(),
+                    ));
+                }
+                Ok(t)
+            })
+            .await??;
+            // A committed earlier text still staged goes in place first, so
+            // staging this one cannot overwrite it.
+            let (dir, sid) = (data_dir.clone(), sid.clone());
+            state
+                .db_write(move |c| crate::m3u::importer::finish_staged(c, &dir, &sid))
+                .await?;
+            let (staged, pending) = (staged.clone(), pending.clone());
+            Some(
+                tokio::task::spawn_blocking(move || -> CoreResult<String> {
+                    let on_disk = crate::m3u::place_raw_text_at(&staged, &t)?.is_empty();
+                    pending.store(on_disk, Ordering::SeqCst);
+                    Ok(if on_disk { String::new() } else { t })
+                })
+                .await??,
+            )
+        }
+        None => None,
+    };
+    let _same = match claim {
+        Some(_) => Some(identity_lock(state).lock_owned().await),
+        None => None,
+    };
     // A user write: through the write gate (R1-1).
     let result = state
         .db_write(move |c| {
             let mut config_changed = false;
-            // Checked and placed before the write lock, as `store::insert` does.
-            let raw = match &text {
-                Some(t) => {
-                    if crate::m3u::rpc::preview(t).channel_count == 0 {
-                        return Err(CoreError::Invalid(
-                            "this is not an M3U playlist (no channels found); paste the playlist text".into(),
-                        ));
-                    }
-                    // A committed earlier text still staged goes in place
-                    // first, so staging this one cannot overwrite it.
-                    crate::m3u::importer::finish_staged(c, &data_dir, &sid)?;
-                    let raw = crate::m3u::place_raw_text_at(&staged_in, t)?;
-                    pending_in.store(raw.is_empty(), Ordering::SeqCst);
-                    Some(raw)
-                }
-                None => None,
-            };
+            let raw = raw.as_deref();
             let text_inline = raw.is_some_and(|r| !r.is_empty());
             let text_staged = raw.is_some_and(str::is_empty);
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;

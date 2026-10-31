@@ -193,6 +193,71 @@ async fn refused_large_update_keeps_the_stored_copy() {
     assert_eq!(raw_row(&env.state, &src.id).await.0, 0);
 }
 
+/// RB-D review: a large paste is hashed and written before the write gate,
+/// so user writes no longer queue behind that. With the gate held, the add
+/// still writes its playlist copy, and inserts the source once the gate is
+/// free. An add refused after the copy was written leaves no copy behind.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn large_paste_is_written_before_the_write_gate() {
+    let env = env().await;
+    let text = big_text();
+    // A user write that holds the gate until it is told to finish.
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let (held, holding) = tokio::sync::oneshot::channel::<()>();
+    let state = env.state.clone();
+    let holder = tokio::spawn(async move {
+        state
+            .db_write(move |_| {
+                let _ = held.send(());
+                let _ = wait.recv();
+                Ok(())
+            })
+            .await
+    });
+    holding.await.unwrap();
+    let (state, pasted) = (env.state.clone(), text.clone());
+    let add = tokio::spawn(async move { add_text(&state, "Big paste", &pasted).await });
+    let copies = || {
+        playlist_files(&env.state.data_dir)
+            .into_iter()
+            .filter(|f| f.ends_with(".m3u"))
+            .count()
+    };
+    let deadline = Instant::now() + std::time::Duration::from_secs(20);
+    while copies() == 0 {
+        assert!(Instant::now() < deadline, "the copy waited for the gate");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(!add.is_finished(), "the insert waits for the gate");
+    release.send(()).unwrap();
+    holder.await.unwrap().unwrap();
+    let src = add.await.unwrap();
+    assert_eq!(src.channel_count, 2000);
+    assert_eq!(
+        playlist_files(&env.state.data_dir),
+        vec![format!("{}.m3u", src.id)]
+    );
+
+    // Refused after its copy was written: the copy goes too.
+    env.state
+        .db_call(|c| {
+            c.execute_batch(
+                "CREATE TRIGGER refuse_insert BEFORE INSERT ON sources
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(sources::add(env.state.clone(), text_args("Again", &text))
+        .await
+        .is_err());
+    assert_eq!(
+        playlist_files(&env.state.data_dir),
+        vec![format!("{}.m3u", src.id)]
+    );
+}
+
 /// Rows of the mark a committed `sources.update` leaves until its staged
 /// text is in place.
 async fn staged_marks(state: &iptv_core::AppState, id: &str) -> i64 {

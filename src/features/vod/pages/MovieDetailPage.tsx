@@ -1,5 +1,5 @@
 import { Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 
@@ -7,14 +7,14 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
-import type { ItemRef, SeriesItem, VodItem } from '@/api/types';
+import type { ItemRef, VodItem } from '@/api/types';
 import { resumePoint } from '@/features/library/lib/myvideos';
 import { playDownload } from '@/features/library/lib/playDownload';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { intlLocale } from '@/lib/intl';
 
-import { CatalogRail } from '../components/CatalogRail';
+import { CatalogRail, useCategoryRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
 import { DownloadButton, FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { TmdbPromo } from '../components/detail/TmdbPromo';
@@ -24,8 +24,6 @@ import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { WatchStage } from '../components/detail/WatchStage';
-import { myListTarget, PosterCard } from '../components/PosterCard';
-import type { RailCardProps } from '../components/PosterRail';
 import { SimilarSection } from '../components/SimilarSection';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import {
@@ -50,7 +48,6 @@ import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { formatClock, isResumable, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
-import { ALL_CATEGORIES, effectiveMinRating } from '../lib/paging';
 import { detailHref, isCachedStalkerSeries } from '../lib/search';
 import { Badge, Button, ErrorState, Menu, Page, SectionHeader, Skeleton, errorDescription, useToast, type MenuItem } from '@/ui';
 
@@ -160,6 +157,8 @@ export function MovieDetailPage() {
     : { title: pageTitle, subtitle: headerSource, section: t('movies'), back: { onClick: goBack } };
   usePageHeader(header, [watching, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'movie'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
+  // Stable across the page's renders, so later answers do not re-render the rail's cards (F4-6).
+  const moreRail = useCategoryRail(source.data?.kind, 'movie', sourceId, item?.categoryId, settings);
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
   const snapshot = {
@@ -342,22 +341,6 @@ export function MovieDetailPage() {
     return Number.isNaN(d.getTime()) ? undefined : new Intl.DateTimeFormat(intlLocale(i18n.language), { dateStyle: 'medium' }).format(d);
   };
   const language = itemLanguage(item.title, item.categoryName);
-  const minRating = effectiveMinRating(settings.vodMinRating, new URLSearchParams());
-  const moreCard = (rel: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean): ReactNode => (
-    <PosterCard
-      index={i}
-      tabIndex={rail.tabIndex}
-      title={rel.titleBase || rel.title}
-      fullTitle={rel.title}
-      href={detailHref(rel.ref) ?? '#'}
-      posterUrl={rel.posterUrl}
-      year={rel.year}
-      rating={rel.rating}
-      watched={isWatched}
-      myList={myListTarget(rel)}
-      prefetch={source.data ? { ref: rel.ref, sourceKind: source.data.kind, posterUrl: rel.posterUrl, backdropUrl: rel.backdropUrl } : undefined}
-    />
-  );
 
   return (
     <div ref={detailScrollRef} className="isolate h-full overflow-x-hidden overflow-y-auto pb-12" data-testid="vod-movie-detail">
@@ -417,24 +400,14 @@ export function MovieDetailPage() {
             </div>
           </section>
         )}
-        {item.categoryId && source.data && (
+        {moreRail.input && moreRail.seeAll && (
           <CatalogRail
             title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
-            seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/movies/c/${encodeURIComponent(item.categoryId || ALL_CATEGORIES)}` }}
-            input={{
-              sourceKind: source.data.kind,
-              kind: 'movie',
-              sourceId,
-              categoryId: item.categoryId,
-              sort: 'added',
-              dir: 'desc',
-              search: '',
-              minRating,
-              ...(settings.vodHideWatched ? { hideWatched: true } : {}),
-            }}
+            seeAll={moreRail.seeAll}
+            input={moreRail.input}
             rootRef={detailScrollRef}
             exclude={ref}
-            card={moreCard}
+            card={moreRail.card}
           />
         )}
         {tmdbOn && (

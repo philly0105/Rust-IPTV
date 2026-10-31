@@ -1,17 +1,17 @@
 import { Download, ListVideo, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigationType, useParams } from 'react-router';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
-import { sameRef, type Episode, type ItemRef, type SeriesItem, type VodItem } from '@/api/types';
+import { sameRef, type Episode, type ItemRef } from '@/api/types';
 import { intlLocale } from '@/lib/intl';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { usePlayerStore } from '@/features/player';
 
-import { CatalogRail } from '../components/CatalogRail';
+import { CatalogRail, useCategoryRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
 import { FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
@@ -24,8 +24,6 @@ import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { NextEpisodeCard, UpNextRail, upcoming } from '../components/detail/UpNext';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { WatchStage } from '../components/detail/WatchStage';
-import { myListTarget, PosterCard } from '../components/PosterCard';
-import type { RailCardProps } from '../components/PosterRail';
 import { SimilarSection } from '../components/SimilarSection';
 import {
   useIsFavorite,
@@ -46,7 +44,6 @@ import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
-import { effectiveMinRating } from '../lib/paging';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
 import { Button, EmptyState, ErrorState, IconButton, Menu, Page, Skeleton, useToast, errorDescription, type MenuItem } from '@/ui';
 import { detailHref } from '../lib/search';
@@ -216,6 +213,8 @@ export function SeriesDetailPage() {
     : { title: pageTitle, subtitle: headerSource, section: t('series'), back: { onClick: goBack } };
   usePageHeader(header, [watch.active, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
+  // Stable across the page's renders, so later answers do not re-render the rail's cards (F4-6).
+  const moreRail = useCategoryRail(source.data?.kind, 'series', sourceId, item?.categoryId, settings);
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
   const snapshot = {
@@ -424,21 +423,6 @@ export function SeriesDetailPage() {
   const language = itemLanguage(item.title, item.categoryName);
   const added = item.added ? new Date(item.added) : undefined;
   const sourceName = source.data?.name ?? sourceId;
-  const moreCard = (rel: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean): ReactNode => (
-    <PosterCard
-      index={i}
-      tabIndex={rail.tabIndex}
-      title={rel.titleBase || rel.title}
-      fullTitle={rel.title}
-      href={detailHref(rel.ref) ?? '#'}
-      posterUrl={rel.posterUrl}
-      year={rel.year}
-      rating={rel.rating}
-      watched={isWatched}
-      myList={myListTarget(rel)}
-      prefetch={source.data ? { ref: rel.ref, sourceKind: source.data.kind, posterUrl: rel.posterUrl, backdropUrl: rel.backdropUrl } : undefined}
-    />
-  );
 
   return (
     <div ref={scrollRef} className="isolate h-full overflow-x-hidden overflow-y-auto pb-12" data-testid="vod-series-detail">
@@ -578,24 +562,14 @@ export function SeriesDetailPage() {
           )}
         </section>
 
-        {item.categoryId && source.data && (
+        {moreRail.input && moreRail.seeAll && (
           <CatalogRail
             title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
-            seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/series/c/${encodeURIComponent(item.categoryId)}` }}
-            input={{
-              sourceKind: source.data.kind,
-              kind: 'series',
-              sourceId,
-              categoryId: item.categoryId,
-              sort: 'added',
-              dir: 'desc',
-              search: '',
-              minRating: effectiveMinRating(settings.vodMinRating, new URLSearchParams()),
-              ...(settings.vodHideWatched ? { hideWatched: true } : {}),
-            }}
+            seeAll={moreRail.seeAll}
+            input={moreRail.input}
             rootRef={scrollRef}
             exclude={ref}
-            card={moreCard}
+            card={moreRail.card}
           />
         )}
 

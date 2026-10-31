@@ -10,14 +10,12 @@ import { itemKey, type Category, type ItemSnapshot, type PlaybackPosition, type 
 import { preloadEngines } from '@/features/player/enginePreload';
 import { snapshotTitle } from '@/lib/title';
 
-import { CatalogRail, type CatalogRailProps } from '../components/CatalogRail';
+import { CatalogPosterCard, CatalogRail, type CatalogRailProps } from '../components/CatalogRail';
 import { CategoryIndex, FROM_LANDING, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
-import { itemLanguage } from '../lib/language';
 import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
-import type { PrefetchTarget } from '../hooks/prefetch';
 import { resumeKey, useRecentlyAdded, useResumeMap, useSectionContinue, useSettings, useSource } from '../hooks/queries';
 import { useClientHeight } from '../hooks/useContainerColumns';
 import { useEdgeFades } from '../hooks/useEdgeFades';
@@ -225,13 +223,14 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 
   const card = useCallback(
     (item: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean) => (
-      <LandingCard
+      <CatalogPosterCard
         item={item}
         index={i}
         tabIndex={rail.tabIndex}
         progress={resume.get(resumeKey(item.ref))}
         watched={isWatched}
         locked={locks.itemLocked(item)}
+        showLanguage
         sourceKind={sourceKind}
       />
     ),
@@ -377,54 +376,6 @@ const LandingRail = memo(function LandingRail({
   const input = useMemo(() => (grid ? { ...grid, categoryId, sort } : undefined), [grid, categoryId, sort]);
   const seeAll = useMemo(() => ({ to: seeAllTo }), [seeAllTo]);
   return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={card} />;
-});
-
-/**
- * A poster of the landing's rails (VOD-LANDING-RENDERS). Memoized, and it builds the card's My
- * List target, prefetch target and language once per title, as the grids' GridPoster does, so a
- * rail that re-renders draws only the cards whose title, progress, watched mark or lock changed.
- */
-const LandingCard = memo(function LandingCard({
-  item,
-  index,
-  tabIndex,
-  progress,
-  watched,
-  locked,
-  sourceKind,
-}: {
-  item: VodItem | SeriesItem;
-  index: number;
-  tabIndex: number;
-  progress: number | undefined;
-  watched: boolean;
-  locked: boolean;
-  sourceKind: SourceKind | undefined;
-}) {
-  const myList = useMemo(() => myListTarget(item), [item]);
-  const language = useMemo(() => itemLanguage(item.title, item.categoryName), [item]);
-  const prefetch = useMemo<PrefetchTarget | undefined>(
-    () => (sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined),
-    [item, sourceKind],
-  );
-  return (
-    <PosterCard
-      index={index}
-      tabIndex={tabIndex}
-      title={item.titleBase || item.title}
-      fullTitle={item.title}
-      href={detailHref(item.ref) ?? '#'}
-      posterUrl={item.posterUrl}
-      year={item.year}
-      rating={item.rating}
-      progress={progress}
-      watched={watched}
-      language={language}
-      myList={myList}
-      locked={locked}
-      prefetch={prefetch}
-    />
-  );
 });
 
 /**

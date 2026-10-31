@@ -59,7 +59,10 @@ function play(i: number) {
   );
 }
 
-function mount(client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })) {
+/** The app's timings for channel pages (query.ts C4 table): a page stays cached across page switches and opens. */
+const appClient = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 2 * 60_000, gcTime: 10 * 60_000 } } });
+
+function mount(client = appClient()) {
   render(
     <QueryClientProvider client={client}>
       <FullscreenChannelPanel available />
@@ -342,8 +345,6 @@ describe('fullscreen channel panel names (round 5)', () => {
 });
 
 describe('fullscreen channel panel paging (F2-1)', () => {
-  /** The app's timings for these reads (query.ts C4 table): a page stays cached across opens. */
-  const appClient = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 2 * 60_000, gcTime: 10 * 60_000 } } });
   const asked = (cmd: string) => rpcMock.calls.filter((c) => c.cmd === cmd);
   const rest = () => act(async () => void (await new Promise((r) => setTimeout(r, 250))));
 
@@ -367,7 +368,7 @@ describe('fullscreen channel panel paging (F2-1)', () => {
       return { items, total, offset, limit };
     };
     play(5);
-    mount(appClient());
+    mount();
     await waitFor(() => expect(focusedName()).toContain('Channel 5'));
     const pagesBefore = asked('catalog.channels').length;
     const guideBefore = asked('epg.nowNext').length;
@@ -392,7 +393,7 @@ describe('fullscreen channel panel paging (F2-1)', () => {
 
   it('the guide lines come with the pages: one epg.nowNext for a page, however the rows in view move', async () => {
     play(5);
-    mount(appClient());
+    mount();
     await waitFor(() => expect(focusedName()).toContain('Channel 5'));
     await waitFor(() => expect(asked('epg.nowNext')).toHaveLength(1));
     for (let k = 1; k <= 8; k++) {
@@ -409,7 +410,7 @@ describe('fullscreen channel panel paging (F2-1)', () => {
 
   it('opening it again asks nothing the last open read, and nothing while it is closed', async () => {
     play(5);
-    mount(appClient());
+    mount();
     await waitFor(() => expect(focusedName()).toContain('Channel 5'));
     await rest();
     const reads = rpcMock.calls.length;

@@ -64,6 +64,8 @@ Each tile is a `Tile` component with its own playback hook, `useTilePlayback`. A
 
 A tile's first start waits `slot × TILE_START_STAGGER_MS` (32 ms), so tiles that start together (the wall opening, a parental check answering) start in slot order, 32 ms apart. Each engine's parse and media attach then gets its own frames instead of all of them landing in one long task. The first slot starts at once, and so do later rebuilds of a tile (Retry, replace).
 
+When the wall mounts, `MultiviewPage` asks for one booted mpegts.js transmuxing worker per tile it opens with, at most 4 (`prewarmTsWorkers` in `src/features/player/enginePreload.ts`), while the tiles' URLs are still being looked up. Each TS tile then takes a spare instead of building its worker before its stream request can go out (17-34 ms per start in Chromium; [players.md](players.md#built-in-engines-ui)). It asks once, at mount: a tile added later takes the one spare mpegts.js keeps after every start, and spares beyond one that no tile takes are shut after 15 s, so a wall of HLS tiles keeps none.
+
 | Phase | Shown | Notes |
 | --- | --- | --- |
 | `resolving` / `loading` | "Tuning" with the channel mark | |
@@ -173,7 +175,7 @@ All copy is in the `multiview` namespace, in all 19 locales. The shared Close, C
   - failure isolation, where one failing tile leaves the other engines untouched and Retry rebuilds only it;
   - keyboard focus, close, replace and swap;
   - parental locks, the connection-limit banner (with `account.status` read when a channel is added), and the empty, loading and no-source states;
-  - staggered tile starts and the quick-picks skeleton;
+  - staggered tile starts, one worker prewarm for the opening tiles (none for an empty wall), and the quick-picks skeleton;
   - the picker add flow.
 - `wallReport.test.tsx` covers the wall's playback report: one entry per playing tile in one report for tiles that start together, a closed or locked tile dropped from it, renewal, the clear when the wall goes, and a direct-loading tile held until the core answers (at most the cap) while a proxied one starts at once.
 - `tilePlayback.test.tsx` covers a server-refused stream failing at once with its reason, the mpegts.js retry without a request first, no retry after an mpegts.js fallback, the tile buffer profile, and the start delay (none for the first slot, none for a retry).

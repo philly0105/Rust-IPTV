@@ -70,10 +70,12 @@ refusals (see Security) and the JSON check run before the task starts.
 The exceptions are the read-only queries the UI supersedes and aborts while the
 user scrolls or types, listed in `api::CANCEL_ON_DISCONNECT`: `epg.grid`,
 `epg.programs`, `epg.search`, `epg.nowNext`, `epg.channelsSearch`,
-`catalog.search`, `catalog.channels`, `catalog.movies`, `catalog.series`,
-`catalog.categories` and `catalog.yearFacets`. They run inline under
+`catalog.search`, `catalog.matchTitles`, `catalog.channels`,
+`catalog.movies`, `catalog.series`, `catalog.categories` and
+`catalog.yearFacets`. They run inline under
 `iptv_core::state::cancel_on_drop`. When the client goes away, axum drops the
-call, and `AppState::db_call` interrupts its SQLite statement (or skips it
+call, and `AppState::db_read_call` (all of these run on the core's read-only
+pool; `db_call` behaves the same) interrupts its SQLite statement (or skips it
 while it still waits for a pooled connection) instead of running it for
 nobody. Writes are never on the list, because an interrupted write rolls
 back; they finish as above. The desktop app does not use this path.
@@ -131,7 +133,10 @@ needs source headers or would be mixed content.
    (EPG refreshes, download progress, the image index) can hold every pooled
    connection, and a segment request then waited 15 s and failed with 500. A
    WAL reader never waits for the write lock. When that connection can't be
-   opened or its query fails, the lookup uses the pool.
+   opened or its query fails, the lookup uses the pool. The core's own hot
+   reads use the same idea through a read-only pool (`AppState::db_read_call`,
+   userstate.md); the image cache's per-request source row and index lookup
+   (`/api/img`) run there too.
 3. Address policy (below). Refusals are 403 with an `RpcError` body.
 4. Fetch with the source's User-Agent / Referer / Origin (non-empty `ua`,
    `referer` and `origin` query parameters override them, for per-channel
@@ -316,7 +321,15 @@ with its `Content-Encoding`.
   the list; before, each deploy's chunks piled up in the one cache
   (performance audit SH-11). A tab still running the old build can no
   longer load an old lazy chunk from the cache after that, which the server
-  no longer has either.
+  no longer has either. The activate handler also turns on navigation
+  preload where the browser has it, so a navigation's request starts while
+  the worker boots and the navigation uses that response (21-40 ms to first
+  byte before, against 5-10 ms with no worker, on a fast desktop). Both
+  paths hand the network response to the page at once and write their cache
+  copy under `event.waitUntil`: `cache.put` resolves only once the whole
+  body is read and stored, so awaiting it held each asset miss (a lazy chunk
+  after a deploy, hls.js, shaka) until it was fully downloaded and written,
+  and every app open waited for a write of `index.html`.
 
 ### Compression
 `compression()` in `src/lib.rs` (tower-http `CompressionLayer`) wraps only

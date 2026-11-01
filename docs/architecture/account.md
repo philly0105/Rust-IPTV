@@ -9,7 +9,8 @@
 - It is filled from replies the app already gets: every Xtream sync (the account call that opens it), `xtream.accountInfo`, and `stalker.accountInfo`. After a successful Stalker import a background check runs, since a Stalker sync does not fetch the account.
 - A check older than 4 hours (30 minutes after a failed check) is stale; `account.status` refreshes a stale entry in the background. `refresh: true` asks an Xtream panel now, at most once per 20 s per source; a younger check is returned as is. On Stalker sources `refresh: true` returns the cache without asking the portal (portals report no connection counts). One check per source runs at a time. A failed check keeps the last good fields and sets `error`; `connections_full` is then false.
 - A failed check keeps the last good fields and sets `error` to a redacted message. Credentials, MACs, tokens and URLs never appear in the cache, the error or the logs.
-- A changed entry emits `account.changed {sourceId}`; the UI invalidates `account.*`.
+- A changed entry emits `account.changed {sourceId}`, after its row is stored; the UI invalidates `account.*`.
+- Saves pass the gate of the background writes (`AppState::db_background`, userstate.md), so a sync start or a forced check during another source's import save parks no write-pool connection of its own. Sync starts and the `accountInfo` commands still wait for their save. A check (`refresh`) updates the downloads' connection limit and returns the fetched status before its row is stored, so the player's check after a failed tune never waits for an import's commit; the source's lock is held until the row is in, so a check queued behind it reads that row and reuses it within 20 s, and `account.changed` still follows the stored row. With the write lock held, forced checks of two mock panels answered in 1.4 and 2.4 ms (`l2_import_pool.rs`, debug build).
 
 ## Commands
 
@@ -33,4 +34,4 @@ Both are in the shared router, so desktop and server mode serve them the same wa
 
 ## Tests
 
-`tests/account_status.rs` runs against the mock panel's `expiring`, `expired` and `full` users (xtream.md): a sync fills the cache, `statusAll` skips M3U, a forced check within 20 s makes no request, a forced Stalker check makes no portal request, removing a source drops its entry, and a failed check keeps the last good fields. Unit tests in `account/mod.rs` cover the reply mapping and staleness.
+`tests/account_status.rs` runs against the mock panel's `expiring`, `expired` and `full` users (xtream.md): a sync fills the cache, `statusAll` skips M3U, a forced check within 20 s makes no request, a second forced check waits for the first one's stored row and reuses it, a forced Stalker check makes no portal request, removing a source drops its entry, and a failed check keeps the last good fields. Unit tests in `account/mod.rs` cover the reply mapping and staleness.

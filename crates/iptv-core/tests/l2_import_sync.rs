@@ -453,6 +453,70 @@ async fn a_fatal_failure_after_a_staged_xtream_list_writes_nothing() {
     assert!(staged_lists(&e.state).is_empty());
 }
 
+/// A changed list that cannot be staged (`data_dir/tmp` is a file here; a
+/// full or failing disk in use) fails the whole sync with `io`, as the
+/// write would: it is not skipped as "could not be loaded from the server"
+/// while the other kinds are written.
+#[tokio::test]
+async fn a_list_that_cannot_be_staged_fails_the_whole_xtream_sync() {
+    let mut e = env().await;
+    e.add_xtream(XT).await;
+    e.refresh(XT).await;
+    let channels = e.rows(XT, "live").await + e.rows(XT, "radio").await;
+    for ct in ["live", "movie", "series"] {
+        e.mark(XT, ct).await;
+    }
+    let marked = (
+        e.marked(XT, "live").await,
+        e.marked(XT, "movie").await,
+        e.marked(XT, "series").await,
+    );
+    let tmp = e.state.data_dir.join("tmp");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::write(&tmp, b"not a directory").unwrap();
+    e.rules.lock().trim.push(vec!["action=get_live_streams"]);
+    // The movie list changes too: it must not be written without live.
+    e.rules.lock().trim.push(vec!["action=get_vod_streams"]);
+
+    while e.events.try_recv().is_ok() {}
+    let err = iptv_core::sources::refresh(e.state.clone(), XT)
+        .await
+        .expect_err("a list that cannot be staged fails the sync");
+    assert!(matches!(err, iptv_core::CoreError::Io(_)), "{err:?}");
+    assert_eq!(
+        e.rows(XT, "live").await + e.rows(XT, "radio").await,
+        channels,
+        "nothing written"
+    );
+    assert_eq!(
+        (
+            e.marked(XT, "live").await,
+            e.marked(XT, "movie").await,
+            e.marked(XT, "series").await,
+        ),
+        marked,
+        "nothing written"
+    );
+    let source = iptv_core::sources::get(&e.state, XT).await.unwrap();
+    assert_eq!(
+        source.last_error_code,
+        Some(iptv_core::RpcErrorCode::Io),
+        "{:?}",
+        source.last_error
+    );
+
+    // The disk is fine again: no staged list was left, and the next
+    // refresh writes the changes.
+    std::fs::remove_file(&tmp).unwrap();
+    let (source, _) = e.refresh(XT).await;
+    assert_eq!(source.last_error, None);
+    assert_eq!(
+        e.rows(XT, "live").await + e.rows(XT, "radio").await,
+        channels - 1
+    );
+    assert!(staged_lists(&e.state).is_empty());
+}
+
 /// Failures are reported in kind order although the live list fails at
 /// decode, after the movie and series lists failed to download: a first
 /// import of a panel without movies or series whose live list is cut short

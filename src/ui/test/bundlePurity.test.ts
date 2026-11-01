@@ -17,11 +17,13 @@
  * writes its asset list into the service worker (SH-11).
  */
 import { readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, sep } from 'node:path';
 
+import type { Rollup } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import viteConfigFn, { withAssetList, withLocaleMap } from '../../../vite.config';
+import viteConfigFn, { VIRTUAL_LIST_BOUNDARY, virtualListBoundary, withAssetList, withLocaleMap } from '../../../vite.config';
 
 const ROOT = join(__dirname, '..', '..', '..');
 type ConfigEnv = Parameters<Extract<typeof viteConfigFn, (...args: never[]) => unknown>>[0];
@@ -115,7 +117,50 @@ describe('bundle shape', () => {
     expect(chunk('/app/node_modules/.pnpm/zustand@5/node_modules/zustand/esm/index.mjs')).toBe('vendor-ui');
     expect(chunk('/app/node_modules/.pnpm/cmdk@1/node_modules/cmdk/dist/index.mjs')).toBeUndefined();
     expect(chunk('/app/node_modules/.pnpm/x/node_modules/@radix-ui/react-dialog/dist/index.mjs')).toBeUndefined();
-    expect(chunk('/app/node_modules/.pnpm/lucide-react@1/node_modules/lucide-react/dist/esm/icons/play.mjs')).toBeUndefined();
+    expect(chunk('/app/node_modules/.pnpm/lucide-react@1/node_modules/lucide-react/dist/esm/icons/gift.mjs')).toBeUndefined();
+    expect(chunk('/app/node_modules/.pnpm/lucide-react@1/node_modules/lucide-react/dist/esm/lucide-react.mjs')).toBeUndefined();
+  });
+
+  // An icon module counts as having a side effect, so the small-chunk merge could join a widely
+  // shared icon only to app code every page of it loads, and that code came along: the
+  // database-backup icon brought the virtual rows and TanStack Virtual to Settings.
+  it('keeps the icons many pages share with the boot, joined to no page code', () => {
+    const chunk = rollup.output!.manualChunks!;
+    const icon = (name: string) => `C:\\app\\node_modules\\.pnpm\\lucide-react@1\\node_modules\\lucide-react\\dist\\esm\\icons\\${name}.mjs`;
+    for (const name of ['play', 'database-backup', 'rotate-ccw', 'search-x']) expect(chunk(icon(name)), name).toBe('vendor-ui');
+    expect(chunk(icon('play-circle'))).toBeUndefined();
+    expect(chunk('/app/node_modules/.pnpm/lucide-react@1/node_modules/lucide-react/dist/esm/icons/play.mjs')).toBe('vendor-ui');
+  });
+
+  describe('the virtual-list boundary', () => {
+    const plugin = virtualListBoundary();
+    const transform = plugin.transform as (code: string, id: string) => { code: string; map: null; moduleSideEffects: boolean } | null;
+
+    it('gives the virtualizer a side effect the merge can see, and nothing else', () => {
+      expect(plugin.apply).toBe('build');
+      expect((viteConfig as { plugins: { name: string }[] }).plugins.map((p) => p.name)).toContain(plugin.name);
+      const out = transform('export const x = 1;', 'C:\\app\\src\\ui\\virtualizer.ts');
+      expect(out?.code.startsWith('export const x = 1;\n')).toBe(true);
+      expect(out?.code.trimEnd().endsWith(VIRTUAL_LIST_BOUNDARY)).toBe(true);
+      // Still tree-shaken: a page that imports the `@/ui` barrel for a button does not load it.
+      expect(out?.moduleSideEffects).toBe(false);
+      expect(out?.map).toBeNull();
+      expect(transform('export const x = 1;', '/app/src/ui/VirtualGrid.tsx')).toBeNull();
+      expect(transform('export const x = 1;', '/app/src/ui/virtualizer.test.ts')).toBeNull();
+    });
+
+    it('Rollup counts the boundary statement as a side effect', async () => {
+      // The Rollup that Vite builds with.
+      const fromVite = createRequire(createRequire(import.meta.url).resolve('vite'));
+      const { rollup: bundle } = (await import(fromVite.resolve('rollup'))) as { rollup: typeof Rollup.rollup };
+      const entry = '\0entry';
+      const build = await bundle({
+        input: entry,
+        plugins: [{ name: 'entry', resolveId: (id: string) => (id === entry ? id : null), load: (id: string) => (id === entry ? VIRTUAL_LIST_BOUNDARY : null) }],
+      });
+      const { output } = await build.generate({ format: 'es' });
+      expect(output[0].code).toContain('WeakSet');
+    });
   });
 
   // Every vendor chunk is preloaded by index.html on every boot and loads whole.

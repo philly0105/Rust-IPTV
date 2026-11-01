@@ -52,6 +52,8 @@ vi.mock('@/api/events', () => ({
   onAnyAppEvent: () => () => undefined,
 }));
 vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
+// The episode queue reads the store from its own module; the same fake stands in for it.
+vi.mock('@/features/player/store', async () => (await import('./harness')).playerModule);
 
 const sref: ItemRef = { sourceId: 'src1', contentType: 'series', itemId: 's1' };
 const ep = (id: string, season: number, episode: number, title = `Episode ${season}.${episode}`): Episode => ({ id, seriesRef: sref, season, episode, title });
@@ -440,7 +442,7 @@ describe('B4-vod-D13: the detail page and the player agree the series ends befor
 describe('B4-vod-D14: "Resume" uses the player\'s own resume threshold', () => {
   it('isResumable agrees with MIN_RESUME_SECONDS', async () => {
     const { isResumable } = await import('../lib/format');
-    const { MIN_RESUME_SECONDS } = await import('@/features/player/store');
+    const { MIN_RESUME_SECONDS } = await import('@/features/player/resumeRules');
     const at = (positionSeconds: number) => ({ positionSeconds, durationSeconds: 3000, watched: false });
     expect(isResumable(at(8))).toBe(true);
     expect(isResumable(at(MIN_RESUME_SECONDS + 1))).toBe(true);

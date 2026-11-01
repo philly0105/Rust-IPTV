@@ -37,6 +37,8 @@ vi.mock('@/shell', () => {
   return { useShell: () => ({ setHeader }), useShortcut: () => undefined };
 });
 vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
+// RecentPage reads the store from its own module; the same fake stands in for it.
+vi.mock('@/features/player/store', async () => (await import('./harness')).playerModule);
 
 const harness = await import('./harness');
 const { invalidate } = await import('@/api/query');

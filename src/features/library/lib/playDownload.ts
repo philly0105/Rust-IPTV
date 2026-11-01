@@ -1,7 +1,6 @@
 import { rpc } from '@/api/transport';
 import type { Download, PlayerSource } from '@/api/types';
 
-import { playSource, usePlayerStore } from '../deps';
 import { resumePoint } from './myvideos';
 import { trackDownloadPosition } from './positionSync';
 
@@ -34,10 +33,12 @@ export function downloadStartSeconds(d: Download, opts?: DownloadStart): number 
 /**
  * Plays a completed download from disk, resuming at its saved position (or
  * where `resumeSeconds` says, or from the beginning with `fromStart`), and
- * keeps `downloads.setPosition` up to date while it plays.
+ * keeps `downloads.setPosition` up to date while it plays. The player loads with
+ * the source lookup, on the press, so the pages that offer a download's play do
+ * not wait for it before their first render.
  */
 export async function playDownload(d: Download, opts?: DownloadStart): Promise<void> {
-  const src = await rpc('myvideos.playSource', { id: d.id });
+  const [src, { playSource, usePlayerStore }] = await Promise.all([rpc('myvideos.playSource', { id: d.id }), import('@/features/player')]);
   const source: PlayerSource = { ...src, title: src.title || d.title };
   if (!source.subtitle && d.subtitle) source.subtitle = d.subtitle;
   if (!source.posterUrl && d.posterUrl) source.posterUrl = d.posterUrl;
@@ -48,7 +49,7 @@ export async function playDownload(d: Download, opts?: DownloadStart): Promise<v
 
 /** Watch the provider's archived stream while its download continues separately. */
 export async function playActiveCatchupDownload(d: Download): Promise<void> {
-  const src = await rpc('downloads.playSource', { id: d.id });
+  const [src, { playSource, usePlayerStore }] = await Promise.all([rpc('downloads.playSource', { id: d.id }), import('@/features/player')]);
   const source: PlayerSource = {
     ...src,
     title: src.title || d.title,

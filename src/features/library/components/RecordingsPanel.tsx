@@ -16,7 +16,7 @@ import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { scheduleRemoval, usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { buttonClass } from '@/ui/Button';
 
-import { Badge, EmptyState, ErrorState, IconButton, SkeletonList, playSource, useToast, errorDescription } from '../deps';
+import { Badge, EmptyState, ErrorState, IconButton, SkeletonList, useToast, errorDescription } from '../deps';
 import { formatBytes, formatDuration } from '../lib/format';
 
 /** Entries whose name, channel or title contains `query` (case-insensitive). */
@@ -45,7 +45,9 @@ export function usePlayRecording(): (f: RecordingFile) => Promise<void> {
   return useCallback(
     async (f: RecordingFile) => {
       try {
-        await playSource(await rpc('recordings.playSource', { id: f.id }));
+        // The player loads with the source lookup, on the press, not before the first render.
+        const [source, { playSource }] = await Promise.all([rpc('recordings.playSource', { id: f.id }), import('@/features/player')]);
+        await playSource(source);
       } catch (e) {
         toast({ variant: 'error', title: t('recPlayFailed'), description: errorDescription(e) });
         void invalidate('recordings.');

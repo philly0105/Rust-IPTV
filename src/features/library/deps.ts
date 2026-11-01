@@ -1,7 +1,10 @@
 /**
  * Every cross-feature import of the library slice goes through this file, so
- * the slice has one seam to the shell (C16), the primitives (C11) and the
- * player (C8).
+ * the slice has one seam to the shell (C16) and the primitives (C11). The
+ * player (C8) is not re-exported: every library page imports this file, so the
+ * player would run before each one's first render. The pages that draw the
+ * stage or read the store import it themselves, and a row's play loads it on
+ * the press (lib/open.ts, lib/playDownload.ts).
  */
 
 export {
@@ -42,7 +45,6 @@ export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';
 // live: the quality filter leaves out the live favorites and history entries it hides.
 export { QualityFilterNote, useLiveQuality } from '@/features/live/components/QualityFilterButton';
-export { PlayerStage, playItem, playSource, usePlayerStore } from '@/features/player';
 // recording:
 export {
   clockDuration,

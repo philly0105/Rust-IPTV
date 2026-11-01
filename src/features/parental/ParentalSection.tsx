@@ -15,7 +15,7 @@ import {
   Tv,
   X,
 } from 'lucide-react';
-import { useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
@@ -25,7 +25,7 @@ import { SectionError, SectionSkeleton, Segmented, SettingsGroup, SettingsRow, S
 import type { SectionProps } from '@/features/settings/sections/types';
 import { Badge, Button, EmptyState, ErrorState, IconButton, ProgressBar, Select, Skeleton, cn, toast, errorDescription } from '@/ui';
 
-import { LockGroupsDialog, contentCounts } from './LockGroupsDialog';
+import { contentCounts } from './counts';
 import { PinDialog } from './PinDialog';
 import { SetPinDialog } from './SetPinDialog';
 import { UNLOCK_CHOICES, useDurationText, useLockKindText } from './labels';
@@ -708,10 +708,25 @@ function SourceLocks({
   );
 }
 
+/**
+ * The groups dialog loads when it opens. Its list is virtualized, and as a static import it put
+ * TanStack Virtual (27 kB) in front of the Settings page's first render.
+ */
+const loadLockGroupsDialog = () => import('./LockGroupsDialog');
+const LockGroupsDialog = lazy(() => loadLockGroupsDialog().then((m) => ({ default: m.LockGroupsDialog })));
+
 /** Loads this source's locks for the groups dialog, so it opens with them ticked. */
 function GroupsDialogLoader({ source, status, onClose }: { source: Source; status: ParentalStatus; onClose: () => void }) {
   const locks = useRpcQuery('parental.locks', {});
   const mine = useMemo(() => (locks.data ?? []).filter((l) => l.sourceId === source.id), [locks.data, source.id]);
+  // The dialog's chunk downloads while the locks load, not after them.
+  useEffect(() => {
+    loadLockGroupsDialog().catch(() => undefined);
+  }, []);
   if (!locks.data) return null;
-  return <LockGroupsDialog source={source} status={status} locks={mine} onClose={onClose} />;
+  return (
+    <Suspense fallback={null}>
+      <LockGroupsDialog source={source} status={status} locks={mine} onClose={onClose} />
+    </Suspense>
+  );
 }

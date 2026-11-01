@@ -13,9 +13,11 @@ import { useNavigate, useParams } from 'react-router';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
+// The store alone, to mark what is playing; a row's play loads the player (lib/open.ts).
+import { usePlayerStore } from '@/features/player/store';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, usePlayerStore, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton, type EntryResume } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';

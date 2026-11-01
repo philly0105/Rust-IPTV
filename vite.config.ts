@@ -25,14 +25,16 @@ const mpegtsPatchHash = createHash('sha256')
  * `vendor-*` chunk on every boot, and a manual chunk loads whole, so only what the boot runs
  * belongs in one. cmdk, its Radix dialog stack and lucide-react are left out (performance audit
  * SH-10): cmdk is used only by the lazy command palette and most icons only by lazy pages, so
- * Rollup places them with their users.
+ * Rollup places them with their users (the icons many pages share are the exception, see
+ * SHARED_ICONS).
  *
  * `virtual` and `tauri-plugins` are packages only lazy code uses: TanStack Virtual (27 kB) only the
  * virtualized pages, the Tauri dialog, opener and updater plugins only through import(). Each set
  * gets a chunk of its own rather than none, since a manual chunk stays out of the
  * experimentalMinChunkSize merge: left to Rollup, the merge put TanStack Virtual in a chunk of
  * parental helpers that Settings, Search and the VOD pages load, and the opener plugin with app
- * code Home loads.
+ * code Home loads. The merge cannot see a manual chunk's weight, though, so the module that imports
+ * TanStack Virtual needs its own guard (virtualListBoundary).
  */
 const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly string[]]> = [
   ['vendor-react', ['react', 'react-dom', 'scheduler', 'react-router']],
@@ -43,6 +45,48 @@ const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly s
   ['virtual', ['@tanstack/virtual-core', '@tanstack/react-virtual']],
   ['tauri-plugins', ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-updater']],
 ];
+
+/**
+ * Lucide icons that seven or more lazy pages draw. They go with the boot's vendor-ui chunk (about
+ * 11 kB), which joins them to no page's code. Rollup counts an icon module as having a side effect
+ * (lucide's `__iconData.node;` statement), and the experimentalMinChunkSize merge joins such a
+ * module only to a chunk that every page drawing the icon also loads. For an icon many pages share
+ * that left one candidate, often app code that brought more with it: database-backup sat with the
+ * library's virtual rows, so Settings, Sources and Stats loaded those rows and TanStack Virtual
+ * before their first render, and rotate-ccw sat with the channel-edit actions (11 kB) in front of
+ * Settings. The other icons keep their place next to their pages.
+ */
+const SHARED_ICONS: ReadonlySet<string> = new Set([
+  'bookmark-plus',
+  'calendar-clock',
+  'chevron-left',
+  'database-backup',
+  'ellipsis-vertical',
+  'external-link',
+  'eye',
+  'eye-off',
+  'film',
+  'folder-lock',
+  'grip-vertical',
+  'hd',
+  'lock',
+  'lock-open',
+  'minus',
+  'pause',
+  'pencil',
+  'play',
+  'refresh-cw',
+  'rotate-ccw',
+  'search-x',
+  'shield-alert',
+  'sliders-horizontal',
+  'square',
+  'star',
+  'trash',
+  'triangle-alert',
+]);
+/** A lucide icon module; group 1 is the icon's file name. */
+const LUCIDE_ICON = /[\\/]lucide-react[\\/]dist[\\/]esm[\\/]icons[\\/]([\w-]+)\.mjs$/;
 
 /**
  * The files of `@tauri-apps/api` the boot imports statically: `invoke` and `listen` (transport,
@@ -88,6 +132,8 @@ function vendorChunk(id: string): string | undefined {
   if (locale) return `locale-${locale[1]}`;
   const own = OWN_CHUNKS.find(([test]) => test.test(id));
   if (own) return own[1];
+  const icon = LUCIDE_ICON.exec(id);
+  if (icon?.[1] && SHARED_ICONS.has(icon[1])) return 'vendor-ui';
   const at = id.lastIndexOf('node_modules');
   if (at < 0) return undefined;
   const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);
@@ -114,6 +160,38 @@ function chunkFileName(chunk: { name: string; facadeModuleId: string | null; mod
   const id = chunk.facadeModuleId ?? chunk.moduleIds.at(-1) ?? '';
   const dir = id.split(/[\\/]/).at(-2);
   return `assets/${dir && dir !== 'src' ? dir : 'chunk'}-index-[hash].js`;
+}
+
+/** `src/ui/virtualizer.ts`: the one module that imports TanStack Virtual (the `virtual` chunk). */
+const VIRTUALIZER = /[\\/]src[\\/]ui[\\/]virtualizer\.ts$/;
+/**
+ * The statement virtualListBoundary appends to the virtualizer: a write to a fresh WeakSet, which
+ * nothing can observe, but which Rollup counts as a side effect (a src/ui/test/bundlePurity.test.ts
+ * case checks that it still does).
+ */
+export const VIRTUAL_LIST_BOUNDARY = 'new WeakSet().add({});';
+
+/**
+ * Keeps TanStack Virtual (27 kB) out of the pages that draw no virtual list. The
+ * experimentalMinChunkSize merge weighs only the modules it merges, not the manual chunks they
+ * import, so it joined small helpers (the parental-lock hooks, useMediaQuery) to the virtualizer,
+ * and every page that needed one of them loaded TanStack Virtual before its first render too
+ * (Settings, Sports and Stats; Home and Sources in trial builds). What the merge never does is
+ * make a page run a side effect it would not run otherwise. So the virtualizer gets one Rollup can
+ * see, and is marked free of side effects for tree-shaking, so it still loads only where something
+ * uses it (a page that imports the `@/ui` barrel for a button does not get it). The merge then
+ * keeps the virtualizer, and every chunk that imports it, out of the pages without a virtual list.
+ */
+export function virtualListBoundary(): Plugin {
+  return {
+    name: 'tsrust-virtual-list-boundary',
+    apply: 'build',
+    transform(code, id) {
+      if (!VIRTUALIZER.test(id)) return null;
+      // Appended at the end, so no code moves and the source map stays as it is (map: null).
+      return { code: `${code}\n${VIRTUAL_LIST_BOUNDARY}\n`, map: null, moduleSideEffects: false };
+    },
+  };
 }
 
 const brotli = promisify(brotliCompress);
@@ -286,7 +364,7 @@ function themeBootLocales(): Plugin {
 }
 
 export default defineConfig(({ command }) => ({
-  plugins: [react(), tailwindcss(), serviceWorkerAssets(), themeBootLocales(), precompress(), timeshiftTrace()],
+  plugins: [react(), tailwindcss(), virtualListBoundary(), serviceWorkerAssets(), themeBootLocales(), precompress(), timeshiftTrace()],
   optimizeDeps: {
     esbuildOptions: { banner: { js: `/* mpegts patch ${mpegtsPatchHash} */` } },
   },

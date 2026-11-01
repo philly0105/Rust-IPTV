@@ -13,6 +13,8 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { RpcError, isDesktop } from '@/api/transport';
 import { useRpcQuery } from '@/api/query';
 import type { Download, ItemRef } from '@/api/types';
+// The stage and the store this page draws and follows (library/deps.ts leaves the player out).
+import { PlayerStage, usePlayerStore } from '@/features/player';
 import { buttonClass } from '@/ui/Button';
 import { BackButton } from '@/ui/Page';
 import { intlLocale } from '@/lib/intl';
@@ -29,12 +31,10 @@ import {
   HeroIcon,
   IconButton,
   Page,
-  PlayerStage,
   SectionHeader,
   Toggle,
   useShortcut,
   useToast,
-  usePlayerStore,
   errorDescription,
   type DetailModel,
 } from '../deps';

@@ -39,6 +39,8 @@ vi.mock('@/api/transport', () => {
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
 vi.mock('@/shell', async () => (await import('./harness')).shellModule);
 vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
+// RecentPage reads the store from its own module; the same fake stands in for it.
+vi.mock('@/features/player/store', async () => (await import('./harness')).playerModule);
 
 const harness = await import('./harness');
 rpcMock.current = harness.createRpcMock();

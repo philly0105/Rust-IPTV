@@ -1,10 +1,12 @@
-/** Opening a favorite / recent entry: live and radio play, movies and series open their detail page. */
+/**
+ * Opening a favorite / recent entry: live and radio play, movies and series open their detail page.
+ * The player (and the series queue) load on the press, so Favorites and Recently watched list their
+ * entries without waiting for the player's chunks.
+ */
 
 import { sameRef, type ItemRef, type ItemSnapshot, type PlaybackPosition, type Source } from '@/api/types';
-import { queueSeriesFrom } from '@/features/vod/lib/episodeQueue';
+import type { PlayItemArgs } from '@/features/player';
 import { intlLocale, relativeTimeFormat } from '@/lib/intl';
-
-import { playItem, usePlayerStore } from '../deps';
 
 export function detailPath(ref: ItemRef): string | undefined {
   const sid = encodeURIComponent(ref.sourceId);
@@ -40,7 +42,7 @@ export async function openEntry(
     return;
   }
   if (!source) throw new SourceGoneError();
-  const args: Parameters<typeof playItem>[0] = {
+  const args: PlayItemArgs = {
     ref,
     title: snapshot.title,
     isLive: true,
@@ -49,6 +51,7 @@ export async function openEntry(
   };
   if (snapshot.subtitle) args.subtitle = snapshot.subtitle;
   if (snapshot.posterUrl) args.posterUrl = snapshot.posterUrl;
+  const { playItem, usePlayerStore } = await import('@/features/player');
   await playItem(args);
   // Only once it plays: a refused PIN leaves what played, and its zapping, alone.
   if (favorites && sameRef(usePlayerStore.getState().source?.ref, ref)) {
@@ -65,12 +68,14 @@ export async function openEntry(
 export async function resumePosition(p: PlaybackPosition, source: Source | undefined): Promise<void> {
   if (!source) throw new SourceGoneError();
   const title = p.snapshot?.title ?? p.ref.itemId;
-  const args: Parameters<typeof playItem>[0] = { ref: p.ref, title, isLive: false, isRadio: false, sourceKind: source.kind };
+  const args: PlayItemArgs = { ref: p.ref, title, isLive: false, isRadio: false, sourceKind: source.kind };
   if (p.episodeId) args.episodeId = p.episodeId;
   if (p.snapshot?.subtitle) args.subtitle = p.snapshot.subtitle;
   if (p.snapshot?.posterUrl) args.posterUrl = p.snapshot.posterUrl;
+  const { playItem } = await import('@/features/player');
   await playItem(args);
   if (p.ref.contentType === 'series' && p.episodeId) {
+    const { queueSeriesFrom } = await import('@/features/vod/lib/episodeQueue');
     const queue: Parameters<typeof queueSeriesFrom>[0] = { ref: p.ref, sourceKind: source.kind, title, episodeId: p.episodeId };
     if (p.snapshot?.posterUrl) queue.posterUrl = p.snapshot.posterUrl;
     await queueSeriesFrom(queue);

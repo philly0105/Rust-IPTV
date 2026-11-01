@@ -84,7 +84,7 @@ import {
 import { archivePath, canBrowseArchive } from '../lib/archive';
 import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
-import { GuideUnavailableNotice } from './ChannelList';
+import { GuideUnavailableNotice } from './GuideUnavailableNotice';
 import { ContextMenu } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { ScopePicker, type PickerSection } from './ScopePicker';

@@ -16,7 +16,7 @@
 import { rpc } from '@/api/transport';
 import type { Episode, ItemRef, PlaybackPosition, PlayerSource, SeriesDetail, SourceKind } from '@/api/types';
 import { sameRef } from '@/api/types';
-import { usePlayerStore } from '@/features/player';
+import { usePlayerStore } from '@/features/player/store';
 
 import { episodeSubtitle, isResumable } from './format';
 import { episodeOrder } from './merge';

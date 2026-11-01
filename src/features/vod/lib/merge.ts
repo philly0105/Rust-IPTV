@@ -27,7 +27,7 @@ import type {
   VodDetail,
 } from '@/api/types';
 
-import { MIN_RESUME_SECONDS } from '@/features/player/store';
+import { MIN_RESUME_SECONDS } from '@/features/player/resumeRules';
 import { formatList } from '@/lib/intl';
 
 import { isResumable, isWatched } from './format';

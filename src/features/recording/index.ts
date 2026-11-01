@@ -1,9 +1,12 @@
-/** Public surface of the recording feature: guide reminders and scheduled recordings. */
+/**
+ * Public surface of the recording feature: guide reminders and scheduled recordings. The shell
+ * loads RecordingWatcher by its own path, with the player: it imports the player, so exporting it
+ * here put the player in front of the first render of every page that imports this barrel.
+ */
 
 export { ProgramActions, ProgramActionsView, useProgramActionsShared, type ProgramActionsShared } from './components/ProgramActions';
 export { RibbonActions } from './components/RibbonActions';
 export { ScheduleMark, ScheduleMarkView } from './components/ScheduleMark';
-export { RecordingWatcher } from './components/RecordingWatcher';
 // Run 2 C5: series recording rules.
 export { RecordingRulesPanel } from './components/RulesPanel';
 export { RecordSeriesDialog, RemoveRuleDialog, type SeriesTarget } from './components/SeriesDialogs';

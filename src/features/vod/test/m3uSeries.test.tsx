@@ -35,6 +35,8 @@ vi.mock('@/api/transport', async (importOriginal) => {
 });
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
 vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
+// The episode queue reads the store from its own module; the same fake stands in for it.
+vi.mock('@/features/player/store', async () => (await import('./harness')).playerModule);
 
 const sref: ItemRef = { sourceId: 'src1', contentType: 'series', itemId: 's1' };
 const ep = (id: string, season: number, episode: number): Episode => ({ id, seriesRef: sref, season, episode, title: `Part ${season}.${episode}`, containerExtension: 'mkv' });

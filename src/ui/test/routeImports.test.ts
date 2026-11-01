@@ -10,7 +10,9 @@
  * the barrel must not export anything that reaches them: when it exported PlayerDock, Live and the
  * guide waited for the controls chunk (77 kB) before their first render. The VOD pages label
  * titles with the player's resume rules without loading its store, the media store keeps its track
- * lists without the engines, and the shell reads the PiP flag without loading pip.
+ * lists without the engines, and the shell reads the PiP flag without loading pip. The library's
+ * pages load the player when a row plays, and the guide draws its Stalker notice without Live's
+ * channel list.
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -56,6 +58,19 @@ function staticImports(file: string): string[] {
 
 const rel = (file: string) => relative(ROOT, file).split(sep).join('/');
 
+/** `import('...')` calls with a literal specifier: what a module loads later, on demand. */
+const DYNAMIC_IMPORT = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
+
+/** The source modules `file` loads with import(), resolved (packages left out). */
+function dynamicImports(file: string): string[] {
+  const out: string[] = [];
+  for (const m of readFileSync(join(ROOT, file), 'utf8').matchAll(DYNAMIC_IMPORT)) {
+    const target = resolveImport(join(ROOT, file), m[1]!);
+    if (target) out.push(rel(target));
+  }
+  return out;
+}
+
 /** The chain of static imports from `from` to `to`, or null when `to` is out of reach. */
 function importChain(from: string, to: string): string[] | null {
   const start = join(ROOT, from);
@@ -99,10 +114,11 @@ const STORE = 'src/features/player/store.ts';
 const ENGINES = 'src/features/player/engines.ts';
 const PIP = 'src/features/player/pip.ts';
 const CARDS = 'src/shell/dashboard/cards.tsx';
+const BARREL = 'src/features/player/index.ts';
 
 const LIVE = 'src/features/live/components/LivePage.tsx';
 const GUIDE = 'src/features/live/components/EpgGridPage.tsx';
-/** Pages that draw the stage, or play from a row, with the barrel's stage and store. */
+/** Pages that draw the stage, or play from a row (the library's load the player on the press). */
 const STAGE_PAGES = [
   LIVE,
   GUIDE,
@@ -145,6 +161,30 @@ describe('what a page reaches before its first render', () => {
 
   it("the shell's first render (window-state effect included) loads neither pip nor the player store", () => {
     expect(reached(['src/main.tsx', 'src/shell/ShellLayout.tsx', 'src/shell/effects.ts'], [PIP, STORE, DOCK])).toEqual([]);
+    // The desktop window-state effect runs right after the first commit, and only reads the PiP
+    // flag (player/pipState.ts): an import() of pip there took the player store into every launch.
+    expect(reached(dynamicImports('src/shell/effects.ts'), [PIP, STORE])).toEqual([]);
+  });
+
+  it('the library pages load the player when a row plays, not before their first render', () => {
+    const library = (page: string) => `src/features/library/pages/${page}.tsx`;
+    const listing = ['FavoritesPage', 'DownloadsPage', 'ScheduledPage', 'MyVideosPage'].map(library);
+    expect(reached(listing, [BARREL, STORE])).toEqual([]);
+    // Recently watched reads the store, to mark what is playing, but not the barrel's stage.
+    expect(reached([library('RecentPage')], [BARREL])).toEqual([]);
+    for (const lib of ['src/features/library/lib/open.ts', 'src/features/library/lib/playDownload.ts', 'src/features/library/components/RecordingsPanel.tsx']) {
+      expect(dynamicImports(lib), lib).toContain(BARREL);
+    }
+    expect(reached(['src/features/library/deps.ts', 'src/features/recording/index.ts', 'src/features/vod/lib/episodeQueue.ts'], [BARREL])).toEqual([]);
+  });
+
+  it("the guide draws its Stalker notice without Live's channel list and rows", () => {
+    expect(reached([GUIDE], ['src/features/live/components/ChannelList.tsx', 'src/features/live/components/ChannelRow.tsx'])).toEqual([]);
+  });
+
+  it('Settings opens the lock groups dialog, with its virtual list, only when asked', () => {
+    expect(reached(['src/features/settings/SettingsPage.tsx'], ['src/features/parental/LockGroupsDialog.tsx'])).toEqual([]);
+    expect(dynamicImports('src/features/parental/ParentalSection.tsx')).toContain('src/features/parental/LockGroupsDialog.tsx');
   });
 
   it('the boot does not load the phone tab bar, which wider windows and the desktop app never draw', () => {
@@ -156,6 +196,8 @@ describe('what a page reaches before its first render', () => {
   it('the walk follows the imports that do exist', () => {
     // A guard that never finds anything proves nothing: these chains are expected.
     expect(importChain(LIVE, STORE)).not.toBeNull();
+    expect(reached(dynamicImports('src/shell/ShellLayout.tsx'), [STORE])).not.toEqual([]);
+    expect(importChain('src/features/live/components/LivePage.tsx', 'src/features/live/components/ChannelRow.tsx')).not.toBeNull();
     expect(importChain('src/features/player/dock.ts', CONTROLS)).not.toBeNull();
     expect(importChain('src/shell/dashboard/DashboardPage.tsx', CARDS)).not.toBeNull();
     expect(importChain('src/shell/TabBar.tsx', 'src/shell/navigation.ts')).not.toBeNull();

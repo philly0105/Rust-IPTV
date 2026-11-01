@@ -9,6 +9,7 @@ import type { ContentType, ParentalLock, ParentalLockTarget, ParentalStatus, Sou
 import { Badge, Button, Checkbox, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, Tabs, cn, toast, tabPanelProps, useListVirtualizer, errorDescription } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
+import { contentCounts } from './counts';
 import { useContentTypeText } from './labels';
 import { PinDialog } from './PinDialog';
 import { trackLockChange } from './status';
@@ -22,16 +23,6 @@ const emptyPicks = (): Picks => ({ live: new Map(), radio: new Map(), movie: new
 
 /** Case- and accent-insensitive form for the group filter, as in the Live sidebar: "espana" finds "España". */
 const fold = (s: string): string => s.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
-
-/** How many items of each content type a source has. */
-export function contentCounts(source: Source): Record<ContentType, number> {
-  return {
-    live: source.channelCount,
-    radio: typeof source.radioCount === 'number' ? source.radioCount : 0,
-    movie: source.movieCount,
-    series: source.seriesCount,
-  };
-}
 
 /** Content types this source has, in tab order; types with locks count even when now empty. */
 function typesOf(source: Source, locks: readonly ParentalLock[]): ContentType[] {

@@ -4,13 +4,14 @@ import { UNSAFE_LocationContext } from 'react-router';
 
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 import { listSeparator } from '@/lib/intl';
-import { TEXT_LINK, cn, useListVirtualizer, useRowHeight } from '@/ui';
+import { useListVirtualizer, useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { ParentalLocks } from '../hooks/useParentalLocks';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow } from './ChannelRow';
+import { GuideUnavailableNotice } from './GuideUnavailableNotice';
 
 export interface ChannelListProps {
   paged: PagedChannels;
@@ -468,22 +469,5 @@ export function ChannelList(props: ChannelListProps) {
         </div>
       </div>
     </>
-  );
-}
-
-/** One line above a list or grid whose Stalker guide timed out; the queue retries on its own. */
-export function GuideUnavailableNotice({ onRetry }: { onRetry(): void }) {
-  const { t } = useTranslation('live');
-  return (
-    <div role="status" data-testid="guide-unavailable" className="flex items-center gap-2 border-b border-divider bg-surface-2 px-3 py-1.5 text-xs text-fg-muted">
-      <span className="min-w-0 flex-1">{t('portalGuideUnavailable')}</span>
-      <button
-        type="button"
-        onClick={onRetry}
-        className={cn(TEXT_LINK, 'shrink-0')}
-      >
-        {t('retry')}
-      </button>
-    </div>
   );
 }

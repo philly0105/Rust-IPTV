@@ -1,17 +1,28 @@
 //! Catalog sync: account check, then live (+radio), movies and series are
-//! fetched and mapped one content type at a time, and all of them are written
-//! in ONE transaction ([`replace_catalogs`]), then the XMLTV link.
+//! fetched one content type at a time, the changed ones are decoded and
+//! mapped, and all of them are written in ONE transaction
+//! ([`replace_catalogs`]), then the XMLTV link.
 //!
 //! Atomicity (C8): a cancel or failure anywhere before that commit leaves the
 //! previous catalog whole. Writing type by type used to leave live new and
 //! movies old when a cancel landed between types.
 //!
-//! Memory: each type's body is fetched as bytes, decoded and mapped to
-//! `ItemRow`s on the blocking pool, and the bytes dropped before the next type
-//! is fetched. The mapped rows of every type are held until the single write.
+//! Two phases (R3-4). First every type is downloaded with no save slot
+//! held: its body is fetched as bytes and hashed on the blocking pool, and
+//! a changed body is staged in `data_dir/tmp/xtream-<id>-<kind>-<uuid>.part`
+//! and dropped before the next type is fetched, so one body at most is in
+//! memory. Then, when any type changed, the import save slot is taken once
+//! and each staged body is read back, decoded and mapped to `ItemRow`s on
+//! the blocking pool, its file deleted; the mapped rows of every type are
+//! held until the single write. A changed live list used to take the slot
+//! before the movie and series lists were even requested, so every other
+//! import's decode and write waited out those downloads too (25-130 s on a
+//! large panel).
 //!
 //! Failure policy: `Auth`, `Network` and `Timeout` (after retries) abort the
-//! whole sync and nothing is written. A type the panel does not serve
+//! whole sync and nothing is written, and so does a staged copy that cannot
+//! be written or read back (`Io`: the disk is full or failing, and the
+//! write would fail as well). A type the panel does not serve
 //! (`NotFound`, unreadable JSON) is skipped with a warning and keeps its
 //! previous rows; the sync fails only if every requested type failed. A
 //! type whose categories come back unreadable (a login page) keeps its
@@ -156,11 +167,28 @@ pub async fn sync_source(
     let mut written: Vec<(Kind, Option<String>)> = Vec::new();
     // Kinds that failed without failing the sync: their rows stay too.
     let mut failed: Vec<Kind> = Vec::new();
-    // The import save slot (ST-2), taken before the first changed answer is
-    // decoded and held until the write ends: the decoded rows of every kind
-    // stay in memory until then.
-    let mut slot: Option<tokio::sync::OwnedSemaphorePermit> = None;
+    let mut skip = |kind: Kind, err: CoreError| {
+        tracing::warn!(source_id, kind = kind.label(), error = %err, "xtream content type skipped");
+        progress(
+            &state,
+            source_id,
+            "parsing",
+            0,
+            None,
+            Some(&format!("{} skipped: {err}", kind.label())),
+        );
+        // A panel that does not serve a type at all is normal; any other
+        // failure leaves that type stale, so say so.
+        if !matches!(err, CoreError::NotFound(_) | CoreError::Unsupported(_)) {
+            crate::sources::note_import_warning(&kind.kept_message(), err.code());
+        }
+        failed.push(kind);
+        first_err.get_or_insert(err);
+    };
 
+    // Phase 1: download every kind, no save slot held. A changed list waits
+    // on disk (its file goes with `staged` if the sync stops early).
+    let mut staged: Vec<Staged> = Vec::new();
     let steps: [(bool, Kind); 3] = [
         (plan.live, Kind::Live),
         (plan.movies, Kind::Movies),
@@ -175,7 +203,7 @@ pub async fn sync_source(
         if crate::sources::is_import_cancelled() {
             return Err(crate::sources::import_cancelled_error());
         }
-        match fetch_kind(&state, &client, source_id, kind, &previous, &mut slot).await {
+        match fetch_kind(&state, &client, source_id, kind, &previous).await {
             Ok(Fetched::Unchanged) => {
                 tracing::info!(
                     source_id,
@@ -185,39 +213,32 @@ pub async fn sync_source(
                 untouched.push(kind);
             }
             Ok(Fetched::Kept) => untouched.push(kind),
-            Ok(Fetched::Parts { parts: p, hash }) => {
+            Ok(Fetched::Staged(s)) => staged.push(s),
+            Err(err) if is_fatal(&err) => return Err(err),
+            Err(err) => skip(kind, err),
+        }
+    }
+
+    // Phase 2: the import save slot (ST-2), taken once before the first
+    // changed list is decoded and held until the write ends, so decoded
+    // rows exist only while it is held. An unchanged refresh never waits.
+    let mut slot: Option<tokio::sync::OwnedSemaphorePermit> = None;
+    for s in staged {
+        if crate::sources::is_import_cancelled() {
+            return Err(crate::sources::import_cancelled_error());
+        }
+        let kind = s.kind;
+        progress(&state, source_id, "parsing", 0, None, Some(kind.label()));
+        if slot.is_none() {
+            slot = Some(crate::sources::save_slot(&state).await?);
+        }
+        match decode_staged(source_id, s).await {
+            Ok((p, hash)) => {
                 written.push((kind, hash));
                 parts.extend(p);
             }
-            Err(err)
-                if matches!(
-                    err,
-                    CoreError::Auth(_)
-                        | CoreError::Network(_)
-                        | CoreError::Server(_)
-                        | CoreError::Timeout(_)
-                ) || crate::sources::is_cancelled_error(&err) =>
-            {
-                return Err(err);
-            }
-            Err(err) => {
-                tracing::warn!(source_id, kind = kind.label(), error = %err, "xtream content type skipped");
-                progress(
-                    &state,
-                    source_id,
-                    "parsing",
-                    0,
-                    None,
-                    Some(&format!("{} skipped: {err}", kind.label())),
-                );
-                // A panel that does not serve a type at all is normal; any
-                // other failure leaves that type stale, so say so.
-                if !matches!(err, CoreError::NotFound(_) | CoreError::Unsupported(_)) {
-                    crate::sources::note_import_warning(&kind.kept_message(), err.code());
-                }
-                failed.push(kind);
-                first_err.get_or_insert(err);
-            }
+            Err(err) if is_fatal(&err) => return Err(err),
+            Err(err) => skip(kind, err),
         }
     }
     if untouched.is_empty() && parts.iter().all(|p| p.rows.is_empty()) {
@@ -545,24 +566,111 @@ enum Fetched {
     /// The categories failed while the kind has rows: they are kept as they
     /// were (and a warning is noted).
     Kept,
-    /// New rows to write. `hash` is `None` when the categories were missing,
-    /// so no fingerprint is stored and the next refresh writes them again.
-    Parts {
-        parts: Vec<CatalogPart>,
-        hash: Option<String>,
-    },
+    /// A changed answer, staged on disk until it is decoded
+    /// ([`decode_staged`]).
+    Staged(Staged),
 }
 
-/// Fetches and maps one content type (live yields a live and a radio part).
-/// Nothing is written here; see [`replace_catalogs`]. An answer identical
-/// to the last write is not even decoded ([`Fetched::Unchanged`]).
+/// Errors that end the whole sync with nothing written: the panel or the
+/// network failed for every kind alike, the run was cancelled, or a staged
+/// list could not be written or read back.
+fn is_fatal(err: &CoreError) -> bool {
+    matches!(
+        err,
+        CoreError::Auth(_)
+            | CoreError::Network(_)
+            | CoreError::Server(_)
+            | CoreError::Timeout(_)
+            | CoreError::Io(_)
+    ) || crate::sources::is_cancelled_error(err)
+}
+
+/// A changed list body waiting on disk for the save slot, with what its
+/// rows need.
+struct Staged {
+    kind: Kind,
+    /// `None` when the categories were missing (the items land under
+    /// "Uncategorized").
+    categories: Option<Vec<CategoryRow>>,
+    /// The fingerprint to store with the rows; `None` without categories,
+    /// so the next refresh writes the kind again.
+    hash: Option<String>,
+    file: StagedFile,
+}
+
+/// A staged list body, deleted on drop: after it is read back, or with a
+/// sync that stops before (a cancel, a failure, a dropped task).
+/// `m3u::init` deletes the `xtream-*.part` files a crash left.
+struct StagedFile(std::path::PathBuf);
+
+impl Drop for StagedFile {
+    fn drop(&mut self) {
+        match std::fs::remove_file(&self.0) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                tracing::warn!(%err, file = %self.0.display(), "could not remove a staged xtream list");
+            }
+        }
+    }
+}
+
+/// Writes a changed list body to `data_dir/tmp` (on the blocking pool), so
+/// its memory is free while the next list downloads. Not synced: it is read
+/// back within the same sync, and a crash leaves nothing to resume.
+async fn stage(
+    state: &AppState,
+    source_id: &str,
+    kind: Kind,
+    body: bytes::Bytes,
+) -> CoreResult<StagedFile> {
+    let dir = state.data_dir.join("tmp");
+    let file = StagedFile(dir.join(format!(
+        "xtream-{source_id}-{}-{}.part",
+        kind.label(),
+        uuid::Uuid::new_v4().simple()
+    )));
+    tokio::task::spawn_blocking(move || -> CoreResult<StagedFile> {
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(&file.0, &body)?;
+        Ok(file)
+    })
+    .await?
+}
+
+/// Reads a staged list back (sized exactly, the file closed and deleted
+/// before the decode), then decodes and maps it on the blocking pool.
+/// Returns its parts and the fingerprint to store.
+async fn decode_staged(
+    source_id: &str,
+    staged: Staged,
+) -> CoreResult<(Vec<CatalogPart>, Option<String>)> {
+    let sid = source_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let Staged {
+            kind,
+            categories,
+            hash,
+            file,
+        } = staged;
+        let body = std::fs::read(&file.0)?;
+        drop(file);
+        let parts = map_kind(kind, &sid, &body, categories.unwrap_or_default())?;
+        Ok((parts, hash))
+    })
+    .await?
+}
+
+/// Fetches one content type and stages its list when it changed. Nothing
+/// is decoded or written here; see [`decode_staged`] and
+/// [`replace_catalogs`]. An answer identical to the last write is not
+/// even staged ([`Fetched::Unchanged`]).
 async fn fetch_kind(
     state: &Arc<AppState>,
     client: &XtreamClient,
     source_id: &str,
     kind: Kind,
     previous: &Previous,
-    slot: &mut Option<tokio::sync::OwnedSemaphorePermit>,
 ) -> CoreResult<Fetched> {
     let (cat_action, list_action) = kind.actions();
     progress(state, source_id, "fetching", 0, None, Some(kind.label()));
@@ -593,8 +701,8 @@ async fn fetch_kind(
     };
     let bytes = list?;
 
-    progress(state, source_id, "parsing", 0, None, Some(kind.label()));
-    // The fingerprint needs only the bytes, so an unchanged kind never waits
+    // The fingerprint is taken from the bytes in memory, in the format the
+    // last write stored, so an unchanged kind is neither staged nor waits
     // for the save slot (ST-2).
     let (hash, categories, bytes) = tokio::task::spawn_blocking(move || {
         let hash = categories
@@ -606,16 +714,13 @@ async fn fetch_kind(
     if hash.as_deref().is_some_and(|h| previous.unchanged(kind, h)) {
         return Ok(Fetched::Unchanged);
     }
-    if slot.is_none() {
-        *slot = Some(crate::sources::save_slot(state).await?);
-    }
-    let sid = source_id.to_string();
-    let fetched = tokio::task::spawn_blocking(move || -> CoreResult<Fetched> {
-        let parts = map_kind(kind, &sid, &bytes, categories.unwrap_or_default())?;
-        Ok(Fetched::Parts { parts, hash })
-    })
-    .await??;
-    Ok(fetched)
+    let file = stage(state, source_id, kind, bytes).await?;
+    Ok(Fetched::Staged(Staged {
+        kind,
+        categories,
+        hash,
+        file,
+    }))
 }
 
 /// Decodes one kind's list body and maps it to the parts to write (live

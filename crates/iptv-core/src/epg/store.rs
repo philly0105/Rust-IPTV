@@ -12,6 +12,7 @@ use crate::db::now_rfc3339;
 use crate::error::CoreResult;
 use crate::model::{EpgFetchStatus, EpgLinks, EpgOrigin, EpgSourceStatus, RequestHeaders};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// Rows per write transaction during ingestion.
@@ -249,6 +250,105 @@ pub fn mark_not_modified(conn: &Connection, url: &str) -> CoreResult<()> {
     Ok(())
 }
 
+/// What identifies a guide body: its ETag and `Last-Modified` (sent back
+/// as `If-None-Match` / `If-Modified-Since`) and a fingerprint (a sha256 of
+/// a download, the size and modification time of a local file; see
+/// `fetch`). [`commit_staging`] stores them with the guide.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Validators {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub fingerprint: Option<String>,
+}
+
+/// The `Last-Modified` and fingerprint of the body a url's stored guide was
+/// ingested from, and when. The ETag has its own column; these are kept in
+/// `app_state` like the playlist validators, one key per url.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredValidators {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    /// Unix seconds of the ingest that stored the guide.
+    pub ingested_at: i64,
+}
+
+/// `app_state` key prefix of [`StoredValidators`].
+const VALIDATORS_KEY: &str = "epg_validators:";
+
+fn validators_key(url: &str) -> String {
+    format!("{VALIDATORS_KEY}{url}")
+}
+
+/// The [`StoredValidators`] of `url`, if any.
+pub fn stored_validators(conn: &Connection, url: &str) -> CoreResult<Option<StoredValidators>> {
+    Ok(conn
+        .prepare_cached("SELECT value FROM app_state WHERE key = ?1")?
+        .query_row([validators_key(url)], |r| r.get::<_, String>(0))
+        .optional()?
+        .and_then(|v| serde_json::from_str(&v).ok()))
+}
+
+fn put_validators(conn: &Connection, url: &str, v: &StoredValidators) -> CoreResult<()> {
+    conn.execute(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![validators_key(url), serde_json::to_string(v)?],
+    )?;
+    Ok(())
+}
+
+/// Records the validators of the body just swapped in for `url`, ingested
+/// now; removes the stored ones when it has neither a `Last-Modified` nor
+/// a fingerprint, so no later body can match the guide it replaced.
+fn record_validators(conn: &Connection, url: &str, v: Option<&Validators>) -> CoreResult<()> {
+    match v.filter(|v| v.last_modified.is_some() || v.fingerprint.is_some()) {
+        Some(v) => put_validators(
+            conn,
+            url,
+            &StoredValidators {
+                last_modified: v.last_modified.clone(),
+                fingerprint: v.fingerprint.clone(),
+                ingested_at: chrono::Utc::now().timestamp(),
+            },
+        ),
+        None => {
+            conn.execute(
+                "DELETE FROM app_state WHERE key = ?1",
+                [validators_key(url)],
+            )?;
+            Ok(())
+        }
+    }
+}
+
+/// Marks a refresh whose body is the one the stored guide came from (same
+/// fingerprint): status ok with `warning` as its error (the stored guide's
+/// unreadable-feed code, if any), fetch time refreshed, and the response's
+/// ETag and `Last-Modified`, which describe the same bytes, kept for the
+/// next conditional request. The fingerprint and ingest time stay.
+pub fn mark_unchanged(
+    conn: &Connection,
+    url: &str,
+    warning: Option<&str>,
+    v: &Validators,
+) -> CoreResult<()> {
+    conn.execute(
+        "UPDATE epg_sources SET status = 'ok', error = ?2, last_fetch_at = ?3, etag = coalesce(?4, etag)
+         WHERE url = ?1",
+        params![url, warning, now_rfc3339(), v.etag],
+    )?;
+    if let (Some(at), Some(mut stored)) = (&v.last_modified, stored_validators(conn, url)?) {
+        if stored.last_modified.as_ref() != Some(at) {
+            stored.last_modified = Some(at.clone());
+            put_validators(conn, url, &stored)?;
+        }
+    }
+    Ok(())
+}
+
 /// Removes staging rows of `url` (cascade deletes its staged channels and
 /// programmes) and this connection's [`STAGE_TABLE`].
 pub fn discard_staging(conn: &Connection, url: &str) -> CoreResult<()> {
@@ -398,9 +498,10 @@ const MAX_DIFF_PERCENT: i64 = 25;
 
 /// Swaps staging in for `url` in one transaction: staged programmes in
 /// place of the stored ones, staged channels re-keyed, staging row removed,
-/// status `ok` with counts, fetch time and etag. Returns the programmes
-/// stored. [`STAGE_TABLE`] is left to the caller (`ingest_reader` closes
-/// the temp database; dropping the table would first walk its pages).
+/// status `ok` with counts, fetch time and the body's validators. Returns
+/// the programmes stored. [`STAGE_TABLE`] is left to the caller
+/// (`ingest_reader` closes the temp database; dropping the table would
+/// first walk its pages).
 ///
 /// A refresh 12 h after the last one changes a few percent of a feed: the
 /// window moves on and a few listings are edited. The swap then deletes
@@ -411,9 +512,10 @@ const MAX_DIFF_PERCENT: i64 = 25;
 pub fn commit_staging(
     conn: &mut Connection,
     url: &str,
-    etag: Option<&str>,
+    validators: Option<&Validators>,
     channels: u64,
 ) -> CoreResult<u64> {
+    let etag = validators.and_then(|v| v.etag.as_deref());
     let key = staging_key(url);
     let slots_indexed = index_staged_slots(conn, url)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -432,6 +534,7 @@ pub fn commit_staging(
          program_count = ?4, etag = ?5 WHERE url = ?1",
         params![url, now_rfc3339(), channels as i64, programs as i64, etag],
     )?;
+    record_validators(&tx, url, validators)?;
     tx.commit()?;
     Ok(programs)
 }
@@ -594,6 +697,10 @@ pub fn prune(conn: &mut Connection, keep: &[ConfiguredUrl]) -> CoreResult<usize>
     for url in &stale {
         tx.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
         tx.execute("DELETE FROM epg_sources WHERE url = ?1", [url])?;
+        tx.execute(
+            "DELETE FROM app_state WHERE key = ?1",
+            [validators_key(url)],
+        )?;
     }
     tx.commit()?;
     Ok(stale.len())
@@ -601,11 +708,11 @@ pub fn prune(conn: &mut Connection, keep: &[ConfiguredUrl]) -> CoreResult<usize>
 
 /// `epg.clearAll`: deletes every stored programme and guide channel in one
 /// transaction and resets each configured url's status (idle, zero counts, no
-/// error, no etag so the next refresh downloads the full feed). Urls,
-/// enabled flags, `last_fetch_at` (so the scheduler does not immediately
-/// re-download) and manual channel mappings are kept. Staging rows of a
-/// refresh that is running right now are left alone. Returns the number of
-/// programmes deleted.
+/// error, no validators so the next refresh downloads and reads the full
+/// feed). Urls, enabled flags, `last_fetch_at` (so the scheduler does not
+/// immediately re-download) and manual channel mappings are kept. Staging
+/// rows of a refresh that is running right now are left alone. Returns the
+/// number of programmes deleted.
 pub fn clear_all(conn: &mut Connection) -> CoreResult<usize> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let live = "SELECT url FROM epg_sources WHERE origin <> ?1";
@@ -621,6 +728,10 @@ pub fn clear_all(conn: &mut Connection) -> CoreResult<usize> {
         "UPDATE epg_sources SET status = 'idle', error = NULL, etag = NULL, channel_count = 0,
          program_count = 0 WHERE origin <> ?1",
         [STAGING_ORIGIN],
+    )?;
+    tx.execute(
+        &format!("DELETE FROM app_state WHERE key GLOB '{VALIDATORS_KEY}*'"),
+        [],
     )?;
     super::search::invalidate_index(&tx)?;
     tx.commit()?;

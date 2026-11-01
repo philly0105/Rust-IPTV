@@ -3,7 +3,7 @@
 //! that keeps stale feeds fresh).
 
 use super::fetch::{self, Fetched};
-use super::store::{self, ConfiguredUrl, StagingWriter};
+use super::store::{self, ConfiguredUrl, StagingWriter, Validators};
 use super::xmltv::{self, Window, XmltvItem};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{EpgFetchStatus, EpgOrigin, RequestHeaders};
@@ -25,16 +25,31 @@ pub const MAX_CONCURRENT: usize = 2;
 pub const STALE_AFTER: Duration = Duration::from_secs(12 * 3600);
 /// A failed url is retried by the scheduler after this long.
 pub const RETRY_FAILED_AFTER: Duration = Duration::from_secs(30 * 60);
-/// First scheduler pass after boot.
+/// First scheduler pass after boot: urls that have no guide yet.
 pub const BOOT_DELAY: Duration = Duration::from_secs(10);
+/// Urls that already have a guide are refreshed no sooner than this after
+/// boot, with the source startup pass: the window, the first screen's
+/// queries and the first stream come before a download, parse and swap.
+pub const STORED_BOOT_DELAY: Duration = crate::sources::STARTUP_REFRESH_DELAY;
 /// Scheduler interval after the first pass (picks up newly added urls).
 pub const TICK: Duration = Duration::from_secs(30);
+/// A body identical to the one the stored guide came from (same fingerprint)
+/// is not read again within this long of that ingest; past it, it is, so the
+/// stored 2-day / 14-day window moves on.
+pub const REINGEST_AFTER: Duration = Duration::from_secs(24 * 3600);
+/// Version of what an ingest stores (parser and staging rules), seeded into
+/// every body fingerprint (`fetch`): bumping it makes the next refresh of
+/// every feed read an unchanged body again. Bump it whenever a change alters
+/// the rows an ingest writes.
+pub const INGEST_VERSION: u32 = 1;
 /// Minimum gap between two `epg.progress` events of one url while parsing.
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
+/// Prefix of the C15 unreadable-feed code ([`unreadable_warning`]).
+const UNREADABLE_CODE: &str = "epg_unreadable:";
 
 /// `epg.changed` payload when only a url's status moved (a refresh started,
-/// or the server answered 304): no guide data changed, so clients refetch
-/// `epg.sources` and keep their guide windows.
+/// ended on a 304 or on the body already stored, or failed): no guide data
+/// changed, so clients refetch `epg.sources` and keep their guide windows.
 #[derive(Serialize)]
 struct StatusOnly {
     reason: &'static str,
@@ -119,22 +134,25 @@ pub struct IngestStats {
     pub programs: u64,
     pub skipped_window: u64,
     pub skipped_invalid: u64,
-    /// The server answered 304; stored data was kept.
+    /// Nothing new: the server answered 304, or sent the body the stored
+    /// guide came from; stored data was kept.
     pub not_modified: bool,
     /// Set when the feed ended with an XML error and the data before it was kept.
     pub warning: Option<String>,
 }
 
-/// Parses `reader` into staging and swaps it in for `url`. Blocking; call
-/// from a blocking thread. `on_progress(phase, programs)` is called with
-/// `"parsing"` after each committed batch and `"saving"` before the swap. On error the staging rows are discarded and stored
-/// data is untouched.
+/// Parses `reader` into staging and swaps it in for `url`, with the body's
+/// `validators` (none: no ETag, nothing to recognise the body by).
+/// Blocking; call from a blocking thread. `on_progress(phase, programs)` is
+/// called with `"parsing"` after each committed batch and `"saving"` before
+/// the swap. On error the staging rows are discarded and stored data is
+/// untouched.
 pub fn ingest_reader(
     conn: &mut rusqlite::Connection,
     url: &str,
     reader: impl BufRead,
     window: Window,
-    etag: Option<&str>,
+    validators: Option<&Validators>,
     on_progress: &mut dyn FnMut(&str, u64),
 ) -> CoreResult<IngestStats> {
     // A large feed (millions of programmes) holds the write lock for long
@@ -162,7 +180,7 @@ pub fn ingest_reader(
     conn.execute_batch(
         "PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0; PRAGMA temp_store=FILE;",
     )?;
-    let result = ingest_inner(conn, url, reader, window, etag, on_progress);
+    let result = ingest_inner(conn, url, reader, window, validators, on_progress);
     // Guide search (C5): a swap that replaced only what changed kept the
     // title index in step; one that copied the whole feed (or a discarded
     // staging) marked it stale: rebuild it while the bulk-load cache is
@@ -186,7 +204,7 @@ fn ingest_inner(
     url: &str,
     reader: impl BufRead,
     window: Window,
-    etag: Option<&str>,
+    validators: Option<&Validators>,
     on_progress: &mut dyn FnMut(&str, u64),
 ) -> CoreResult<IngestStats> {
     let key = store::begin_staging(conn, url)?;
@@ -209,14 +227,18 @@ fn ingest_inner(
     match result {
         Ok((stats, channels, staged)) => {
             on_progress("saving", staged);
-            let programs = store::commit_staging(conn, url, etag, channels)?;
+            let programs = store::commit_staging(conn, url, validators, channels)?;
             // Most programmes unreadable (often an unknown time zone): the
             // status stays ok (the readable part was stored) but the source
             // row and the done event carry the C15 code saying why the
-            // guide is empty or thin.
+            // guide is empty or thin. The guide is already swapped in, so a
+            // failure here must not fail the refresh: an error tells clients
+            // no guide data changed.
             let unreadable = unreadable_warning(&stats);
             if let Some(w) = &unreadable {
-                store::set_status(conn, url, EpgFetchStatus::Ok, Some(w))?;
+                if let Err(e) = store::set_status(conn, url, EpgFetchStatus::Ok, Some(w)) {
+                    tracing::warn!(error = %e, "could not record the EPG unreadable warning");
+                }
             }
             Ok(IngestStats {
                 channels,
@@ -247,7 +269,7 @@ fn unreadable_warning(stats: &xmltv::ParseStats) -> Option<String> {
         .saturating_add(stats.skipped_window)
         .saturating_add(skipped);
     (skipped > 0 && skipped.saturating_mul(2) > seen)
-        .then(|| format!("epg_unreadable:{skipped}:{seen}"))
+        .then(|| format!("{UNREADABLE_CODE}{skipped}:{seen}"))
 }
 
 /// Looks up `url` among the configured urls; unknown urls are treated as
@@ -382,12 +404,23 @@ async fn run_refresh(
                 "EPG refresh done"
             );
             progress(&state, &url, "done", stats.programs, stats.warning.clone());
-            // A 304 kept the stored guide: only the url's status moved, so
-            // cached directories stay valid and clients keep their guide windows.
+            // A 304 or an unchanged body kept the stored guide: only the
+            // url's status moved, so cached directories stay valid and
+            // clients keep their guide windows.
             if stats.not_modified {
                 state.emit("epg.changed", STATUS_ONLY);
             } else {
                 rt.bump();
+                // Build the next channel directory before clients refetch, so
+                // their first now/next does not wait for it; a read arriving
+                // meanwhile waits for this one build.
+                let dir_rt = rt.clone();
+                if let Err(e) = state
+                    .db_call(move |c| super::resolve::directory(c, &dir_rt).map(drop))
+                    .await
+                {
+                    tracing::warn!(error = %e, "could not build the EPG channel directory");
+                }
                 state.emit("epg.changed", serde_json::json!({}));
             }
         }
@@ -402,7 +435,8 @@ async fn run_refresh(
                 tracing::warn!(error = %e, "could not record EPG error status");
             }
             progress(&state, &url, "error", 0, Some(msg));
-            state.emit("epg.changed", serde_json::json!({}));
+            // A failed refresh left the stored guide as it was.
+            state.emit("epg.changed", STATUS_ONLY);
         }
     }
     result
@@ -439,27 +473,50 @@ fn user_message(err: &CoreError) -> String {
     }
 }
 
+/// True when `body` is the one the stored guide of `row` was ingested from
+/// (the same fingerprint) less than [`REINGEST_AFTER`] before `now`.
+fn unchanged(
+    row: &store::SourceRow,
+    stored: Option<&store::StoredValidators>,
+    body: &Validators,
+    now: i64,
+) -> bool {
+    let Some(stored) = stored else {
+        return false;
+    };
+    let age = now.saturating_sub(stored.ingested_at);
+    row.program_count > 0
+        && body.fingerprint.is_some()
+        && stored.fingerprint == body.fingerprint
+        && (0..REINGEST_AFTER.as_secs() as i64).contains(&age)
+}
+
 async fn refresh_inner(state: &Arc<AppState>, cfg: &ConfiguredUrl) -> CoreResult<IngestStats> {
     let url = cfg.url.clone();
-    let row = {
+    let (row, stored) = {
         let c = cfg.clone();
         state
             .db_call(move |conn| {
                 store::ensure_row(conn, &c)?;
+                // Read before the status below clears the error: an
+                // unchanged body keeps the stored guide's unreadable warning.
+                let row = store::source_row(conn, &c.url)?.unwrap_or_default();
+                let stored = store::stored_validators(conn, &c.url)?;
                 store::set_status(conn, &c.url, EpgFetchStatus::Fetching, None)?;
-                store::source_row(conn, &c.url)
+                Ok((row, stored))
             })
             .await?
-            .unwrap_or_default()
     };
     progress(state, &url, "fetching", 0, None);
     state.emit("epg.changed", STATUS_ONLY);
 
-    // Conditional GET only when the stored data came from that ETag.
-    let etag = row
-        .etag
-        .as_deref()
-        .filter(|_| row.status != "error" && row.program_count > 0);
+    // Conditional GET only when the stored data came from those validators
+    // (commit_staging writes them with it).
+    let known = (row.program_count > 0).then(|| Validators {
+        etag: row.etag.clone(),
+        last_modified: stored.as_ref().and_then(|s| s.last_modified.clone()),
+        fingerprint: None,
+    });
     let on_bytes = {
         let st = state.clone();
         let u = url.clone();
@@ -473,7 +530,7 @@ async fn refresh_inner(state: &Arc<AppState>, cfg: &ConfiguredUrl) -> CoreResult
             )
         }
     };
-    let body = match fetch::fetch(state, &url, &cfg.headers, etag, &on_bytes).await? {
+    let body = match fetch::fetch(state, &url, &cfg.headers, known.as_ref(), &on_bytes).await? {
         Fetched::NotModified => {
             let u = url.clone();
             state
@@ -488,13 +545,36 @@ async fn refresh_inner(state: &Arc<AppState>, cfg: &ConfiguredUrl) -> CoreResult
         }
         Fetched::Body(b) => b,
     };
+    // A server without validators (or a local file) giving the body the
+    // stored guide came from: parsing it and swapping it in would store the
+    // same programmes, so keep them as on a 304.
+    if unchanged(
+        &row,
+        stored.as_ref(),
+        &body.validators,
+        chrono::Utc::now().timestamp(),
+    ) {
+        body.cleanup();
+        let warning = row.error.filter(|e| e.starts_with(UNREADABLE_CODE));
+        let (u, w, v) = (url.clone(), warning.clone(), body.validators.clone());
+        state
+            .db_call(move |c| store::mark_unchanged(c, &u, w.as_deref(), &v))
+            .await?;
+        return Ok(IngestStats {
+            channels: row.channel_count as u64,
+            programs: row.program_count as u64,
+            not_modified: true,
+            warning,
+            ..Default::default()
+        });
+    }
     progress(state, &url, "parsing", 0, None);
 
     let pool = state.db.clone();
     let st = state.clone();
     let u = url.clone();
     let path = body.path.clone();
-    let etag = body.etag.clone();
+    let validators = body.validators.clone();
     let result = tokio::task::spawn_blocking(move || -> CoreResult<IngestStats> {
         let reader = fetch::open_reader(&path)?;
         let mut conn = pool.get()?;
@@ -505,7 +585,7 @@ async fn refresh_inner(state: &Arc<AppState>, cfg: &ConfiguredUrl) -> CoreResult
             &u,
             reader,
             Window::around(now),
-            etag.as_deref(),
+            Some(&validators),
             &mut |phase, programs| {
                 if phase != "parsing" || last.elapsed() >= PROGRESS_EVERY {
                     last = Instant::now();
@@ -552,6 +632,17 @@ fn is_due(
 /// urls that were never fetched, are older than 12 h, or failed more than
 /// 30 min ago. Returns the urls started.
 pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
+    pass(state, false).await
+}
+
+/// True for a url the passes right after boot leave for later
+/// ([`STORED_BOOT_DELAY`]): it already has a guide to show meanwhile.
+fn held_at_boot(row: Option<&store::SourceRow>) -> bool {
+    row.is_some_and(|r| r.program_count > 0)
+}
+
+/// [`schedule_pass`]; with `boot`, urls that already have a guide wait.
+async fn pass(state: Arc<AppState>, boot: bool) -> CoreResult<Vec<String>> {
     let rt = runtime(&state);
     let all = configured_all(&state).await?;
     let keep = all.clone();
@@ -575,7 +666,7 @@ pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
     let now = chrono::Utc::now();
     let mut started = Vec::new();
     for (url, row) in rows {
-        if rt.is_running(&url) {
+        if rt.is_running(&url) || (boot && held_at_boot(row.as_ref())) {
             continue;
         }
         let last = rt.last_attempt.lock().get(&url).copied();
@@ -587,18 +678,24 @@ pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
 }
 
 /// Boot: cleans staging leftovers and temp files, then runs the scheduler
-/// (first pass after `first_delay`, then every [`TICK`]) until the state is dropped.
+/// (first pass after `first_delay`, then every [`TICK`]) until the state is
+/// dropped. Passes before [`STORED_BOOT_DELAY`] start only urls that have no
+/// guide yet. Each pass also drops the provider guide answers past their
+/// TTL ([`crate::catchup::sweep`]).
 pub async fn start(state: Arc<AppState>, first_delay: Duration) -> CoreResult<()> {
     runtime(&state);
     fetch::clean_temp_dir(&state);
     state.db_call(|c| store::cleanup_on_boot(c)).await?;
     let weak: Weak<AppState> = Arc::downgrade(&state);
     drop(state);
+    let booted = Instant::now();
     tokio::spawn(async move {
         tokio::time::sleep(first_delay).await;
         loop {
             let Some(state) = weak.upgrade() else { break };
-            if let Err(err) = schedule_pass(state).await {
+            crate::catchup::sweep(&state);
+            let boot = booted.elapsed() < STORED_BOOT_DELAY;
+            if let Err(err) = pass(state, boot).await {
                 tracing::warn!(error = %err, "EPG scheduler pass failed");
             }
             tokio::time::sleep(TICK).await;
@@ -610,6 +707,13 @@ pub async fn start(state: Arc<AppState>, first_delay: Duration) -> CoreResult<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn etag(tag: &str) -> Validators {
+        Validators {
+            etag: Some(tag.into()),
+            ..Default::default()
+        }
+    }
 
     fn row(status: &str, enabled: bool, last: Option<&str>) -> store::SourceRow {
         store::SourceRow {
@@ -695,14 +799,14 @@ mod tests {
             }
         }
         full.push_str("</tv>");
-        let ingest = |conn: &mut rusqlite::Connection, body: &[u8], etag: &str| {
+        let ingest = |conn: &mut rusqlite::Connection, body: &[u8], tag: &str| {
             let reader = std::io::BufReader::new(body);
             ingest_reader(
                 conn,
                 "u",
                 reader,
                 Window::unbounded(),
-                Some(etag),
+                Some(&etag(tag)),
                 &mut |_, _| {},
             )
         };
@@ -753,7 +857,7 @@ mod tests {
             "u",
             reader,
             Window::unbounded(),
-            Some("v3"),
+            Some(&etag("v3")),
             &mut |_, _| {},
         )
         .unwrap_err();
@@ -892,13 +996,13 @@ mod tests {
                 20_261_012_000_000u64 + i as u64 * 100 + 1
             )
         };
-        let ingest = |conn: &mut rusqlite::Connection, xml: String, etag: &str| {
+        let ingest = |conn: &mut rusqlite::Connection, xml: String, tag: &str| {
             ingest_reader(
                 conn,
                 "u",
                 std::io::Cursor::new(xml.into_bytes()),
                 Window::unbounded(),
-                Some(etag),
+                Some(&etag(tag)),
                 &mut |_, _| {},
             )
         };
@@ -942,6 +1046,146 @@ mod tests {
             )
             .unwrap();
         assert_eq!(staging, 0);
+    }
+
+    /// A body is kept only when it is the one the stored guide came from,
+    /// that guide has programmes, and it was read less than a day ago.
+    #[test]
+    fn unchanged_rules() {
+        let now = 1_800_000_000;
+        let stored = |fp: &str, at: i64| store::StoredValidators {
+            fingerprint: Some(fp.into()),
+            ingested_at: at,
+            ..Default::default()
+        };
+        let body = |fp: Option<&str>| Validators {
+            fingerprint: fp.map(str::to_string),
+            ..Default::default()
+        };
+        let mut guide = row("ok", true, None);
+        guide.program_count = 5;
+        let day = REINGEST_AFTER.as_secs() as i64;
+        assert!(unchanged(
+            &guide,
+            Some(&stored("a", now - 3600)),
+            &body(Some("a")),
+            now
+        ));
+        assert!(!unchanged(
+            &guide,
+            Some(&stored("a", now - 3600)),
+            &body(Some("b")),
+            now
+        ));
+        assert!(!unchanged(
+            &guide,
+            Some(&stored("a", now - 3600)),
+            &body(None),
+            now
+        ));
+        assert!(!unchanged(&guide, None, &body(Some("a")), now));
+        assert!(!unchanged(
+            &guide,
+            Some(&stored("a", now - day)),
+            &body(Some("a")),
+            now
+        ));
+        assert!(unchanged(
+            &guide,
+            Some(&stored("a", now - day + 1)),
+            &body(Some("a")),
+            now
+        ));
+        // A clock that went back does not keep a guide forever.
+        assert!(!unchanged(
+            &guide,
+            Some(&stored("a", now + 60)),
+            &body(Some("a")),
+            now
+        ));
+        guide.program_count = 0;
+        assert!(!unchanged(
+            &guide,
+            Some(&stored("a", now - 3600)),
+            &body(Some("a")),
+            now
+        ));
+    }
+
+    /// The passes right after boot leave urls that already have a guide for
+    /// the source startup pass's time, and start those without one.
+    #[tokio::test]
+    async fn boot_passes_start_only_urls_without_a_guide() {
+        assert!(BOOT_DELAY < STORED_BOOT_DELAY);
+        assert!(STORED_BOOT_DELAY >= crate::sources::STARTUP_REFRESH_DELAY);
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let stored = dir.path().join("stored.xml").to_string_lossy().into_owned();
+        let empty = dir.path().join("empty.xml").to_string_lossy().into_owned();
+        state.settings.write().epg_urls = vec![stored.clone(), empty.clone()];
+        let stale = (chrono::Utc::now() - chrono::Duration::hours(13)).to_rfc3339();
+        let u = stored.clone();
+        state
+            .db_call(move |c| {
+                c.execute(
+                    "INSERT INTO epg_sources(url, status, last_fetch_at, program_count) VALUES (?1, 'ok', ?2, 5)",
+                    rusqlite::params![u, stale],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(pass(state.clone(), true).await.unwrap(), [empty]);
+        assert_eq!(pass(state.clone(), false).await.unwrap(), [stored]);
+        assert!(!held_at_boot(None));
+        assert!(!held_at_boot(Some(&row("idle", true, None))));
+    }
+
+    /// The channel directory is built before the first guide read: at boot,
+    /// and by a refresh that stored data, before it tells clients.
+    #[tokio::test]
+    async fn the_directory_is_built_ahead_of_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let rt = runtime(&state);
+        let built = |rt: &EpgRuntime| rt.names.lock().as_ref().map(|d| d.generation());
+        super::super::spawn_directory_build(&state);
+        let started = Instant::now();
+        while built(&rt).is_none() && started.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(built(&rt), Some(rt.generation()));
+
+        let now = chrono::Utc::now();
+        let ts = |h: i64| (now + chrono::Duration::hours(h)).format("%Y%m%d%H%M%S +0000");
+        let path = dir.path().join("guide.xml");
+        std::fs::write(
+            &path,
+            format!(
+                r#"<tv><channel id="c"><display-name>C</display-name></channel><programme channel="c" start="{}" stop="{}"><title>T</title></programme></tv>"#,
+                ts(0),
+                ts(1)
+            ),
+        )
+        .unwrap();
+        let before = rt.generation();
+        refresh_now(state.clone(), &path.to_string_lossy())
+            .await
+            .unwrap();
+        assert_eq!(rt.generation(), before + 1);
+        assert_eq!(built(&rt), Some(rt.generation()));
     }
 
     #[test]

@@ -38,15 +38,35 @@ pub const SEARCH_DEFAULT_LIMIT: usize = 50;
 pub const SEARCH_MAX_LIMIT: usize = 500;
 
 /// Starts the EPG runtime: cleans leftovers of an interrupted import, then
-/// refreshes never-fetched or stale (> 12 h) enabled urls 10 s after boot and
-/// keeps checking every 30 s (newly added urls, failed urls after 30 min).
+/// refreshes never-fetched enabled urls 10 s after boot and stale (> 12 h)
+/// ones from 30 s, with the source startup pass, and keeps checking every
+/// 30 s (newly added urls, failed urls after 30 min).
 ///
 /// A guide search index missing at startup (a database upgraded to
-/// migration 0015) is built in the background ([`search`]).
+/// migration 0015) is built in the background ([`search`]), and so is the
+/// channel directory, so the first now/next after launch does not build it.
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     ingest::start(state.clone(), ingest::BOOT_DELAY).await?;
     search::spawn_startup_build(&state);
+    spawn_directory_build(&state);
     Ok(())
+}
+
+/// Builds the channel directory in the background ([`resolve::directory`]).
+/// A guide read arriving meanwhile waits for this build, never longer than
+/// it would building its own.
+fn spawn_directory_build(state: &Arc<AppState>) {
+    let weak = Arc::downgrade(state);
+    tokio::spawn(async move {
+        let Some(state) = weak.upgrade() else { return };
+        let rt = runtime(&state);
+        if let Err(e) = state
+            .db_call(move |c| resolve::directory(c, &rt).map(drop))
+            .await
+        {
+            tracing::warn!(error = %e, "could not build the EPG channel directory");
+        }
+    });
 }
 
 /// `epg.sources`: every configured url with its status.

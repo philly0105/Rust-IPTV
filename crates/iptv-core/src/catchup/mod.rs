@@ -21,7 +21,7 @@ use crate::model::{ContentType, EpgProgram, ItemRef, SourceKind};
 use crate::state::AppState;
 use cache::ProgramCache;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How long a short-EPG answer is reused (it also expires when it has ended).
 pub const SHORT_EPG_TTL: Duration = Duration::from_secs(20 * 60);
@@ -31,6 +31,10 @@ pub const SHORT_EPG_FETCH: i64 = 10;
 pub const SHORT_EPG_MAX: usize = 10;
 /// How long an archive table is reused.
 pub const ARCHIVE_TTL: Duration = Duration::from_secs(20 * 60);
+/// Most programmes the archive cache holds across every channel, about
+/// 35-40 MB at worst: a two-week table lists a few thousand, so its 200
+/// tables alone could hold hundreds of MB.
+pub const ARCHIVE_MAX_PROGRAMS: usize = 60_000;
 
 const EXT_KEY: &str = "catchup_runtime";
 
@@ -45,7 +49,8 @@ impl Default for Runtime {
             // Three panel calls at a time across every source; a visible list
             // of 30 rows fills in a few seconds without flooding the panel.
             short: ProgramCache::new(SHORT_EPG_TTL, 3, 4000, true),
-            archive: ProgramCache::new(ARCHIVE_TTL, 2, 200, false),
+            archive: ProgramCache::new(ARCHIVE_TTL, 2, 200, false)
+                .with_max_programs(ARCHIVE_MAX_PROGRAMS),
         }
     }
 }
@@ -61,6 +66,17 @@ pub fn forget_source(state: &AppState, source_id: &str) {
     if let Some(rt) = state.ext::<Runtime>(EXT_KEY) {
         rt.short.forget_source(source_id);
         rt.archive.forget_source(source_id);
+    }
+}
+
+/// Drops the short-EPG and archive answers past their TTL, which are never
+/// served again: without it they stay until their cache fills up. Run on the
+/// guide scheduler's tick. No-op before the runtime exists.
+pub fn sweep(state: &AppState) {
+    if let Some(rt) = state.ext::<Runtime>(EXT_KEY) {
+        let now = Instant::now();
+        rt.short.sweep(now);
+        rt.archive.sweep(now);
     }
 }
 

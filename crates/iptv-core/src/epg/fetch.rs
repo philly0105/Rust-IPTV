@@ -6,9 +6,11 @@
 //! read in place. Gzip is detected by its magic bytes, not by the URL or the
 //! Content-Type, because providers mislabel both.
 
+use super::store::Validators;
 use crate::error::{CoreError, CoreResult};
 use crate::model::RequestHeaders;
 use crate::state::AppState;
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -78,8 +80,10 @@ pub struct Body {
     pub path: PathBuf,
     /// True when `path` is a temp download that must be deleted after use.
     pub temp: bool,
-    /// ETag of the response (remote only).
-    pub etag: Option<String>,
+    /// The response's ETag and `Last-Modified` (remote only) and the body's
+    /// fingerprint: a version-seeded sha256 of a download, the size and
+    /// modification time of a local file.
+    pub validators: Validators,
     pub bytes: u64,
 }
 
@@ -97,9 +101,37 @@ impl Body {
 /// Result of [`fetch`].
 #[derive(Debug)]
 pub enum Fetched {
-    /// The server answered 304 to our `If-None-Match`.
+    /// The server answered 304 to our `If-None-Match` / `If-Modified-Since`.
     NotModified,
     Body(Body),
+}
+
+/// sha256 state for a downloaded guide body, seeded with
+/// [`super::ingest::INGEST_VERSION`] so that a change to what an ingest
+/// stores reads every feed again. Every remote fingerprint is computed this
+/// way (64 hex chars).
+fn body_hasher() -> Sha256 {
+    let mut h = Sha256::new();
+    h.update(format!("tsrust-epg-ingest-v{}\n", super::ingest::INGEST_VERSION).as_bytes());
+    h
+}
+
+/// Fingerprint of a local guide file: its size and modification time, with
+/// [`super::ingest::INGEST_VERSION`]. The file is read in place, so hashing
+/// it would cost a read of its own. `None` when the platform has no
+/// modification time.
+fn file_fingerprint(meta: &std::fs::Metadata) -> Option<String> {
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some(format!(
+        "file:v{}:{}:{}",
+        super::ingest::INGEST_VERSION,
+        meta.len(),
+        mtime.as_nanos()
+    ))
 }
 
 /// Directory for temp downloads.
@@ -122,13 +154,14 @@ pub fn clean_temp_dir(state: &AppState) {
 }
 
 /// Resolves `url` to a local body. Remote bodies are streamed to a temp file
-/// with the source headers and, when `etag` is given, `If-None-Match`.
-/// `on_bytes` receives the running byte count of a download.
+/// with the source headers and, from `known`, `If-None-Match` and
+/// `If-Modified-Since`. `on_bytes` receives the running byte count of a
+/// download.
 pub async fn fetch(
     state: &AppState,
     url: &str,
     headers: &RequestHeaders,
-    etag: Option<&str>,
+    known: Option<&Validators>,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> CoreResult<Fetched> {
     match classify(url)? {
@@ -152,7 +185,10 @@ pub async fn fetch(
             Ok(Fetched::Body(Body {
                 path,
                 temp: false,
-                etag: None,
+                validators: Validators {
+                    fingerprint: file_fingerprint(&meta),
+                    ..Default::default()
+                },
                 bytes: meta.len(),
             }))
         }
@@ -164,7 +200,7 @@ pub async fn fetch(
             let mut n = 0;
             loop {
                 let mut too_slow = false;
-                match download(state, &u, headers, etag, &dir, on_bytes, &mut too_slow).await {
+                match download(state, &u, headers, known, &dir, on_bytes, &mut too_slow).await {
                     Ok(f) => return Ok(f),
                     Err(err) if !too_slow && err.is_retryable() && n + 1 < ATTEMPTS => {
                         tokio::time::sleep(crate::http::backoff_delay(n)).await;
@@ -181,7 +217,7 @@ async fn download(
     state: &AppState,
     url: &str,
     headers: &RequestHeaders,
-    etag: Option<&str>,
+    known: Option<&Validators>,
     dir: &Path,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
     too_slow: &mut bool,
@@ -195,8 +231,11 @@ async fn download(
         crate::http::guarded_client(state, own.as_ref()).get(url),
         headers,
     );
-    if let Some(tag) = etag {
+    if let Some(tag) = known.and_then(|k| k.etag.as_deref()) {
         req = req.header(reqwest::header::IF_NONE_MATCH, tag);
+    }
+    if let Some(at) = known.and_then(|k| k.last_modified.as_deref()) {
+        req = req.header(reqwest::header::IF_MODIFIED_SINCE, at);
     }
     let resp = crate::http::send(req).await?;
     let status = resp.status();
@@ -221,11 +260,14 @@ async fn download(
     {
         return Err(CoreError::Invalid("EPG file is larger than 2 GB".into()));
     }
-    let etag = resp
-        .headers()
-        .get(reqwest::header::ETAG)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
+    let validator = |name: reqwest::header::HeaderName| {
+        resp.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let etag = validator(reqwest::header::ETAG);
+    let last_modified = validator(reqwest::header::LAST_MODIFIED);
     let path = dir.join(format!("epg-{}.part", uuid::Uuid::new_v4().simple()));
     let result = async {
         let mut file = tokio::fs::File::create(&path).await?;
@@ -236,6 +278,7 @@ async fn download(
         let mut reported: u64 = 0;
         // A drip-fed body keeps resetting the idle timeout; fail it on rate.
         let mut rate = crate::m3u::body::MinRate::standard();
+        let mut hasher = body_hasher();
         while let Some(chunk) =
             crate::http::next_body_chunk(&mut stream, &host, crate::http::BODY_IDLE_TIMEOUT).await?
         {
@@ -252,6 +295,7 @@ async fn download(
             if total > MAX_DOWNLOAD_BYTES {
                 return Err(CoreError::Invalid("EPG file is larger than 2 GB".into()));
             }
+            hasher.update(&chunk);
             file.write_all(&chunk).await?;
             if total - reported >= 4 * 1024 * 1024 {
                 reported = total;
@@ -259,14 +303,18 @@ async fn download(
             }
         }
         file.flush().await?;
-        Ok::<u64, CoreError>(total)
+        Ok::<_, CoreError>((total, hex::encode(hasher.finalize())))
     }
     .await;
     match result {
-        Ok(bytes) => Ok(Fetched::Body(Body {
+        Ok((bytes, sha)) => Ok(Fetched::Body(Body {
             path,
             temp: true,
-            etag,
+            validators: Validators {
+                etag,
+                last_modified,
+                fingerprint: Some(sha),
+            },
             bytes,
         })),
         Err(err) => {

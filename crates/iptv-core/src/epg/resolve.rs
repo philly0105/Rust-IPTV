@@ -81,8 +81,22 @@ static TLD: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.[a-z]{2,3}$").expect("tld 
 /// " 4K" stripped (repeatedly), `&` read as "and", then only letters and
 /// digits kept. Empty input yields an empty key.
 pub fn normalize_name(name: &str) -> String {
-    let s = strip_affixes(name).replace('&', "and").replace('+', "plus");
-    s.chars().filter(|c| c.is_alphanumeric()).collect()
+    key_of(&strip_affixes(name))
+}
+
+/// The last steps of [`normalize_name`], on a name [`strip_affixes`] already
+/// ran on: `&` read as "and", `+` as "plus", only letters and digits kept.
+fn key_of(stripped: &str) -> String {
+    let mut key = String::with_capacity(stripped.len());
+    for c in stripped.chars() {
+        match c {
+            '&' => key.push_str("and"),
+            '+' => key.push_str("plus"),
+            c if c.is_alphanumeric() => key.push(c),
+            _ => {}
+        }
+    }
+    key
 }
 
 /// The first steps of [`normalize_name`]: lowercase, decorative symbols,
@@ -115,7 +129,12 @@ fn strip_affixes(name: &str) -> String {
 /// "BBC One" on purpose (same schedule), and their digits are no channel
 /// number.
 fn qualifiers(name: &str) -> Vec<String> {
-    let chars: Vec<char> = strip_affixes(name).chars().collect();
+    qualifiers_of(&strip_affixes(name))
+}
+
+/// [`qualifiers`] of a name [`strip_affixes`] already ran on.
+fn qualifiers_of(stripped: &str) -> Vec<String> {
+    let chars: Vec<char> = stripped.chars().collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
@@ -175,11 +194,6 @@ fn id_base(id: &str) -> String {
     TLD.replace(&lower, "").into_owned()
 }
 
-/// Normalized key of an XMLTV channel id: "BBCOne.uk" -> "bbcone".
-fn normalize_id(id: &str) -> String {
-    normalize_name(&id_base(id))
-}
-
 /// Snapshot of the channels of every enabled EPG url, for id and name lookup.
 pub struct ChannelDirectory {
     generation: u64,
@@ -190,7 +204,8 @@ pub struct ChannelDirectory {
     /// (normalized name, channel id, [`qualifiers`]) for fuzzy matching.
     entries: Vec<(String, String, Vec<String>)>,
     /// Title -> index in `entries` of its fuzzy match ([`Self::find_name`]).
-    /// The directory is replaced when the generation moves, and this with it.
+    /// The directory is replaced when the generation moves; this moves to
+    /// the new one when its `entries` are the same ([`directory`]).
     fuzzy: Mutex<HashMap<String, Option<usize>>>,
 }
 
@@ -216,14 +231,18 @@ impl ChannelDirectory {
             dir.ids
                 .entry(id.to_lowercase())
                 .or_insert_with(|| id.clone());
-            let base = id_base(&id);
-            for (key, source) in [(normalize_name(&name), &name), (normalize_id(&id), &base)] {
+            // The key and the qualifiers both start from the stripped name
+            // (or id): strip it once for both.
+            for source in [name, id_base(&id)] {
+                let stripped = strip_affixes(&source);
+                let key = key_of(&stripped);
                 if key.is_empty() {
                     continue;
                 }
                 if !dir.names.contains_key(&key) {
                     dir.names.insert(key.clone(), id.clone());
-                    dir.entries.push((key, id.clone(), qualifiers(source)));
+                    dir.entries
+                        .push((key, id.clone(), qualifiers_of(&stripped)));
                 }
             }
         }
@@ -331,7 +350,14 @@ impl ChannelDirectory {
 
 /// The cached directory, rebuilt when the runtime generation changed. The
 /// lock is held while it is rebuilt, so concurrent callers wait for one
-/// build instead of each loading every guide channel.
+/// build instead of each loading every guide channel. The guide refresh and
+/// boot build it ahead of the first read (`ingest::run_refresh`,
+/// [`super::init`]).
+///
+/// Most refreshes change programmes, not channels. When the rebuilt
+/// directory has the same entries, the fuzzy results of the old one still
+/// hold (they are indices into those entries) and move to it, so titles
+/// matched before are not scanned against every guide channel again.
 pub fn directory(conn: &Connection, rt: &EpgRuntime) -> CoreResult<Arc<ChannelDirectory>> {
     let generation = rt.generation();
     let mut cached = rt.names.lock();
@@ -340,7 +366,11 @@ pub fn directory(conn: &Connection, rt: &EpgRuntime) -> CoreResult<Arc<ChannelDi
             return Ok(d.clone());
         }
     }
-    let d = Arc::new(ChannelDirectory::load(conn, generation)?);
+    let mut d = ChannelDirectory::load(conn, generation)?;
+    if let Some(old) = cached.as_ref().filter(|old| old.entries == d.entries) {
+        *d.fuzzy.get_mut() = std::mem::take(&mut *old.fuzzy.lock());
+    }
+    let d = Arc::new(d);
     *cached = Some(d.clone());
     Ok(d)
 }
@@ -427,6 +457,11 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
 mod tests {
     use super::*;
 
+    /// Normalized key of an XMLTV channel id: "BBCOne.uk" -> "bbcone".
+    fn normalize_id(id: &str) -> String {
+        normalize_name(&id_base(id))
+    }
+
     #[test]
     fn normalizes() {
         assert_eq!(normalize_name("UK: BBC One HD"), "bbcone");
@@ -459,7 +494,7 @@ mod tests {
         assert_eq!(q("HBOEast"), Vec::<String>::new());
     }
 
-    fn dir(channels: &[(&str, &str)]) -> ChannelDirectory {
+    fn guide(channels: &[(&str, &str)]) -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::db::migrate(&mut conn).unwrap();
         conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
@@ -471,7 +506,80 @@ mod tests {
             )
             .unwrap();
         }
-        ChannelDirectory::load(&conn, 0).unwrap()
+        conn
+    }
+
+    fn dir(channels: &[(&str, &str)]) -> ChannelDirectory {
+        ChannelDirectory::load(&guide(channels), 0).unwrap()
+    }
+
+    /// The directory strips each name and id once for both its key and its
+    /// qualifiers; the result is what normalizing and qualifying each one
+    /// apart gives.
+    #[test]
+    fn directory_keys_match_the_normalized_names() {
+        let channels = [
+            ("BBCOne.uk", "UK: BBC One HD"),
+            ("bbcone.uk", "BBC One"),
+            ("SkySp2.uk", "|UK| Sky Sports 02 FHD"),
+            ("E4p1.uk", "E4 +1"),
+            ("canal.fr", "fr - Canal+ 1080p H.264"),
+            ("att", "AT&T SportsNet ◉"),
+            ("dw.us", "[US] Discovery Channel West (HD)"),
+            ("hd", "HD"),
+            ("blank", "  "),
+            ("Ελληνικά.gr", "Ελληνικά Νέα 4K"),
+        ];
+        let d = dir(&channels);
+        let mut want: Vec<(String, String, Vec<String>)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (id, name) in channels {
+            let reference = |s: &str| -> String {
+                let s = strip_affixes(s).replace('&', "and").replace('+', "plus");
+                s.chars().filter(|c| c.is_alphanumeric()).collect()
+            };
+            assert_eq!(normalize_name(name), reference(name), "{name}");
+            for (key, source) in [
+                (normalize_name(name), name.to_string()),
+                (normalize_id(id), id_base(id)),
+            ] {
+                if !key.is_empty() && seen.insert(key.clone()) {
+                    want.push((key, id.to_string(), qualifiers(&source)));
+                }
+            }
+        }
+        // Rows come back in the table key order; compare as sets.
+        let mut got = d.entries.clone();
+        got.sort();
+        want.sort();
+        assert_eq!(got, want);
+    }
+
+    /// A refresh that kept every guide channel keeps the fuzzy results; one
+    /// that changed a channel starts over.
+    #[test]
+    fn fuzzy_results_survive_a_refresh_with_the_same_channels() {
+        let conn = guide(&[("ss1.uk", "Sky Sports 1"), ("ss2.uk", "Sky Sports 2")]);
+        let rt = EpgRuntime::default();
+        let first = directory(&conn, &rt).unwrap();
+        assert_eq!(first.find_name("Sky Sprts 2"), Some("ss2.uk"));
+        assert_eq!(first.find_name("Sky Sprots 3"), None);
+        rt.bump();
+        let second = directory(&conn, &rt).unwrap();
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert_eq!(second.fuzzy.lock().len(), 2, "carried over");
+        assert_eq!(second.find_name("Sky Sprts 2"), Some("ss2.uk"));
+        assert_eq!(second.fuzzy.lock().len(), 2, "answered from the memo");
+
+        conn.execute(
+            "INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES ('u', 'ss3.uk', 'Sky Sports 3')",
+            [],
+        )
+        .unwrap();
+        rt.bump();
+        let third = directory(&conn, &rt).unwrap();
+        assert!(third.fuzzy.lock().is_empty(), "new channels, new scan");
+        assert_eq!(third.find_name("Sky Sprts 3"), Some("ss3.uk"));
     }
 
     /// L1-core-12: a fuzzy match gave sibling channels the same guide.

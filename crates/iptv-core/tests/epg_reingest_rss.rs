@@ -63,6 +63,14 @@ async fn refreshing_over_a_stored_guide_stays_flat() {
     state.settings.write().epg_urls = vec![url.clone()];
 
     let (first, first_secs, first_mb) = refresh_measured(&state, &url).await;
+    // An unchanged file is kept as it is; a new modification time has the
+    // same bytes read and swapped in again.
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + Duration::from_secs(5))
+        .unwrap();
     let (again, again_secs, again_mb) = refresh_measured(&state, &url).await;
     println!(
         "epg_reingest_rss: {} programmes; first {first_secs:.2} s, peak RSS delta {first_mb} MB; again {again_secs:.2} s, peak RSS delta {again_mb} MB",

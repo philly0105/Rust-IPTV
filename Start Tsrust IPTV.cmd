@@ -7,7 +7,9 @@ rem    The NSIS build installs iptv-tauri.exe; "Tsrust IPTV.exe" is checked too 
 rem    later build sets mainBinaryName.
 rem 2. A release build from `pnpm tauri build` (with or without --no-bundle), looked up in the
 rem    cargo target dir: %TSRUST_TARGET_DIR% when set, else the one cargo reports (`cargo metadata`,
-rem    which follows a local .cargo\config.toml), then target\ and crates\iptv-tauri\target\.
+rem    which follows CARGO_TARGET_DIR and the target-dir in CARGO_HOME's config.toml), then target\
+rem    and crates\iptv-tauri\target\. The repository's .cargo\config.toml is tracked and holds shared
+rem    build flags only, so a machine-local target-dir does not belong there.
 rem    Build it with the Tauri CLI: a plain `cargo build --release` exe points at the dev server.
 rem 3. Otherwise the desktop dev build: `pnpm tauri dev` (Vite + cargo, first run takes a few minutes).
 
@@ -28,7 +30,8 @@ for %%E in ("iptv-tauri.exe" "Tsrust IPTV.exe") do (
 )
 
 rem An optional TSRUST_TARGET_DIR environment variable names the cargo target dir directly (for
-rem a target dir moved by a local .cargo\config.toml when cargo is not on PATH); it is tried first.
+rem a target dir moved by CARGO_TARGET_DIR or CARGO_HOME's config.toml when cargo is not on PATH);
+rem it is tried first.
 rem Otherwise ask cargo. RUSTUP_AUTO_INSTALL=0 keeps rustup from downloading the pinned toolchain
 rem just to answer; without cargo this stays empty and the default paths are used.
 set "TARGET_ROOT="

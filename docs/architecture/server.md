@@ -101,7 +101,11 @@ anything is subscribed:
   reset) on window `focus`, `online`, the page becoming visible, or an RPC the
   server answered. The transport reports an answer through
   `notifyServerAnswered` (`src/api/reachability.ts`) on a success or on one of
-  the core's own error payloads, not on a proxy's 502.
+  the core's own error payloads, not on a proxy's 502. An HTTP error without
+  such a payload (a proxy's 502 or 503, a 404 from a misrouted path) is
+  tagged `details: {transport: 'http'}`, next to the `unreachable` tag of a
+  request that got no answer at all, so the UI can tell the app's own server
+  or proxy failing from a provider failing (performance.md, retries).
 - While the wait before the next attempt is longer than 1 s
   (`HEALTH_POLL_MS`), the page asks `GET /api/health` every second, and an
   ok answer connects at once, so a restarted server is noticed within about a
@@ -308,7 +312,25 @@ with its `Content-Encoding`.
   `public/sw.js` are copied into `dist/`. The service worker is registered
   only in the web build (never in Tauri). It serves `/assets/*` cache-first,
   page navigations network-first with the cached shell as the offline
-  fallback, and never touches `/api/*`. `pnpm build` writes the build's
+  fallback, and never touches `/api/*`. Where the browser supports static
+  routes (Chromium 123 and later), install registers network routes
+  (`event.addRoutes`), so `/api/*`, navigations to API URLs included, and
+  every other request the handler ignores (cross-origin direct streams, the
+  manifest, icons, `theme-boot.js`) never dispatch a fetch event and never
+  wait for a stopped worker to start again. The second rule needs the
+  `not` and `or` conditions; a browser without them keeps only the
+  `/api/*` route, and browsers without static routes (Firefox, Safari) fall
+  through the fetch handler as before. A refused route never fails the
+  install. In headless Chrome on the dev box, an `/api` or cross-origin
+  fetch right after the worker went idle took 5-6 ms instead of 16-19 ms
+  (4-6 ms warm). On a cache miss both handlers return the network response
+  at once and write the copy to Cache Storage in the background under
+  `event.waitUntil`, so the page streams and compiles a first-time chunk
+  while it downloads: a 2 MB uncached asset reached the page after 5-11 ms
+  instead of 1.0-1.1 s, with the same total. A failed write only leaves the
+  entry uncached; it no longer fails the request. Navigation preload is not
+  enabled: in browsers without static routes it would push API downloads,
+  multi-GB recordings among them, through the worker. `pnpm build` writes the build's
   `/assets/*` URLs into `dist/sw.js` (the `serviceWorkerAssets` plugin in
   `vite.config.ts` fills its `ASSETS` placeholder), so the worker's bytes
   change with every build and the browser installs the new one. Its
@@ -371,7 +393,9 @@ Publish the port on loopback or put an authenticating reverse proxy in front.
 ## Docker
 
 `Dockerfile` at the repo root: node 24 builds `dist/` with `pnpm build`, rust
-1.96 builds `iptv-server` in release, and a `debian:bookworm-slim` runtime
+1.96 builds `iptv-server` in release (with the repository's `.cargo/config.toml`,
+which sets the bundled SQLite's build flags; performance.md), and a
+`debian:bookworm-slim` runtime
 runs it as uid 10001 under `tini`, with `VOLUME /data`, `EXPOSE 7180` and a
 `HEALTHCHECK` that runs `iptv-server --health`. Set `IPTV_ALLOWED_HOSTS` when
 the app is reached under a host name other than localhost or an IP address.
@@ -384,7 +408,10 @@ requires mpv. It makes the image larger; an image built without it hides
 Record (see recording.md). The remote control server listens on the
 container's own 127.0.0.1 only, and server mode has no LAN pairing, so the
 remote page cannot be reached from outside the container; publishing its
-port does not change that (remote-control.md).
+port does not change that (remote-control.md). The image's glibc lets the
+core hand the heap an import freed back to the system after each source
+import (`malloc_trim`, sources.md), so a large Xtream catalog no longer leaves
+the container about 300 MB above its start.
 
 ```
 docker build -t tsrust-iptv .

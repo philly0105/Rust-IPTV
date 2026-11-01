@@ -6,6 +6,26 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 
 ## [Unreleased]
 
+### Changed
+
+- Pages draw sooner: Live TV and the TV guide load about a third less code before they appear, Search and the category grids about a quarter less, and the command palette and the shortcut list load after the first page instead of with it. In a browser, a language other than English downloads alongside the app instead of after it.
+- The TV guide asks for its first programmes before its page has drawn, on the first open after a launch too, and asks for fewer distant hours while you scroll up and down.
+- Guide refreshes are much lighter: a refresh replaces only the programmes that changed, a guide whose file has not changed is kept without being read again, and the guide takes less space on disk. After each update of the app the guide search index is rebuilt once in the background.
+- Large channel lists page faster: All channels and radio take their count from stored totals, about 1 ms a page on 200,000 channels.
+- Imports use much less memory: Xtream catalogs, M3U playlists with series and Stalker channel lists. In the Docker image and on Linux the memory an import used goes back to the system afterwards. Removing a large source takes a fraction of the time. Each Stalker source rewrites its channels once on its first refresh after the update.
+- Marking a whole season or series watched is one quick write, even on long series, and Continue watching answers at once with a long watch history.
+- Poster walls that are not cached yet fill in faster, most of all in a browser: the app fetches the pictures waiting on screen in parallel. A poster or logo shown at two sizes is downloaded once, and TMDB posters are stored at the size shown.
+- M3U channels start playing without waiting for the guide's answer.
+- The Sports page no longer stalls while it reads the guide, and switching league after the first switch shows the day's streams at once.
+- Errors from a provider that does not answer show sooner: the app no longer retries on top of its own retries, and outside an import a request that timed out is not sent again, so a silent Stalker portal fails a play after about 30 s instead of 90. Catch-up on a Stalker channel starts without asking the portal again for programmes the guide already read.
+- Several reads at once (two windows, several users of one server) no longer wait on each other in the database.
+- Recordings use less memory and write to disk in fewer, larger writes.
+- Search asks for guide programmes once typing pauses, and keeps the programmes it found while the next answer loads.
+
+### Fixed
+
+- In the desktop app, pages no longer wait for a network connection: My Videos showed an empty library while the system reported no connection.
+
 ## [0.3.0] - 2026-10-29
 
 The first public release: the redesign, Sports, more catch-up and guide work, fixes that followed the October 2026 audits, and what a public release needs, including a macOS app and a licence.

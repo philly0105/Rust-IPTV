@@ -81,3 +81,12 @@ Most of the desktop app's memory belongs to WebView2's browser, GPU, renderer an
 - `set_webview_visible(window, visible)` calls `ICoreWebView2Controller::SetIsVisible`, sending only changes. For the main window, `on_window_event` asks `visibility_after(event, minimized)`: a size change while minimized hides the page, and any other size change (restore from the taskbar, Alt+Tab, the tray) or focus shows it again. Hidden, the page reports `visibilityState = hidden` and Chromium throttles its timers, animation frames and rendering. Chromium cannot find this out by itself, because native occlusion tracking is off (`CalculateNativeWinOcclusion` is disabled in `additionalBrowserArgs`). Embedded mpv is a separate child window of the main window, so it keeps playing. Checked over raw CDP on a debug build: a minimized window used to stay `visible` and draw 176 frames/s; now it is `hidden` with 0 frames/s while mpv plays on, and a restore brings it back.
 
 Static Chromium flags that keep the WebView2 process tree small (`--renderer-process-limit=1`, disabled Edge features, no extensions, no background networking) live in `tauri.conf.json` under `additionalBrowserArgs`. Other platforms do nothing here.
+
+## The webview's own costs (UI)
+
+What the UI does differently in the desktop app to keep work off the webview:
+
+- Queries and mutations run in TanStack's `networkMode: 'always'`: IPC needs no network, and the default `online` mode paused every query while WebView2 thought it was offline, so My videos showed an empty library (performance.md, Query cache timing).
+- The idle hls.js and mpegts.js warm-up is skipped when live, VOD and catch-up all play in mpv, VLC or embedded mpv (players.md, Starting a play).
+- Embedded mpv's cursor poll in fullscreen and picture-in-picture reads only the cursor while it rests, and none on a focused macOS window (players.md).
+- The window-state effect reads the picture-in-picture flag from `features/player/pipState.ts`, so it no longer loads the player store right after the first paint. The Tauri dialog, opener and updater plugins are a lazy chunk (`tauri-plugins`); the desktop build keeps the whole `@tauri-apps/api` in the boot's `vendor-tauri`, since `main.tsx` syncs the window's fullscreen state at boot (performance.md, Entry chunk budget).

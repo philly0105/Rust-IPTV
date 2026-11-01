@@ -476,24 +476,24 @@ The audit/fixes branch merges the performance lane (audit/perf-fixes) and the fe
 | ST-4 | Partial | Export to a path streams to the file and the download JSON is built on the blocking pool. The RPC layer still serializes the download a second time (DB-5), and there is no option to leave out the text of URL sources. |
 | ST-5 | Fixed | Refresh of one source refetches only `sources.*`; backup loads emit `done` with `sources.changed`; an autoRefresh-only update sends `status`. |
 | DB-1 | Partial | These writes go through the write gate (`db_write`): `stats.record`, watched marks, favorites (reorder now IMMEDIATE), recent entries, positions, source pins, `watchlist.*`, `lists.*`, `channels.*` edits, category hiding, settings, `epg.setMapping`, `epg.clearMapping`, `epg.setChannelShift` and `remote.publishSource`. Stalker VOD page writes and TMDB cache writes run through `writer()` without the read RPC waiting. Still on plain `db_call`: parental lock and PIN writes, `epg.setEnabled`, and the background writers (EPG refreshes, the image index writer, recording byte saves, and download progress, which is now spawned so the transfer no longer waits on it). The separate read pool is not done. |
-| DB-2 | Partial | Remove holds `long_write`, deletes FTS and rank rows in bulk and checkpoints the WAL. The index rebuild after a very large removal is not done. |
+| DB-2 | Fixed | Remove holds `long_write`, deletes FTS and rank rows in bulk and checkpoints the WAL. The index rebuild after a very large removal followed in the 2026-10-31 audit. |
 | DB-3 | Fixed | OFFSET is bound, LIMIT stays literal, statement cache raised to 64. |
 | DB-4 | Fixed | Pool idle timeout and max lifetime are off. |
 | DB-5 | Not done | Not attempted: serializing RPC results once (`RawValue`) needs a Rust toolchain to do safely. |
 | DB-6 | Fixed | The superseded index lines were removed from migration 0018. |
 | IN-1 | Fixed | No deep clone of the channel list, trees dropped after mapping, mapping runs on `spawn_blocking`. The typed decode was not attempted. |
 | IN-2 | Fixed | Xtream lists and Stalker large calls use the 120 s head deadline and a minimum body rate, and a spent timeout is not retried. |
-| IN-3 | Partial | `title_base` and the title year are computed before the transaction. Rows still carry the JSON extra and a `source_id` clone, and extra is serialized inside the transaction. |
+| IN-3 | Partial | `title_base` and the title year are computed before the transaction. Since the 2026-10-31 audit the extra is serialized in the mapping step and rows are freed once written; rows still carry a `source_id` clone. |
 | IN-4 | Fixed | Stalker pages are fetched 4 at a time once the total is known, with a 100k-row cap that logs a warning. |
 | IN-5 | Fixed | The remapper keeps strings only for referenced ids and identities. |
 | IN-6 | Fixed | A gzip file whose decoded size is over the inline limit is not read again. |
 | IN-7 | Not done | Decoding straight into the typed structs changes how bad elements and duplicate keys are handled; it needs a design decision and a compiled benchmark. |
 | IN-8 | Fixed | Parse progress is throttled to one event per 250 ms, and the final count is always sent. |
 | IN-9 | Fixed | The writer counts untouched rows once. |
-| IN-10 | Partial | Group ids are cached, directive lines are matched without allocating, and only playlists kept on disk are synced. Per-attribute double allocation and the per-row extra map remain. |
+| IN-10 | Partial | Group ids are cached, directive lines are matched without allocating, and only playlists kept on disk are synced. The per-attribute double allocation went in the 2026-10-31 audit; the per-row extra map remains. |
 | EP-1 | Fixed | Recording uses the HTTP copy for plain TS and Xtream live even when mpv is installed; recording mpv skips video decoding. |
 | EP-2 | Fixed | Fuzzy name lookups are memoized, the directory build is single-flight, per-ref reads use cached statements, and status-only `epg.changed` refetches only `epg.sources`. |
-| EP-3 | Not done | Not attempted: changing how guide refreshes rewrite programmes needs a Rust toolchain to do safely. |
+| EP-3 | Partial | Done in the 2026-10-31 audit: a refresh replaces only the programmes that changed and updates the search index in place. Keying programmes by an integer feed id is not done. |
 | EP-4 | Fixed | Large posters are shrunk before Catmull-Rom, and resizes are capped at cores minus one. |
 | EP-5 | Fixed | `FEED_SQL` probes each enabled feed through the index instead of reading the whole lookback. |
 | EP-6 | Partial | Download lists stat files on the blocking pool and desktop image hits skip the source row. The zlib-rs feature and stable desktop image URLs were not done. |

@@ -162,7 +162,19 @@ in the memory LRU) at once; its SQLite row is written in the background
 through the user-write gate (`AppState::writer`), so cast and trailer do not
 wait while an import holds the write lock. A failed write is logged and only
 costs a refetch later. `tmdb.clearCache` waits for pending writes first.
-Expired rows are ignored on read and purged by `tmdb::init`.
+Expired rows are ignored on read and purged in the background, not at boot.
+`tmdb::init` starts a task that waits 60 s after launch (`PURGE_AFTER`), clear
+of the first screens' reads, purges, and repeats every 24 h (`PURGE_EVERY`,
+so a server that keeps running purges too) until the state is dropped. A purge
+goes through the background write gate (`AppState::db_background`) one step at
+a time (`TmdbCache::purge_expired_step`): it reads the next 500 rows by rowid
+(`PURGE_BATCH`) with a plain read and deletes the expired ones by rowid in one
+transaction, checking `expires_at` again so a row refreshed in between stays.
+`expires_at` has no index and sits after the payload, so the read pulls each
+payload's overflow pages; in steps, the image index, download progress and
+recordings, which share that gate, wait for one step at most, and the write
+lock is held only for the deletes. Before, `init_all` waited for the whole
+scan, 17-20 ms warm and about 1.5 s cold for 3,000 rows of 15 KB.
 
 ## Rate limits and retries
 
@@ -179,4 +191,4 @@ Expired rows are ignored on read and purged by `tmdb::init`.
 
 - `crate::tmdb::rpc::register(&mut r)` in `rpc::build_router`.
 - Optional: `run_init("tmdb", crate::tmdb::init(state.clone()))` in
-  `rpc::init_all` to purge expired rows at boot.
+  `rpc::init_all` to start the background purge of expired rows.

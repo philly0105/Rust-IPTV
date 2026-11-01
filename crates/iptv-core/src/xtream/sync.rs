@@ -611,60 +611,71 @@ async fn fetch_kind(
     }
     let sid = source_id.to_string();
     let fetched = tokio::task::spawn_blocking(move || -> CoreResult<Fetched> {
-        let categories = categories.unwrap_or_default();
-        let part = |content_type, categories, rows| CatalogPart {
-            content_type,
-            categories,
-            rows,
-        };
-        let parts = match kind {
-            Kind::Live => {
-                let parsed: LenientVec<RawLive> = super::client::decode(&bytes, "live streams")?;
-                drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let (radio, live): (Vec<ItemRow>, Vec<ItemRow>) = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| live_row(&sid, i as i64, r))
-                    .partition(|r| r.is_radio);
-                let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
-                vec![
-                    part(ContentType::Live, live_cats, live),
-                    part(ContentType::Radio, radio_cats, radio),
-                ]
-            }
-            Kind::Movies => {
-                let parsed: LenientVec<RawVod> = super::client::decode(&bytes, "movies")?;
-                drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let rows = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| vod_row(&sid, i as i64, r))
-                    .map(with_title_base)
-                    .collect();
-                vec![part(ContentType::Movie, categories, rows)]
-            }
-            Kind::Series => {
-                let parsed: LenientVec<RawSeries> = super::client::decode(&bytes, "series")?;
-                drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let rows = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| series_row(&sid, i as i64, r))
-                    .map(with_title_base)
-                    .collect();
-                vec![part(ContentType::Series, categories, rows)]
-            }
-        };
+        let parts = map_kind(kind, &sid, &bytes, categories.unwrap_or_default())?;
         Ok(Fetched::Parts { parts, hash })
     })
     .await??;
     Ok(fetched)
+}
+
+/// Decodes one kind's list body and maps it to the parts to write (live
+/// yields a live and a radio part). Each record is mapped to its row as soon
+/// as it is read (R3-2): no `Vec` of every decoded record sits beside the
+/// rows any more (96.5 MB of `RawVod`s plus their text at 180k movies,
+/// grown by doubling). `position` counts the records read, skipped elements
+/// excluded, as `enumerate` over that `Vec` did.
+fn map_kind(
+    kind: Kind,
+    source_id: &str,
+    body: &[u8],
+    categories: Vec<CategoryRow>,
+) -> CoreResult<Vec<CatalogPart>> {
+    let part = |content_type, categories, rows| CatalogPart {
+        content_type,
+        categories,
+        rows,
+    };
+    let mut position = 0i64;
+    let parts = match kind {
+        Kind::Live => {
+            let (mut live, mut radio) = (Vec::new(), Vec::new());
+            let skipped = super::client::decode_list(body, "live streams", |r: RawLive| {
+                if let Some(row) = live_row(source_id, position, r) {
+                    if row.is_radio {
+                        radio.push(row);
+                    } else {
+                        live.push(row);
+                    }
+                }
+                position += 1;
+            })?;
+            log_skipped(source_id, kind, skipped);
+            let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
+            vec![
+                part(ContentType::Live, live_cats, live),
+                part(ContentType::Radio, radio_cats, radio),
+            ]
+        }
+        Kind::Movies => {
+            let mut rows = Vec::new();
+            let skipped = super::client::decode_list(body, "movies", |r: RawVod| {
+                rows.extend(vod_row(source_id, position, r).map(with_title_base));
+                position += 1;
+            })?;
+            log_skipped(source_id, kind, skipped);
+            vec![part(ContentType::Movie, categories, rows)]
+        }
+        Kind::Series => {
+            let mut rows = Vec::new();
+            let skipped = super::client::decode_list(body, "series", |r: RawSeries| {
+                rows.extend(series_row(source_id, position, r).map(with_title_base));
+                position += 1;
+            })?;
+            log_skipped(source_id, kind, skipped);
+            vec![part(ContentType::Series, categories, rows)]
+        }
+    };
+    Ok(parts)
 }
 
 /// `row` with its title base worked out here, on the blocking pool, instead
@@ -1244,6 +1255,114 @@ mod tests {
                 (sid.into(), r#"{"plot":"P","tmdbId":9}"#.into()),
             ]
         );
+    }
+
+    /// The rows of one part, comparable.
+    fn part_rows(p: &CatalogPart) -> (ContentType, &[CategoryRow], &[ItemRow]) {
+        (p.content_type, &p.categories, &p.rows)
+    }
+
+    /// R3-2: `map_kind` maps each record as it is read. Its rows, their
+    /// positions (records read, skipped elements excluded, records without
+    /// an id included), the live/radio split and the categories are those of
+    /// the pipeline it replaced: every record decoded into a `LenientVec`,
+    /// then enumerated and mapped. Errors are `decode`'s.
+    #[test]
+    fn streamed_mapping_matches_the_collected_pipeline() {
+        use super::super::client::decode;
+        let cats = map_categories(parse(json!([
+            {"category_id": 1, "category_name": "News"},
+            {"category_id": "2", "category_name": "Radio"},
+            {"category_id": "3", "category_name": "Unused"}
+        ])));
+        let live = br#"["junk", {"stream_id": 101, "name": "One", "category_id": "1", "num": 3},
+            null, {"name": "no id"}, {"stream_id": "9", "stream_type": "radio_streams",
+            "category_ids": [2, 1]}, [1, "Pos", "live", 102], {"stream_id": 101, "name": "Dup"},
+            {"stream_id": 103, "tv_archive": "1", "tv_archive_duration": "3"}]"#;
+        let movies = br#"{"0": {"stream_id": 201, "name": "Film (2019)", "rating": "7,5"},
+            "1": 5, "2": {"name": "no id"}, "3": {"stream_id": "202", "title": "The Film",
+            "tmdb": "0", "tmdb_id": 550, "genre": "Drama, Crime"}}"#;
+        let series = br#"[{"series_id": 301, "name": "Show", "releaseDate": "2018-03-01",
+            "backdrop_path": ["", "http://x/b.jpg"]}, true, {"series_id": 302, "title": "S2",
+            "last_modified": "1700000000", "rating_5based": 4}]"#;
+
+        // Live and radio.
+        let parsed: LenientVec<RawLive> = decode(live, "live streams").unwrap();
+        assert_eq!(parsed.skipped, 2);
+        let (radio, live_rows): (Vec<ItemRow>, Vec<ItemRow>) = parsed
+            .items
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, r)| live_row("s", i as i64, r))
+            .partition(|r| r.is_radio);
+        let (live_cats, radio_cats) = split_categories(&cats, &live_rows, &radio);
+        let parts = map_kind(Kind::Live, "s", live, cats.clone()).unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(
+            part_rows(&parts[0]),
+            (ContentType::Live, &live_cats[..], &live_rows[..])
+        );
+        assert_eq!(
+            part_rows(&parts[1]),
+            (ContentType::Radio, &radio_cats[..], &radio[..])
+        );
+        let positions: Vec<i64> = parts[0].rows.iter().map(|r| r.position).collect();
+        assert_eq!(
+            positions,
+            [0, 3, 4, 5],
+            "junk is not counted, a row without id is"
+        );
+        assert_eq!(parts[1].rows[0].position, 2);
+
+        // Movies, from an object keyed by index.
+        let parsed: LenientVec<RawVod> = decode(movies, "movies").unwrap();
+        let rows: Vec<ItemRow> = parsed
+            .items
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, r)| vod_row("s", i as i64, r))
+            .map(with_title_base)
+            .collect();
+        let parts = map_kind(Kind::Movies, "s", movies, cats.clone()).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(
+            part_rows(&parts[0]),
+            (ContentType::Movie, &cats[..], &rows[..])
+        );
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r.title_base.is_some()));
+
+        // Series.
+        let parsed: LenientVec<RawSeries> = decode(series, "series").unwrap();
+        let rows: Vec<ItemRow> = parsed
+            .items
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, r)| series_row("s", i as i64, r))
+            .map(with_title_base)
+            .collect();
+        let parts = map_kind(Kind::Series, "s", series, Vec::new()).unwrap();
+        assert_eq!(
+            part_rows(&parts[0]),
+            (ContentType::Series, &[][..], &rows[..])
+        );
+        assert_eq!(rows[1].position, 1);
+
+        // No list at all, and unreadable answers.
+        for empty in [&b""[..], b"null", b"false", b"{}"] {
+            let parts = map_kind(Kind::Movies, "s", empty, Vec::new()).unwrap();
+            assert!(parts[0].rows.is_empty());
+        }
+        for (bad, label) in [
+            (&b"<html>Please log in</html>"[..], "movies"),
+            (b"[{\"stream_id\": 1}, {", "movies"),
+            (b"1.5", "movies"),
+        ] {
+            let old = decode::<LenientVec<RawVod>>(bad, label).unwrap_err();
+            let new = map_kind(Kind::Movies, "s", bad, Vec::new()).err().unwrap();
+            assert!(matches!(new, CoreError::Invalid(_)), "{new:?}");
+            assert_eq!(new.to_string(), old.to_string());
+        }
     }
 
     #[test]

@@ -417,9 +417,28 @@ pub const UNREADABLE_REPLY: &str =
 
 /// Decodes a body; empty bodies are `null`, HTML or garbage is `Invalid`.
 pub fn decode<T: DeserializeOwned>(bytes: &[u8], label: &str) -> CoreResult<T> {
+    decode_with(bytes, label, |body| serde_json::from_slice(body))
+}
+
+/// [`decode`] for a big list (`get_live_streams`, `get_vod_streams`,
+/// `get_series`): each record goes to `each` as it is read
+/// ([`super::raw::decode_list`]); returns how many elements were skipped.
+pub fn decode_list<T: super::raw::Record>(
+    bytes: &[u8],
+    label: &str,
+    each: impl FnMut(T),
+) -> CoreResult<usize> {
+    decode_with(bytes, label, |body| super::raw::decode_list(body, each))
+}
+
+fn decode_with<R>(
+    bytes: &[u8],
+    label: &str,
+    read: impl FnOnce(&[u8]) -> serde_json::Result<R>,
+) -> CoreResult<R> {
     let trimmed = bytes.trim_ascii();
     let body: &[u8] = if trimmed.is_empty() { b"null" } else { trimmed };
-    serde_json::from_slice(body).map_err(|err| {
+    read(body).map_err(|err| {
         let looks_html = body.first() == Some(&b'<');
         CoreError::Invalid(if looks_html {
             format!("Xtream {label}: the server answered with a web page instead of JSON. Check the server URL.")

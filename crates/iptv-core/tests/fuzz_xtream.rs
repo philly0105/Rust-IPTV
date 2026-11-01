@@ -10,14 +10,14 @@ use fuzz_common::{
     INTERESTING_NUMBERS,
 };
 use iptv_core::model::{ContentType, ItemRef};
-use iptv_core::xtream::client::{check_auth, decode};
+use iptv_core::xtream::client::{check_auth, decode, decode_list};
 use iptv_core::xtream::meta::{
     added_to_rfc3339, duration_to_seconds, parse_instant, parse_server_datetime,
     server_offset_seconds, unix_to_rfc3339, year_from_date, ServerMeta,
 };
 use iptv_core::xtream::raw::{
     LenientVec, RawAccount, RawCategory, RawLive, RawSeries, RawSeriesInfo, RawShortEpg, RawVod,
-    RawVodInfo,
+    RawVodInfo, Record,
 };
 use iptv_core::xtream::service::{
     build_seasons, build_series_detail, build_vod_detail, cast_list, decode_b64_text,
@@ -27,7 +27,9 @@ use iptv_core::xtream::sync::{live_row, map_categories, series_row, vod_row};
 use iptv_core::xtream::url::{
     catchup_stamp, clean_extension, encode_segment, is_xmltv_url_for, normalize_server_url,
 };
+use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::fmt::Debug;
 
 const SEED: u64 = 0x5854_5245_0001;
 const MAX_LEN: usize = 6 * 1024;
@@ -195,11 +197,29 @@ fn fuzz_list(name: &str, salt: u64, check: impl FnMut(&[u8])) {
     );
 }
 
+/// A big list through the streaming decoder a sync uses (`decode_list`),
+/// checked against the `Value` path (`LenientVec`): the same records, skip
+/// count, or error (R3-2).
+fn streamed<T: Record + DeserializeOwned + Debug>(bytes: &[u8]) -> Option<Vec<T>> {
+    let mut items = Vec::new();
+    let streamed = decode_list(bytes, "fuzz", |t: T| items.push(t));
+    let collected = decode::<LenientVec<T>>(bytes, "fuzz");
+    match (&streamed, &collected) {
+        (Ok(skipped), Ok(list)) => {
+            assert_eq!(*skipped, list.skipped);
+            assert_eq!(format!("{items:?}"), format!("{:?}", list.items));
+        }
+        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+        _ => panic!("streamed {streamed:?} vs collected {collected:?}"),
+    }
+    streamed.ok().map(|_| items)
+}
+
 #[test]
 fn fuzz_live_rows() {
     fuzz_list("xtream get_live_streams -> live_row", 0x01, |bytes| {
-        if let Ok(list) = decode::<LenientVec<RawLive>>(bytes, "fuzz") {
-            for (i, raw) in list.items.into_iter().enumerate() {
+        if let Some(items) = streamed::<RawLive>(bytes) {
+            for (i, raw) in items.into_iter().enumerate() {
                 if let Some(row) = live_row("s", i as i64, raw) {
                     if let Some(h) = row.archive_hours {
                         assert!(h > 0 && h <= 366 * 24, "archive_hours {h}");
@@ -213,8 +233,8 @@ fn fuzz_live_rows() {
 #[test]
 fn fuzz_vod_rows() {
     fuzz_list("xtream get_vod_streams -> vod_row", 0x02, |bytes| {
-        if let Ok(list) = decode::<LenientVec<RawVod>>(bytes, "fuzz") {
-            for (i, raw) in list.items.into_iter().enumerate() {
+        if let Some(items) = streamed::<RawVod>(bytes) {
+            for (i, raw) in items.into_iter().enumerate() {
                 if let Some(row) = vod_row("s", i as i64, raw) {
                     if let Some(rating) = row.rating {
                         assert!((0.0..=10.0).contains(&rating), "rating {rating}");
@@ -228,8 +248,8 @@ fn fuzz_vod_rows() {
 #[test]
 fn fuzz_series_rows() {
     fuzz_list("xtream get_series -> series_row", 0x03, |bytes| {
-        if let Ok(list) = decode::<LenientVec<RawSeries>>(bytes, "fuzz") {
-            for (i, raw) in list.items.into_iter().enumerate() {
+        if let Some(items) = streamed::<RawSeries>(bytes) {
+            for (i, raw) in items.into_iter().enumerate() {
                 let _ = series_row("s", i as i64, raw);
             }
         }
@@ -239,6 +259,7 @@ fn fuzz_series_rows() {
 #[test]
 fn fuzz_categories() {
     fuzz_list("xtream categories -> map_categories", 0x04, |bytes| {
+        let _ = streamed::<RawCategory>(bytes);
         if let Ok(list) = decode::<LenientVec<RawCategory>>(bytes, "fuzz") {
             let _ = map_categories(list);
         }

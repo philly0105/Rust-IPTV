@@ -4,7 +4,9 @@
 //! `pub fn register(r: &mut RpcRouter)` at `crate::<module>::rpc::register` and,
 //! when they need a background runtime, `pub async fn init(state)`.
 //! The Tauri `rpc` command and the server's `POST /api/rpc/{cmd}` both call
-//! [`RpcRouter::dispatch`].
+//! [`RpcRouter::dispatch_raw`], which hands back the reply as JSON text
+//! ready to send; [`RpcRouter::dispatch`] parses that text into a `Value`
+//! for tests and in-process callers that inspect the reply.
 
 pub mod app;
 
@@ -14,18 +16,23 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Result of a dispatched command: JSON value or `RpcError`.
+/// Result of [`RpcRouter::dispatch`]: JSON value or `RpcError`.
 pub type RpcResult = Result<serde_json::Value, RpcError>;
+
+/// Result of a handler and of [`RpcRouter::dispatch_raw`]: the reply as JSON
+/// text or `RpcError`.
+pub type RawRpcResult = Result<Box<RawValue>, RpcError>;
 
 /// Type-erased handler.
 pub type Handler =
-    Arc<dyn Fn(Arc<AppState>, serde_json::Value) -> BoxFuture<'static, RpcResult> + Send + Sync>;
+    Arc<dyn Fn(Arc<AppState>, serde_json::Value) -> BoxFuture<'static, RawRpcResult> + Send + Sync>;
 
 /// Name -> handler table.
 #[derive(Default, Clone)]
@@ -61,7 +68,12 @@ impl RpcRouter {
     }
 
     /// Registers a typed handler. Args deserialize from the JSON payload (see
-    /// [`parse_args`] for `null` handling); the result serializes to JSON.
+    /// [`parse_args`] for `null` handling); the result serializes straight to
+    /// JSON text. It used to go through `serde_json::to_value`, a BTreeMap
+    /// node and a String key per field that both hosts then serialized again:
+    /// 239 against 79 us for a 120-row Channel page (43 KB) and 1,041
+    /// against 329 us for 500 rows at the release opt-level (DB-5). Object
+    /// keys now come out in struct field order, not sorted.
     /// Registering the same name twice panics: names are a contract.
     pub fn add<A, R, F, Fut>(&mut self, name: &'static str, f: F)
     where
@@ -76,7 +88,7 @@ impl RpcRouter {
             async move {
                 let parsed: A = parse_args(name, args)?;
                 let out = f(state, parsed).await?;
-                serde_json::to_value(out).map_err(|e| {
+                serde_json::value::to_raw_value(&out).map_err(|e| {
                     RpcError::internal(format!("failed to encode result of {name}: {e}"))
                 })
             }
@@ -87,14 +99,29 @@ impl RpcRouter {
         }
     }
 
-    /// Runs a command. Unknown names return `NotFound`; a panicking handler
-    /// returns `Internal` instead of tearing down the caller. Args are never logged.
+    /// Runs a command and parses its reply into a `Value`. For tests and
+    /// in-process callers that inspect the reply; the hosts send the text
+    /// from [`Self::dispatch_raw`] as it is.
     pub async fn dispatch(
         &self,
         state: Arc<AppState>,
         cmd: &str,
         args: serde_json::Value,
     ) -> RpcResult {
+        let raw = self.dispatch_raw(state, cmd, args).await?;
+        serde_json::from_str(raw.get())
+            .map_err(|e| RpcError::internal(format!("failed to decode result of {cmd}: {e}")))
+    }
+
+    /// Runs a command and returns its reply as JSON text. Unknown names
+    /// return `NotFound`; a panicking handler returns `Internal` instead of
+    /// tearing down the caller. Args are never logged.
+    pub async fn dispatch_raw(
+        &self,
+        state: Arc<AppState>,
+        cmd: &str,
+        args: serde_json::Value,
+    ) -> RawRpcResult {
         let Some(handler) = self.handlers.get(cmd).cloned() else {
             tracing::warn!(cmd, "unknown rpc command");
             return Err(RpcError::not_found(format!("unknown command: {cmd}")));
@@ -313,6 +340,191 @@ mod tests {
         assert_eq!(info["isDesktop"], false);
         assert!(info["version"].is_string());
         assert!(r.names().contains(&"app.openPath"));
+    }
+
+    /// Registers `name` as a command that answers a clone of `v`.
+    fn reply<R: Serialize + Clone + Send + Sync + 'static>(
+        r: &mut RpcRouter,
+        name: &'static str,
+        v: R,
+    ) {
+        r.add(name, move |_s, _a: ()| {
+            let v = v.clone();
+            async move { Ok(v) }
+        });
+    }
+
+    fn channel(i: i64) -> crate::model::Channel {
+        use crate::model::{ArchiveInfo, Channel, ContentType, ItemRef};
+        Channel {
+            item_ref: ItemRef::new("src", ContentType::Live, i.to_string()),
+            name: format!("Channel \"{i}\" \u{e9}\u{2603}"),
+            number: (i % 2 == 0).then_some(i),
+            logo_url: Some(format!("http://img.example/{i}.png")),
+            category_id: "news".into(),
+            category_name: "News & Talk".into(),
+            epg_channel_id: (i % 3 == 0).then(|| format!("ch{i}.tv")),
+            url: Some(format!("http://live.example/{i}.m3u8?a=1&b=2")),
+            is_radio: false,
+            archive: (i % 4 == 0).then_some(ArchiveInfo {
+                enabled: true,
+                duration_hours: Some(72),
+            }),
+            headers: None,
+            catchup: None,
+            clear_key: None,
+        }
+    }
+
+    /// Handlers used to build a `Value` with `serde_json::to_value` and the
+    /// hosts serialized it again; they now serialize once to text (DB-5).
+    /// For the shapes replies use (a page of model rows, a map keyed by item
+    /// ref, flattened TMDB details, absent options, non-finite and extreme
+    /// numbers, escapes) the text parses to the `Value` the old path built,
+    /// and `dispatch` still hands tests that `Value`.
+    #[tokio::test]
+    async fn raw_replies_parse_to_the_value_the_old_path_built() {
+        use crate::model::{EpgProgram, Page, Person, TmdbBrief, TmdbMediaType, TmdbMovie};
+        let (_tmp, s) = state().await;
+        let page = Page {
+            items: (0..120).map(channel).collect(),
+            total: 5000,
+            offset: 240,
+            limit: 120,
+        };
+        let program = |ch: usize, h: usize| EpgProgram {
+            channel_id: format!("ch{ch}.tv"),
+            start: format!("2026-11-01T{h:02}:00:00Z"),
+            end: format!("2026-11-01T{:02}:00:00Z", h + 1),
+            title: format!("Show {h}"),
+            description: h
+                .is_multiple_of(2)
+                .then(|| "A long synopsis\nwith a newline.".into()),
+            category: Some("News".into()),
+            icon: None,
+        };
+        let grid: HashMap<String, Vec<EpgProgram>> = (0..40)
+            .map(|ch| {
+                (
+                    format!("src|live|{ch}"),
+                    (0..7).map(|h| program(ch, h)).collect(),
+                )
+            })
+            .collect();
+        let brief = TmdbBrief {
+            tmdb_id: 603,
+            media_type: TmdbMediaType::Movie,
+            title: "The Matrix".into(),
+            year: Some(1999),
+            poster_url: None,
+            backdrop_url: Some("http://img.example/b.jpg".into()),
+            // Not finite: both paths write `null`.
+            rating: Some(f64::NAN),
+            overview: Some("Neo.".into()),
+        };
+        let movie = TmdbMovie {
+            brief: brief.clone(),
+            runtime: Some(136),
+            genres: vec!["Action".into(), "Science Fiction".into()],
+            cast: vec![Person {
+                id: Some(6384),
+                name: "Keanu Reeves".into(),
+                role: Some("Neo".into()),
+                profile_url: None,
+            }],
+            crew: vec![],
+            director: Some("Lana Wachowski".into()),
+            trailer_youtube_key: None,
+            similar: vec![brief],
+            imdb_id: Some("tt0133093".into()),
+        };
+        let numbers = (
+            i64::MIN,
+            u64::MAX,
+            0.1_f64,
+            -1e300_f64,
+            1.0_f64,
+            f64::INFINITY,
+        );
+        let mut r = RpcRouter::new();
+        reply(&mut r, "test.page", page.clone());
+        reply(&mut r, "test.grid", grid.clone());
+        reply(&mut r, "test.movie", movie.clone());
+        reply(&mut r, "test.numbers", numbers);
+        reply(&mut r, "test.none", Option::<String>::None);
+        reply(
+            &mut r,
+            "test.text",
+            "tab\t\"quote\" \u{1F600} </script>".to_string(),
+        );
+        let cases = [
+            ("test.page", serde_json::to_value(&page).unwrap()),
+            ("test.grid", serde_json::to_value(&grid).unwrap()),
+            ("test.movie", serde_json::to_value(&movie).unwrap()),
+            ("test.numbers", serde_json::to_value(numbers).unwrap()),
+            ("test.none", serde_json::Value::Null),
+            (
+                "test.text",
+                serde_json::to_value("tab\t\"quote\" \u{1F600} </script>").unwrap(),
+            ),
+        ];
+        for (cmd, old) in cases {
+            let raw = r
+                .dispatch_raw(s.clone(), cmd, serde_json::Value::Null)
+                .await
+                .unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(raw.get()).unwrap();
+            assert_eq!(parsed, old, "{cmd}");
+            let v = r
+                .dispatch(s.clone(), cmd, serde_json::Value::Null)
+                .await
+                .unwrap();
+            assert_eq!(v, old, "{cmd}");
+        }
+        // The old tree would have hidden a duplicate key; the flattened TMDB
+        // structs emit each key once per object (the movie and its one
+        // similar entry).
+        let raw = r
+            .dispatch_raw(s.clone(), "test.movie", serde_json::Value::Null)
+            .await
+            .unwrap();
+        let text = raw.get();
+        for (key, count) in [("tmdbId", 2), ("title", 2), ("genres", 1), ("similar", 1)] {
+            let found = text.matches(&format!("\"{key}\":")).count();
+            assert_eq!(found, count, "{key} in {text}");
+        }
+    }
+
+    /// The reply text is the struct serialized once, so object keys follow
+    /// field declaration order (the old `Value` tree sorted them), and errors
+    /// come back exactly as `dispatch` reports them.
+    #[tokio::test]
+    async fn raw_replies_keep_field_order_and_errors() {
+        let (_tmp, s) = state().await;
+        let mut r = RpcRouter::new();
+        reply(&mut r, "test.channel", channel(4));
+        let raw = r
+            .dispatch_raw(s.clone(), "test.channel", serde_json::Value::Null)
+            .await
+            .unwrap();
+        assert_eq!(raw.get(), serde_json::to_string(&channel(4)).unwrap());
+        assert!(
+            raw.get().starts_with(
+                r#"{"ref":{"sourceId":"src","contentType":"live","itemId":"4"},"name":"#
+            ),
+            "{}",
+            raw.get()
+        );
+        let e = r
+            .dispatch_raw(s.clone(), "nope.nope", serde_json::Value::Null)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, RpcErrorCode::NotFound);
+        let e = r
+            .dispatch_raw(s, "test.channel", serde_json::json!([1]))
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, RpcErrorCode::Invalid);
     }
 
     /// Extracts the string literals of `RPC_COMMANDS` from `src/api/rpc.ts`.

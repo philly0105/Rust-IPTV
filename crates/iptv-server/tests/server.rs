@@ -321,6 +321,51 @@ async fn rpc_app_info_and_error_mapping() {
     assert_eq!(r.status(), 404);
 }
 
+/// DB-5: a reply is the core's JSON text sent as it is, on the detached
+/// path and the inline (`cancel_on_drop`) path: `application/json`, the
+/// same bytes `dispatch_raw` returns (struct field order, not re-sorted),
+/// and the same value `dispatch` parses.
+#[tokio::test]
+async fn rpc_replies_are_the_cores_json_text() {
+    let h = start().await;
+    let (rpc, app) = (h.server.rpc.clone(), h.server.app.clone());
+    let grid = serde_json::json!({
+        "refs": [],
+        "from": "2026-10-16T00:00:00Z",
+        "to": "2026-10-16T03:00:00Z",
+    });
+    for (cmd, args) in [
+        ("settings.get", serde_json::Value::Null),
+        ("epg.grid", grid),
+    ] {
+        let r = h
+            .http
+            .post(format!("{}/api/rpc/{cmd}", h.base))
+            .json(&args)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "{cmd}");
+        assert_eq!(
+            r.headers()[header::CONTENT_TYPE],
+            "application/json",
+            "{cmd}"
+        );
+        let text = r.text().await.unwrap();
+        let raw = rpc
+            .dispatch_raw(app.clone(), cmd, args.clone())
+            .await
+            .unwrap();
+        assert_eq!(text, raw.get(), "{cmd}");
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            parsed,
+            rpc.dispatch(app.clone(), cmd, args).await.unwrap(),
+            "{cmd}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn spa_fallback_and_cache_headers() {
     let h = start().await;

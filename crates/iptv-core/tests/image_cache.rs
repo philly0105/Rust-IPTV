@@ -778,6 +778,61 @@ async fn f_server_mode_refuses_private_urls_without_a_trusted_source() {
     assert_eq!(mock_hits(&mock, path).await, 2);
 }
 
+/// R6-5: in server mode a hit that the guard allows without trusting a
+/// source is served without reading the source row; a miss still reads it,
+/// since its headers go with the fetch.
+#[tokio::test]
+async fn server_mode_hits_do_not_read_the_source_row() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    // Private targets allowed: the stub is on loopback, and every URL then
+    // passes the check that trusts no source.
+    ServerMode::install(&state, true).unwrap();
+    let config = serde_json::json!({
+        "url": stub.url("/list.m3u"),
+        "headers": {"userAgent": GATE_AGENT}
+    })
+    .to_string();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources(id, kind, name, config_json) VALUES ('s1', 'm3u', 'S', ?1)",
+                [config],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // The gated host answers only with the source's User-Agent.
+    let url = stub.url("/gated/hit");
+    assert!(
+        !imagecache::fetch(&state, &url, Some("s1"))
+            .await
+            .unwrap()
+            .hit
+    );
+
+    // From now on reading the source row fails.
+    state
+        .db_call(|c| {
+            c.execute("UPDATE sources SET config_json = x'00' WHERE id = 's1'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let hit = imagecache::fetch_sized(&state, &url, Some("s1"), None)
+        .await
+        .unwrap();
+    assert!(hit.hit);
+    assert_eq!(stub.hits("/gated/hit"), 1);
+    let err = imagecache::fetch(&state, &stub.url("/gated/miss"), Some("s1"))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ImageErrorKind::Local, "{err:?}");
+    assert_eq!(stub.hits("/gated/miss"), 0);
+}
+
 // Startup ----------------------------------------------------------------------
 
 #[tokio::test]

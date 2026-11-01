@@ -8,14 +8,17 @@
 //! Request flow ([`fetch`], wrapped by [`get`]):
 //! 1. The URL is normalised (absolute http(s), no user info, no fragment) and
 //!    hashed into the cache key.
-//! 2. In server mode the SSRF guard checks it first, trusting only the
-//!    requesting source's own `host:port`. This check needs no DNS: it
-//!    refuses private and loopback IP literals and `localhost` names, and
-//!    those stay refused even when the cache holds the image. A host name
-//!    that resolves to a private address is refused by the guarded client's
-//!    resolver only when it is fetched, so a copy cached through a trusted
-//!    source is also served to a request that names no source. That reveals
-//!    nothing new: any caller may name any `sourceId`.
+//! 2. In server mode the SSRF guard checks it first, trusting no source.
+//!    This check needs no DNS and no source row: it refuses private and
+//!    loopback IP literals and `localhost` names. Only a URL it refuses
+//!    makes it read the requesting source and check again, trusting the
+//!    source's own `host:port`; what that refuses stays refused even when
+//!    the cache holds the image. A host name that resolves to a private
+//!    address is refused by the guarded client's resolver only when it is
+//!    fetched, so a copy cached through a trusted source is also served to
+//!    a request that names no source. That reveals nothing new: any caller
+//!    may name any `sourceId`. A miss reads the source (its headers go with
+//!    the fetch) and checks the URL trusting it before fetching.
 //! 3. A row whose file is on disk with the recorded size is a hit (read-only;
 //!    `last_access` is written at most once a minute per key).
 //! 4. Otherwise one fetch per URL and scope ([`flight_scope`]: the trusted
@@ -385,8 +388,8 @@ struct SourceAccess {
 
 /// A source's headers and authority (empty when `id` is unknown, so a stale
 /// `sourceId` still loads the image, just without the source's trust).
-/// Read on the read-only pool like [`ImageCache::lookup`]: server mode reads
-/// it for every image request, hit or not.
+/// Read on the read-only pool like [`ImageCache::lookup`]: for a miss, and in
+/// server mode also for a URL the guard refuses without the source's trust.
 async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess, ImageError> {
     let Some(id) = id.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(SourceAccess::default());
@@ -404,17 +407,17 @@ async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess,
         .await
         .map_err(ImageError::local)?;
     Ok(match row {
-        Some((kind, json)) => {
-            let headers = serde_json::from_str::<serde_json::Value>(&json)
-                .ok()
-                .and_then(|v| v.get("headers").cloned())
-                .and_then(|h| serde_json::from_value(h).ok())
-                .unwrap_or_default();
-            SourceAccess {
-                headers,
-                trusted: http::source_config_authority(&kind, &json),
-            }
-        }
+        // Parsed once for both the headers and the authority.
+        Some((kind, json)) => match serde_json::from_str::<serde_json::Value>(&json) {
+            Ok(config) => SourceAccess {
+                headers: config
+                    .get("headers")
+                    .and_then(|h| RequestHeaders::deserialize(h).ok())
+                    .unwrap_or_default(),
+                trusted: http::source_config_authority_value(&kind, &config),
+            },
+            Err(_) => SourceAccess::default(),
+        },
         None => SourceAccess::default(),
     })
 }
@@ -1203,17 +1206,26 @@ pub async fn fetch_sized_within(
     let cache = cache(state);
     cache.ready().await?;
     let mode = http::server_mode(state);
-    // Server mode checks the URL against the source's authority first, hit
-    // or not. The desktop needs the source row only to fetch, so a hit
-    // skips reading it.
-    let checked = match &mode {
-        Some(mode) => {
+    // Server mode checks the URL with the guard first, hit or not. Trusting
+    // no source, the check needs neither DNS nor the source row, and it
+    // passes every public host, so a hit is served as to a request without
+    // a source, which may read any copy cached through one (step 2 of the
+    // module docs). Reading the row for every hit cost a blocking-pool hop,
+    // a pooled connection and two JSON parses per poster (R6-5). A URL the
+    // check refuses (a private or loopback literal, `localhost`) loads the
+    // source and is checked again trusting its authority; `checked` then
+    // holds the source, already checked with its trust.
+    let mut checked = None;
+    if let Some(mode) = &mode {
+        if let Err(refused) = mode.guard.check(&url, None).await {
             let source = load_source(state, source_id).await?;
+            if source.trusted.is_none() {
+                return Err(refused.into());
+            }
             mode.guard.check(&url, source.trusted.as_ref()).await?;
-            Some(source)
+            checked = Some(source);
         }
-        None => None,
-    };
+    }
     // A variant known to be served by its original goes there first: one
     // lookup instead of a miss on the variant before it (R6-2). A miss falls
     // through, since a later fetch may give the variant an entry of its own.
@@ -1227,7 +1239,16 @@ pub async fn fetch_sized_within(
     }
     let source = match checked {
         Some(source) => source,
-        None => load_source(state, source_id).await?,
+        None => {
+            let source = load_source(state, source_id).await?;
+            // A fetch keeps the trusted check: it can be stricter than the
+            // one above, since the source's host name on another port is
+            // resolved and refused when it points at a private address.
+            if let (Some(mode), Some(trusted)) = (&mode, source.trusted.as_ref()) {
+                mode.guard.check(&url, Some(trusted)).await?;
+            }
+            source
+        }
     };
     // The source-trusting client only for a logo on the source's own
     // host:port; its resolver cannot tell ports apart.

@@ -530,6 +530,12 @@ impl fmt::Display for Authority {
 /// Xtream server or Stalker portal.
 pub fn source_config_authority(kind: &str, config_json: &str) -> Option<Authority> {
     let v: serde_json::Value = serde_json::from_str(config_json).ok()?;
+    source_config_authority_value(kind, &v)
+}
+
+/// [`source_config_authority`] of a config already parsed, for a caller
+/// that reads other fields of it too (the image cache's source headers).
+pub fn source_config_authority_value(kind: &str, v: &serde_json::Value) -> Option<Authority> {
     let key = match kind {
         "m3u" => "url",
         "xtream" => "serverUrl",

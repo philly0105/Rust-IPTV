@@ -18,6 +18,11 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 - Sports: switching league no longer reads the whole guide again (about 2 s on a big account, now a few milliseconds), and a game card redraws only when its own game or its Watch time changes.
 - Startup: the main script is 18 kB smaller and Live TV and the guide load about 110 kB less before they show; the command palette and the shortcut list load when first opened; typing in a page's search no longer redraws the side rail. In the browser the app no longer waits for its offline copy to be written, and in the desktop app the built-in engines are not preloaded when every player is mpv or VLC.
 - Removing or replacing a large source takes about a third of the time it did, and importing large playlists and Xtream accounts uses less memory.
+- Xtream accounts read their channel, movie and series lists faster, and a refreshing account no longer holds up other sources' imports while it downloads its lists; it keeps the changed lists on disk until it reads them.
+- Pages get their data with less work, in the desktop app and in the browser: the core prepares each reply once instead of twice. In the browser the server also spends less time compressing replies, and the Docker image is built for speed instead of size.
+- Restoring a backup with large playlists in it uses about a third of the memory it did.
+- Logos and posters the app shows at their own size are no longer checked again at every launch, and the image cache looks over its folder only after the app did not close cleanly, or once a week, instead of at every start.
+- Downloads split over several connections save their resume point every 15 seconds instead of every 2, so they hold up a recording or the app less on a USB disk or eMMC, and recordings write to disk in larger blocks.
 
 ## [0.3.0] - 2026-10-29
 

@@ -124,7 +124,7 @@ Secrets (the Xtream password and request headers, and the Stalker password and s
 
 ## Import
 
-1. Parse and check. Invalid JSON, a legacy JSON array export, a wrong `kind`, a `version` other than 1, or a missing `playlists` array rejects the file (`Invalid`). Anything else is lenient: a bad entry is skipped with a warning (`skipped += 1`), and a bad user-state item is dropped.
+1. Parse and check. Invalid JSON, a legacy JSON array export, a wrong `kind`, a `version` other than 1, or a missing `playlists` array rejects the file (`Invalid`). Anything else is lenient: a bad entry is skipped with a warning (`skipped += 1`), and a bad user-state item is dropped. The RPC hands its text to `backup::import_owned`, which parses it on the blocking pool and frees it as soon as the JSON tree is built (`import` and `import_with` keep a `&str` API for other callers). The `playlists` array and the custom lists are taken out of the tree, each entry takes its source (with `rawM3u`), connection and user state out of its own, and step 5 moves the playlist text into its database call, so nothing copies an embedded playlist. A 24 MB playlist in a backup peaked at 144 MB of heap (6x the text), now 50 MB (2x, serde_json's own unescape copy while it parses; `tests/backup_import_memory.rs`).
 2. `replace` removes every source and their parental locks with them, so while parental controls are on and locked it fails with `auth` before anything changes (`parental::require_unlocked`; the user unlocks with the PIN and imports again). It never deletes first. Every entry is parsed before anything changes, and a backup none of whose entries can be used is refused (`Invalid`, "nothing was replaced"). The backup's playlists are imported next to the existing sources. Only once at least one new catalog has loaded are the old sources removed (user state cascades), with their VOD pins, parked state, Stalker tokens and cached playlist copies (`data_dir/playlists/<id>.m3u`), and the backup's settings applied. When no catalog loads, the new sources are rolled back, the old pins restored, and the call fails with `Invalid`; nothing changes.
 3. EPG URLs go through `settings::update`:
    - `merge`: the backup's URLs come first, then the current ones, deduplicated by URL identity.
@@ -132,7 +132,7 @@ Secrets (the Xtream password and request headers, and the Stalker password and s
 
    The app-level preferences present in `settings` are applied in a second `settings::update`. An invalid value becomes a warning. Manifests without them leave the current values alone.
 4. Each entry is matched to an existing source by fingerprint, as in the old app:
-   - m3u: normalized URL, or else the SHA-256 of the canonical raw text.
+   - m3u: normalized URL, or else the SHA-256 of the canonical raw text (trimmed, `\r\n` and a lone `\r` turned into `\n`). It is hashed as the text is read (`fp_m3u_raw`), for the backup's playlists and for the stored text playlists a merge compares them with; building the canonical copy took three full copies of the text, about 135 MB of transient heap for a 45 MB playlist.
    - xtream: server plus username.
    - stalker: portal plus lowercased MAC.
 

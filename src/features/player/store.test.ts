@@ -929,6 +929,46 @@ describe('zap', () => {
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
   });
 
+  it('steps over a dropped favorite after a click on its snapshot row (F2-4 review)', async () => {
+    // Favorites 21, gone (128), 25. The catalog no longer has 128: Live's Favorites view draws it from
+    // its snapshot, a row with no number and no URL.
+    const fav = (ch: Channel, position: number) => ({ ref: ch.ref, position, addedAt: '2026-01-01T00:00:00Z', snapshot: { title: ch.name, contentType: ch.ref.contentType } });
+    const gone = channel(28);
+    const stub: Channel = { ref: gone.ref, name: gone.name, logoUrl: 'http://logo/28.png', categoryId: '', categoryName: '', isRadio: false };
+    handlers['favorites.list'] = () => [fav(channel(21), 0), fav(gone, 1), fav(channel(25), 2)];
+    handlers['catalog.item'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      if (id === '121') return channel(21);
+      if (id === '125') return channel(25);
+      throw Object.assign(new Error(`item ${id} not found`), { code: 'not_found' });
+    };
+    queryClient.removeQueries({ queryKey: ['catalog.item'] });
+    queryClient.removeQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('favorites.') });
+    const favorites = { sourceId: 's1', favorites: { sourceId: 's1' } };
+
+    // The click on the snapshot row: an Xtream panel still builds a stream URL without the catalog.
+    await playItem({ ref: stub.ref, title: stub.name, isLive: true, isRadio: false, sourceKind: 'xtream', channel: stub });
+    expect(store.knownChannel(gone.ref)).toBeUndefined();
+    // A row whose stream lookup fails is not remembered either (a Stalker channel the portal dropped
+    // after its page loaded).
+    const dropped = channel(29, { ref: { sourceId: 's3', contentType: 'live', itemId: '129' } });
+    handlers['stalker.streamUrl'] = () => {
+      throw Object.assign(new Error('item 129 not found'), { code: 'not_found' });
+    };
+    await expect(playItem({ ref: dropped.ref, title: dropped.name, isLive: true, isRadio: false, sourceKind: 'stalker', channel: dropped })).rejects.toThrow('not found');
+    expect(store.knownChannel(dropped.ref)).toBeUndefined();
+
+    // Channel 21 from Favorites, then channel down: 128 is stepped over.
+    const ch21 = channel(21);
+    await playItem({ ref: ch21.ref, title: ch21.name, isLive: true, isRadio: false, sourceKind: 'xtream', channel: ch21 });
+    expect(store.knownChannel(ch21.ref)).toEqual(ch21);
+    usePlayerStore.setState({ zapContext: favorites });
+    const played = await zap('down');
+    expect(played?.ref.itemId).toBe('125');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('125');
+    expect(usePlayerStore.getState().status).not.toBe('error');
+  });
+
   it('keeps walking the favorites from a playing favorite the quality filter then hides', async () => {
     const fav = (ch: Channel, position: number) => ({ ref: ch.ref, position, addedAt: '2026-01-01T00:00:00Z', snapshot: { title: ch.name, contentType: ch.ref.contentType } });
     // Stored order 1, 2, 3 (FHD, HD, UHD); `shown` is what favorites.list answers under the filter.

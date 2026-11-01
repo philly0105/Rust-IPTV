@@ -1557,9 +1557,6 @@ export async function startItem(
   opts?.onRequest?.(seq);
   // The engine downloads while the gate and the stream lookup run.
   preloadEngineFor(args.channel?.url);
-  // The row a list click holds answers the zap banner's details (and `catalog.item`) without a
-  // second lookup, as a zap's neighbour row does (F2-4).
-  if (args.channel && args.isLive) rememberChannel(args.channel);
   // The user picked something: a countdown firing during the lookup must not override it.
   cancelUpNext();
   // Parental gate first, so a locked item's title never shows behind the PIN prompt.
@@ -1588,6 +1585,10 @@ export async function startItem(
   let source: PlayerSource;
   try {
     const resolved = await resolveSource(args);
+    // The row a list click holds answers the zap banner's details (and `catalog.item`) without a
+    // second lookup, as a zap's neighbour row does (F2-4); only once the stream lookup found the
+    // channel, and never a snapshot stand-in (see `catalogRow`).
+    if (args.channel && args.isLive && catalogRow(args.channel)) rememberChannel(args.channel);
     source = args.fromStart ? fromTheStart(resolved) : await withResume(resolved);
   } catch (err) {
     // A newer request won the race: do not clobber it.
@@ -1699,6 +1700,18 @@ export async function playChannel(channel: Channel, sourceKind?: SourceKind, opt
  */
 const knownChannels = new Map<string, Channel>();
 const KNOWN_CHANNELS_MAX = 256;
+
+/**
+ * Whether a list click's row is the catalog's. Live's Favorites and Recently watched views and the
+ * guide's Favorites view draw a channel the catalog no longer answers for from its stored
+ * snapshot: no number and no URL. An Xtream panel still builds a stream URL for it, so its play
+ * succeeding proves nothing, and remembered it would stand in for the catalog for the rest of the
+ * session: a favorites zap would tune the dropped channel instead of stepping over it. A catalog
+ * row without either (a panel that numbers nothing) is only looked up again, as before F2-4.
+ */
+function catalogRow(ch: Channel): boolean {
+  return ch.url !== undefined || ch.number !== undefined;
+}
 
 function rememberChannel(ch: Channel): void {
   const key = itemKey(ch.ref);

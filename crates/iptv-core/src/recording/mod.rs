@@ -1269,6 +1269,24 @@ fn total_bytes(parts: &[String]) -> i64 {
         .sum::<u64>() as i64
 }
 
+/// [`file_len`] on the blocking pool. Recordings folders are often on a NAS
+/// or a USB disk, where one stat can take milliseconds, and on a runtime
+/// worker it held up every task sharing that worker (R6-6).
+async fn file_len_async(p: PathBuf) -> u64 {
+    let path = p.clone();
+    tokio::task::spawn_blocking(move || file_len(&path))
+        .await
+        .unwrap_or_else(|_| file_len(&p))
+}
+
+/// [`total_bytes`] on the blocking pool, like [`file_len_async`].
+async fn total_bytes_async(parts: Arc<[String]>) -> i64 {
+    let owned = Arc::clone(&parts);
+    tokio::task::spawn_blocking(move || total_bytes(&owned))
+        .await
+        .unwrap_or_else(|_| total_bytes(&parts))
+}
+
 /// The engine task of one recording: resolve, record a part, retry with a
 /// new part file when the stream drops, until the padded end or a stop.
 async fn run(
@@ -1450,7 +1468,7 @@ async fn record(
                 )
                 .await;
                 ticker.abort();
-                let len = file_len(&path);
+                let len = file_len_async(path.clone()).await;
                 if len == 0 {
                     let _ = crate::downloads::naming::remove_regular_file(&path);
                     parts.pop();
@@ -1466,9 +1484,14 @@ async fn record(
                 }
                 save_progress(state, id, &parts).await;
                 if end.stopped {
+                    // Only the HTTP copy's last flush fails a stopped part
+                    // (a full disk); it explains a recording left empty.
+                    if let Some(err) = end.error {
+                        last_error = Some(err);
+                    }
                     break;
                 }
-                dropped |= total_bytes(&parts) > 0;
+                dropped |= total_bytes_async(parts.as_slice().into()).await > 0;
                 if failed
                     && !http_failed
                     && engine == engine::Engine::Http
@@ -1514,7 +1537,7 @@ async fn record(
             _ = stop.changed() => {}
         }
     }
-    let bytes = total_bytes(&parts);
+    let bytes = total_bytes_async(parts.as_slice().into()).await;
     if bytes > 0 {
         let key = id.to_string();
         let _ = state
@@ -1552,8 +1575,8 @@ async fn join_last_part(parts: &mut Vec<String>) {
 
 async fn save_progress(state: &Arc<AppState>, id: &str, parts: &[String]) {
     let key = id.to_string();
+    let bytes = total_bytes_async(parts.into()).await;
     let parts = parts.to_vec();
-    let bytes = total_bytes(&parts);
     if let Err(e) = state
         .db_call(move |c| store::set_progress(c, &key, &parts, bytes))
         .await
@@ -1563,20 +1586,23 @@ async fn save_progress(state: &Arc<AppState>, id: &str, parts: &[String]) {
 }
 
 /// Emits `recordings.progress` every 2 s while a part is written, and saves
-/// the byte count every [`SAVE_BYTES_EVERY`] ticks.
+/// the byte count every [`SAVE_BYTES_EVERY`] ticks. The parts are stat'ed on
+/// the blocking pool ([`total_bytes_async`]): the HTTP copy's buffer means
+/// the count can trail the stream by up to 256 KiB.
 fn spawn_progress(
     state: Arc<AppState>,
     id: String,
     parts: Vec<String>,
     started: i64,
 ) -> tokio::task::JoinHandle<()> {
+    let parts: Arc<[String]> = parts.into();
     tokio::spawn(async move {
         let mut every = tokio::time::interval(PROGRESS_EVERY);
         let mut ticks: u32 = 0;
         loop {
             every.tick().await;
             let rt = runtime(&state);
-            let bytes = total_bytes(&parts);
+            let bytes = total_bytes_async(Arc::clone(&parts)).await;
             state.emit(
                 EVENT_RECORDINGS_PROGRESS,
                 RecordingProgress {
@@ -2045,6 +2071,28 @@ mod tests {
         let t = 1_800_000_000;
         assert_eq!(parse_time("start", &rfc3339(t)).unwrap(), t);
         assert!(parse_time("start", "tomorrow").is_err());
+    }
+
+    /// R6-6: the stats off the runtime workers give what the blocking ones
+    /// did; a missing part counts as empty.
+    #[tokio::test]
+    async fn part_sizes_are_read_on_the_blocking_pool_like_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.ts"), dir.path().join("b.ts"));
+        std::fs::write(&a, vec![0u8; 1000]).unwrap();
+        std::fs::write(&b, vec![0u8; 24]).unwrap();
+        let gone = dir.path().join("gone.ts");
+        let parts: Vec<String> = [&a, &b, &gone]
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(total_bytes_async(parts.as_slice().into()).await, 1024);
+        assert_eq!(
+            total_bytes_async(parts.as_slice().into()).await,
+            total_bytes(&parts)
+        );
+        assert_eq!(file_len_async(a.clone()).await, 1000);
+        assert_eq!(file_len_async(gone).await, 0);
     }
 
     /// DB-1R: the byte count saved every [`SAVE_BYTES_EVERY`] ticks passes

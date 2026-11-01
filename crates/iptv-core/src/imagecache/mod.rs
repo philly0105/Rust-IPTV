@@ -112,6 +112,26 @@ pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
 pub const HEAD_TIMEOUT: Duration = Duration::from_secs(8);
 /// [`set_head_timeout_for_tests`]'s value in ms; 0 means [`HEAD_TIMEOUT`].
 static HEAD_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
+/// A clean start skips the reconcile when the last one finished less than
+/// this ago. It ran at every launch: every index row read into a map and
+/// every file of the 256 shards walked and stat'ed, about 30-60k files and
+/// 0.2-2 s of cold-start I/O on N100-class storage at the 500 MB default,
+/// several seconds and some 100 MB at the 5000 MB cap (R6-3). A lookup
+/// already drops a row whose file is gone, so after clean shutdowns the
+/// weekly pass only bounds orphan files (a failed index batch, a clear
+/// while a fetch held its file); a crash still runs it at the next start.
+const RECONCILE_EVERY: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// `app_state` key: unix seconds of the last reconcile that ran to the end.
+const RECONCILED_KEY: &str = "image_cache_reconciled_at";
+/// The reconcile starts once no database call has run for this long, or
+/// [`RECONCILE_MAX_WAIT`] after init, so it keeps out of the way of the
+/// first screen and the startup refresh.
+const RECONCILE_IDLE: Duration = Duration::from_secs(5);
+/// Latest start of the reconcile after init, quiet database or not.
+const RECONCILE_MAX_WAIT: Duration = Duration::from_secs(60);
+/// [`set_reconcile_wait_for_tests`]'s value in ms; 0 means
+/// [`RECONCILE_MAX_WAIT`].
+static RECONCILE_MAX_WAIT_MS: AtomicU64 = AtomicU64::new(0);
 /// Remembered failures kept at most (expired ones are pruned first).
 const MAX_FAILURES: usize = 4096;
 /// Variant keys remembered as "serve the original" at most.
@@ -1101,33 +1121,121 @@ impl ImageCache {
     }
 
     /// Startup reconcile: drops rows whose file is gone (or has the wrong
-    /// size), deletes files without a row and stale temp files.
-    async fn reconcile(&self) {
+    /// size), deletes files without a row and stale temp files. Returns true
+    /// when the scan ran to the end.
+    async fn reconcile(&self) -> bool {
         let rows = match blocking(&self.pool, &self.db_path, store::all_rows).await {
             Ok(rows) => rows,
             Err(err) => {
                 tracing::warn!(error = %err, "image cache reconcile could not read the index");
-                return;
+                return false;
             }
         };
         let dir = self.dir.clone();
-        match tokio::task::spawn_blocking(move || store::scan(&dir, &rows)).await {
+        let started = Instant::now();
+        match tokio::task::spawn_blocking(move || store::scan(&dir, rows)).await {
             Ok(report) => {
                 if !report.stale.is_empty() {
                     self.send(Op::Forget {
                         keys: report.stale.clone(),
                     });
                 }
+                let ms = started.elapsed().as_millis() as u64;
                 if report.stale.len() + report.removed > 0 {
                     tracing::info!(
                         stale_rows = report.stale.len(),
                         removed_files = report.removed,
+                        ms,
                         "image cache reconciled"
                     );
+                } else {
+                    tracing::debug!(ms, "image cache reconciled; nothing to repair");
                 }
+                true
             }
-            Err(err) => tracing::warn!(%err, "image cache reconcile failed"),
+            Err(err) => {
+                tracing::warn!(%err, "image cache reconcile failed");
+                false
+            }
         }
+    }
+
+    /// True when a reconcile finished less than [`RECONCILE_EVERY`] ago
+    /// (the `app_state` stamp [`RECONCILED_KEY`]; a stamp in the future, after
+    /// the clock was set back, does not count).
+    async fn reconciled_recently(&self) -> bool {
+        let stamp = blocking(&self.read_pool, &self.db_path, |c| {
+            Ok(c.query_row(
+                "SELECT value FROM app_state WHERE key = ?1",
+                [RECONCILED_KEY],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+        })
+        .await;
+        let Some(at) = stamp.ok().flatten().and_then(|v| v.parse::<i64>().ok()) else {
+            return false;
+        };
+        let every = i64::try_from(RECONCILE_EVERY.as_secs()).unwrap_or(i64::MAX);
+        (0..every).contains(&(unix_now() - at))
+    }
+
+    /// Records that a reconcile finished now.
+    async fn note_reconciled(&self) {
+        // A background write: while an import holds the write lock it waits
+        // at the gate, not on a pooled connection.
+        let _permit = self.background_gate.acquire().await.ok();
+        let at = unix_now().to_string();
+        let written = blocking(&self.pool, &self.db_path, move |c| {
+            c.execute(
+                "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                rusqlite::params![RECONCILED_KEY, at],
+            )?;
+            Ok(())
+        })
+        .await;
+        if let Err(err) = written {
+            tracing::debug!(error = %err, "could not record the image cache reconcile");
+        }
+    }
+}
+
+/// Sleeps until the startup reconcile may start: once no database call has
+/// run for [`RECONCILE_IDLE`], or [`reconcile_max_wait`] after the call.
+async fn wait_for_quiet_database() {
+    let started = Instant::now();
+    let max_wait = reconcile_max_wait();
+    loop {
+        let quiet = db::quiet_for();
+        let waited = started.elapsed();
+        if quiet >= RECONCILE_IDLE || waited >= max_wait {
+            return;
+        }
+        let rest = RECONCILE_IDLE
+            .saturating_sub(quiet)
+            .max(Duration::from_millis(50))
+            .min(max_wait - waited);
+        tokio::time::sleep(rest).await;
+    }
+}
+
+/// Starts the startup reconcile at most `max_wait` after [`init`], quiet
+/// database or not, for the whole process. Test hook, like
+/// [`set_head_timeout_for_tests`]: integration tests share the process with
+/// others that keep the database busy.
+#[doc(hidden)]
+pub fn set_reconcile_wait_for_tests(max_wait: Duration) {
+    let ms = u64::try_from(max_wait.as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    RECONCILE_MAX_WAIT_MS.store(ms, Ordering::Relaxed);
+}
+
+fn reconcile_max_wait() -> Duration {
+    match RECONCILE_MAX_WAIT_MS.load(Ordering::Relaxed) {
+        0 => RECONCILE_MAX_WAIT,
+        ms => Duration::from_millis(ms),
     }
 }
 
@@ -1315,11 +1423,24 @@ pub async fn clear(state: &Arc<AppState>) -> CoreResult<ImageCacheStats> {
 }
 
 /// Module init: loads the running byte total from `SUM(bytes)` and starts the
-/// background reconcile (rows without a file, files without a row).
+/// background reconcile (rows without a file, files without a row) when the
+/// previous run did not shut down cleanly (`AppState::unclean_start`) or the
+/// last reconcile finished [`RECONCILE_EVERY`] ago or longer. It waits for a
+/// quiet database first ([`wait_for_quiet_database`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     let cache = cache(&state);
     cache.ready().await?;
-    tokio::spawn(async move { cache.reconcile().await });
+    let unclean = state.unclean_start;
+    tokio::spawn(async move {
+        if !unclean && cache.reconciled_recently().await {
+            tracing::debug!("image cache reconcile skipped: clean shutdown and a recent pass");
+            return;
+        }
+        wait_for_quiet_database().await;
+        if cache.reconcile().await {
+            cache.note_reconciled().await;
+        }
+    });
     Ok(())
 }
 

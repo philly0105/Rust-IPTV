@@ -35,6 +35,12 @@ pub struct AppState {
     pub settings: Arc<parking_lot::RwLock<Settings>>,
     /// True inside the Tauri shell, false in server (PWA) mode and tests.
     pub is_desktop: bool,
+    /// True when the previous run did not shut down cleanly: the database's
+    /// running marker was still there at open (see
+    /// [`db::open_and_migrate_at_boot`]). Startup repair work that only a
+    /// crash makes necessary, such as the image cache's reconcile, runs
+    /// then (and on its own schedule otherwise).
+    pub unclean_start: bool,
     /// Runtime singletons stashed by modules under their module name
     /// (download queue, mpv session, remote server handle, importers, ...).
     pub extensions: DashMap<&'static str, Arc<dyn Any + Send + Sync>>,
@@ -189,7 +195,7 @@ impl AppState {
         events: Arc<dyn EventSink>,
         is_desktop: bool,
     ) -> CoreResult<Arc<Self>> {
-        let (data_dir, db, db_read, settings) = tokio::task::spawn_blocking(move || -> CoreResult<_> {
+        let (data_dir, db, db_read, settings, unclean_start) = tokio::task::spawn_blocking(move || -> CoreResult<_> {
             let data_dir = std::path::absolute(&data_dir).unwrap_or(data_dir);
             std::fs::create_dir_all(&data_dir).map_err(|e| {
                 CoreError::Io(std::io::Error::new(
@@ -200,7 +206,7 @@ impl AppState {
             std::fs::create_dir_all(crate::logging::logs_dir(&data_dir))?;
             std::fs::create_dir_all(data_dir.join("downloads"))?;
             let path = data_dir.join(db::DB_FILE);
-            let pool = db::open_and_migrate(&path)?;
+            let (pool, unclean_start) = db::open_and_migrate_at_boot(&path)?;
             // After the migration and any quarantine: the file the read
             // pool opens is the one the write pool holds.
             let read = db::open_read(&path).unwrap_or_else(|err| {
@@ -211,11 +217,11 @@ impl AppState {
                 let conn = pool.get()?;
                 load_settings(&conn)?
             };
-            Ok((data_dir, pool, read, settings))
+            Ok((data_dir, pool, read, settings, unclean_start))
         })
         .await??;
 
-        tracing::info!(data_dir = %data_dir.display(), is_desktop, version = Self::version(), "app state ready");
+        tracing::info!(data_dir = %data_dir.display(), is_desktop, unclean_start, version = Self::version(), "app state ready");
         Ok(Arc::new(Self {
             data_dir,
             db,
@@ -224,6 +230,7 @@ impl AppState {
             events,
             settings: Arc::new(parking_lot::RwLock::new(settings)),
             is_desktop,
+            unclean_start,
             extensions: DashMap::new(),
             write_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             background_gate: Arc::new(tokio::sync::Semaphore::new(1)),

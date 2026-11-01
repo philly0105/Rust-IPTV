@@ -360,7 +360,8 @@ pub fn activity() -> Activity {
 }
 
 /// How long the database has been quiet: zero while a call is in flight.
-fn quiet_for() -> Duration {
+/// Also waited on by the image cache's startup reconcile.
+pub(crate) fn quiet_for() -> Duration {
     if ACTIVE_CALLS.load(std::sync::atomic::Ordering::SeqCst) > 0 {
         return Duration::ZERO;
     }
@@ -796,17 +797,28 @@ pub fn note_error(db_path: &Path, err: &CoreError) -> bool {
 /// When the file is corrupt or not a database, quarantine it (see
 /// [`quarantine`]), log a warning, and recreate an empty one.
 pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
-    open_and_migrate_with(path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT).map(|(pool, _)| pool)
+    open_and_migrate_at_boot(path).map(|(pool, _)| pool)
+}
+
+/// [`open_and_migrate`] that also says whether the previous run did not
+/// shut down cleanly: the running marker written at open was still there
+/// (see [`note_clean_shutdown`]). `AppState::unclean_start` keeps it for
+/// startup repair work that a clean exit makes unnecessary, such as the
+/// image cache's reconcile.
+pub fn open_and_migrate_at_boot(path: &Path) -> CoreResult<(DbPool, bool)> {
+    open_and_migrate_with(path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT)
+        .map(|(pool, unclean, _)| (pool, unclean))
 }
 
 /// [`open_and_migrate`] with the size limit of the check at open and the
-/// schedule of the background check as parameters. Returns the background
-/// check's thread when one started.
+/// schedule of the background check as parameters. Returns whether the
+/// previous run did not shut down cleanly, and the background check's
+/// thread when one started.
 fn open_and_migrate_with(
     path: &Path,
     sync_check_max_bytes: u64,
     schedule: CheckSchedule,
-) -> CoreResult<(DbPool, Option<std::thread::JoinHandle<()>>)> {
+) -> CoreResult<(DbPool, bool, Option<std::thread::JoinHandle<()>>)> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -845,7 +857,7 @@ fn open_and_migrate_with(
     } else {
         spawn_background_check(path, schedule)
     };
-    Ok((pool, background))
+    Ok((pool, unclean, background))
 }
 
 /// Checkpoints the WAL into the database and truncates it to zero bytes,
@@ -1418,19 +1430,21 @@ mod tests {
 
         // First start: never checked.
         note_clean_shutdown(&path);
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         join_bounded(check.expect("no pass recorded yet"));
         assert!(checked.exists(), "a pass is recorded");
         drop(pool);
 
         // Clean shutdown, recent pass: skipped.
         note_clean_shutdown(&path);
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, unclean, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        assert!(!unclean, "the previous run shut down cleanly");
         assert!(check.is_none(), "skipped after a clean shutdown");
         drop(pool);
 
         // No clean shutdown (a crash): checked again.
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, unclean, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        assert!(unclean, "the running marker was left behind");
         join_bounded(check.expect("checked after an unclean shutdown"));
         drop(pool);
 
@@ -1438,7 +1452,7 @@ mod tests {
         note_clean_shutdown(&path);
         let old = chrono::Utc::now() - chrono::TimeDelta::days(8);
         std::fs::write(&checked, old.to_rfc3339()).unwrap();
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         join_bounded(check.expect("checked when the last pass is stale"));
         drop(pool);
         assert!(!recovery_flag_path(&path).exists());
@@ -1535,7 +1549,8 @@ mod tests {
     fn clean_shutdown_removes_the_running_marker() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(DB_FILE);
-        let pool = open_and_migrate(&path).unwrap();
+        let (pool, unclean) = open_and_migrate_at_boot(&path).unwrap();
+        assert!(!unclean, "a new database has no marker yet");
         let running = side_path(&path, RUNNING_SUFFIX);
         assert!(running.exists(), "written at open");
         note_clean_shutdown(&path);
@@ -1543,6 +1558,11 @@ mod tests {
         note_clean_shutdown(&path);
         assert!(!running.exists());
         drop(pool);
+        let (pool, unclean) = open_and_migrate_at_boot(&path).unwrap();
+        assert!(!unclean, "after a clean shutdown");
+        drop(pool);
+        let (_pool, unclean) = open_and_migrate_at_boot(&path).unwrap();
+        assert!(unclean, "the last run never shut down cleanly");
     }
 
     /// L3-perf-core-7: the background check does not start while a database
@@ -1559,7 +1579,7 @@ mod tests {
             idle: Duration::from_millis(200),
             max_wait: Duration::from_secs(20),
         };
-        let (pool, check) = open_and_migrate_with(&path, 0, schedule).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, schedule).unwrap();
         let check = check.expect("a background check is scheduled");
         std::thread::sleep(Duration::from_millis(800));
         assert!(!check.is_finished(), "waits while a call is in flight");
@@ -1582,7 +1602,7 @@ mod tests {
         let flag = recovery_flag_path(&path);
 
         // Limit 0: every database counts as large.
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         assert_eq!(corrupt_backups(dir.path()), 0, "not checked at open");
         let rows: i64 = pool
             .get()
@@ -1604,7 +1624,7 @@ mod tests {
 
         // The flagged boot runs the full check at open (even with limit 0)
         // and recovers. The recreated file is checked in the background.
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         assert_eq!(corrupt_backups(dir.path()), 1, "corrupt file moved aside");
         join_bounded(check.expect("the new file counts as large too"));
         assert!(!flag.exists(), "flag cleared after recovery");
@@ -1622,7 +1642,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(DB_FILE);
         populate(&path);
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         join_bounded(check.expect("a background check started"));
         assert!(!recovery_flag_path(&path).exists());
         let rows: i64 = pool
@@ -1645,7 +1665,7 @@ mod tests {
         assert!(len > 1_000_000 && len < SYNC_CHECK_MAX_BYTES, "{len} bytes");
         corrupt_middle(&path);
 
-        let (pool, check) =
+        let (pool, _, check) =
             open_and_migrate_with(&path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT).unwrap();
         assert!(check.is_none(), "checked at open, not in the background");
         assert_eq!(corrupt_backups(dir.path()), 1);

@@ -995,6 +995,58 @@ async fn a_clean_start_reconciles_only_when_the_last_pass_is_a_week_old() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    wait_for_reconcile(&state, began).await;
+
+    // Another crash, and the pass it owes does not run to the end (an index
+    // row it cannot read fails it; closing the app while it waits for a
+    // quiet database is the same). The earlier stamp is recent, but the pass
+    // is still owed: the next start reconciles though it follows a clean
+    // shutdown.
+    drop(state);
+    plant();
+    let state = new_state(dir.path()).await;
+    assert!(state.unclean_start);
+    state
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO image_cache (key, url, content_type, bytes, created_at, last_access)
+                 VALUES (X'01', 'u', 'image/png', 0, 0, 0)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    imagecache::init(state.clone()).await.unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while reconciled_at(&state).await.is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the stamp of the last pass was kept after an unclean shutdown"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(orphan.exists(), "the failed pass removed nothing");
+    assert_eq!(
+        reconciled_at(&state).await,
+        None,
+        "a failed pass is no pass"
+    );
+    state
+        .db_call(|c| {
+            c.execute("DELETE FROM image_cache WHERE key = X'01'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    iptv_core::db::note_clean_shutdown(&state.db_path());
+    drop(state);
+    let state = new_state(dir.path()).await;
+    assert!(!state.unclean_start);
+    imagecache::init(state.clone()).await.unwrap();
+    wait_for_reconcile(&state, began).await;
+    assert!(!orphan.exists(), "the owed pass ran after a clean shutdown");
 }
 
 #[tokio::test]

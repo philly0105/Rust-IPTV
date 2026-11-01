@@ -1199,6 +1199,23 @@ impl ImageCache {
             tracing::debug!(error = %err, "could not record the image cache reconcile");
         }
     }
+
+    /// Drops the stamp of the last pass ([`RECONCILED_KEY`]), so the pass an
+    /// unclean shutdown owes stays owed until one runs to the end: a run
+    /// closed while the pass waits for a quiet database, or a pass that
+    /// fails, would otherwise leave the earlier stamp, and the next clean
+    /// start would skip the crash's orphans for up to a week.
+    async fn forget_reconciled(&self) {
+        let _permit = self.background_gate.acquire().await.ok();
+        let dropped = blocking(&self.pool, &self.db_path, |c| {
+            c.execute("DELETE FROM app_state WHERE key = ?1", [RECONCILED_KEY])?;
+            Ok(())
+        })
+        .await;
+        if let Err(err) = dropped {
+            tracing::debug!(error = %err, "could not drop the image cache reconcile stamp");
+        }
+    }
 }
 
 /// Sleeps until the startup reconcile may start: once no database call has
@@ -1426,13 +1443,19 @@ pub async fn clear(state: &Arc<AppState>) -> CoreResult<ImageCacheStats> {
 /// background reconcile (rows without a file, files without a row) when the
 /// previous run did not shut down cleanly (`AppState::unclean_start`) or the
 /// last reconcile finished [`RECONCILE_EVERY`] ago or longer. It waits for a
-/// quiet database first ([`wait_for_quiet_database`]).
+/// quiet database first ([`wait_for_quiet_database`]). After an unclean
+/// shutdown the last pass's stamp is dropped before that wait, so a pass that
+/// does not run to the end runs again at the next start, clean or not.
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     let cache = cache(&state);
     cache.ready().await?;
     let unclean = state.unclean_start;
     tokio::spawn(async move {
-        if !unclean && cache.reconciled_recently().await {
+        if unclean {
+            // In the task, not awaited by init: boot never waits on the
+            // background gate or an import's write lock for this row.
+            cache.forget_reconciled().await;
+        } else if cache.reconciled_recently().await {
             tracing::debug!("image cache reconcile skipped: clean shutdown and a recent pass");
             return;
         }

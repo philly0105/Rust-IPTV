@@ -437,12 +437,12 @@ function gridKeyHash(key: QueryKey): string {
     byWindow = new Map();
     gridHashes.set(args.refs, byWindow);
   }
-  const window = `${args.from}|${args.to}`;
-  let hash = byWindow.get(window);
+  const span = `${args.from}|${args.to}`;
+  let hash = byWindow.get(span);
   if (hash === undefined) {
     if (byWindow.size >= GRID_HASH_WINDOWS) byWindow.clear();
     hash = hashKey(key);
-    byWindow.set(window, hash);
+    byWindow.set(span, hash);
   }
   return hash;
 }

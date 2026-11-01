@@ -3,6 +3,7 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { Outlet } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Settings } from '@/api/types';
@@ -47,6 +48,7 @@ const settingsRoutes = await eagerRoutes((await import('../routes')).settingsRou
 const { useToastStore } = await import('@/ui');
 const { queryClient, rpcKey } = await import('@/api/query');
 const { useUpdateSettings } = await import('../lib/useUpdateSettings');
+const { currentLastRoute, useLastRoutePersistence } = await import('@/shell/effects');
 
 let current: Settings;
 const patches = () => rpcMock.callsOf('settings.update').map((a) => (a as { patch: Record<string, unknown> }).patch);
@@ -92,6 +94,45 @@ describe('Reset settings (D9)', () => {
 
     lastToast()!.action!.onClick();
     await waitFor(() => expect(patches()).toEqual([{ coverSize: 'large', showDashboard: false }]));
+  });
+
+  /** The shell's screen save, which sends lastRoute to the core but leaves the settings cache alone. */
+  function ScreenSaver() {
+    useLastRoutePersistence(true, undefined);
+    return <Outlet />;
+  }
+
+  async function resetAfterScreenSave() {
+    // The cache, like the core, starts on the guide; the save below reaches the core only.
+    current = settings({ coverSize: 'large', lastRoute: '/epg' });
+    rpcMock.handlers['settings.reset'] = () => {
+      current = settings();
+      return current;
+    };
+    renderAt([{ element: <ScreenSaver />, children: settingsRoutes }], '/settings/backup');
+    fireEvent.click(await screen.findByTestId('settings-reset'));
+    // Leaving the window saves the screen at once, without the debounce.
+    act(() => void window.dispatchEvent(new Event('pagehide')));
+    const cached = () => queryClient.getQueryData<Settings>(rpcKey('settings.get'));
+    await waitFor(() => expect(currentLastRoute(cached())).toBe('/settings/backup'));
+    expect(cached()?.lastRoute).toBe('/epg');
+    fireEvent.click(within(await screen.findByRole('dialog')).getByTestId('settings-reset-confirm'));
+    await waitFor(() => expect(lastToast()?.title).toBe('Settings reset to defaults'));
+  }
+
+  it("Undo puts back the screen this window saved last, not the cache's older one", async () => {
+    await resetAfterScreenSave();
+    lastToast()!.action!.onClick();
+    await waitFor(() => expect(patches()).toHaveLength(2));
+    expect(patches()[1]).toEqual({ coverSize: 'large', lastRoute: '/settings/backup' });
+  });
+
+  it('Undo keeps a screen saved after the reset', async () => {
+    await resetAfterScreenSave();
+    current = { ...current, lastRoute: '/live' };
+    lastToast()!.action!.onClick();
+    await waitFor(() => expect(patches()).toHaveLength(2));
+    expect(patches()[1]).toEqual({ coverSize: 'large' });
   });
 
   it('a failed reset says so and changes nothing', async () => {

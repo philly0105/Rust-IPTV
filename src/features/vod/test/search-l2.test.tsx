@@ -4,7 +4,7 @@
  * L2-perf-desktop-11: one catalog.search per query. L2-visual-8: chips and badges truncate.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -113,9 +113,12 @@ function GuideStub() {
   return <p>{`guide ${location.search} ${title ?? ''}`}</p>;
 }
 
-/** The app frame: header field, a rail link that stays mounted, and the routes. */
-function renderApp(path: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+/**
+ * The app frame: header field, a rail link that stays mounted, and the routes. Unused answers are
+ * dropped at once unless `gcTime` keeps them, as the app's cache does.
+ */
+function renderApp(path: string, { gcTime = 0 }: { gcTime?: number } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime } } });
   const utils = render(
     <QueryClientProvider client={client}>
       <I18nextProvider i18n={i18n}>
@@ -140,6 +143,20 @@ function renderApp(path: string) {
 
 const field = () => screen.getByLabelText('Header search');
 const focusedIndex = () => document.activeElement?.getAttribute('data-grid-index');
+
+/**
+ * Fakes the timers the page's pauses run on, so a test types at an exact pace: real sleeps under
+ * load can outlast a pause and send a search the test says is never sent.
+ */
+const fakePauses = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+const PASS_STEP_MS = 25;
+/**
+ * Moves the faked clock on in short steps. React renders what a timer changed when its act ends,
+ * so each step lets the page render, and start the next pause, before the clock goes on.
+ */
+async function pass(ms: number): Promise<void> {
+  for (let left = ms; left > 0; left -= PASS_STEP_MS) await act(() => vi.advanceTimersByTimeAsync(Math.min(PASS_STEP_MS, left)));
+}
 
 describe('L1-vod-3: search focus and keyboard', () => {
   it('opened from a link, the header field takes focus even from the rail link that opened it', async () => {
@@ -225,18 +242,22 @@ describe('L2-perf-ui-5: a new query never blanks the results', () => {
 describe('VD-6: portal searches wait for a pause and three characters', () => {
   const field = () => screen.getByLabelText('Header search') as HTMLInputElement;
   const portalQueries = () => [...new Set(callsOf('stalker.search').map((c) => (c.args as { query: string }).query))];
+  afterEach(() => vi.useRealTimers());
 
   it('sends one portal search for the word typed, not one per keystroke', async () => {
     sources = [makeSource('src2', 'stalker', 'Beta Portal')];
     rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
     renderApp('/s/src2/search?q=d');
     await screen.findByLabelText('Header search');
-    // Typed letter by letter, faster than the portal pause.
+    fakePauses();
+    // Typed letter by letter, faster than the portal pause (450 ms).
     for (const q of ['du', 'dun', 'dune', 'dune ', 'dune p', 'dune pa']) {
       fireEvent.change(field(), { target: { value: q } });
-      await new Promise((r) => setTimeout(r, 120));
+      await pass(120);
     }
-    await waitFor(() => expect(portalQueries()).toEqual(['dune pa']), { timeout: 2000 });
+    expect(portalQueries()).toEqual([]);
+    await pass(500);
+    expect(portalQueries()).toEqual(['dune pa']);
     // The library search still follows the field at its own pace.
     expect(callsOf('catalog.search').length).toBeGreaterThan(1);
   });
@@ -427,24 +448,54 @@ describe('guide programmes in search (F-SEARCH-PROGRAMMES)', () => {
   });
 
   const programmeQueries = () => callsOf('epg.search').map((c) => (c.args as { query: string }).query);
+  afterEach(() => vi.useRealTimers());
 
   it('asks every source for a query the page opens with, without waiting for a pause', async () => {
+    fakePauses();
     renderApp('/search?q=alpha');
-    // Well inside the programme search's pause: the opening query is not held back.
-    await waitFor(() => expect(programmeQueries()).toEqual(['alpha', 'alpha']), { timeout: 200 });
+    // Well inside the programme search's pause (300 ms): the opening query is not held back.
+    await pass(50);
+    expect(programmeQueries()).toEqual(['alpha', 'alpha']);
   });
 
   it('searches the guide for the word typed once it rests, not for every prefix on the way', async () => {
     renderApp('/search?q=b');
     await screen.findByLabelText('Header search');
-    // Typed letter by letter, faster than the programme pause but slower than the library's.
+    fakePauses();
+    // Typed letter by letter, faster than the programme pause (300 ms) but slower than the library's.
     for (const q of ['br', 'bre', 'brea', 'break', 'breaki', 'breakin', 'breaking']) {
       fireEvent.change(field(), { target: { value: q } });
-      await new Promise((r) => setTimeout(r, 150));
+      await pass(150);
     }
-    await waitFor(() => expect(programmeQueries()).toEqual(['breaking', 'breaking']), { timeout: 2000 });
+    expect(programmeQueries()).toEqual([]);
+    await pass(350);
+    expect(programmeQueries()).toEqual(['breaking', 'breaking']);
     // The library search follows the field at its own pace.
     expect(callsOf('catalog.search').length).toBeGreaterThan(2);
+  });
+
+  it('shows a cached answer at once when Backspace returns to its query, and asks nothing', async () => {
+    rpcMock.handlers['epg.search'] = (a) => {
+      const { sourceId, query } = a as { sourceId: string; query: string };
+      if (sourceId === 'src1') return [programmeHit('src1', 'Alpha Report', start + 600_000)];
+      return query === 'alpha' ? [programmeHit('src2', 'Alpha Hour', start)] : [];
+    };
+    // The app keeps unused answers for minutes (the query client's default), not for no time at all.
+    renderApp('/search?q=alpha&type=programmes', { gcTime: 600_000 });
+    const list = await screen.findByTestId('search-programmes');
+    await waitFor(() => expect(within(list).getAllByRole('button')).toHaveLength(2));
+    fakePauses();
+    fireEvent.change(field(), { target: { value: 'alpha r' } });
+    await pass(500);
+    expect(programmeQueries()).toEqual(['alpha', 'alpha', 'alpha r', 'alpha r']);
+    expect(screen.queryByText('Alpha Hour')).toBeNull();
+    fireEvent.change(field(), { target: { value: 'alpha' } });
+    // The field's 100 ms pause has passed, the programme search's 300 ms has not.
+    await pass(150);
+    expect(screen.getByText('Alpha Hour')).toBeTruthy();
+    expect(screen.getByText('Alpha Report')).toBeTruthy();
+    await pass(500);
+    expect(programmeQueries()).toHaveLength(4);
   });
 
   it('keeps the answered programmes, narrowed to the typed text, while the longer query waits', async () => {

@@ -34,7 +34,10 @@ const UNHANDLED_ROUTE = {
   source: 'network',
 };
 
-/** Registers the static routes where supported. Never rejects: without them the fetch handler still answers. */
+/**
+ * Registers the static routes where supported. Never rejects: without them the fetch handler
+ * still answers.
+ */
 function addStaticRoutes(event) {
   if (typeof event.addRoutes !== 'function') return undefined;
   const add = (rules) => new Promise((resolve) => resolve(event.addRoutes(rules)));

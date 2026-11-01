@@ -35,7 +35,11 @@ export interface EpisodeQueueContext {
 
 /** Seconds before the end at which the next entry's URL is fetched again. */
 export const REFRESH_LEAD_SECONDS = 90;
-/** Parallel `streamUrl` calls while building a queue. */
+/**
+ * Parallel `streamUrl` calls in {@link resolveQueue}. A queue build asks for
+ * {@link RESOLVE_AHEAD} episodes only, so it makes one call; the pool serves a
+ * caller that resolves several.
+ */
 const RESOLVE_CONCURRENCY = 4;
 
 /**

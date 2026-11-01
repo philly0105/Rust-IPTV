@@ -1,7 +1,7 @@
 /**
  * TanStack Query bindings (SPEC C1). Query keys are `[cmd, args]`.
  * Only errors with `retryable` are retried, at most twice; provider commands
- * only when the app's own server failed the call (`retryProviderError`).
+ * not when the provider failed, which the core already retried (`retryProviderError`).
  */
 
 import {
@@ -34,15 +34,20 @@ function retryRetryable(failureCount: number, error: unknown): boolean {
  */
 const PROVIDER_PREFIXES: readonly string[] = ['stalker.', 'xtream.', 'tmdb.'];
 
+/** The codes a provider's failure reaches the UI with, once the core's own attempts are spent. */
+const PROVIDER_FAILURE_CODES: ReadonlySet<string> = new Set(['network', 'timeout', 'server']);
+
 /**
- * Retry for provider commands: only when the app's own server, or a proxy in front of it, failed
- * the call (`details.transport`, web only), which the core never saw. A provider error the core
- * already retried shows at once; it stays `retryable`, so the page's Retry button still works.
+ * Retry for provider commands. A provider error the core already retried shows at once; it stays
+ * `retryable`, so the page's Retry button still works. Everything else retryable is retried as for
+ * any command: a local failure the core does not retry (a busy database), or the app's own server,
+ * or a proxy in front of it, failing the call (`details.transport`, web only), which the core never saw.
  */
 function retryProviderError(failureCount: number, error: unknown): boolean {
   if (!retryRetryable(failureCount, error)) return false;
-  const d = (error as RpcError).details;
-  return typeof d === 'object' && d !== null && 'transport' in d;
+  const { code, details } = error as RpcError;
+  if (!PROVIDER_FAILURE_CODES.has(code)) return true;
+  return typeof details === 'object' && details !== null && 'transport' in details;
 }
 
 /** Any RPC command name, as used in key[0]. */

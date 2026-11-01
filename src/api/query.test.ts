@@ -205,6 +205,17 @@ describe('retries', () => {
     }
   });
 
+  it('retries a provider command that failed locally, which the core does not retry', () => {
+    const busy = new RpcError('db', 'database is locked', true);
+    for (const cmd of ['stalker.movies', 'xtream.vodDetail', 'tmdb.movie']) {
+      expect(retry(cmd)(0, busy)).toBe(true);
+      expect(retry(cmd)(1, busy)).toBe(true);
+      expect(retry(cmd)(2, busy)).toBe(false);
+      // Not busy: the same answer again.
+      expect(retry(cmd)(0, new RpcError('db', 'no such table', false))).toBe(false);
+    }
+  });
+
   it('lets a per-query retry win over the provider rule', () => {
     expect(queryClient.defaultQueryOptions({ queryKey: ['tmdb.movie', null], retry: false }).retry).toBe(false);
   });
@@ -220,6 +231,15 @@ describe('retries', () => {
     expect(await b).toBe(timeout);
     expect(panel).toHaveBeenCalledTimes(1);
     expect(local).toHaveBeenCalledTimes(3);
+  });
+
+  it('answers a provider query on the retry after a busy database', async () => {
+    vi.useFakeTimers();
+    const detail = vi.fn().mockRejectedValueOnce(new RpcError('db', 'database is locked', true)).mockResolvedValueOnce({ title: 'Dune' });
+    const a = queryClient.fetchQuery({ queryKey: ['xtream.vodDetail', { id: 7 }], queryFn: detail });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await a).toEqual({ title: 'Dune' });
+    expect(detail).toHaveBeenCalledTimes(2);
   });
 });
 

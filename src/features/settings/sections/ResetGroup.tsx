@@ -3,11 +3,25 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
+import type { Settings } from '@/api/types';
+import { currentLastRoute } from '@/shell/effects';
 
 import { Button, Dialog, useToast } from '@/ui';
 import { SettingsGroup, SettingsRow } from '../components';
 import { diffSettings, type SettingsPatch } from '../lib/patch';
 import { useResetSettings } from '../lib/useUpdateSettings';
+
+/**
+ * What Undo puts back: the settings from before the reset, with the screen restored at start
+ * taken apart. The cached `lastRoute` can be older than the screen this window saved last (a
+ * screen save's reply stays out of the cache, see `currentLastRoute`), so that screen goes back
+ * instead. A screen saved since the reset (`now` has one) is the newest and stays.
+ */
+function undoTarget(before: Settings, now: Settings | null): Settings {
+  const { lastRoute: _cached, ...rest } = before;
+  const lastRoute = now?.lastRoute ?? currentLastRoute(before);
+  return lastRoute === undefined ? rest : { ...rest, lastRoute };
+}
 
 /**
  * Puts every setting back to its default after a confirm. Sources, favorites,
@@ -37,7 +51,8 @@ export function ResetGroup({ update }: { update: (patch: SettingsPatch) => Promi
           void rpc('settings.get')
             .catch(() => null)
             .then((now) => {
-              const patch = now ? diffSettings(now, before) : before;
+              const target = undoTarget(before, now);
+              const patch = now ? diffSettings(now, target) : target;
               if (Object.keys(patch).length > 0) void update(patch);
             });
         },

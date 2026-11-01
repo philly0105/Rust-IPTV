@@ -11,7 +11,7 @@ import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
 import { onAppEvent } from '@/api/events';
 import { invalidate, queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
 import type { CatalogSearchResult } from '@/api/rpc';
-import { RpcError, rpcRaw } from '@/api/transport';
+import { RpcError, rpcRaw, type RpcArgs } from '@/api/transport';
 import type {
   ItemRef,
   Page,
@@ -501,11 +501,16 @@ export interface SetWatchedArgs {
   series?: boolean;
 }
 
+/** Most episode ids the core takes in one `userstate.setWatched` (its MAX_WATCHED_EPISODES). */
+export const MAX_WATCHED_EPISODES = 10_000;
+
 /**
  * Marks a movie, or a set of episodes, watched or unwatched through
  * `userstate.setWatched` (B2-fix1), then refreshes positions. A set of
  * episodes is one call: the core writes them, then the series row, in one
  * transaction, so a long series is not hundreds of writes queued at the core.
+ * A set over the core's cap goes in several calls, one after another, and
+ * only the last sets the series row, so it still follows its episodes.
  */
 export function useSetWatched() {
   const qc = useQueryClient();
@@ -516,7 +521,12 @@ export function useSetWatched() {
         if (!episodeIds || series) await rpcRaw('userstate.setWatched', { ref, watched });
         return;
       }
-      await rpcRaw('userstate.setWatched', { ref, episodeIds, watched, ...(series ? { series } : {}) });
+      for (let at = 0; at < episodeIds.length; at += MAX_WATCHED_EPISODES) {
+        const ids = episodeIds.slice(at, at + MAX_WATCHED_EPISODES);
+        const last = at + MAX_WATCHED_EPISODES >= episodeIds.length;
+        const args: RpcArgs<'userstate.setWatched'> = { ref, episodeIds: ids, watched, ...(series && last ? { series } : {}) };
+        await rpcRaw('userstate.setWatched', args);
+      }
     },
     onSettled: () => invalidateWatched(qc),
   });

@@ -15,6 +15,7 @@ import { useRecentlyAdded, useSource } from '@/features/vod/hooks/queries';
 
 import {
   CHANNEL_PAGE_SIZE,
+  GUIDE_MODULE_WAIT_MS,
   categoriesArgs,
   channelPageArgs,
   homeContinueArgs,
@@ -194,6 +195,37 @@ describe('the TV guide', () => {
     await waitFor(() => expect(calls('catalog.channels')).toHaveLength(1));
     await new Promise((r) => setTimeout(r, 0));
     expect(grid).not.toHaveBeenCalled();
+  });
+
+  it('on a cold launch, waits for the guide module and asks for the first chunk once it loads', async () => {
+    // The channel page answers while the guide's route chunks still load.
+    setGuideGridPrefetch(null);
+    sources.channels = [channel(0), channel(1)];
+    prefetchScreenData('/epg?source=s1');
+    await waitFor(() => expect(calls('catalog.channels')).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(grid).not.toHaveBeenCalled();
+    setGuideGridPrefetch(grid);
+    await waitFor(() => expect(grid).toHaveBeenCalledTimes(1));
+    expect(grid.mock.calls[0]![0]).toEqual(refs(2));
+    expect(grid.mock.calls[0]![2]).toEqual(sources.settings);
+  });
+
+  it('stops waiting for a guide module that has not loaded within the wait', async () => {
+    setGuideGridPrefetch(null);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      sources.channels = [channel(0)];
+      prefetchScreenData('/epg?source=s1');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(calls('catalog.channels')).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(GUIDE_MODULE_WAIT_MS);
+      setGuideGridPrefetch(grid);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(grid).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

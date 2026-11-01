@@ -256,6 +256,20 @@ describe('add failure offers a retry', () => {
     await screen.findByTestId('add-source-error');
     expect(input(/^Playlist URL/).getAttribute('aria-invalid')).toBe('true');
   });
+
+  it('marks the server URL for a bad gateway answered without the core', async () => {
+    rpcMock.handlers['sources.add'] = () => {
+      throw new RpcError('network', 'HTTP 502 Bad Gateway', undefined, { transport: 'http' });
+    };
+    await openAdd('Xtream Codes');
+    type(/^Name/, 'XC');
+    type(/^Server URL/, 'http://xt.example.com:8080');
+    type(/^Username/, 'alice');
+    type(/^Password/, 'pw');
+    fireEvent.click(screen.getByTestId('add-source-submit'));
+    await screen.findByTestId('add-source-error');
+    expect(input(/^Server URL/).getAttribute('aria-invalid')).toBe('true');
+  });
 });
 
 describe('wrong URL (stream, web page, oversized download)', () => {
@@ -358,6 +372,15 @@ describe('fieldForError', () => {
     expect(fieldForError({ code: 'timeout' }, 'xtream')).toBeNull();
     // The app's own backend being down says nothing about the form.
     expect(fieldForError({ code: 'network', details: { transport: 'unreachable' } }, 'xtream')).toBeNull();
+  });
+
+  it('marks the address for an HTTP error that carries no core payload', async () => {
+    const { fieldForError } = await import('../lib/errors');
+    // transport.ts tags a 502/503 as `network` and a 404 as `not_found`, with `transport: 'http'`.
+    expect(fieldForError({ code: 'network', details: { transport: 'http' } }, 'xtream')).toBe('xtream.serverUrl');
+    expect(fieldForError({ code: 'network', details: { transport: 'http' } }, 'stalker')).toBe('stalker.portalUrl');
+    expect(fieldForError({ code: 'not_found', details: { transport: 'http' } }, 'm3u', 'url')).toBe('m3u.url');
+    expect(fieldForError({ code: 'timeout', details: { transport: 'http' } }, 'xtream')).toBeNull();
   });
 });
 

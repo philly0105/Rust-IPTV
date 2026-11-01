@@ -95,14 +95,42 @@ export function guideCategoriesArgs(sourceId: string): RpcArgs<'catalog.categori
 export type GuideGridPrefetch = (refs: ItemRef[], params: URLSearchParams, settings: Settings | undefined) => void;
 
 let guideGrid: GuideGridPrefetch | null = null;
+/** Guide prefetches whose channel page answered before the guide module had loaded. */
+const guideGridWaiters = new Set<(fn: GuideGridPrefetch) => void>();
 
 /**
- * Set by the guide page's module as it loads. The grid's window follows the page's width, which
- * only a guide laid out earlier in the session knows, and its arguments are the page's own; until
- * then the function asks for nothing. Kept here as a hook, so no guide code joins the entry chunk.
+ * How long a guide prefetch waits for the guide module once its channel page has answered. On a
+ * cold launch into the guide the page answers first, while the route's chunks still load; a load
+ * slower than this leaves the first grid chunk to the page, and a prefetch the user moved away
+ * from does not ask for it long after.
+ */
+export const GUIDE_MODULE_WAIT_MS = 5_000;
+
+/**
+ * Set by the guide page's module as it loads: the grid's arguments are the page's own (its window
+ * follows the page's width and zoom). Kept here as a hook, so no guide code joins the entry
+ * chunk. A prefetch waiting for it asks at once.
  */
 export function setGuideGridPrefetch(fn: GuideGridPrefetch | null): void {
   guideGrid = fn;
+  if (!fn) return;
+  const waiting = [...guideGridWaiters];
+  guideGridWaiters.clear();
+  for (const resume of waiting) resume(fn);
+}
+
+/** The guide module's grid prefetch: now when it has loaded, else once it loads, else null after `waitMs`. */
+function guideGridPrefetch(waitMs: number): Promise<GuideGridPrefetch | null> {
+  if (guideGrid) return Promise.resolve(guideGrid);
+  return new Promise((resolve) => {
+    const resume = (fn: GuideGridPrefetch | null) => {
+      clearTimeout(timer);
+      guideGridWaiters.delete(resume);
+      resolve(fn);
+    };
+    const timer = setTimeout(() => resume(null), waitMs);
+    guideGridWaiters.add(resume);
+  });
 }
 
 /** `catalog.recentlyAdded` for the recently added rail of a source kept in SQLite (not Stalker). */
@@ -179,10 +207,10 @@ function prefetchVodLanding(sourceId: string, kind: 'movie' | 'series'): void {
 
 /**
  * The guide's first data, as EpgGridPage asks it: its source (the URL's, else the one browsed
- * last, else the first with live channels), the source's groups, then the first channel page and,
- * once a window has been laid out this session, the first grid chunk for it. A favorites or list
- * view asks for its list instead; a `focus` link opens elsewhere in the list, so its first chunk
- * is left to the page.
+ * last, else the first with live channels), the source's groups, then the first channel page and
+ * the first grid chunk for its rows, once the guide module has loaded (waited for up to
+ * GUIDE_MODULE_WAIT_MS). A favorites or list view asks for its list instead; a `focus` link opens
+ * elsewhere in the list, so its first chunk is left to the page.
  */
 function prefetchGuide(params: URLSearchParams): void {
   void queryClient
@@ -197,9 +225,12 @@ function prefetchGuide(params: URLSearchParams): void {
       if (view?.startsWith('list:') && view.length > 5) return prefetch('lists.items', { id: view.slice(5) });
       const page = await fetched('catalog.channels', channelPageArgs({ sourceId, categoryId: params.get('category') ?? undefined }, 0));
       const refs = (page as Page<Channel> | undefined)?.items.map((c) => c.ref) ?? [];
-      if (refs.length === 0 || params.get('focus') || !guideGrid) return;
-      const settings = await queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpcRaw('settings.get') });
-      guideGrid(refs, params, settings as Settings | undefined);
+      if (refs.length === 0 || params.get('focus')) return;
+      const [grid, settings] = await Promise.all([
+        guideGridPrefetch(GUIDE_MODULE_WAIT_MS),
+        queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpcRaw('settings.get') }),
+      ]);
+      grid?.(refs, params, settings as Settings | undefined);
     })
     .catch(() => undefined);
 }

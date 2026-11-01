@@ -1,4 +1,4 @@
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import type { Virtualizer } from '@tanstack/react-virtual';
 import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
@@ -9,7 +9,7 @@ import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearch
 import { useRpcQuery } from '@/api/query';
 import { rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type GuideSearchHit, type Page as PageOf, type RecentEntry, type SeriesItem, type Source, type VodItem } from '@/api/types';
-import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
+import { guideHitLink, programmeAnswersFresh, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
@@ -142,14 +142,17 @@ const NO_PROGRAMMES: GuideSearchHit[] = [];
 
 /**
  * Programmes for `query` once it has rested for PROGRAMME_DEBOUNCE_MS. A query the page opens
- * with goes out at once, and a cleared one clears at once. While a newer search waits or loads,
- * the last answer stays on screen narrowed to the typed text, as the catalog's preview does, so
- * the rows neither flash away on each key nor show another query's programmes.
- * `pending` holds until the typed text has its answer.
+ * with goes out at once, a cleared one clears at once, and one whose answers are cached and fresh
+ * (Backspace to a query asked a moment ago) shows at once, since asking it sends nothing. While a
+ * newer search waits or loads, the last answer stays on screen narrowed to the typed text, as the
+ * catalog's preview does, so the rows neither flash away on each key nor show another query's
+ * programmes. `pending` holds until the typed text has its answer.
  */
 function useRestedProgrammeSearch(sourceIds: readonly string[], query: string, offsetMinutes: number): { hits: GuideSearchHit[]; pending: boolean } {
+  const qc = useQueryClient();
   const rested = useDebounced(query, PROGRAMME_DEBOUNCE_MS);
-  const asked = query ? rested : '';
+  const cached = !!query && rested !== query && programmeAnswersFresh(qc, sourceIds, query, { limit: PROGRAMME_LIMIT, offsetMinutes });
+  const asked = !query ? '' : cached ? query : rested;
   const search = useProgrammeSearch(sourceIds, asked, { enabled: !!asked, limit: PROGRAMME_LIMIT, offsetMinutes });
   const pending = asked !== query || search.pending;
   const [settled, setSettled] = useState({ query: asked, hits: search.hits });

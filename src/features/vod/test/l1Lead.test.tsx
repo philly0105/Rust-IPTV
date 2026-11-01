@@ -2,7 +2,8 @@
 // toast per series (L1-vod-14), a fresh visit opens the Resume season (L1-vod-11), a Back control
 // for the detail page, in the shell header (L1-vod-2), and a designed state for a removed source (L1-vod-13).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +15,7 @@ import { BackButton, useToastStore } from '@/ui';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
+import { MAX_WATCHED_EPISODES, useSetWatched } from '../hooks/queries';
 import { forgetSpots, rememberSeason } from '../hooks/useScrollMemory';
 import { seriesWatchedWrite } from '../lib/seriesWatched';
 import { currentLocation, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
@@ -127,6 +129,20 @@ describe('SeriesDetailPage watched marks (L1-vod-1, L1-vod-14)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Mark series watched' }));
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     expect(callsOf('userstate.setWatched')).toEqual([{ ref: sref, episodeIds: eps.map((e) => e.id), watched: true, series: true }]);
+  });
+
+  it("a set over the core's cap goes in several calls, the series row with the last", async () => {
+    const ids = Array.from({ length: 2 * MAX_WATCHED_EPISODES + 5 }, (_, i) => `x${i}`);
+    const client = new QueryClient();
+    const { result } = renderHook(() => useSetWatched(), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+    await act(() => result.current.mutateAsync({ ref: sref, episodeIds: ids, watched: true, series: true }));
+    const sent = callsOf('userstate.setWatched') as { episodeIds: string[]; series?: boolean }[];
+    expect(MAX_WATCHED_EPISODES).toBe(10_000);
+    expect(sent.map((a) => a.episodeIds.length)).toEqual([10_000, 10_000, 5]);
+    expect(sent.map((a) => a.series)).toEqual([undefined, undefined, true]);
+    expect(sent.flatMap((a) => a.episodeIds)).toEqual(ids);
   });
 
   it('marking seasons one after another keeps one toast, naming the season', async () => {

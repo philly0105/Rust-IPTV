@@ -89,9 +89,10 @@ export function fieldForError(
   kind: SourceKind,
   m3uOrigin: M3uOrigin = 'url',
 ): string | null {
-  // The app could not reach its own backend: nothing in the form is wrong.
+  // The app could not reach its own backend: nothing in the form is wrong. An HTTP error without
+  // the core's payload (`transport: 'http'`: a 404, a proxy's 502 or 503) maps by its code like any other.
   const d = err.details;
-  if (d && typeof d === 'object' && 'transport' in d) return null;
+  if (d && typeof d === 'object' && (d as { transport?: unknown }).transport === 'unreachable') return null;
   // A stream, web page or oversized file instead of a playlist: the address is the thing to fix.
   const code = isWrongUrl(err) ? 'not_found' : err.code;
   switch (code) {

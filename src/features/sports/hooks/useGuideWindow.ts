@@ -52,11 +52,11 @@ function gridKeyHash(key: QueryKey): string {
     byWindow = new Map();
     hashes.set(args.refs, byWindow);
   }
-  const window = `${args.from}|${args.to}`;
-  let hash = byWindow.get(window);
+  const span = `${args.from}|${args.to}`;
+  let hash = byWindow.get(span);
   if (hash === undefined) {
     hash = hashKey(key);
-    byWindow.set(window, hash);
+    byWindow.set(span, hash);
   }
   return hash;
 }

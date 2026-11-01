@@ -449,8 +449,12 @@ export interface RpcMap {
   // vod: Run 2 C4.
   /** Refs among the input that are watched (item-level row, empty episode id, watched = 1). 1..500 refs else invalid. */
   'positions.watchedContains': Cmd<{ refs: ItemRef[] }, ItemRef[]>;
-  /** Watched: row kept with watched = true (position = duration when known). Unwatched: row cleared. */
-  'userstate.setWatched': Cmd<{ ref: ItemRef; episodeId?: string; watched: boolean }, void>;
+  /**
+   * Watched: row kept with watched = true (position = duration when known). Unwatched: row cleared.
+   * `episodeIds` marks several episodes in one transaction (at most 10,000, none blank, else
+   * invalid), then with `series` the series' own row; neither goes with `episodeId` (invalid).
+   */
+  'userstate.setWatched': Cmd<{ ref: ItemRef; episodeId?: string; episodeIds?: string[]; series?: boolean; watched: boolean }, void>;
   // vod: preferred-source pins ("Other sources"), one per title match key (`vod_source_pins`, C3).
   /** matchKey blank or over 512 bytes -> invalid. */
   'sourcePins.get': Cmd<{ matchKey: string }, SourcePin | null>;

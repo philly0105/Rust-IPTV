@@ -4,11 +4,11 @@
  * time, and open the guide at the programme a hit names.
  */
 
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, type QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { rpcKey } from '@/api/query';
-import { rpcRaw } from '@/api/transport';
+import { rpcRaw, type RpcArgs } from '@/api/transport';
 import type { GuideSearchHit } from '@/api/types';
 
 import { ms } from '../lib/epgTime';
@@ -43,6 +43,34 @@ export function mergeProgrammeHits(answers: readonly (readonly GuideSearchHit[] 
   return all.slice(0, limit).map((x) => x.hit);
 }
 
+/** How long an answer counts as fresh: the same search again within it sends nothing. */
+const SEARCH_FRESH_MS = 60_000;
+
+/** One source's `epg.search` arguments, for a query already through {@link searchQuery}. */
+function searchArgs(sourceId: string, query: string, range: { from: string; to: string }, limit: number): RpcArgs<'epg.search'> {
+  return { sourceId, query, from: range.from, to: range.to, limit };
+}
+
+/**
+ * True when every source's answer for `raw` is cached and still fresh, so showing it costs no
+ * request. The search page then shows it at once (Backspace to a query asked a moment ago)
+ * instead of after its typing rest.
+ */
+export function programmeAnswersFresh(
+  qc: QueryClient,
+  sourceIds: readonly string[],
+  raw: string,
+  opts: { limit: number; offsetMinutes: number },
+): boolean {
+  const query = searchQuery(raw);
+  if (!query || sourceIds.length === 0) return false;
+  const range = searchWindow(Date.now(), opts.offsetMinutes);
+  return sourceIds.every((sourceId) => {
+    const cached = qc.getQueryCache().find({ queryKey: rpcKey('epg.search', searchArgs(sourceId, query, range, opts.limit)), exact: true });
+    return !!cached && !cached.isStaleByTime(SEARCH_FRESH_MS);
+  });
+}
+
 export interface ProgrammeSearch {
   /** Display-time hits, earliest first; empty while the query is too short. */
   hits: GuideSearchHit[];
@@ -61,17 +89,17 @@ export function useProgrammeSearch(
 ): ProgrammeSearch {
   const query = searchQuery(raw);
   // Floored to 5 minutes, so the query keys hold still between renders.
-  const { from, to } = searchWindow(Date.now(), opts.offsetMinutes);
+  const range = searchWindow(Date.now(), opts.offsetMinutes);
   const on = opts.enabled && !!query;
   const results = useQueries({
     queries: sourceIds.map((sourceId) => {
-      const args = { sourceId, query: query ?? '', from, to, limit: opts.limit };
+      const args = searchArgs(sourceId, query ?? '', range, opts.limit);
       return {
         queryKey: rpcKey('epg.search', args),
         // The signal aborts a search that a newer query replaced.
         queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('epg.search', args, { signal })) as GuideSearchHit[],
         enabled: on,
-        staleTime: 60_000,
+        staleTime: SEARCH_FRESH_MS,
         retry: false,
       };
     }),

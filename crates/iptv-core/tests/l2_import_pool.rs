@@ -558,11 +558,16 @@ async fn newly_gated_writes_leave_reads_free() {
             .await
             .unwrap();
         assert_eq!(v["sourceId"], user);
-        let stored = state
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while state
             .db_call(move |c| iptv_core::account::load(c, user))
             .await
-            .unwrap();
-        assert!(stored.is_some(), "{user} status stored");
+            .unwrap()
+            .is_none()
+        {
+            assert!(Instant::now() < deadline, "{user} status never stored");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
     state.flush_background_writes().await;
     drop(long);

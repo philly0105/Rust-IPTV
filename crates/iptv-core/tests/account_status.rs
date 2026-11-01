@@ -207,19 +207,114 @@ async fn a_failed_check_keeps_the_last_good_fields() {
         .contains(iptv_mock::xtream::PASSWORD));
 
     // The forced check answers before its row is stored (R4-1); the next
-    // one waits for the source's lock until it is, then reuses it.
+    // one reuses it without waiting for that row, which lands after.
     let again = account::status(&env.state, &src.id, true)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(again, s);
-    let id = src.id.clone();
-    let stored = env
-        .state
-        .db_call(move |c| account::load(c, &id))
+    wait_stored(&env.state, &s).await;
+}
+
+/// Waits (up to 5 s) for the background save of `expected` to land.
+async fn wait_stored(
+    state: &std::sync::Arc<iptv_core::AppState>,
+    expected: &account::AccountStatus,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let id = expected.source_id.clone();
+        let row = state
+            .db_read_call(move |c| account::load(c, &id))
+            .await
+            .unwrap();
+        if row.as_ref() == Some(expected) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "never stored: {expected:?}, row {row:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// R4-1 follow-up: a playback failure makes two forced checks of one source
+/// (smart reconnect, then the error screen) a few seconds apart. With
+/// another source's import save holding the write lock, the first check
+/// answers and its row waits for the commit; the second used to wait for
+/// the source's lock, held until that row was stored, so "connection limit
+/// reached" still came once the save committed. It reuses the first answer
+/// now, at once and without a second panel request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_second_forced_check_does_not_wait_for_the_first_ones_row() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let env = env().await;
+    iptv_core::xtream::init(env.state.clone()).await.unwrap();
+    let cfg = json!({
+        "serverUrl": mock.url("/xtream"),
+        "username": iptv_mock::xtream::USER_FULL,
+        "password": iptv_mock::xtream::PASSWORD,
+    })
+    .to_string();
+    env.state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES ('x', 'xtream', 'Panel', ?1)",
+                [cfg],
+            )?;
+            Ok(())
+        })
         .await
         .unwrap();
-    assert_eq!(stored, Some(s));
+    let r = account_router();
+    let before = api_requests(&mock).await;
+
+    // Another source's import save holds the write lock.
+    let holder = rusqlite::Connection::open(env.state.db_path()).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let long = iptv_core::db::long_write();
+
+    let mut answers = Vec::new();
+    for which in ["reconnect", "error screen"] {
+        let t = std::time::Instant::now();
+        let v = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            r.dispatch(
+                env.state.clone(),
+                "account.status",
+                json!({ "sourceId": "x", "refresh": true }),
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("the {which} check waited for the save"))
+        .unwrap();
+        eprintln!("account_status: {which} check in {:?}", t.elapsed());
+        assert_eq!(
+            (v["activeCons"].as_i64(), v["maxConnections"].as_i64()),
+            (Some(2), Some(2)),
+            "{v}"
+        );
+        answers.push(v);
+    }
+    assert_eq!(answers[0], answers[1], "the second check reuses the first");
+    assert_eq!(
+        api_requests(&mock).await,
+        before + 1,
+        "one panel request for both checks"
+    );
+    let stored = env
+        .state
+        .db_read_call(|c| account::load(c, "x"))
+        .await
+        .unwrap();
+    assert_eq!(stored, None, "the row waits for the save's commit");
+
+    // The row lands once the save commits.
+    holder.execute_batch("COMMIT").unwrap();
+    let answer: account::AccountStatus = serde_json::from_value(answers[0].clone()).unwrap();
+    wait_stored(&env.state, &answer).await;
+    drop(long);
 }
 
 /// Portal requests the mock Stalker portal has served so far.

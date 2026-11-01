@@ -4,8 +4,9 @@
 //! are queued; a picture's own request joins the running fetch; warms take
 //! at most [`WARM_PER_HOST`] of one host's slots and [`WARM_MAX`] of all;
 //! requests go past the warms up to [`UPSTREAM_PER_HOST`], and a request
-//! waiting for a slot goes before queued warms; a fetch gives its slots back
-//! before its resize; clearing the cache drops the warms not started; and
+//! waiting for a slot goes before queued warms; a fetch gives its host's slot
+//! back before its resize and the one of all once its body is stored;
+//! clearing the cache drops the warms not started; and
 //! server mode checks every warmed picture against the guard like a request.
 
 use axum::extract::{Request, State};
@@ -338,7 +339,7 @@ async fn requests_go_past_the_warms_and_a_waiting_one_goes_before_them() {
 }
 
 #[tokio::test]
-async fn a_fetch_gives_its_slots_back_before_its_resize() {
+async fn a_fetch_gives_its_host_slot_back_before_its_resize_and_holds_one_of_all() {
     let host = spawn_host(Arc::default(), Duration::ZERO).await;
     let (_dir, state) = new_state().await;
     // No body can be resized: each fetched one waits for a resize slot.
@@ -349,8 +350,14 @@ async fn a_fetch_gives_its_slots_back_before_its_resize() {
         .map(|p| item(&host.url(p), Some(192)))
         .collect();
     imagecache::warm(&state, items).await;
-    // Every warm reached the host, not only the first slots' worth.
-    host.reached(paths.len()).await;
+    // More than one host's share of warms reached the host, so a fetched
+    // body waiting for the resizer no longer holds its host's slot...
+    host.reached(WARM_MAX).await;
+    assert!(WARM_MAX > WARM_PER_HOST);
+    // ...but each still holds a slot of all, so no more than the warms'
+    // share of those bodies waits in memory while nothing is resized.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(host.arrivals().len(), WARM_MAX, "{:?}", host.arrivals());
     drop(resizes);
     let deadline = Instant::now() + Duration::from_secs(10);
     while imagecache::stats(&state).await.unwrap().files < paths.len() as u64 {

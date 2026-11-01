@@ -1,7 +1,7 @@
 //! Loop 3 (core-serve, L3-perf-core-8): server mode compresses RPC replies
-//! and the built UI for clients that accept it (brotli or gzip, 1 KiB and
-//! up), serves precompressed assets as they are, and leaves small replies,
-//! images and clients without `Accept-Encoding` alone.
+//! and the built UI for clients that accept it (brotli at quality 1 or gzip
+//! at level 4, 1 KiB and up), serves precompressed assets as they are, and
+//! leaves small replies, images and clients without `Accept-Encoding` alone.
 
 use axum::http::header;
 use axum::routing::get;
@@ -141,6 +141,70 @@ async fn rpc_replies_are_compressed_for_clients_that_accept_it() {
     let a: Value = serde_json::from_slice(&body).unwrap();
     let b: Value = serde_json::from_slice(&plain).unwrap();
     assert_eq!(a, b, "the same reply, compressed");
+}
+
+/// `body` compressed by a plain tower-http layer at quality `q` for a client
+/// that accepts only `enc`.
+async fn reference(body: &[u8], enc: &str, q: i32) -> Vec<u8> {
+    use tower::ServiceExt;
+    use tower_http::compression::{CompressionLayer, CompressionLevel};
+    let body = body.to_vec();
+    let app = Router::new()
+        .route(
+            "/",
+            get(move || {
+                let body = body.clone();
+                async move { ([(header::CONTENT_TYPE, "application/json")], body) }
+            }),
+        )
+        .layer(CompressionLayer::new().quality(CompressionLevel::Precise(q)));
+    let req = axum::http::Request::builder()
+        .uri("/")
+        .header(header::ACCEPT_ENCODING, enc)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.headers()[header::CONTENT_ENCODING], enc);
+    axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec()
+}
+
+/// R7-2: brotli runs at quality 1 (half the CPU of 4 on every reply) and
+/// gzip stays at level 4 (zlib-rs level 1 is 40-57 % larger), each from its
+/// own layer, and every compressed reply says `Vary: Accept-Encoding` once.
+/// `settings.get` is used because its bytes are the same on every call (a
+/// map reply such as `epg.nowNext` comes out in hash order).
+#[tokio::test]
+async fn brotli_runs_at_quality_1_and_gzip_at_level_4() {
+    assert_eq!(iptv_server::BROTLI_LEVEL, 1);
+    assert_eq!(iptv_server::GZIP_LEVEL, 4);
+    let h = start().await;
+    let args = Value::Null;
+    let plain = h
+        .rpc("settings.get", &args, None)
+        .await
+        .bytes()
+        .await
+        .unwrap();
+    assert!(plain.len() > 1024, "{}", plain.len());
+
+    let br = h
+        .rpc("settings.get", &args, Some("gzip, deflate, br"))
+        .await;
+    assert_eq!(encoding(&br).as_deref(), Some("br"));
+    assert_eq!(br.headers().get_all(header::VARY).iter().count(), 1);
+    let br = br.bytes().await.unwrap();
+    assert_eq!(br.as_ref(), reference(&plain, "br", 1).await.as_slice());
+    assert_ne!(br.as_ref(), reference(&plain, "br", 4).await.as_slice());
+
+    let gz = h.rpc("settings.get", &args, Some("gzip, deflate")).await;
+    assert_eq!(encoding(&gz).as_deref(), Some("gzip"));
+    assert_eq!(gz.headers().get_all(header::VARY).iter().count(), 1);
+    let gz = gz.bytes().await.unwrap();
+    assert_eq!(gz.as_ref(), reference(&plain, "gzip", 4).await.as_slice());
+    assert_eq!(gunzip(&gz), plain.as_ref());
 }
 
 #[tokio::test]

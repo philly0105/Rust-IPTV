@@ -39,8 +39,11 @@
 //! are reused this way, then age out by LRU since the UI stops asking for
 //! them), else from one upstream fetch whose original is not kept. An image
 //! the resizer leaves alone (SVG, GIF, WebP, animated PNG, already narrow
-//! enough, see [`resize`]) is stored and served as the original, and the
-//! decision is remembered in memory so later hints skip the decode.
+//! enough, see [`resize`]) is stored and served as the original. A small one
+//! (up to [`MAX_KEPT_COPY`], logos and most posters) is stored again under
+//! the variant key, so later hints find it with one lookup, after a restart
+//! too; a larger one's decision is remembered in memory only, so later hints
+//! in the session skip the decode.
 //!
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
@@ -110,6 +113,14 @@ static HEAD_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
 const MAX_FAILURES: usize = 4096;
 /// Variant keys remembered as "serve the original" at most.
 const MAX_KEPT: usize = 65_536;
+/// Largest original stored again under a variant key when the resizer
+/// leaves it alone. Kept only in memory, the decision was lost at every
+/// restart: each kept logo then cost three index lookups, a source row
+/// read, a whole-file read and a resize slot again, and a flat palette PNG
+/// wider than the bucket a full decode, resize and encode (1-3 ms on an
+/// N100) whose result was thrown away (R6-2). The copy counts against the
+/// cap a second time, which is small at logo sizes.
+const MAX_KEPT_COPY: u64 = 256 * 1024;
 /// Extension key of the runtime singleton.
 const EXT_KEY: &str = "imagecache";
 
@@ -826,8 +837,8 @@ impl ImageCache {
     /// Fetches, validates and stores one image for flight `id`, and queues
     /// its index row (pending until the writer's batch is done). A variant
     /// job resizes the cached original when there is one, else the fetched
-    /// body, and stores only the result (or only the original, when the
-    /// resizer leaves it alone).
+    /// body, and stores only the result; when the resizer leaves the image
+    /// alone it serves the original, see [`Self::keep_original`].
     async fn download(&self, job: &Job, id: u64) -> Result<Done, ImageError> {
         // An earlier flight may have stored it after the caller looked.
         if let Some(image) = self.lookup(&job.key).await? {
@@ -841,13 +852,12 @@ impl ImageCache {
             if let Some(original) = self.lookup(&base_key).await? {
                 // Evicted between the lookup and the read: fetch it below.
                 if let Ok(body) = tokio::fs::read(&original.path).await {
-                    if let Some(done) = self.store_variant(job, id, width, body).await? {
+                    if let Some(done) = self.store_variant(job, id, width, body, &original).await? {
                         return Ok(Done {
                             fetched: false,
                             ..done
                         });
                     }
-                    self.keep(&job.key);
                     return Ok(Done {
                         image: original,
                         fetched: false,
@@ -905,10 +915,46 @@ impl ImageCache {
                     .await
             }
             resize::Shrunk::Keep => {
-                self.keep(&job.key);
-                self.store(&base_key, &label, id, content_type, body).await
+                // The original first: plain requests and every other
+                // bucket find it under its own key.
+                let copy = (body.len() as u64 <= MAX_KEPT_COPY).then(|| body.clone());
+                let done = self
+                    .store(&base_key, &label, id, content_type.clone(), body)
+                    .await?;
+                self.keep_original(job, id, width, &content_type, copy)
+                    .await;
+                Ok(done)
             }
         }
+    }
+
+    /// Records that the variant `job.key` is served by its original. A
+    /// small original (`copy`, at most [`MAX_KEPT_COPY`]) is stored again
+    /// under the variant key, an ordinary entry that outlives the process;
+    /// a larger one, or a copy that could not be written, is remembered in
+    /// memory ([`Self::keep`]).
+    async fn keep_original(
+        &self,
+        job: &Job,
+        id: u64,
+        width: u32,
+        content_type: &str,
+        copy: Option<Vec<u8>>,
+    ) {
+        if let Some(body) = copy {
+            let label = variant_label(&job.url, width);
+            match self
+                .store(&job.key, &label, id, content_type.to_owned(), body)
+                .await
+            {
+                Ok(_) => return,
+                Err(err) => tracing::debug!(
+                    error = %err,
+                    "could not store a kept image under its variant key"
+                ),
+            }
+        }
+        self.keep(&job.key);
     }
 
     /// Tells the breaker of `host` how a fetch it let through at `started`
@@ -939,18 +985,25 @@ impl ImageCache {
         }
     }
 
-    /// Resizes a cached original for the variant job and stores the copy;
-    /// `None` when the resizer leaves the image alone.
+    /// Resizes the cached `original` (read as `body`) for the variant job and
+    /// stores the copy; `None` when the resizer leaves the image alone (then
+    /// recorded with [`Self::keep_original`]).
     async fn store_variant(
         &self,
         job: &Job,
         id: u64,
         width: u32,
         body: Vec<u8>,
+        original: &CachedImage,
     ) -> Result<Option<Done>, ImageError> {
-        let (shrunk, _) = self.shrink(body, width).await?;
+        let (shrunk, body) = self.shrink(body, width).await?;
         match shrunk {
-            resize::Shrunk::Keep => Ok(None),
+            resize::Shrunk::Keep => {
+                let copy = (body.len() as u64 <= MAX_KEPT_COPY).then_some(body);
+                self.keep_original(job, id, width, &original.content_type, copy)
+                    .await;
+                Ok(None)
+            }
             resize::Shrunk::Resized {
                 content_type, body, ..
             } => {
@@ -1161,13 +1214,16 @@ pub async fn fetch_sized_within(
         }
         None => None,
     };
-    if let Some(image) = cache.lookup(&key).await? {
-        return Ok(image);
-    }
+    // A variant known to be served by its original goes there first: one
+    // lookup instead of a miss on the variant before it (R6-2). A miss falls
+    // through, since a later fetch may give the variant an entry of its own.
     if width.is_some() && cache.is_kept(&key) {
         if let Some(image) = cache.lookup(&cache_key(&url)).await? {
             return Ok(image);
         }
+    }
+    if let Some(image) = cache.lookup(&key).await? {
+        return Ok(image);
     }
     let source = match checked {
         Some(source) => source,

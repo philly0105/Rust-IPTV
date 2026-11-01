@@ -307,6 +307,9 @@ pub fn register(r: &mut RpcRouter) {
                 super::watched::EpisodeMark::Unmarked
             };
             if let Some(ids) = a.episode_ids {
+                // Before the write gate: a bad batch need not wait behind
+                // an import's write to be refused.
+                super::check_watched_episodes(&a.item_ref, &ids)?;
                 let first = ids.first().cloned();
                 let series = a.series;
                 state

@@ -24,7 +24,8 @@
 //!    Before it asks the host it takes an upstream slot: at most
 //!    [`UPSTREAM_PER_HOST`] fetches go to one `host:port` at once and
 //!    [`UPSTREAM_MAX`] in all, so a parallel wall neither floods a provider's
-//!    host nor holds more than a few bodies in memory.
+//!    host nor downloads more than a few bodies at once. The slots go back
+//!    once the body is in: resizing and writing it never hold the host up.
 //!    The body is checked (image type, at most [`MAX_IMAGE_BYTES`]), written
 //!    to a temp name and renamed into place, and the callers are answered.
 //!    The index row is written in the background: a catalog import holds
@@ -56,11 +57,13 @@
 //! upstream fetch, so a cold wall used to be fetched six (server mode: four)
 //! at a time. The UI names the pictures it has queued, and each one that is
 //! not cached is checked like a request (the guard included) and queued
-//! here; queued warms start whenever an upstream slot is free, the newest
-//! batch first. A picture's own request then joins the running fetch or
-//! finds the file. A request that waits for a slot always gets the next free
-//! one before any warm, so the pictures a user scrolled to never wait behind
-//! the warms of a screen they left.
+//! here; queued warms start while fewer than [`WARM_PER_HOST`] of the host's
+//! slots and [`WARM_MAX`] of all are taken, the newest batch first. A
+//! picture's own request then joins the running fetch or finds the file.
+//! Requests may take the slots above the warms' share, so several users of
+//! one server are not held to one browser's pace, and a request that waits
+//! for a slot always gets the next free one before any warm: the pictures a
+//! user scrolled to never wait behind the warms of a screen they left.
 //!
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
@@ -129,13 +132,20 @@ const MAX_FAILURES: usize = 4096;
 /// Variant keys remembered as "serve the original" at most.
 const MAX_KEPT: usize = 65_536;
 /// Upstream fetches at once to one `host:port`, for every caller together.
-/// A little above the browser's six connections, so a warmed wall fills
-/// faster than the browser alone would fetch it, and low enough for a
+/// Requests come at most six at a time from each browser, so this is only
+/// reached by several users of one server, and stays low enough for a
 /// provider's panel that also serves the streams and may count connections.
-pub const UPSTREAM_PER_HOST: usize = 8;
+pub const UPSTREAM_PER_HOST: usize = 16;
+/// Of a host's [`UPSTREAM_PER_HOST`] slots, warms start only while fewer
+/// than this many are taken: a little above the browser's six connections,
+/// so a warmed wall fills faster than the browser alone would fetch it.
+pub const WARM_PER_HOST: usize = 8;
 /// Upstream fetches at once in all. Each holds its whole body in memory (up
-/// to [`MAX_IMAGE_BYTES`]) until its copy is stored.
-pub const UPSTREAM_MAX: usize = 16;
+/// to [`MAX_IMAGE_BYTES`]) while it downloads.
+pub const UPSTREAM_MAX: usize = 32;
+/// Of the [`UPSTREAM_MAX`] slots, warms start only while fewer than this
+/// many are taken.
+pub const WARM_MAX: usize = 16;
 /// Pictures one [`warm`] takes at most, and warms queued at most: about
 /// one settled screen of posters or logos with the rows just past its edge.
 pub const WARM_MAX_ITEMS: usize = 48;
@@ -557,7 +567,7 @@ struct ImageCache {
     next_flight: AtomicU64,
     /// Resizes running at once ([`resize_slots`]): a poster wall's first
     /// view queued one per poster, all decoding at the same time.
-    resizes: Semaphore,
+    resizes: Arc<Semaphore>,
     /// Image hosts that stopped answering.
     breakers: Mutex<Breakers>,
     /// Upstream slots per `host:port` ([`UPSTREAM_PER_HOST`] each).
@@ -597,7 +607,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
             touched: Mutex::default(),
             kept: Mutex::default(),
             next_flight: AtomicU64::new(1),
-            resizes: Semaphore::new(resize_slots()),
+            resizes: Arc::new(Semaphore::new(resize_slots())),
             breakers: Mutex::default(),
             host_slots: Mutex::default(),
             upstream: Arc::new(Semaphore::new(UPSTREAM_MAX)),
@@ -901,7 +911,8 @@ impl ImageCache {
 
     /// The detached body of one flight: it runs to the end even when every
     /// caller went away, so the next request finds the image stored. Its
-    /// upstream slots are free again when it ends, so a waiting warm may go.
+    /// upstream slots go back once its body is in (see [`Self::download`])
+    /// or when it ends, and a queued warm may go then.
     async fn run_flight(
         self: Arc<Self>,
         flight_key: String,
@@ -953,8 +964,14 @@ impl ImageCache {
     /// cached variant wider than it, else the fetched body, and stores only
     /// the result (or only the original, when the resizer leaves it alone).
     /// The upstream fetch uses `slots` when a warm took them, else waits for
-    /// its own.
-    async fn download(&self, job: &Job, id: u64, slots: Option<Slots>) -> Result<Done, ImageError> {
+    /// its own, and gives them back once the body is in, before the resize
+    /// and the write.
+    async fn download(
+        self: &Arc<Self>,
+        job: &Job,
+        id: u64,
+        slots: Option<Slots>,
+    ) -> Result<Done, ImageError> {
         // An earlier flight may have stored it after the caller looked.
         if let Some(image) = self.lookup(&job.key).await? {
             return Ok(Done {
@@ -1003,7 +1020,7 @@ impl ImageCache {
         let authority = Authority::of(&job.url);
         // Taken before the breaker is asked and the clock starts: time spent
         // queued behind the host's other fetches is not the host's silence.
-        let _slots = match slots {
+        let slots = match slots {
             Some(slots) => slots,
             None => self.upstream_slots(authority.as_ref()).await,
         };
@@ -1043,6 +1060,10 @@ impl ImageCache {
                 fetched.as_ref().err(),
             );
         }
+        // The host is done with: a request waiting for a slot takes it at
+        // once, else a queued warm, while this body is resized and written.
+        drop(slots);
+        self.pump_warms();
         let (content_type, body) = fetched?;
         let label = job.url.to_string();
         let Some(width) = job.width else {
@@ -1114,7 +1135,7 @@ impl ImageCache {
     /// Waits for an upstream slot of `host`, then for one of all. In that
     /// order, so fetches queued behind one slow host hold no slot that
     /// another host could use. A waiting request gets each freed slot before
-    /// a warm does: [`Self::free_slots`] takes only slots nobody waits for.
+    /// a warm does: [`Self::warm_slots`] takes only slots nobody waits for.
     async fn upstream_slots(&self, host: Option<&Authority>) -> Slots {
         // Never closed, so a permit always comes.
         let host = match host {
@@ -1128,13 +1149,24 @@ impl ImageCache {
         }
     }
 
-    /// [`Self::upstream_slots`] without waiting: `None` while either is
-    /// taken or wanted by a waiting request.
-    fn free_slots(&self, host: Option<&Authority>) -> Option<Slots> {
+    /// [`Self::upstream_slots`] for a warm, without waiting: `None` while
+    /// [`WARM_PER_HOST`] of the host's slots or [`WARM_MAX`] of all are
+    /// taken, or a waiting request wants them (a slot freed while a request
+    /// waits goes straight to it, so none is free then).
+    fn warm_slots(&self, host: Option<&Authority>) -> Option<Slots> {
         let host = match host {
-            Some(host) => Some(self.host_slots(host).try_acquire_owned().ok()?),
+            Some(host) => {
+                let slots = self.host_slots(host);
+                if slots.available_permits() <= UPSTREAM_PER_HOST - WARM_PER_HOST {
+                    return None;
+                }
+                Some(slots.try_acquire_owned().ok()?)
+            }
             None => None,
         };
+        if !self.warm_room() {
+            return None;
+        }
         let all = self.upstream.clone().try_acquire_owned().ok()?;
         Some(Slots {
             _host: host,
@@ -1159,21 +1191,26 @@ impl ImageCache {
         self.pump_warms();
     }
 
-    /// Starts queued warms while upstream slots are free, first in queue
-    /// first, passing over a host whose slots are all taken. A warm whose
-    /// image is being fetched already is dropped.
+    /// True while fewer than [`WARM_MAX`] of all upstream slots are taken.
+    fn warm_room(&self) -> bool {
+        self.upstream.available_permits() > UPSTREAM_MAX - WARM_MAX
+    }
+
+    /// Starts queued warms while their share of the upstream slots is free,
+    /// first in queue first, passing over a host whose share is taken. A
+    /// warm whose image is being fetched already is dropped.
     fn pump_warms(self: &Arc<Self>) {
         loop {
             let (job, slots) = {
                 let mut warms = self.warms.lock();
                 let mut next = None;
                 let mut i = 0;
-                while i < warms.len() && self.upstream.available_permits() > 0 {
+                while i < warms.len() && self.warm_room() {
                     if self.flights.lock().contains_key(&warms[i].flight_key()) {
                         warms.remove(i);
                         continue;
                     }
-                    match self.free_slots(Authority::of(&warms[i].url).as_ref()) {
+                    match self.warm_slots(Authority::of(&warms[i].url).as_ref()) {
                         Some(slots) => {
                             next = warms.remove(i).map(|job| (job, slots));
                             break;
@@ -1345,6 +1382,19 @@ pub fn set_breaker_open_for_tests(open_for: Duration) {
         .unwrap_or(u64::MAX)
         .max(1);
     breaker::OPEN_FOR_MS.store(ms, Ordering::Relaxed);
+}
+
+/// Takes every resize slot of `state`'s cache until the returned permit is
+/// dropped, so a test can hold fetched bodies before their resize. Test
+/// hook, like [`set_head_timeout_for_tests`].
+#[doc(hidden)]
+pub async fn hold_resizes_for_tests(state: &AppState) -> OwnedSemaphorePermit {
+    cache(state)
+        .resizes
+        .clone()
+        .acquire_many_owned(resize_slots() as u32)
+        .await
+        .expect("the resize slots are never closed")
 }
 
 fn head_timeout() -> Duration {
@@ -1547,6 +1597,8 @@ pub async fn clear(state: &Arc<AppState>) -> CoreResult<ImageCacheStats> {
     cache.breakers.lock().clear();
     cache.touched.lock().clear();
     cache.kept.lock().clear();
+    // Warms not started yet would fill the cache again right after.
+    cache.warms.lock().clear();
     cache.round_trip(|ack| Op::Clear { ack }).await?;
     cache.read_stats().await
 }

@@ -759,8 +759,6 @@ pub(crate) fn replace_catalogs_with(
     // it deletes the old rows.
     let offered = parts.iter().map(|p| p.rows.len() as u64).sum();
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    // The written rows are freed after the commit, outside the write lock.
-    let mut spent = Vec::with_capacity(parts.len());
     {
         let mut w = catalog::CatalogWriter::begin_with(
             &tx,
@@ -773,13 +771,15 @@ pub(crate) fn replace_catalogs_with(
         for part in &parts {
             w.declare_categories(part.content_type, &part.categories);
         }
+        // Each row is freed once it is in, so a sync's rows are gone before
+        // `finish` builds the indexes. Holding them to the commit kept every
+        // part's rows alive through the index build, the peak of the write.
         for part in parts {
-            for row in &part.rows {
-                w.insert(row)?;
+            for row in part.rows {
+                w.insert(&row)?;
                 on_row(part.content_type);
             }
             categories.push((part.content_type, part.categories));
-            spent.push(part.rows);
         }
         for ct in &types {
             counts.insert(*ct, w.inserted_of(*ct));
@@ -791,7 +791,6 @@ pub(crate) fn replace_catalogs_with(
     // Last check: a cancelled run never commits.
     check_cancel()?;
     tx.commit()?;
-    drop(spent);
     Ok(counts)
 }
 

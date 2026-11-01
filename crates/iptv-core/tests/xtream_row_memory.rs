@@ -1,15 +1,26 @@
 //! Heap the mapped rows of an Xtream sync hold: a changed sync keeps every
 //! mapped row of every changed list (live, movies, series) until the one
-//! catalog write, so the bytes a row holds set the sync's peak memory.
+//! catalog write, so the bytes a row holds set the sync's peak memory, and
+//! the write frees each row once it is in, before the index build.
 //!
 //! The test binary counts live heap bytes with its own global allocator, so
 //! the numbers are exact and the same in debug and release.
 
+use axum::extract::Query;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::{Json, Router};
+use bytes::Bytes;
+use iptv_core::events::{AppEvent, EventSink};
+use iptv_core::rpc::RpcRouter;
 use iptv_core::xtream::raw::{RawLive, RawSeries, RawVod};
 use iptv_core::xtream::sync::{live_row, series_row, vod_row};
-use serde_json::json;
+use iptv_core::AppState;
+use serde_json::{json, Value};
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::Arc;
 
 struct Counting;
 
@@ -54,6 +65,9 @@ static ALLOCATOR: Counting = Counting;
 
 const ROWS: usize = 5_000;
 
+/// One test at a time: each reads the one heap counter.
+static HEAP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn live_raw(i: usize) -> RawLive {
     serde_json::from_value(json!({
         "num": i + 1, "name": format!("UK: Channel {i} HD"), "stream_type": "live",
@@ -66,15 +80,18 @@ fn live_raw(i: usize) -> RawLive {
     .unwrap()
 }
 
-fn vod_raw(i: usize) -> RawVod {
-    serde_json::from_value(json!({
+fn vod_json(i: usize) -> Value {
+    json!({
         "num": i + 1, "name": format!("Movie {i} (2019)"), "stream_type": "movie",
         "stream_id": i + 1, "stream_icon": format!("http://img.example/p/{i}.jpg"),
         "rating": "6.5", "rating_5based": 3.25, "added": "1700000000",
         "category_id": format!("{}", i % 400), "category_ids": [i % 400],
         "container_extension": "mkv", "is_adult": 0, "tmdb": format!("{}", 1000 + i)
-    }))
-    .unwrap()
+    })
+}
+
+fn vod_raw(i: usize) -> RawVod {
+    serde_json::from_value(vod_json(i)).unwrap()
 }
 
 fn series_raw(i: usize) -> RawSeries {
@@ -114,6 +131,7 @@ fn held_per_row<R, F: Fn(usize) -> R, M: Fn(R) -> Option<iptv_core::catalog::Ite
 /// write of a 50k live, 100k movie, 20k series panel.
 #[test]
 fn mapped_xtream_rows_hold_little_heap() {
+    let _heap = HEAP.blocking_lock();
     let live = held_per_row(live_raw, |r| live_row("source-0000-0000", 0, r));
     let vod = held_per_row(vod_raw, |r| vod_row("source-0000-0000", 0, r));
     let series = held_per_row(series_raw, |r| series_row("source-0000-0000", 0, r));
@@ -124,4 +142,125 @@ fn mapped_xtream_rows_hold_little_heap() {
     assert!(live < 400, "live row holds {live} B");
     assert!(vod < 400, "movie row holds {vod} B");
     assert!(series < 700, "series row holds {series} B");
+}
+
+const MOVIES: usize = 20_000;
+const USER: &str = "demo";
+const PASS: &str = "secret";
+
+/// An Xtream panel of `MOVIES` movies and nothing else, its list answer
+/// built before the test measures anything.
+async fn movie_panel() -> (String, tokio::sync::oneshot::Sender<()>) {
+    let list = Value::Array((0..MOVIES).map(vod_json).collect());
+    let list = Bytes::from(serde_json::to_vec(&list).unwrap());
+    let app = Router::new().route(
+        "/xtream/player_api.php",
+        get(move |Query(q): Query<HashMap<String, String>>| {
+            let list = list.clone();
+            async move { panel_answer(q.get("action").map_or("", String::as_str), list) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await;
+    });
+    (format!("http://127.0.0.1:{port}/xtream"), stop)
+}
+
+fn panel_answer(action: &str, movies: Bytes) -> Response {
+    let now = chrono::Utc::now().timestamp();
+    match action {
+        "" => Json(json!({
+            "user_info": {
+                "username": USER, "password": PASS, "auth": 1, "status": "Active",
+                "exp_date": (now + 30 * 86400).to_string(), "max_connections": "1",
+                "allowed_output_formats": ["m3u8", "ts"]
+            },
+            "server_info": {"url": "127.0.0.1", "port": "80", "timestamp_now": now}
+        }))
+        .into_response(),
+        "get_vod_categories" => Json(json!((0..400)
+            .map(|c| json!({"category_id": c.to_string(), "category_name": format!("Genre {c}")}))
+            .collect::<Vec<_>>()))
+        .into_response(),
+        "get_vod_streams" => ([("content-type", "application/json")], movies).into_response(),
+        _ => Json(json!([])).into_response(),
+    }
+}
+
+/// Records the live heap when the writer reports that every row is in
+/// (`step` "indexing"), right before it builds the indexes.
+struct AtIndexing(Arc<AtomicIsize>);
+
+impl EventSink for AtIndexing {
+    fn emit(&self, event: AppEvent) {
+        if event.kind == "import.progress" && event.payload["step"] == "indexing" {
+            self.0
+                .store(LIVE_BYTES.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
+}
+
+/// The catalog write frees each row once it is in: by the time the writer
+/// builds the indexes (its slowest step, with SQLite's own sort memory on
+/// top) the rows of the sync are gone, instead of waiting for the commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_catalog_write_frees_the_rows_before_the_index_build() {
+    let _heap = HEAP.lock().await;
+    let (server_url, _stop) = movie_panel().await;
+    let dir = tempfile::tempdir().unwrap();
+    let at_indexing = Arc::new(AtomicIsize::new(-1));
+    let state = AppState::new(
+        dir.path().to_path_buf(),
+        Arc::new(AtIndexing(at_indexing.clone())),
+        false,
+    )
+    .await
+    .unwrap();
+    iptv_core::xtream::init(state.clone()).await.unwrap();
+    let cfg = json!({"serverUrl": server_url, "username": USER, "password": PASS}).to_string();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES ('xt-mem', 'xtream', 'Movies', ?1)",
+                [cfg],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut router = RpcRouter::new();
+    iptv_core::xtream::rpc::register(&mut router);
+
+    // What the mapped rows hold, row and heap, at the start of the write.
+    let per_row = held_per_row(vod_raw, |r| vod_row("xt-mem", 0, r))
+        + std::mem::size_of::<iptv_core::catalog::ItemRow>() as isize;
+    let rows = per_row * MOVIES as isize;
+
+    let base = LIVE_BYTES.load(Ordering::Relaxed);
+    let summary = router
+        .dispatch(state.clone(), "xtream.sync", json!({"sourceId": "xt-mem"}))
+        .await
+        .unwrap_or_else(|e| panic!("xtream.sync failed: {:?} {}", e.code, e.message));
+    assert_eq!(summary["movies"], MOVIES as u64);
+    let at_indexing = at_indexing.load(Ordering::Relaxed);
+    assert!(at_indexing >= 0, "no indexing step was reported");
+    let held = at_indexing - base;
+    eprintln!(
+        "xtream_row_memory: {MOVIES} movies, rows {:.1} MB; heap above the start when the index build begins {:.1} MB",
+        rows as f64 / 1e6,
+        held as f64 / 1e6
+    );
+    assert!(
+        held < rows / 2,
+        "{held} B still held when the index build begins, rows are {rows} B"
+    );
 }

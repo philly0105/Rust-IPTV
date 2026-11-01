@@ -1,10 +1,12 @@
 //! `images.warm`: the fetch gate names the pictures it has queued, and the
 //! cache fetches the ones it does not hold in parallel instead of a few at a
 //! time behind the browser's connections. A warm answers once its pictures
-//! are queued; a picture's own request joins the running fetch; at most
-//! [`UPSTREAM_PER_HOST`] fetches go to one host and [`UPSTREAM_MAX`] in all;
-//! a request waiting for a slot goes before queued warms; and server mode
-//! checks every warmed picture against the guard like a request.
+//! are queued; a picture's own request joins the running fetch; warms take
+//! at most [`WARM_PER_HOST`] of one host's slots and [`WARM_MAX`] of all;
+//! requests go past the warms up to [`UPSTREAM_PER_HOST`], and a request
+//! waiting for a slot goes before queued warms; a fetch gives its slots back
+//! before its resize; clearing the cache drops the warms not started; and
+//! server mode checks every warmed picture against the guard like a request.
 
 use axum::extract::{Request, State};
 use axum::http::header;
@@ -15,7 +17,9 @@ use image::codecs::jpeg::JpegEncoder;
 use image::{ImageEncoder, Rgb, RgbImage};
 use iptv_core::events::NoopSink;
 use iptv_core::http::ServerMode;
-use iptv_core::imagecache::{self, WarmItem, UPSTREAM_MAX, UPSTREAM_PER_HOST, WARM_MAX_ITEMS};
+use iptv_core::imagecache::{
+    self, WarmItem, UPSTREAM_PER_HOST, WARM_MAX, WARM_MAX_ITEMS, WARM_PER_HOST,
+};
 use iptv_core::AppState;
 use parking_lot::Mutex;
 use std::collections::HashSet;
@@ -231,11 +235,11 @@ async fn warms_go_to_one_host_at_most_eight_at_a_time_and_one_call_takes_48() {
     imagecache::warm(&state, items).await;
 
     // More at once than the browser's six connections, never more than the
-    // host's slots, and the first in the batch first.
-    host.reached(UPSTREAM_PER_HOST).await;
+    // warms' share of the host's slots, and the first in the batch first.
+    host.reached(WARM_PER_HOST).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let first: HashSet<String> = host.arrivals().into_iter().collect();
-    assert_eq!(first, paths[..UPSTREAM_PER_HOST].iter().cloned().collect());
+    assert_eq!(first, paths[..WARM_PER_HOST].iter().cloned().collect());
 
     host.release.add_permits(1000);
     host.reached(WARM_MAX_ITEMS).await;
@@ -248,7 +252,7 @@ async fn warms_go_to_one_host_at_most_eight_at_a_time_and_one_call_takes_48() {
         "each once; the items past the batch's cap are dropped"
     );
     assert_eq!(host.arrivals().len(), WARM_MAX_ITEMS);
-    assert_eq!(host.load.max(), UPSTREAM_PER_HOST);
+    assert_eq!(host.load.max(), WARM_PER_HOST);
     let stats = imagecache::stats(&state).await.unwrap();
     assert_eq!(stats.files, WARM_MAX_ITEMS as u64);
 }
@@ -271,49 +275,105 @@ async fn warms_across_hosts_share_the_slots_of_all() {
     imagecache::warm(&state, items).await;
     let total = || hosts.iter().map(|h| h.arrivals().len()).sum::<usize>();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while total() < UPSTREAM_MAX {
+    while total() < WARM_MAX {
         assert!(Instant::now() < deadline, "only {} went out", total());
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(total(), UPSTREAM_MAX);
+    assert_eq!(total(), WARM_MAX);
     for h in &hosts {
         h.release.add_permits(1000);
     }
     for h in &hosts {
         h.reached(16).await;
         h.idle().await;
-        assert!(h.load.max() <= UPSTREAM_PER_HOST, "{}", h.load.max());
+        assert!(h.load.max() <= WARM_PER_HOST, "{}", h.load.max());
     }
-    assert_eq!(all.max(), UPSTREAM_MAX);
+    assert_eq!(all.max(), WARM_MAX);
 }
 
 #[tokio::test]
-async fn a_request_waiting_for_a_slot_goes_before_queued_warms() {
+async fn requests_go_past_the_warms_and_a_waiting_one_goes_before_them() {
     let host = spawn_host(Arc::default(), Duration::ZERO).await;
     let (_dir, state) = new_state().await;
     let items = (0..20)
         .map(|i| item(&host.url(&format!("/held/{i}.png")), Some(192)))
         .collect();
     imagecache::warm(&state, items).await;
-    host.reached(UPSTREAM_PER_HOST).await;
+    host.reached(WARM_PER_HOST).await;
 
-    // The user scrolled on: a picture of the new screen asks, and waits
-    // for one of the host's slots.
-    let request = {
-        let (state, url) = (state.clone(), host.url("/held/now.png"));
-        tokio::spawn(async move { imagecache::fetch_sized(&state, &url, None, Some(192)).await })
-    };
+    // Users scrolled on: the pictures of their new screens ask. They do not
+    // wait behind the warms up to the host's cap; the one past it waits for
+    // a slot.
+    let more = UPSTREAM_PER_HOST - WARM_PER_HOST;
+    let requests: Vec<_> = (0..=more)
+        .map(|i| {
+            let (state, url) = (state.clone(), host.url(&format!("/held/now{i}.png")));
+            tokio::spawn(
+                async move { imagecache::fetch_sized(&state, &url, None, Some(192)).await },
+            )
+        })
+        .collect();
+    host.reached(UPSTREAM_PER_HOST).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(host.arrivals().len(), UPSTREAM_PER_HOST);
-    // One fetch ends: its slot goes to the request, not to the twelve
-    // warms queued before it.
+    let arrivals = host.arrivals();
+    assert_eq!(arrivals.len(), UPSTREAM_PER_HOST);
+    assert!(arrivals[WARM_PER_HOST..]
+        .iter()
+        .all(|p| p.starts_with("/held/now")));
+    // One fetch ends: its slot goes to the waiting request, not to the
+    // twelve warms queued before it.
     host.release.add_permits(1);
     host.reached(UPSTREAM_PER_HOST + 1).await;
-    assert_eq!(host.arrivals()[UPSTREAM_PER_HOST], "/held/now.png");
+    assert!(
+        host.arrivals()[UPSTREAM_PER_HOST].starts_with("/held/now"),
+        "{:?}",
+        host.arrivals()
+    );
     host.release.add_permits(1000);
-    request.await.unwrap().unwrap();
-    host.reached(21).await;
+    for request in requests {
+        request.await.unwrap().unwrap();
+    }
+    host.reached(20 + more + 1).await;
+}
+
+#[tokio::test]
+async fn a_fetch_gives_its_slots_back_before_its_resize() {
+    let host = spawn_host(Arc::default(), Duration::ZERO).await;
+    let (_dir, state) = new_state().await;
+    // No body can be resized: each fetched one waits for a resize slot.
+    let resizes = imagecache::hold_resizes_for_tests(&state).await;
+    let paths: Vec<String> = (0..20).map(|i| format!("/ok/{i}.png")).collect();
+    let items = paths
+        .iter()
+        .map(|p| item(&host.url(p), Some(192)))
+        .collect();
+    imagecache::warm(&state, items).await;
+    // Every warm reached the host, not only the first slots' worth.
+    host.reached(paths.len()).await;
+    drop(resizes);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while imagecache::stats(&state).await.unwrap().files < paths.len() as u64 {
+        assert!(Instant::now() < deadline, "the pictures were never stored");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(host.arrivals().len(), paths.len());
+}
+
+#[tokio::test]
+async fn clearing_the_cache_drops_the_warms_not_started() {
+    let host = spawn_host(Arc::default(), Duration::ZERO).await;
+    let (_dir, state) = new_state().await;
+    let items = (0..20)
+        .map(|i| item(&host.url(&format!("/held/{i}.png")), Some(192)))
+        .collect();
+    imagecache::warm(&state, items).await;
+    host.reached(WARM_PER_HOST).await;
+    imagecache::clear(&state).await.unwrap();
+    host.release.add_permits(1000);
+    host.idle().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(host.arrivals().len(), WARM_PER_HOST);
 }
 
 #[tokio::test]

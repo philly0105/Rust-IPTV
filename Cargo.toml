@@ -95,9 +95,10 @@ lto = true
 # faster, imports about 5% and searches and page queries no faster (they run
 # in SQLite, already at 3 below); 3 was no better overall. Either level grew
 # iptv-server by 32% (18.5 to 24.4 MB). Under fat LTO the merged module is
-# optimized at the binary crate's level, so a package override for a Rust
-# crate (iptv-core, image, serde_json) changes next to nothing: only this
-# level does.
+# optimized at the binary crate's level, so a package override that raises
+# one Rust crate above it (iptv-core, image or serde_json at 2 or 3 under
+# this "s") changes next to nothing: only this level does. The reverse does
+# hold: an "s" crate under a 2 or 3 root keeps its size attribute.
 opt-level = "s"
 panic = "unwind"
 strip = true

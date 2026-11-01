@@ -463,7 +463,18 @@ pub(super) async fn walk_pages(
     base: Req,
     max_pages: i64,
 ) -> CoreResult<Vec<Value>> {
-    let js = client.call(base.clone().p("p", 1)).await?;
+    walk_pages_in_turn(client, base, max_pages, None).await
+}
+
+/// [`walk_pages`], each request waiting for a turn of `turns` first when
+/// given: a sync shares one with its other requests to the portal.
+pub(super) async fn walk_pages_in_turn(
+    client: &StalkerClient,
+    base: Req,
+    max_pages: i64,
+    turns: Option<&tokio::sync::Semaphore>,
+) -> CoreResult<Vec<Value>> {
+    let js = call_in_turn(client, base.clone().p("p", 1), turns).await?;
     let total = n(&js, "total_items");
     let mut out = into_list(js);
     let per_page = out.len() as i64;
@@ -479,7 +490,7 @@ pub(super) async fn walk_pages(
     }
     let pages = (total.min(MAX_WALK_ITEMS) as u64).div_ceil(per_page as u64) as i64;
     let rest = stream::iter(2..=pages.min(max_pages))
-        .map(|page| client.call(base.clone().p("p", page)))
+        .map(|page| call_in_turn(client, base.clone().p("p", page), turns))
         .buffered(PAGE_CONCURRENCY);
     tokio::pin!(rest);
     // Dropping `rest` at an empty page drops the requests still out.
@@ -491,6 +502,20 @@ pub(super) async fn walk_pages(
         out.extend(rows);
     }
     Ok(out)
+}
+
+/// `client.call(req)`, after a turn of `turns` when given.
+pub(super) async fn call_in_turn(
+    client: &StalkerClient,
+    req: Req,
+    turns: Option<&tokio::sync::Semaphore>,
+) -> CoreResult<Value> {
+    // Never closed, so a turn always comes.
+    let _turn = match turns {
+        Some(turns) => turns.acquire().await.ok(),
+        None => None,
+    };
+    client.call(req).await
 }
 
 async fn vod_series_plan(

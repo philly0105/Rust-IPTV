@@ -37,7 +37,10 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
 
 /// Purges after `first`, then every [`PURGE_EVERY`], until the state is
 /// dropped. The purge is a write nobody waits on, so it goes through
-/// `db_background` and user writes never queue behind it.
+/// `db_background` and user writes never queue behind it, one step of
+/// [`cache::PURGE_BATCH`] rows per turn of the gate: the image cache index,
+/// download progress and recordings, which share that gate, wait for one
+/// step at most, not for a read of every cached payload.
 fn spawn_purge(weak: Weak<AppState>, first: Duration) {
     tokio::spawn(async move {
         let mut wait = first;
@@ -46,10 +49,7 @@ fn spawn_purge(weak: Weak<AppState>, first: Duration) {
             let Some(state) = weak.upgrade() else {
                 return;
             };
-            let purged = state
-                .db_background(|c| cache::TmdbCache::purge_expired(c, chrono::Utc::now()))
-                .await;
-            match purged {
+            match purge(&state).await {
                 Ok(0) => {}
                 Ok(n) => tracing::debug!(rows = n, "tmdb expired cache rows purged"),
                 Err(err) => tracing::warn!(error = %err, "tmdb cache purge failed"),
@@ -58,6 +58,21 @@ fn spawn_purge(weak: Weak<AppState>, first: Duration) {
             wait = PURGE_EVERY;
         }
     });
+}
+
+/// Deletes the rows expired now, a step at a time; returns how many.
+async fn purge(state: &AppState) -> CoreResult<u64> {
+    let now = chrono::Utc::now();
+    let mut purged = 0;
+    let mut after = Some(i64::MIN);
+    while let Some(from) = after {
+        let (n, next) = state
+            .db_background(move |c| cache::TmdbCache::purge_expired_step(c, now, from))
+            .await?;
+        purged += n;
+        after = next;
+    }
+    Ok(purged)
 }
 
 #[cfg(test)]

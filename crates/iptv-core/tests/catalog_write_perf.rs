@@ -60,9 +60,12 @@ fn assert_search_rows(c: &Connection) {
         [],
     )
     .expect("items_fts integrity-check");
+    // `items_fts` reads its rows from `items` (external content), so its
+    // own count is always the item count; the index keeps one size row per
+    // entry it holds.
     let (items, fts): (i64, i64) = c
         .query_row(
-            "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM items_fts)",
+            "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM items_fts_docsize)",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )

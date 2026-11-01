@@ -785,10 +785,12 @@ pub(crate) fn parse_attrs(s: &str) -> (Vec<(&str, &str)>, Option<usize>) {
     (attrs, comma)
 }
 
-/// [`parse_attrs`], handing each attribute to `attr` as it is read, so an
-/// entry line allocates nothing for the attributes it does not keep. With
-/// `header` (an `#EXTM3U` line, which has no display name) a comma ends
-/// neither the attributes nor an unquoted value, so
+/// Parses `key=value` attributes until the first comma outside quotes,
+/// handing each to `attr` as it is read (keys trimmed, in the case
+/// written), so an entry line allocates nothing for the attributes it does
+/// not keep. Returns the byte index just past that comma (`None` when there
+/// is none). With `header` (an `#EXTM3U` line, which has no display name) a
+/// comma ends neither the attributes nor an unquoted value, so
 /// `url-tvg=http://a/e.xml,http://b/e.xml` keeps both guides.
 fn parse_attrs_in<'s>(
     s: &'s str,

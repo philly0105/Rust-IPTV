@@ -393,18 +393,48 @@ impl TmdbCache {
         Ok(n)
     }
 
-    /// Deletes the rows expired at `now`; returns how many. `expires_at` has
-    /// no index and comes after the payload, so finding them reads every
-    /// row's overflow pages. That runs as a plain read, and only the deletes,
-    /// by rowid and [`PURGE_BATCH`] at a time, take the write lock.
+    /// Deletes the rows expired at `now`; returns how many. Runs
+    /// [`Self::purge_expired_step`] over the whole table on one connection.
     pub fn purge_expired(conn: &mut rusqlite::Connection, now: DateTime<Utc>) -> CoreResult<u64> {
-        let now = ts(now);
-        let expired: Vec<i64> = conn
-            .prepare("SELECT rowid FROM tmdb_cache WHERE expires_at <= ?1")?
-            .query_map([&now], |r| r.get(0))?
-            .collect::<Result<_, _>>()?;
         let mut purged = 0;
-        for batch in expired.chunks(PURGE_BATCH) {
+        let mut after = Some(i64::MIN);
+        while let Some(from) = after {
+            let (n, next) = Self::purge_expired_step(conn, now, from)?;
+            purged += n;
+            after = next;
+        }
+        Ok(purged)
+    }
+
+    /// One step of a purge: reads the next [`PURGE_BATCH`] rows after rowid
+    /// `after`, deletes those expired at `now`, and returns how many it
+    /// deleted with the rowid to go on after (`None` at the end of the
+    /// table). `expires_at` has no index and comes after the payload, so
+    /// each row read reads its overflow pages too: in steps, the background
+    /// gate a caller holds is free between them, rather than held for a
+    /// whole cold scan. The read runs as a plain read, and only the deletes
+    /// take the write lock.
+    pub fn purge_expired_step(
+        conn: &mut rusqlite::Connection,
+        now: DateTime<Utc>,
+        after: i64,
+    ) -> CoreResult<(u64, Option<i64>)> {
+        let now = ts(now);
+        let rows: Vec<(i64, bool)> = conn
+            .prepare_cached(
+                "SELECT rowid, expires_at <= ?2 FROM tmdb_cache WHERE rowid > ?1 ORDER BY rowid LIMIT ?3",
+            )?
+            .query_map(rusqlite::params![after, now, PURGE_BATCH as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        // A short batch is the end of the table.
+        let next = rows
+            .last()
+            .filter(|_| rows.len() == PURGE_BATCH)
+            .map(|(rowid, _)| *rowid);
+        let mut purged = 0;
+        if rows.iter().any(|(_, expired)| *expired) {
             let tx = conn.transaction()?;
             {
                 // A row refreshed since the read keeps its rowid: the
@@ -412,18 +442,19 @@ impl TmdbCache {
                 let mut delete = tx.prepare_cached(
                     "DELETE FROM tmdb_cache WHERE rowid = ?1 AND expires_at <= ?2",
                 )?;
-                for rowid in batch {
+                for (rowid, _) in rows.iter().filter(|(_, expired)| *expired) {
                     purged += delete.execute(rusqlite::params![rowid, now])? as u64;
                 }
             }
             tx.commit()?;
         }
-        Ok(purged)
+        Ok((purged, next))
     }
 }
 
-/// Rows one write transaction of [`TmdbCache::purge_expired`] deletes.
-const PURGE_BATCH: usize = 500;
+/// Rows one step of [`TmdbCache::purge_expired_step`] reads, and so deletes
+/// at most.
+pub const PURGE_BATCH: usize = 500;
 
 #[cfg(test)]
 mod tests {
@@ -497,6 +528,46 @@ mod tests {
         left.sort();
         assert_eq!(left, ["fresh", "fresh-negative"]);
         assert_eq!(TmdbCache::purge_expired(&mut c, now).unwrap(), 0);
+    }
+
+    /// A step reads one batch of rows in rowid order and deletes only the
+    /// expired ones among them; the next step goes on after its last row.
+    #[test]
+    fn a_purge_step_reads_one_batch_of_rows() {
+        let mut c = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut c).unwrap();
+        let now = Utc::now();
+        let day = chrono::Duration::days(1);
+        // Every third row is fresh.
+        let total = PURGE_BATCH * 2 + 10;
+        for n in 0..total {
+            let expires = if n % 3 == 0 { now + day } else { now - day };
+            c.execute(
+                "INSERT INTO tmdb_cache (media_type, lookup_key, fetched_at, expires_at)
+                 VALUES ('movie', ?1, ?2, ?3)",
+                rusqlite::params![format!("k{n}"), ts(now), ts(expires)],
+            )
+            .unwrap();
+        }
+        let expired_in = |rows: std::ops::Range<usize>| rows.filter(|n| n % 3 != 0).count() as u64;
+        let left = |c: &rusqlite::Connection| -> u64 {
+            c.query_row("SELECT count(*) FROM tmdb_cache", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap() as u64
+        };
+
+        let (purged, next) = TmdbCache::purge_expired_step(&mut c, now, i64::MIN).unwrap();
+        assert_eq!(purged, expired_in(0..PURGE_BATCH));
+        assert_eq!(left(&c), total as u64 - purged, "only the first batch");
+        let after = next.expect("more rows to read");
+
+        let (second, next) = TmdbCache::purge_expired_step(&mut c, now, after).unwrap();
+        assert_eq!(second, expired_in(PURGE_BATCH..PURGE_BATCH * 2));
+        let (last, next) = TmdbCache::purge_expired_step(&mut c, now, next.unwrap()).unwrap();
+        assert_eq!(last, expired_in(PURGE_BATCH * 2..total));
+        assert_eq!(next, None, "the end of the table");
+        assert_eq!(left(&c), (0..total).filter(|n| n % 3 == 0).count() as u64);
     }
 
     #[test]

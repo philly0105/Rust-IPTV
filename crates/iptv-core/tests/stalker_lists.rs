@@ -3,7 +3,10 @@
 //! list's own text (a debug line that changes on every answer does not
 //! count), every shape of the list and every value type a portal sends map
 //! to the same rows, and a refused or broken list answer is handled as
-//! before: one fresh login, or the paged fallback.
+//! before: one fresh login, or the paged fallback. The radio walk, the
+//! category lists and the totals keep at most a few requests out to the
+//! portal, and the import says it waits for the movie and series side only
+//! when it does.
 
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap};
@@ -13,11 +16,13 @@ use axum::Router;
 use iptv_core::events::BroadcastSink;
 use iptv_core::model::StalkerSourceConfig;
 use iptv_core::rpc::RpcRouter;
+use iptv_core::stalker::sync::PORTAL_REQUESTS;
 use iptv_core::AppState;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 const MAC: &str = "00:1A:79:00:00:01";
 const SID: &str = "stk-lists";
@@ -31,11 +36,39 @@ struct Portal {
     refusal: Mutex<Option<String>>,
     calls: Mutex<HashMap<String, u64>>,
     seq: AtomicU64,
+    /// Pages of 14 stations the radio list has (one station when 0).
+    radio_pages: AtomicU64,
+    /// How long each `type.action` takes to answer.
+    delays: Mutex<HashMap<String, Duration>>,
+    /// Requests being answered now, and the most at once.
+    in_flight: AtomicU64,
+    most_in_flight: AtomicU64,
 }
 
 impl Portal {
     fn count(&self, key: &str) -> u64 {
         self.calls.lock().unwrap().get(key).copied().unwrap_or(0)
+    }
+
+    fn delay(&self, key: &str, by: Duration) {
+        self.delays.lock().unwrap().insert(key.to_string(), by);
+    }
+}
+
+/// One request being answered, counted in `in_flight` until it is dropped.
+struct Answering<'a>(&'a Portal);
+
+impl<'a> Answering<'a> {
+    fn new(p: &'a Portal) -> Self {
+        let now = p.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        p.most_in_flight.fetch_max(now, Ordering::SeqCst);
+        Self(p)
+    }
+}
+
+impl Drop for Answering<'_> {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -50,6 +83,16 @@ async fn portal_php(
 ) -> Response {
     let get = |k: &str| q.get(k).cloned().unwrap_or_default();
     let key = format!("{}.{}", get("type"), get("action"));
+    let _answering = Answering::new(&p);
+    let delay = p.delays.lock().unwrap().get(&key).copied();
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
+    answer(&p, &headers, &q, key)
+}
+
+fn answer(p: &Portal, headers: &HeaderMap, q: &HashMap<String, String>, key: String) -> Response {
+    let get = |k: &str| q.get(k).cloned().unwrap_or_default();
     *p.calls.lock().unwrap().entry(key.clone()).or_default() += 1;
     let bearer = headers
         .get(header::AUTHORIZATION)
@@ -73,9 +116,21 @@ async fn portal_php(
                 r#"{{"js":{list},"text":"generated in: 0.00{n}s; query counter: {n}"}}"#
             ));
         }
-        "radio.get_ordered_list" => json!({"total_items": 1, "max_page_items": 14, "data": [
-            {"id": "r1", "name": "Radio One", "cmd": "http://radio.example/1"}
-        ]}),
+        "radio.get_ordered_list" => match p.radio_pages.load(Ordering::SeqCst) {
+            0 => json!({"total_items": 1, "max_page_items": 14, "data": [
+                {"id": "r1", "name": "Radio One", "cmd": "http://radio.example/1"}
+            ]}),
+            pages => {
+                let page: u64 = get("p").parse().unwrap_or(1);
+                let data: Vec<Value> = (0..14)
+                    .map(|i| {
+                        let id = (page - 1) * 14 + i;
+                        json!({"id": format!("r{id}"), "name": format!("Radio {id}"), "cmd": format!("http://radio.example/{id}")})
+                    })
+                    .collect();
+                json!({"total_items": pages * 14, "max_page_items": 14, "data": data})
+            }
+        },
         "vod.get_categories" | "series.get_categories" => {
             json!([{"id": "*", "title": "All"}, {"id": "5", "title": "Films"}])
         }
@@ -97,6 +152,7 @@ struct Env {
     state: Arc<AppState>,
     router: RpcRouter,
     portal: Arc<Portal>,
+    events: tokio::sync::broadcast::Receiver<iptv_core::AppEvent>,
 }
 
 impl Env {
@@ -157,7 +213,7 @@ async fn env(channels: &str) -> Env {
         axum::serve(listener, app).await.unwrap();
     });
     let tmp = tempfile::tempdir().unwrap();
-    let (sink, _events) = BroadcastSink::channel(4096);
+    let (sink, events) = BroadcastSink::channel(4096);
     let state = AppState::new(tmp.path().to_path_buf(), Arc::new(sink), false)
         .await
         .unwrap();
@@ -197,6 +253,7 @@ async fn env(channels: &str) -> Env {
         state,
         router,
         portal,
+        events,
     }
 }
 
@@ -366,4 +423,67 @@ async fn a_broken_list_answer_falls_back_to_paging() {
         assert_eq!(ids, ["p1", "p2"], "{js}");
         assert!(e.portal.count("itv.get_ordered_list") >= 1, "{js}");
     }
+}
+
+/// The progress messages the import sent so far.
+fn messages(e: &mut Env) -> Vec<String> {
+    let mut out = Vec::new();
+    while let Ok(event) = e.events.try_recv() {
+        if event.kind == "import.progress" {
+            if let Some(m) = event.payload["message"].as_str() {
+                out.push(m.to_string());
+            }
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn the_radio_walk_categories_and_totals_keep_a_few_requests_out() {
+    let e = env(&as_array()).await;
+    // Radio's first page answers first, while both category lists and both
+    // totals are still out: the walk's next pages must wait for turns.
+    e.portal.radio_pages.store(6, Ordering::SeqCst);
+    e.portal
+        .delay("radio.get_ordered_list", Duration::from_millis(40));
+    for key in [
+        "vod.get_categories",
+        "series.get_categories",
+        "vod.get_ordered_list",
+        "series.get_ordered_list",
+    ] {
+        e.portal.delay(key, Duration::from_millis(250));
+    }
+    let summary = e.sync().await;
+    assert_eq!(summary["channels"], 5 + 6 * 14, "{summary}");
+    assert_eq!(e.portal.count("radio.get_ordered_list"), 6);
+    let most = e.portal.most_in_flight.load(Ordering::SeqCst);
+    assert!(
+        most as usize <= PORTAL_REQUESTS,
+        "{most} requests were out to the portal at once"
+    );
+}
+
+#[tokio::test]
+async fn the_wait_for_movie_and_series_categories_is_named_only_while_it_lasts() {
+    const VOD_GROUPS: &str = "Loading movie and series categories";
+    // The radio walk ends last: the categories were in long before.
+    let mut e = env(&as_array()).await;
+    e.portal.radio_pages.store(3, Ordering::SeqCst);
+    e.portal
+        .delay("radio.get_ordered_list", Duration::from_millis(150));
+    e.sync().await;
+    let seen = messages(&mut e);
+    assert!(seen.iter().any(|m| m == "Loading radio"), "{seen:?}");
+    assert!(!seen.iter().any(|m| m == VOD_GROUPS), "{seen:?}");
+
+    // The radio walk ends first: the import then waits for the categories.
+    let mut e = env(&as_array()).await;
+    e.portal
+        .delay("vod.get_categories", Duration::from_millis(300));
+    e.sync().await;
+    let seen = messages(&mut e);
+    let radio = seen.iter().position(|m| m == "Loading radio");
+    let groups = seen.iter().position(|m| m == VOD_GROUPS);
+    assert!(radio.is_some() && groups > radio, "{seen:?}");
 }

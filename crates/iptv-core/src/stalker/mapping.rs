@@ -154,7 +154,7 @@ pub fn channel_fields(raw: &serde_json::value::RawValue) -> Value {
     serde_json::from_str(text).unwrap_or(Value::Null)
 }
 
-/// Rebuilds the portal-ish raw value of a stored channel (for playback)./// Rebuilds the portal-ish raw value of a stored channel (for playback).
+/// Rebuilds the portal-ish raw value of a stored channel (for playback).
 pub fn channel_raw(extra: &Value) -> Value {
     let mut raw = json!({});
     if let Some(cmd) = extra.get("cmd") {

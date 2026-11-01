@@ -20,6 +20,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 static PENDING: AtomicBool = AtomicBool::new(false);
 
+/// Clears [`PENDING`] when dropped: when the queued trim starts, and also
+/// when its runtime shuts down first and drops it unrun. Otherwise no later
+/// import would queue a trim again.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+struct Pending;
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+impl Drop for Pending {
+    fn drop(&mut self) {
+        PENDING.store(false, Ordering::Release);
+    }
+}
+
 /// Returns the heap's free pages to the OS. Blocking: it walks every arena
 /// under that arena's lock (20-35 ms after a 170k-item import). Call it once
 /// the import's rows are dropped, or it frees nothing.
@@ -36,9 +49,10 @@ pub fn release_freed_heap() {
 pub fn release_freed_heap_soon() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     if !PENDING.swap(true, Ordering::AcqRel) {
-        tokio::task::spawn_blocking(|| {
+        let pending = Pending;
+        tokio::task::spawn_blocking(move || {
             // Cleared first: memory freed while this trim runs needs another.
-            PENDING.store(false, Ordering::Release);
+            drop(pending);
             release_freed_heap();
         });
     }

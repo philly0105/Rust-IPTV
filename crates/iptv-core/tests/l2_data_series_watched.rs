@@ -320,6 +320,46 @@ async fn a_bad_batch_is_invalid_and_writes_nothing() {
     assert_eq!(e.code, iptv_core::RpcErrorCode::NotFound);
 }
 
+/// A batch too long or with a blank id is refused at once, also while
+/// another write (an import's save) holds the write gate.
+#[tokio::test]
+async fn a_bad_batch_is_refused_without_waiting_for_the_write_gate() {
+    let a = app().await;
+    let r = series("313");
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let (entered, writing) = tokio::sync::oneshot::channel::<()>();
+    let write = {
+        let state = a.state.clone();
+        tokio::spawn(async move {
+            state
+                .db_write(move |_| {
+                    let _ = entered.send(());
+                    let _ = held.recv();
+                    Ok(())
+                })
+                .await
+        })
+    };
+    writing.await.unwrap();
+    let over: Vec<String> = (0..=iptv_core::userstate::MAX_WATCHED_EPISODES)
+        .map(|i| format!("e{i}"))
+        .collect();
+    for args in [
+        json!({"ref": r, "episodeIds": over, "watched": true}),
+        json!({"ref": r, "episodeIds": ["e1", ""], "watched": true, "series": true}),
+    ] {
+        let refused = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            a.try_call("userstate.setWatched", args),
+        )
+        .await
+        .expect("the batch waited for the write gate");
+        assert_eq!(refused.unwrap_err().code, iptv_core::RpcErrorCode::Invalid);
+    }
+    release.send(()).unwrap();
+    write.await.unwrap().unwrap();
+}
+
 /// Marking a long series watched: one `userstate.setWatched` per episode, all
 /// in flight at once as the detail page used to send them, against one
 /// batched call. Each single call is its own gated write plus a series sync

@@ -872,7 +872,8 @@ pub const MAX_WATCHED_EPISODES: usize = 10_000;
 /// watched), each row as [`set_watched`] writes it and in list order, then,
 /// with `series`, the item's own row. One IMMEDIATE transaction: a long
 /// series is one write instead of one per episode, and it lands whole or not
-/// at all. Blank ids, or more than [`MAX_WATCHED_EPISODES`], are invalid.
+/// at all. Blank ids, or more than [`MAX_WATCHED_EPISODES`], are invalid
+/// (see [`check_watched_episodes`]).
 pub fn set_watched_episodes(
     conn: &mut Connection,
     r: &ItemRef,
@@ -880,6 +881,22 @@ pub fn set_watched_episodes(
     series: bool,
     watched: bool,
 ) -> CoreResult<()> {
+    check_watched_episodes(r, episode_ids)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    for ep in episode_ids {
+        set_watched(&tx, r, Some(ep), watched)?;
+    }
+    if series {
+        set_watched(&tx, r, None, watched)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// The checks of [`set_watched_episodes`] that need no database: the RPC
+/// runs them before it waits for the write gate, so a bad batch is refused
+/// at once rather than after an import's write.
+pub fn check_watched_episodes(r: &ItemRef, episode_ids: &[String]) -> CoreResult<()> {
     validate_ref(r)?;
     if episode_ids.len() > MAX_WATCHED_EPISODES {
         return Err(CoreError::invalid(format!(
@@ -891,14 +908,6 @@ pub fn set_watched_episodes(
     if episode_ids.iter().any(|e| e.trim().is_empty()) {
         return Err(CoreError::invalid("episodeIds must not contain blank ids"));
     }
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    for ep in episode_ids {
-        set_watched(&tx, r, Some(ep), watched)?;
-    }
-    if series {
-        set_watched(&tx, r, None, watched)?;
-    }
-    tx.commit()?;
     Ok(())
 }
 

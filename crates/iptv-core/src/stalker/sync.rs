@@ -4,6 +4,7 @@
 use super::mapping;
 use super::protocol::{self as p, into_list, n};
 use super::session::{ListAnswer, Req, StalkerClient, LONG_TIMEOUT};
+use super::vod::{call_in_turn, walk_pages_in_turn};
 use super::Runtime;
 use crate::catalog::{self, CategoryRow, ItemRow};
 use crate::error::{CoreError, CoreResult};
@@ -16,12 +17,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 /// Category id for channels without a (known) genre.
 const UNCATEGORIZED: &str = "uncategorized";
 /// Category id of the single radio category.
 const RADIO_CATEGORY: &str = "radio";
+/// Requests a sync has out to the portal at once. Portals rate-limit, and
+/// the radio walk (four pages at a time), both category lists and both
+/// totals went out together: up to eight.
+pub const PORTAL_REQUESTS: usize = 5;
 
 /// Progress callback: `(phase, done, total, message)`.
 type Emit<'a> = dyn Fn(&str, u64, Option<u64>, Option<&str>) + Sync + 'a;
@@ -75,18 +82,18 @@ fn optional_section<T: Default>(err: CoreError, what: &str, label: &str) -> Core
     Ok(Some(T::default()))
 }
 
-async fn list(client: &StalkerClient, req: Req) -> CoreResult<Vec<Value>> {
-    Ok(into_list(client.call(req).await?))
+async fn list(client: &StalkerClient, req: Req, turns: &Semaphore) -> CoreResult<Vec<Value>> {
+    Ok(into_list(call_in_turn(client, req, Some(turns)).await?))
 }
 
 /// First-page `total_items` of a VOD/series listing; `None` when the portal
 /// did not answer (or answered without a total).
-async fn remote_total(client: &StalkerClient, kind: &str) -> Option<i64> {
+async fn remote_total(client: &StalkerClient, kind: &str, turns: &Semaphore) -> Option<i64> {
     let req = Req::new(kind, "get_ordered_list")
         .p("category", "*")
         .p("sortby", "added")
         .p("p", 1);
-    match client.call(req).await {
+    match call_in_turn(client, req, Some(turns)).await {
         Ok(js) => n(&js, "total_items"),
         Err(err) => {
             tracing::info!(kind, error = %err, "stalker portal total unavailable; keeping the previous count");
@@ -98,9 +105,16 @@ async fn remote_total(client: &StalkerClient, kind: &str) -> Option<i64> {
 /// Movie and series totals for the summary (VOD is not stored, so ask the
 /// portal). An unanswered total keeps the stored count:
 /// `sources::run_import` records whatever the summary carries.
-async fn totals(state: &Arc<AppState>, client: &StalkerClient, source_id: &str) -> (i64, i64) {
-    let (movies, series) =
-        tokio::join!(remote_total(client, "vod"), remote_total(client, "series"));
+async fn totals(
+    state: &Arc<AppState>,
+    client: &StalkerClient,
+    source_id: &str,
+    turns: &Semaphore,
+) -> (i64, i64) {
+    let (movies, series) = tokio::join!(
+        remote_total(client, "vod", turns),
+        remote_total(client, "series", turns)
+    );
     if movies.is_none() || series.is_none() {
         let sid = source_id.to_string();
         let (_, old_movies, old_series) = state
@@ -273,9 +287,10 @@ async fn run(
 ) -> CoreResult<ImportSummary> {
     emit("fetching", 0, None, Some("Connecting to the portal"));
     let endpoint = client.endpoint().await?;
+    let turns = Semaphore::new(PORTAL_REQUESTS);
 
     emit("fetching", 0, None, Some("Loading channel categories"));
-    let genres = mapping::categories(&list(client, Req::new("itv", "get_genres")).await?);
+    let genres = mapping::categories(&list(client, Req::new("itv", "get_genres"), &turns).await?);
 
     emit("fetching", 0, None, Some("Loading channels"));
     // The list stays the portal's JSON text, read on the blocking pool: a
@@ -317,27 +332,40 @@ async fn run(
     // rows instead of wiping them (L1-core-14), and says so in lastError.
     // They go out together with the movie and series totals, so neither
     // the totals nor the categories wait on the radio walk, and nothing is
-    // asked of the portal once the save slot is held.
+    // asked of the portal once the save slot is held. At most
+    // [`PORTAL_REQUESTS`] of them are out at once.
+    let vod_pending = AtomicBool::new(true);
     let radio_walk = async {
-        let radio = fetch_all_pages(
+        let radio = walk_pages_in_turn(
             client,
             Req::new("radio", "get_ordered_list").p("sortby", "number"),
+            i64::MAX,
+            Some(&turns),
         )
         .await;
-        emit(
-            "fetching",
-            (channels.len() + radio.as_ref().map_or(0, Vec::len)) as u64,
-            None,
-            Some("Loading movie and series categories"),
-        );
+        // The movie and series side went out with the radio walk: say so
+        // only when the import still waits for it.
+        if vod_pending.load(Ordering::Relaxed) {
+            emit(
+                "fetching",
+                (channels.len() + radio.as_ref().map_or(0, Vec::len)) as u64,
+                None,
+                Some("Loading movie and series categories"),
+            );
+        }
         radio
     };
-    let (radio, vod_categories, series_categories, (movies, series)) = tokio::join!(
-        radio_walk,
-        list(client, Req::new("vod", "get_categories")),
-        list(client, Req::new("series", "get_categories")),
-        totals(state, client, source_id),
-    );
+    let vod_side = async {
+        let answers = tokio::join!(
+            list(client, Req::new("vod", "get_categories"), &turns),
+            list(client, Req::new("series", "get_categories"), &turns),
+            totals(state, client, source_id, &turns),
+        );
+        vod_pending.store(false, Ordering::Relaxed);
+        answers
+    };
+    let (radio, (vod_categories, series_categories, (movies, series))) =
+        tokio::join!(radio_walk, vod_side);
     let radio = match radio {
         Ok(r) => Some(r),
         Err(err @ CoreError::Auth(_)) => return Err(err),

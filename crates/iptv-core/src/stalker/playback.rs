@@ -342,6 +342,9 @@ pub struct DayTables {
     reads: DashMap<String, Arc<tokio::sync::Mutex<()>>>,
     /// The table type (`epg` or `itv`) each source last answered on.
     kinds: DashMap<String, &'static str>,
+    /// Bumped per source by [`Self::forget_source`]: a read that began
+    /// before keeps what it read to itself.
+    generations: DashMap<String, u64>,
 }
 
 struct DayTable {
@@ -371,6 +374,35 @@ impl DayTables {
         self.tables.insert(key, DayTable { rows, at, ttl });
     }
 
+    /// The generation of `source_id` a read starts in.
+    fn generation(&self, source_id: &str) -> u64 {
+        self.generations.get(source_id).map_or(0, |g| *g)
+    }
+
+    /// Keeps what a read of `source_id` that began in generation `began`
+    /// learned: the table type that answered, and the rows when the table
+    /// was read to its end. Nothing when the source was forgotten since, so
+    /// a removed or repointed source gets no table back from a read that
+    /// was on its way. The generation's entry stays locked while the read
+    /// is kept, and [`Self::forget_source`] bumps it before it drops the
+    /// tables, so each keep lands before that drop or is refused.
+    fn keep_read(
+        &self,
+        source_id: &str,
+        began: u64,
+        table_type: &'static str,
+        table: Option<(String, Arc<Vec<Value>>, std::time::Duration)>,
+    ) {
+        let generation = self.generations.entry(source_id.to_string()).or_default();
+        if *generation != began {
+            return;
+        }
+        self.kinds.insert(source_id.to_string(), table_type);
+        if let Some((key, rows, ttl)) = table {
+            self.store(key, rows, ttl);
+        }
+    }
+
     /// The table types in the order to ask a source for them.
     fn order(&self, source_id: &str) -> [&'static str; 2] {
         match self.kinds.get(source_id).map(|k| *k) {
@@ -379,8 +411,10 @@ impl DayTables {
         }
     }
 
-    /// Drops every table of a source (removed, or pointing elsewhere now).
+    /// Drops every table of a source (removed, or pointing elsewhere now),
+    /// and every table a read already on its way would keep.
     pub fn forget_source(&self, source_id: &str) {
+        *self.generations.entry(source_id.to_string()).or_default() += 1;
         let prefix = format!("{source_id}|");
         self.tables.retain(|k, _| !k.starts_with(&prefix));
         self.kinds.remove(source_id);
@@ -497,19 +531,20 @@ async fn day_table(
         }
     }
     let order = tables.order(source_id);
+    let began = tables.generation(source_id);
     let Some(read) = read_day_table(client, channel_id, &day, order, stop_at).await? else {
         return Ok(None);
     };
-    tables.kinds.insert(source_id.to_string(), read.table_type);
     let rows = Arc::new(read.rows);
-    if read.complete {
+    let table = read.complete.then(|| {
         let ttl = if date < Utc::now().date_naive() {
             PAST_DAY_TABLE_TTL
         } else {
             DAY_TABLE_TTL
         };
-        tables.store(key.clone(), rows.clone(), ttl);
-    }
+        (key.clone(), rows.clone(), ttl)
+    });
+    tables.keep_read(source_id, began, read.table_type, table);
     Ok(Some((rows, false)))
 }
 
@@ -1151,5 +1186,33 @@ mod tests {
             let err = check_archive_window(now - Duration::days(400), now, hours).unwrap_err();
             assert!(user_message(&err).contains("366 days"), "{err}");
         }
+    }
+
+    /// A read on its way when its source is forgotten keeps nothing: the
+    /// table it read and the table type that answered belong to the source
+    /// as it was. A read that began after keeps both.
+    #[test]
+    fn a_read_begun_before_the_source_was_forgotten_keeps_nothing() {
+        let tables = DayTables::default();
+        let ttl = std::time::Duration::from_secs(60);
+        let rows = Arc::new(vec![serde_json::json!({"id": "1"})]);
+        let table = |day: &str| Some((format!("s|7|{day}"), rows.clone(), ttl));
+
+        let began = tables.generation("s");
+        tables.forget_source("s");
+        tables.keep_read("s", began, "itv", table("2026-10-31"));
+        assert!(tables.fresh("s|7|2026-10-31").is_none());
+        assert_eq!(tables.order("s"), ["epg", "itv"]);
+
+        let began = tables.generation("s");
+        tables.keep_read("s", began, "itv", table("2026-10-31"));
+        assert!(tables.fresh("s|7|2026-10-31").is_some());
+        assert_eq!(tables.order("s"), ["itv", "epg"]);
+
+        // Another source's forget leaves this one's reads alone.
+        let began = tables.generation("s");
+        tables.forget_source("other");
+        tables.keep_read("s", began, "epg", table("2026-11-01"));
+        assert!(tables.fresh("s|7|2026-11-01").is_some());
     }
 }

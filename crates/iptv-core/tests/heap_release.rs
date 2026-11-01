@@ -53,6 +53,19 @@ fn freed_rows_below_a_live_block_go_back_to_the_os() {
     assert!(mb(trimmed) < 30, "the trim kept {} MB", mb(trimmed));
     drop(pin);
 
+    // A trim queued on a runtime that shuts down before it runs it (a
+    // test's runtime ending, the app quitting) is dropped unrun; it must not
+    // pass for the trim of the imports that follow.
+    let gone = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .handle()
+        .clone();
+    {
+        let _in = gone.enter();
+        iptv_core::memory::release_freed_heap_soon();
+    }
+
     // The queued variant the import paths call, twice in a row: the second
     // import's trim must run too, not be taken for the first one's.
     let rt = tokio::runtime::Builder::new_multi_thread()

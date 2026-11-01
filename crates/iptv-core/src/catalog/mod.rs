@@ -1631,8 +1631,9 @@ pub fn query_named(
     // each title probes the hidden set; on 200k channels 8-20 ms, and 40-110
     // ms with 100 of 2,000 groups hidden, against about 1 ms a page now, on
     // a loaded 4-core machine). Every item has a category row
-    // (`CatalogWriter::finish` adds "Uncategorized" ones). For live and radio `item_count` leaves out channels hidden by a
-    // channel edit (`recount_categories`), and the sum is used only while
+    // (`CatalogWriter::finish` adds "Uncategorized" ones). For live and
+    // radio `item_count` leaves out channels hidden by a channel edit
+    // (`recount_categories`), and the sum is used only while
     // the source hides none of that type (`edited` empty), so there too it is
     // the row count. Every writer of items recounts in `finish`, and every
     // change to the hidden set recounts. Every other shape counts its rows.

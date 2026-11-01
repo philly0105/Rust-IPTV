@@ -453,6 +453,72 @@ async fn a_fatal_failure_after_a_staged_xtream_list_writes_nothing() {
     assert!(staged_lists(&e.state).is_empty());
 }
 
+/// Failures are reported in kind order although the live list fails at
+/// decode, after the movie and series lists failed to download: a first
+/// import of a panel without movies or series whose live list is cut short
+/// fails with the live list's error, not the movie list's 404.
+#[tokio::test]
+async fn a_sync_where_every_kind_failed_returns_the_earliest_kinds_error() {
+    let e = env().await;
+    e.add_xtream(XT).await;
+    {
+        let mut rules = e.rules.lock();
+        rules.fail.push((
+            vec!["action=get_live_streams"],
+            200,
+            r#"[{"stream_id": 1, "name": "Cut"#,
+        ));
+        rules
+            .fail
+            .push((vec!["action=get_vod_streams"], 404, "Not Found"));
+        rules
+            .fail
+            .push((vec!["action=get_series"], 404, "Not Found"));
+    }
+    let err = iptv_core::sources::refresh(e.state.clone(), XT)
+        .await
+        .expect_err("every kind failed");
+    match &err {
+        iptv_core::CoreError::Invalid(m) => assert!(m.contains("live streams"), "{m}"),
+        other => panic!("expected the live list's error, got {other:?}"),
+    }
+    assert_eq!(e.rows(XT, "live").await, 0);
+    assert!(staged_lists(&e.state).is_empty());
+}
+
+/// The warning that becomes `lastError` is the earliest kind's too: a live
+/// list that fails at decode wins over movie categories that failed while
+/// downloading (the movies kept).
+#[tokio::test]
+async fn the_earliest_kinds_warning_becomes_last_error() {
+    let mut e = env().await;
+    e.add_xtream(XT).await;
+    e.refresh(XT).await;
+    let channels = e.rows(XT, "live").await + e.rows(XT, "radio").await;
+    let movies = e.rows(XT, "movie").await;
+    {
+        let mut rules = e.rules.lock();
+        rules
+            .fail
+            .push((vec!["action=get_live_streams"], 200, LOGIN_PAGE));
+        rules
+            .fail
+            .push((vec!["action=get_vod_categories"], 200, LOGIN_PAGE));
+    }
+    let (source, _) = e.refresh(XT).await;
+    let err = source.last_error.expect("lastError says what is stale");
+    assert!(err.starts_with("Channels could not be loaded"), "{err}");
+    assert_eq!(
+        source.last_error_code,
+        Some(iptv_core::error::RpcErrorCode::Invalid)
+    );
+    assert_eq!(
+        e.rows(XT, "live").await + e.rows(XT, "radio").await,
+        channels
+    );
+    assert_eq!(e.rows(XT, "movie").await, movies);
+}
+
 /// `m3u::init` deletes the staged lists a crash left.
 #[tokio::test]
 async fn startup_removes_staged_xtream_lists_left_by_a_crash() {

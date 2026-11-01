@@ -28,7 +28,9 @@
 //! type whose categories come back unreadable (a login page) keeps its
 //! previous rows too, or, with none yet, lands under "Uncategorized". Both
 //! are noted with `sources::note_import_warning`, so the source's
-//! `lastError` says what is stale.
+//! `lastError` says what is stale. Warnings and the error of a sync where
+//! every type failed are reported in type order ([`Issues`]), as when each
+//! type was fetched and decoded in turn.
 //!
 //! Unchanged refresh (L2-perf-core-4): each type's answers (mapped
 //! categories plus the raw list body, with [`SYNC_VERSION`]) are hashed and
@@ -42,7 +44,7 @@ use super::meta::{self, added_to_rfc3339, year_from_date, ServerMeta};
 use super::raw::{LenientVec, RawCategory, RawLive, RawSeries, RawVod};
 use super::url::{clean_extension, is_xmltv_url_for, xmltv_url};
 use crate::catalog::{self, CategoryRow, ItemRow};
-use crate::error::{CoreError, CoreResult};
+use crate::error::{CoreError, CoreResult, RpcErrorCode};
 use crate::model::{ContentType, EpgLinks, ImportSummary, XtreamSourceConfig};
 use crate::sources::{progress, progress_step, ProgressGate, SaveStep};
 use crate::state::AppState;
@@ -160,31 +162,13 @@ pub async fn sync_source(
     };
 
     let mut parts: Vec<CatalogPart> = Vec::new();
-    let mut first_err: Option<CoreError> = None;
     // Kinds whose rows stay as they are (unchanged, or kept after their
     // categories failed), and the new fingerprints of the kinds written.
     let mut untouched: Vec<Kind> = Vec::new();
     let mut written: Vec<(Kind, Option<String>)> = Vec::new();
-    // Kinds that failed without failing the sync: their rows stay too.
-    let mut failed: Vec<Kind> = Vec::new();
-    let mut skip = |kind: Kind, err: CoreError| {
-        tracing::warn!(source_id, kind = kind.label(), error = %err, "xtream content type skipped");
-        progress(
-            &state,
-            source_id,
-            "parsing",
-            0,
-            None,
-            Some(&format!("{} skipped: {err}", kind.label())),
-        );
-        // A panel that does not serve a type at all is normal; any other
-        // failure leaves that type stale, so say so.
-        if !matches!(err, CoreError::NotFound(_) | CoreError::Unsupported(_)) {
-            crate::sources::note_import_warning(&kind.kept_message(), err.code());
-        }
-        failed.push(kind);
-        first_err.get_or_insert(err);
-    };
+    // Warnings and kinds that failed without failing the sync (their rows
+    // stay too), reported in kind order once both phases are done.
+    let mut issues = Issues::default();
 
     // Phase 1: download every kind, no save slot held. A changed list waits
     // on disk (its file goes with `staged` if the sync stops early).
@@ -203,7 +187,7 @@ pub async fn sync_source(
         if crate::sources::is_import_cancelled() {
             return Err(crate::sources::import_cancelled_error());
         }
-        match fetch_kind(&state, &client, source_id, kind, &previous).await {
+        match fetch_kind(&state, &client, source_id, kind, &previous, &mut issues).await {
             Ok(Fetched::Unchanged) => {
                 tracing::info!(
                     source_id,
@@ -215,7 +199,7 @@ pub async fn sync_source(
             Ok(Fetched::Kept) => untouched.push(kind),
             Ok(Fetched::Staged(s)) => staged.push(s),
             Err(err) if is_fatal(&err) => return Err(err),
-            Err(err) => skip(kind, err),
+            Err(err) => issues.skip(&state, source_id, kind, err),
         }
     }
 
@@ -238,11 +222,12 @@ pub async fn sync_source(
                 parts.extend(p);
             }
             Err(err) if is_fatal(&err) => return Err(err),
-            Err(err) => skip(kind, err),
+            Err(err) => issues.skip(&state, source_id, kind, err),
         }
     }
+    issues.note_warnings();
     if untouched.is_empty() && parts.iter().all(|p| p.rows.is_empty()) {
-        if let Some(err) = first_err {
+        if let Some(err) = issues.take_first_error() {
             // Every requested type failed (or the rest came back empty):
             // keep the previous catalog untouched.
             return Err(err);
@@ -325,7 +310,7 @@ pub async fn sync_source(
         let kind = Kind::of(ct);
         if !enabled(kind) {
             0
-        } else if untouched.contains(&kind) || failed.contains(&kind) {
+        } else if untouched.contains(&kind) || issues.failed(kind) {
             previous.rows(ct)
         } else {
             counts.get(&ct).copied().unwrap_or(0) as i64
@@ -394,6 +379,10 @@ impl Kind {
             ContentType::Series => Kind::Series,
         }
     }
+    /// Position in the fetch order (and in [`Issues`]).
+    fn index(self) -> usize {
+        self as usize
+    }
     /// `lastError` of a sync where this kind could not be loaded and kept
     /// its previous rows.
     fn kept_message(self) -> String {
@@ -421,6 +410,73 @@ impl Kind {
         } else {
             format!("The {what} categories could not be loaded from the server, so every {what} is listed under Uncategorized for now. Refresh the source to try again.")
         }
+    }
+}
+
+/// The warnings of a sync and the kinds it skipped, held per kind and
+/// reported in kind order once both phases are done. Only the first of each
+/// reaches the user (`run_import` keeps the run's first warning as
+/// `lastError`; a sync where every kind failed returns its first error), and
+/// that should be the earliest kind's, as when each kind was fetched and
+/// decoded in turn. Noted as they came, a later kind's fetch failure
+/// (phase 1) would win over an earlier kind's decode failure (phase 2): a
+/// live list cut short on a panel without movies or series would be
+/// reported as the movie list's 404.
+#[derive(Default)]
+struct Issues {
+    /// By [`Kind::index`].
+    kinds: [KindIssues; 3],
+}
+
+#[derive(Default)]
+struct KindIssues {
+    /// `lastError` candidates, in the order this kind met them.
+    warnings: Vec<(String, RpcErrorCode)>,
+    /// Why the kind was skipped; its rows stay as they were.
+    error: Option<CoreError>,
+}
+
+impl Issues {
+    fn warn(&mut self, kind: Kind, message: String, code: RpcErrorCode) {
+        self.kinds[kind.index()].warnings.push((message, code));
+    }
+
+    /// A kind that failed without failing the sync: its rows stay.
+    fn skip(&mut self, state: &AppState, source_id: &str, kind: Kind, err: CoreError) {
+        tracing::warn!(source_id, kind = kind.label(), error = %err, "xtream content type skipped");
+        progress(
+            state,
+            source_id,
+            "parsing",
+            0,
+            None,
+            Some(&format!("{} skipped: {err}", kind.label())),
+        );
+        // A panel that does not serve a type at all is normal; any other
+        // failure leaves that type stale, so say so.
+        if !matches!(err, CoreError::NotFound(_) | CoreError::Unsupported(_)) {
+            self.warn(kind, kind.kept_message(), err.code());
+        }
+        self.kinds[kind.index()].error = Some(err);
+    }
+
+    fn failed(&self, kind: Kind) -> bool {
+        self.kinds[kind.index()].error.is_some()
+    }
+
+    /// Notes every warning in kind order (`note_import_warning` keeps the
+    /// first).
+    fn note_warnings(&mut self) {
+        for kind in &mut self.kinds {
+            for (message, code) in kind.warnings.drain(..) {
+                crate::sources::note_import_warning(&message, code);
+            }
+        }
+    }
+
+    /// The earliest kind's error, taken out: only for a sync that returns it.
+    fn take_first_error(&mut self) -> Option<CoreError> {
+        self.kinds.iter_mut().find_map(|k| k.error.take())
     }
 }
 
@@ -664,13 +720,15 @@ async fn decode_staged(
 /// Fetches one content type and stages its list when it changed. Nothing
 /// is decoded or written here; see [`decode_staged`] and
 /// [`replace_catalogs`]. An answer identical to the last write is not
-/// even staged ([`Fetched::Unchanged`]).
+/// even staged ([`Fetched::Unchanged`]). A categories warning goes to
+/// `issues`, reported with the other kinds' in kind order.
 async fn fetch_kind(
     state: &Arc<AppState>,
     client: &XtreamClient,
     source_id: &str,
     kind: Kind,
     previous: &Previous,
+    issues: &mut Issues,
 ) -> CoreResult<Fetched> {
     let (cat_action, list_action) = kind.actions();
     progress(state, source_id, "fetching", 0, None, Some(kind.label()));
@@ -691,7 +749,7 @@ async fn fetch_kind(
             // (L1-core-15): every item would land under "Uncategorized".
             tracing::warn!(source_id, action = cat_action, error = %err, "xtream categories unavailable");
             let kept = previous.has_rows(kind);
-            crate::sources::note_import_warning(&kind.categories_message(kept), err.code());
+            issues.warn(kind, kind.categories_message(kept), err.code());
             if kept {
                 // Keep the previous rows and categories of this kind whole.
                 return Ok(Fetched::Kept);

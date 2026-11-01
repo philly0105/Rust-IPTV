@@ -144,8 +144,19 @@ struct Manifest {
 }
 
 fn parse_manifest(json: &str) -> CoreResult<Manifest> {
-    let v: Value = serde_json::from_str(json.trim_start_matches('\u{feff}'))
-        .map_err(|e| invalid(format!("backup file is not valid JSON: {e}")))?;
+    manifest_from(parse_root(json)?)
+}
+
+/// The backup's JSON tree.
+fn parse_root(json: &str) -> CoreResult<Value> {
+    serde_json::from_str(json.trim_start_matches('\u{feff}'))
+        .map_err(|e| invalid(format!("backup file is not valid JSON: {e}")))
+}
+
+/// Checks the tree's kind and version and moves its lists out. The
+/// `playlists` array holds every embedded playlist text, so it is taken
+/// from the tree, not cloned (R5-7).
+fn manifest_from(mut v: Value) -> CoreResult<Manifest> {
     if v.is_array() {
         return Err(invalid(
             "legacy playlist JSON exports are not supported; export a versioned backup from IPTVnator first",
@@ -168,7 +179,7 @@ fn parse_manifest(json: &str) -> CoreResult<Manifest> {
             )))
         }
     }
-    let Some(playlists) = v.get("playlists").and_then(Value::as_array) else {
+    let Some(Value::Array(playlists)) = take_key(&mut v, "playlists") else {
         return Err(invalid("backup file must contain a playlists array"));
     };
     let epg_urls = v
@@ -191,14 +202,23 @@ fn parse_manifest(json: &str) -> CoreResult<Manifest> {
         .and_then(|s| s.get(super::EXT_PARENTAL_SETTINGS))
         .filter(|p| !p.is_null())
         .cloned();
-    let custom_lists = arr(&v, super::EXT_CUSTOM_LISTS).to_vec();
+    let custom_lists = match take_key(&mut v, super::EXT_CUSTOM_LISTS) {
+        Some(Value::Array(lists)) => lists,
+        _ => Vec::new(),
+    };
     Ok(Manifest {
         epg_urls,
         app_settings,
         parental,
-        playlists: playlists.clone(),
+        playlists,
         custom_lists,
     })
+}
+
+/// Moves `key` out of an object (`None` when it is absent or `v` is not an
+/// object).
+fn take_key(v: &mut Value, key: &str) -> Option<Value> {
+    v.as_object_mut()?.remove(key)
 }
 
 /// Old-app `mergeUrls`: primary first, de-duplicated by URL identity.
@@ -263,34 +283,35 @@ fn headers_of(v: &Value) -> RequestHeaders {
 
 #[cfg(test)]
 fn parse_entry(v: &Value, index: usize) -> Result<Entry, String> {
-    parse_entry_with(v, index, true)
+    parse_entry_with(v.clone(), index, true)
 }
 
-/// [`parse_entry`]; `probe_files` false (server mode) skips the `is_file`
-/// check on a `file` entry's path, so the result never reveals whether a
-/// path exists on the server ([`keep_text_only`] then always applies).
-fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry, String> {
+/// Reads one playlist entry, moving its parts out of `v`: an m3u entry's
+/// embedded text becomes the entry's own without a copy (R5-7).
+/// `probe_files` false (server mode) skips the `is_file` check on a `file`
+/// entry's path, so the result never reveals whether a path exists on the
+/// server ([`keep_text_only`] then always applies).
+fn parse_entry_with(mut v: Value, index: usize, probe_files: bool) -> Result<Entry, String> {
     if !v.is_object() {
         return Err(format!("playlist #{}: not an object", index + 1));
     }
-    let portal = s_field(v, "portalType").unwrap_or_default();
-    let exported_id = s_field(v, "exportedId");
-    let title = s_field(v, "title")
+    let portal = s_field(&v, "portalType").unwrap_or_default();
+    let exported_id = s_field(&v, "exportedId");
+    let title = s_field(&v, "title")
         .or_else(|| exported_id.clone())
         .unwrap_or_else(|| format!("Imported playlist {}", index + 1));
     let label = format!("\"{title}\"");
-    let auto_refresh = b_field(v, "autoRefresh");
-    let position = i_field(v, "position").map(|p| p.clamp(0, MAX_IMPORTED_POSITION));
-    let user_state = v.get("userState").cloned().unwrap_or_else(|| json!({}));
+    let auto_refresh = b_field(&v, "autoRefresh");
+    let position = i_field(&v, "position").map(|p| p.clamp(0, MAX_IMPORTED_POSITION));
+    let user_state = take_key(&mut v, "userState").unwrap_or_else(|| json!({}));
 
     let (kind, config, fingerprint) = match portal.as_str() {
         "m3u" => {
-            let src = v.get("source").cloned().unwrap_or(Value::Null);
-            let raw = src
-                .get("rawM3u")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
+            let mut src = take_key(&mut v, "source").unwrap_or(Value::Null);
+            let raw = match take_key(&mut src, "rawM3u") {
+                Some(Value::String(text)) => text,
+                _ => String::new(),
+            };
             let url = s_field(&src, "url");
             let src_kind = s_field(&src, "kind").unwrap_or_default();
             let url_kind =
@@ -360,7 +381,7 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
             )
         }
         "xtream" => {
-            let c = v.get("connection").cloned().unwrap_or(Value::Null);
+            let c = take_key(&mut v, "connection").unwrap_or(Value::Null);
             let (Some(server), Some(user)) = (s_field(&c, "serverUrl"), s_field(&c, "username"))
             else {
                 return Err(format!(
@@ -381,7 +402,7 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
             )
         }
         "stalker" => {
-            let c = v.get("connection").cloned().unwrap_or(Value::Null);
+            let c = take_key(&mut v, "connection").unwrap_or(Value::Null);
             let (Some(portal_url), Some(mac)) =
                 (s_field(&c, "portalUrl"), s_field(&c, "macAddress"))
             else {
@@ -541,7 +562,40 @@ pub async fn import_with(
     mode: ImportMode,
     background: bool,
 ) -> CoreResult<ImportReport> {
-    let manifest = parse_manifest(json)?;
+    import_manifest(state, parse_manifest(json)?, mode, background).await
+}
+
+/// [`import_with`] for the RPC, which owns the backup text (R5-7). The
+/// import used to keep the RPC's text, a clone of the whole `playlists`
+/// array and the entry's own copy of an embedded playlist for its whole
+/// length, with transient copies on top, all parsed on a runtime worker: a
+/// 24 MB playlist peaked at 144 MB above the caller's heap (6x). The text is
+/// now parsed on the blocking pool and freed once its tree is built, and
+/// the playlist text moves from the tree into the entry and then into the
+/// database call: 50 MB (2x, serde_json's own unescape copy while parsing;
+/// `tests/backup_import_memory.rs`).
+pub async fn import_owned(
+    state: &Arc<AppState>,
+    json: String,
+    mode: ImportMode,
+    background: bool,
+) -> CoreResult<ImportReport> {
+    let manifest = tokio::task::spawn_blocking(move || {
+        let root = parse_root(&json);
+        drop(json);
+        manifest_from(root?)
+    })
+    .await??;
+    import_manifest(state, manifest, mode, background).await
+}
+
+/// [`import_with`] once the backup text is parsed.
+async fn import_manifest(
+    state: &Arc<AppState>,
+    mut manifest: Manifest,
+    mode: ImportMode,
+    background: bool,
+) -> CoreResult<ImportReport> {
     // parental: Replace removes every source and their parental locks with
     // them, so it needs the PIN (an active unlock) while controls are on.
     if mode == ImportMode::Replace {
@@ -560,9 +614,8 @@ pub async fn import_with(
     // Every entry is read before anything is changed: Replace must not wipe
     // the user's sources for a backup none of whose playlists can be used.
     let server_mode = crate::http::is_server_mode(state);
-    let parsed: Vec<Result<Entry, String>> = manifest
-        .playlists
-        .iter()
+    let parsed: Vec<Result<Entry, String>> = std::mem::take(&mut manifest.playlists)
+        .into_iter()
         .enumerate()
         .map(|(i, v)| parse_entry_with(v, i, !server_mode))
         .collect();
@@ -698,7 +751,7 @@ pub async fn import_with(
         match import_entry(
             state,
             &lock,
-            &entry,
+            &mut entry,
             &target_id,
             matched.is_some(),
             defer,
@@ -1235,7 +1288,7 @@ struct Deferred {
 async fn import_entry(
     state: &Arc<AppState>,
     lock: &tokio::sync::Mutex<()>,
-    entry: &Entry,
+    entry: &mut Entry,
     id: &str,
     is_merge: bool,
     defer: bool,
@@ -1263,8 +1316,11 @@ async fn import_entry(
         let name = entry.title.clone();
         let auto_refresh = entry.auto_refresh;
         let position = entry.position;
-        let raw = match &entry.config {
-            Config::M3u { raw, .. } if !fetch_url => Some(raw.clone()),
+        // The text moves into the database call: nothing reads it after
+        // this step (the catalog import, now or deferred, reads the stored
+        // copy), so it is not cloned (R5-7).
+        let raw = match &mut entry.config {
+            Config::M3u { raw, .. } if !fetch_url => Some(std::mem::take(raw)),
             _ => None,
         };
         let _guard = lock.lock().await;

@@ -25,7 +25,7 @@ mod import;
 pub mod rpc;
 
 pub use export::{build_manifest, export};
-pub use import::{apply_pending_restore, import, import_with};
+pub use import::{apply_pending_restore, import, import_owned, import_with};
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
@@ -356,7 +356,29 @@ pub(crate) fn fp_m3u_url(url: &str) -> String {
     format!("m3u|url|{}", normalize_url_identity(url))
 }
 pub(crate) fn fp_m3u_raw(raw: &str) -> String {
-    format!("m3u|raw|{}", sha256_hex(&canonical_m3u(raw)))
+    format!("m3u|raw|{}", canonical_m3u_sha256(raw))
+}
+
+/// `sha256_hex(&canonical_m3u(raw))`, hashed as the text is read. The
+/// canonical form took three full copies of the text (two `replace` passes
+/// and the trimmed copy): about 135 MB of transient heap for a 45 MB
+/// playlist in a backup, and again for every stored text playlist a merge
+/// fingerprints (R5-7). Trimming first is the same as trimming last: `\r`
+/// and `\n` are both whitespace, so line endings never move the edges.
+fn canonical_m3u_sha256(raw: &str) -> String {
+    let mut hasher = Sha256::new();
+    let mut rest = raw.trim().as_bytes();
+    while let Some(i) = memchr::memchr(b'\r', rest) {
+        hasher.update(&rest[..i]);
+        hasher.update(b"\n");
+        rest = &rest[i + 1..];
+        // `\r\n` becomes one `\n`; a lone `\r` becomes `\n` too.
+        if rest.first() == Some(&b'\n') {
+            rest = &rest[1..];
+        }
+    }
+    hasher.update(rest);
+    hex::encode(hasher.finalize())
 }
 pub(crate) fn fp_xtream(server: &str, user: &str) -> String {
     format!("xtream|{}|{}", normalize_url_identity(server), user.trim())
@@ -459,6 +481,38 @@ mod tests {
             fp_stalker("http://p/c/", " 00:1A:79:00:00:01 "),
             "stalker|http://p/c|00:1a:79:00:00:01"
         );
+    }
+
+    #[test]
+    fn streamed_raw_fingerprint_matches_the_canonical_copy() {
+        let old = |raw: &str| format!("m3u|raw|{}", sha256_hex(&canonical_m3u(raw)));
+        let mut big = String::from("\u{feff}  \r\n#EXTM3U\r\n");
+        for i in 0..2000 {
+            let end = ["\n", "\r\n", "\r", "\r\r\n", "\n\r"][i % 5];
+            big.push_str(&format!(
+                "#EXTINF:-1 group-title=\"G\u{e9}{i}\",Ch \u{2603} {i}{end}http://h/{i}.ts{end}"
+            ));
+        }
+        big.push_str("\u{a0}\r\n \t\r");
+        for raw in [
+            "",
+            " ",
+            "\r",
+            "\n",
+            "\r\n",
+            "\n\r",
+            "\r\r\n\n",
+            "#EXTM3U",
+            "x\r",
+            "\rx",
+            "a\rb\r\r\nc\n\rd",
+            "\u{a0}x\r\u{a0}",
+            "\u{2028}\r\n#EXTM3U\r\n\u{3000}",
+            "#EXTM3U\r\n#EXTINF:-1,A\r\nhttp://a\r\n",
+            big.as_str(),
+        ] {
+            assert_eq!(fp_m3u_raw(raw), old(raw), "{raw:?}");
+        }
     }
 
     #[test]

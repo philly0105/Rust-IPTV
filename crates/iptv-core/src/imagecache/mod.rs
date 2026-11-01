@@ -24,8 +24,10 @@
 //!    Before it asks the host it takes an upstream slot: at most
 //!    [`UPSTREAM_PER_HOST`] fetches go to one `host:port` at once and
 //!    [`UPSTREAM_MAX`] in all, so a parallel wall neither floods a provider's
-//!    host nor downloads more than a few bodies at once. The slots go back
-//!    once the body is in: resizing and writing it never hold the host up.
+//!    host nor downloads more than a few bodies at once. The host's slot
+//!    goes back once the body is in, so resizing and writing it never hold
+//!    the host up; the slot of all goes back once the body is written, so
+//!    no more than [`UPSTREAM_MAX`] fetched bodies wait in memory at once.
 //!    The body is checked (image type, at most [`MAX_IMAGE_BYTES`]), written
 //!    to a temp name and renamed into place, and the callers are answered.
 //!    The index row is written in the background: a catalog import holds
@@ -542,6 +544,13 @@ struct Slots {
     _all: Option<OwnedSemaphorePermit>,
 }
 
+impl Slots {
+    /// Gives the host's slot back and keeps the one of all.
+    fn release_host(&mut self) {
+        self._host = None;
+    }
+}
+
 /// The runtime singleton (stored in `AppState::extensions`). It holds no
 /// `Arc<AppState>`, so it never keeps the state alive; dropping the state
 /// drops the writer's sender, and the writer exits once its queue drains.
@@ -964,8 +973,8 @@ impl ImageCache {
     /// cached variant wider than it, else the fetched body, and stores only
     /// the result (or only the original, when the resizer leaves it alone).
     /// The upstream fetch uses `slots` when a warm took them, else waits for
-    /// its own, and gives them back once the body is in, before the resize
-    /// and the write.
+    /// its own. It gives the host's slot back once the body is in and the
+    /// slot of all once the body is resized and written.
     async fn download(
         self: &Arc<Self>,
         job: &Job,
@@ -1060,10 +1069,29 @@ impl ImageCache {
                 fetched.as_ref().err(),
             );
         }
-        // The host is done with: a request waiting for a slot takes it at
-        // once, else a queued warm, while this body is resized and written.
+        // The host is done with: a request waiting for one of its slots takes
+        // it at once, else a queued warm. The slot of all is held until the
+        // body is resized and written, so at most UPSTREAM_MAX fetched bodies
+        // (each up to MAX_IMAGE_BYTES) wait in memory at once.
+        let mut slots = slots;
+        slots.release_host();
+        self.pump_warms();
+        let stored = self.store_fetched(job, id, &base_key, fetched).await;
         drop(slots);
         self.pump_warms();
+        stored
+    }
+
+    /// Stores the body [`Self::download`] fetched: as it is, or for a
+    /// variant job the resized copy (or the original, when the resizer
+    /// leaves it alone).
+    async fn store_fetched(
+        &self,
+        job: &Job,
+        id: u64,
+        base_key: &str,
+        fetched: Result<(String, Vec<u8>), ImageError>,
+    ) -> Result<Done, ImageError> {
         let (content_type, body) = fetched?;
         let label = job.url.to_string();
         let Some(width) = job.width else {
@@ -1084,7 +1112,7 @@ impl ImageCache {
             }
             resize::Shrunk::Keep => {
                 self.keep(&job.key);
-                self.store(&base_key, &label, id, content_type, body).await
+                self.store(base_key, &label, id, content_type, body).await
             }
         }
     }

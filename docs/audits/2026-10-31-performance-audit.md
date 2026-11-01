@@ -40,7 +40,7 @@ The code was split into twelve slices:
 
 Each reviewer read docs/architecture/performance.md, the 2026-10-19 audit with its status table, and the area's docs before the code, so they would not re-report decisions that were already measured. Each slice also had an adversarial verifier. The verifier re-read the cited code, re-ran or repeated the measurements where it could, and returned a verdict (confirmed, partly or refuted), a severity, a refined fix and its risks. Where the refined fix differed from the reviewer's, the implementers followed the refined fix.
 
-Implementation ran in 15 batches: RB-A to RB-I for the core, FB-1 to FB-6 for the frontend. Each batch owned a set of files. Implementers wrote tests that pin the new behaviour and, where they could, checked that those tests fail against the old code. Each batch then had an adversarial review against its brief and the committed code. The review issues were checked and fixed in follow-up commits, and the architecture docs were brought up to date in `492849e`, `ccaa074` and `6d802ed`. Finally, a cross-batch review looked at how the batches interact. One lens covered wire and cross-layer contracts: RPC arguments, result shapes and key order, `RPC_COMMANDS`, the server policy and cancel list, the desktop proxy and Tauri IPC, iptv-mock, the e2e mocks and the test harnesses, plus backup, the remote control and server mode. The other lens covered frontend integration. That review produced the last two fixes, `d247ad9` and `2c15cce`.
+Implementation ran in 15 batches: RB-A to RB-I for the core, FB-1 to FB-6 for the frontend. Each batch owned a set of files. Implementers wrote tests that pin the new behaviour and, where they could, checked that those tests fail against the old code. Each batch then had an adversarial review against its brief and the committed code. The review issues were checked and fixed in follow-up commits, and the architecture docs were brought up to date in `492849e`, `ccaa074` and `6d802ed`. Finally, a cross-batch review looked at how the batches interact, through three lenses. The first covered the database across batches: which pool and which gate each new read and write uses, read-only connections facing another connection's index drop and recreate, every `AppState` construction path, gate-inside-gate deadlocks and the upgrade from schema 26. It found nothing. The second covered wire and cross-layer contracts: RPC arguments, result shapes and key order, `RPC_COMMANDS`, the server policy and cancel list, the desktop proxy and Tauri IPC, iptv-mock, the e2e mocks and the test harnesses, plus backup, the remote control and server mode. The third covered frontend integration. The last two found one problem each, fixed in `d247ad9` and `2c15cce`.
 
 Rust was available this time (1.97 in the sandbox), so the items the previous audit left because there was no compiler on gmk1 were done: DB-5 (R1-5, R7-4), the separate read pool (R1-1), IN-7 (R3-2) and the first stage of EP-3 (R2-1). All Rust changes were compiled and tested in the sandbox.
 
@@ -425,7 +425,7 @@ Also on the untouched tree, `cargo clippy -D warnings` failed on Linux because o
 
 Flakes that showed up during the pass but that the pass did not cause:
 
-- `crates/iptv-core/tests/stalker_paging.rs` `unchanged_answers_keep_the_catalog` sometimes fails under parallel load with "no such table: items" on a write-pool delete. With the read pool switched off, as the code stood before RB-E, it failed 2 times in 36 runs. A likely cause: `Env` declares `_tmp` before `state`, so the temporary directory is deleted before the `AppState` and its connections are dropped.
+- Two Rust tests sometimes fail with "no such table: items" on a raw `DELETE FROM items` issued right after a refresh: `crates/iptv-core/tests/l2_import_sync.rs` `a_removed_catalog_is_written_again_even_when_the_panel_did_not_change` and `crates/iptv-core/tests/stalker_paging.rs` `unchanged_answers_keep_the_catalog`. The untouched tree has the same flake. Built from `88b94a3` and run 40 times each, the first failed 7 times and the second once; at `2c15cce` the first failed once in 15 runs. The cause is not known. It is not the boot quarantine, which only runs at open, and the tests use a real temporary file, not a shared in-memory database. It is worth a look of its own, since the same delete after a refresh could happen in the app.
 - `src/features/library/test/pages.test.tsx` "RecentPage … past the 20 newest saved spots" can miss its 1 s wait under full-suite load.
 - `gridPerf.test.tsx` "updates only airing markers on a clock tick" failed once under load and passed alone.
 
@@ -468,4 +468,15 @@ pnpm test
 
 ## Final checks
 
-Filled in after the full suites run.
+Run at `2c15cce`, the last code commit, in the sandbox (4 CPUs, Node 22, Rust 1.97, WebKitGTK installed so the desktop crate builds on Linux):
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Clean, `iptv-tauri` included |
+| `cargo test -p iptv-core -p iptv-server -p iptv-mock` | 132 test binaries. 131 pass; `l2_import_sync` failed once on the flake above and passes on re-runs (14 of 15). 10 min 30 s. The same run at `cb41a7d` passed every binary. |
+| `pnpm typecheck` | Clean |
+| `pnpm test` | 5,984 passed, 10 skipped, 5 failed (439 files, 6 min 32 s). The 5 are the ones listed under the untouched tree: the format test and the two F11 runtime tests (Node 22), favoritesGrid, and guideFallback, which passes alone (9 of 9). Before the pass: 5,872 passed, 6 failed. |
+| `pnpm build` and `tools/check-bundle.mjs` | Pass. Entry 205,755 B of 268,000 B; Live 386,651 B and the guide 411,656 B beyond the boot chunks before their first render. The player, controls and Home-cards guards all hold. |
+
+The Playwright suite was not run.

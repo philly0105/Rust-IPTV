@@ -508,6 +508,10 @@ async fn attach_locked(
         .map(|(child, stream)| (Some(child), stream));
     #[cfg(target_os = "macos")]
     let started = platform::start(hwnd, &settings.mpv_args, initial_volume, initial_muted).await;
+    // Only the Windows and macOS starts read these; consume them so clippy's
+    // -D warnings passes on Linux too.
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = (&settings, initial_volume, initial_muted);
     #[cfg(not(any(windows, target_os = "macos")))]
     let started = platform::start(Path::new(""), &[], "")
         .await

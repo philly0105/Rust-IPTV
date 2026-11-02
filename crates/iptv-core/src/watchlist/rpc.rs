@@ -1,7 +1,8 @@
 //! `watchlist.*` RPC commands (contract C3).
 //!
 //! Each handler runs the synchronous function of the same name in the parent
-//! module through [`AppState::db_call`]. Every write that changes My List
+//! module: readers through [`AppState::db_read_call`], writes through
+//! [`AppState::db_write`]. Every write that changes My List
 //! emits [`super::CHANGED_EVENT`] with `{}` once it has committed, so other
 //! windows and the remote refresh their copy.
 
@@ -73,7 +74,9 @@ pub fn register(r: &mut RpcRouter) {
     r.add("watchlist.list", |s: S, a: ListArgs| async move {
         let hide = crate::parental::hide_filter(&s).await?;
         let v = s
-            .db_call(move |c| super::list_filtered(c, a.source_id.as_deref(), a.content_type, hide))
+            .db_read_call(move |c| {
+                super::list_filtered(c, a.source_id.as_deref(), a.content_type, hide)
+            })
             .await?;
         Ok::<Vec<WatchlistEntry>, RpcError>(v)
     });
@@ -85,7 +88,7 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<_, RpcError>(ToggleResult { in_list })
     });
     r.add("watchlist.contains", |s: S, a: RefsArgs| async move {
-        let v = s.db_call(move |c| super::contains(c, &a.refs)).await?;
+        let v = s.db_read_call(move |c| super::contains(c, &a.refs)).await?;
         Ok::<Vec<ItemRef>, RpcError>(v)
     });
     r.add("watchlist.remove", |s: S, a: RefArgs| async move {

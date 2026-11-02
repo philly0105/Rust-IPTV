@@ -14,8 +14,9 @@
  * Below them, three sections: Live now (whatever day is picked: games in progress from today and
  * yesterday, whose late games run past midnight), then the picked day's Upcoming and Final games, so
  * a game never shows twice. Every league's games for the day are fetched (four small answers), so the
- * tabs can count them and switching league shows them at once; streams are matched only for the games
- * the league and search leave on screen.
+ * tabs can count them and switching league shows them at once; streams are matched only for the league's
+ * games, over a guide window that grows with the leagues picked that day (useGrowingWindow), so going
+ * back to a league, or to All, never asks the guide again.
  */
 
 import { CalendarX2, Hd, SearchX, Star, Tv } from 'lucide-react';
@@ -30,11 +31,12 @@ import { DayStrip } from '../components/DayStrip';
 import { GameCard } from '../components/GameCard';
 import { LeagueFilter } from '../components/LeagueFilter';
 import { SportsSkeleton } from '../components/SportsSkeleton';
-import { QUALITY_LABEL, useStreamContext, type StreamContext } from '../components/StreamList';
+import { QUALITY_LABEL, cardNow, useStreamContext, type StreamContext } from '../components/StreamList';
 import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, useLiveQuality, useNow, useShell, useVisibleSources } from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
+import { useGrowingWindow } from '../hooks/useGrowingWindow';
 import { etDate, etDays } from '../lib/espn';
 import { filterGames, leagueCounts, sectionGames } from '../lib/filter';
 import type { StreamMatch } from '../lib/match';
@@ -73,6 +75,14 @@ const COMPACT_CHIP = 'max-sm:gap-0 max-sm:px-3 max-sm:[&>svg]:me-1.5';
 /** What the quality chip turns on: Full HD (1080p) and up. */
 const QUALITY_FLOOR: ChannelQuality = 'fhd';
 
+/**
+ * The page's one clock, for the cards and both match passes (they ran two unaligned minute timers of their
+ * own besides the page's 30 s one: about 4 renders a minute of every card, F5-2). A minute is enough: it
+ * ticks just after each minute starts, and ESPN's start times are whole minutes, so Watch still appears in
+ * the minute 15 minutes before the start, the one its "Watch from" time names.
+ */
+const CLOCK_MS = 60_000;
+
 interface StreamsOf {
   (game: Game): { streams: readonly StreamMatch[] | undefined; streamsLoading: boolean };
 }
@@ -83,12 +93,14 @@ function GameGrid({
   showStreams,
   showLeague,
   ctx,
+  now,
 }: {
   games: readonly Game[];
   streamsOf: StreamsOf;
   showStreams: boolean;
   showLeague: boolean;
   ctx: StreamContext;
+  now: number;
 }) {
   // Each card spans four rows of this grid as a subgrid (GameCard), so the cards in a row share one
   // height and their status lines, teams, notes and streams line up across it. The grid has no row
@@ -98,7 +110,7 @@ function GameGrid({
   return (
     <ul className={cn('-mb-3 grid gap-x-3 md:grid-cols-2 xl:grid-cols-3', CLEAR_PINNED)} data-testid="sports-grid">
       {games.map((g) => (
-        <GameCard key={g.key} game={g} {...streamsOf(g)} showStreams={showStreams} showLeague={showLeague} ctx={ctx} />
+        <GameCard key={g.key} game={g} {...streamsOf(g)} showStreams={showStreams} showLeague={showLeague} ctx={ctx} now={cardNow(g, now)} />
       ))}
     </ul>
   );
@@ -123,7 +135,7 @@ export function SportsPage() {
     setHeader({ title, search: { value: query, onChange: setQuery, placeholder } });
   }, [setHeader, title, query, placeholder]);
 
-  const now = useNow();
+  const now = useNow(CLOCK_MS);
   const today = etDate(now);
   // The window moves with the Eastern date, not with every tick of the clock.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -191,8 +203,14 @@ export function SportsPage() {
   // Live games the day list also holds share its matches; the others (yesterday's late games, or
   // every live game while another day is picked) get a pass of their own, over their own window.
   const liveOnly = useMemo(() => leagueLive.filter((g) => !dayKeys.has(g.key)), [leagueLive, dayKeys]);
-  const dayStreams = useGameStreams(leagueDay, hasSources);
-  const liveStreams = useGameStreams(liveOnly, hasSources);
+  // Each pass reads the guide over a window that only grows until the day changes: a league tab, or a
+  // game going live or final, no longer asks the whole guide again (useGrowingWindow). The live pass's
+  // games follow the clock, not the picked day: it starts over at Eastern midnight too, or a far day left
+  // open would stretch it over every day's live games since.
+  const dayWindow = useGrowingWindow(leagueDay, day);
+  const liveWindow = useGrowingWindow(liveOnly, `${day}|${today}`);
+  const dayStreams = useGameStreams(leagueDay, hasSources, { window: dayWindow, now });
+  const liveStreams = useGameStreams(liveOnly, hasSources, { window: liveWindow, now });
   const liveGames = useMemo(
     () => filterGames(leagueLive, null, query).filter((g) => !filterMyTeams || followsGame(followed, g)),
     [leagueLive, query, filterMyTeams, followed],
@@ -201,7 +219,7 @@ export function SportsPage() {
     () => filterGames(leagueDay, null, query).filter((g) => !filterMyTeams || followsGame(followed, g)),
     [leagueDay, query, filterMyTeams, followed],
   );
-  const ctx = useStreamContext(now, sourceCount);
+  const ctx = useStreamContext(sourceCount);
 
   const streamsOf: StreamsOf = (g) => {
     const from = dayKeys.has(g.key) ? dayStreams : liveStreams;
@@ -252,7 +270,7 @@ export function SportsPage() {
 
   const { loading, error, refetch } = allDay;
   const failed = error !== null && error !== undefined;
-  const grid = (games: Game[]) => <GameGrid games={games} streamsOf={streamsOf} showStreams={hasSources} showLeague={showLeague} ctx={ctx} />;
+  const grid = (games: Game[]) => <GameGrid games={games} streamsOf={streamsOf} showStreams={hasSources} showLeague={showLeague} ctx={ctx} now={now} />;
   let body: ReactNode;
   if (allDay.games.length === 0 && loading) {
     body = <SportsSkeleton label={t('loading')} />;

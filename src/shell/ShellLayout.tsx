@@ -7,6 +7,7 @@ import { isDesktop } from '@/api/transport';
 import { leaveBareWindowFullscreen } from '@/api/window';
 import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
 import { ListsDialogHost } from '@/features/lists/host';
+import { PLAYER_DOCK_EVENT } from '@/features/player/dockRequest';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import '@/i18n';
@@ -21,13 +22,15 @@ import { Header, HEADER_SEARCH_WIDTH } from './Header';
 import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
+import { loadCommandPalette, loadShortcutOverlay, warmOverlays } from './overlayChunks';
+import { PathnameProvider } from './pathname';
 import { useOutletScrollMemory } from './scrollMemory';
 import { modalOpen, useShortcut } from './shortcuts';
 import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
 import { useSettings, useSettingsValue } from './useSettings';
-import { SHELL_BOTTOM_INSET, TabBar, TAB_BAR_HEIGHT } from './TabBar';
+import { SHELL_BOTTOM_INSET, TAB_BAR_HEIGHT } from './tabBarMetrics';
 
 // player: the dock and the external-playback footer carry the whole playback UI (surfaces,
 // controls, engines, the store), about a third of the app's code, in their own chunk (C4 entry
@@ -36,12 +39,14 @@ import { SHELL_BOTTOM_INSET, TabBar, TAB_BAR_HEIGHT } from './TabBar';
 // first idle moment, so it never competes with the page being opened. It starts at once when
 // there is playback to restore, and on the first pointer or key press (the start of any play
 // intent; a page that plays imports the player itself, so by then the chunk is usually in).
-type PlayerModule = typeof import('@/features/player');
+// `@/features/player/dock`, not the barrel: pages import the barrel for the stage and the store,
+// and with the dock in it they loaded the controls before their first render (F1-1).
+type PlayerModule = typeof import('@/features/player/dock');
 let loadedPlayer: PlayerModule | null = null;
 let playerModule: Promise<PlayerModule> | null = null;
 
 function loadPlayerModule(): Promise<PlayerModule> {
-  playerModule ??= import('@/features/player').then((m) => (loadedPlayer = m));
+  playerModule ??= import('@/features/player/dock').then((m) => (loadedPlayer = m));
   return playerModule;
 }
 
@@ -70,11 +75,12 @@ function playbackToRestore(): boolean {
 /**
  * Calls `load` once: at once when `now`, else on the first idle moment (at most
  * PLAYER_IDLE_TIMEOUT_MS; a macrotask where requestIdleCallback is missing) once `delayMs` has
- * passed and scrolling is quiet, or on the first pointer or non-modifier key press. Presses
- * count from the start. Returns the cancel function.
+ * passed and scrolling is quiet, or on the first pointer or non-modifier key press or
+ * PLAYER_DOCK_EVENT. Presses count from the start. Returns the cancel function.
  */
 export function schedulePlayerLoad(load: () => void, now: boolean, win: Window = window, delayMs = 0): () => void {
-  const intents = ['pointerdown', 'keydown'] as const;
+  // PLAYER_DOCK_EVENT: a play began without a press (the player barrel raises it, F1-1).
+  const intents = ['pointerdown', 'keydown', PLAYER_DOCK_EVENT] as const;
   const movement = ['wheel', 'scroll', 'touchmove'] as const;
   let idle: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -176,9 +182,45 @@ function useWatchStats(enabled: boolean): void {
 const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
 // parental: the PIN dialogs (C2) load with the shell, outside the main chunk.
 const ParentalGateHost = lazy(() => import('@/features/parental/GateHost').then((m) => ({ default: m.ParentalGateHost })));
-// The palette and the `?` overlay only show on demand; they load right after the shell, outside the main chunk.
-const CommandPalette = lazy(() => import('./CommandPalette').then((m) => ({ default: m.CommandPalette })));
-const ShortcutOverlay = lazy(() => import('./ShortcutOverlay').then((m) => ({ default: m.ShortcutOverlay })));
+// The palette and the `?` overlay mount when they first open (F1-3), outside the main chunk; their
+// chunks are warmed at idle after the player and on hover or focus of their buttons (overlayChunks.ts).
+const CommandPalette = lazy(() => loadCommandPalette().then((m) => ({ default: m.CommandPalette })));
+const ShortcutOverlay = lazy(() => loadShortcutOverlay().then((m) => ({ default: m.ShortcutOverlay })));
+
+/** True from the first time `open` is true, for good: an overlay keeps its state and exit once shown. */
+function useOpenedOnce(open: boolean): boolean {
+  const [opened, setOpened] = useState(open);
+  if (open && !opened) setOpened(true);
+  return opened || open;
+}
+
+/**
+ * The command palette, mounted the first time it opens (F1-3). Closed, it rendered from the
+ * shell's first frame: its chunk, cmdk and programme search (about 85 kB) loaded right after the
+ * shell on every launch, and its five item hooks ran on every navigation. Ctrl+K is bound in
+ * GlobalShortcuts, so it works before the chunk is in; the first open waits for it.
+ */
+function PaletteHost() {
+  const opened = useOpenedOnce(useShellStore((s) => s.paletteOpen));
+  return opened ? (
+    <Suspense fallback={null}>
+      <CommandPalette />
+    </Suspense>
+  ) : null;
+}
+
+/** The `?` overlay, mounted the first time it opens, as the palette is. */
+function ShortcutOverlayHost() {
+  const opened = useOpenedOnce(useShellStore((s) => s.helpOpen));
+  return opened ? (
+    <Suspense fallback={null}>
+      <ShortcutOverlay />
+    </Suspense>
+  ) : null;
+}
+// The phone tab bar (F1-7): it renders only below 640 px, so a desktop or tablet launch does not
+// load it; its skeleton holds the bar's place while the chunk comes in.
+const TabBar = lazy(() => import('./TabBar').then((m) => ({ default: m.TabBar })));
 // Run 3 C7: the first-run tour and What's new. The host (decision, store) loads right after the
 // shell; the overlays and release notes are its own lazy chunks. Imported from `host`, not the
 // barrel, so RELEASE_NOTES and its icons stay out of this chunk.
@@ -431,17 +473,22 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
         </div>
-        {phone && (
-          <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>
-            {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
-                <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
-                <Skeleton className="h-2 w-10" />
-              </div>
-            ))}
-          </div>
-        )}
+        {phone && <TabBarSkeleton />}
       </div>
+    </div>
+  );
+}
+
+/** The phone tab bar's text-free stand-in: in the shell skeleton, and while the bar's chunk loads. */
+function TabBarSkeleton() {
+  return (
+    <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
+          <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
+          <Skeleton className="h-2 w-10" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -483,6 +530,9 @@ export function ShellLayout() {
   useParentalEvents();
   const player = usePlayerModule();
   useWatchStats(!!player);
+  // The overlays' chunks come after the player's idle load, at the next idle moment, so the first
+  // Ctrl+K or `?` rarely waits and neither competes with the page being opened.
+  useEffect(() => (player ? warmOverlays() : undefined), [player]);
   // The layout counts as the parental gate's host from its first render, so a PIN request made
   // before the dialogs can show (restoring a locked channel under the language skeleton, or
   // while their chunk loads) waits in the queue instead of being refused.
@@ -523,64 +573,69 @@ export function ShellLayout() {
   return (
     <>
       {leaves}
-      {/* The side safe areas: a phone on its side keeps the rail and the header off the notch. */}
-      <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
-        <a
-          href="#main"
-          className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
-        >
-          {t('skipToContent')}
-        </a>
-        <GlobalShortcuts />
-        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          <Header panelInline={wide} railHidden={railHidden} phone={phone} />
-          <ConnectionBanner />
-          <div className="flex min-h-0 flex-1">
-            {/*
-              The outlet is a bounded flex column at every width: the row above
-              has a definite height (h-dvh minus header and footer), and
-              min-h-0 lets it shrink. Pages either grow (main scrolls) or fill
-              it with `flex-1 min-h-0` / `h-full` and scroll inside, which gives
-              VirtualList / VirtualGrid a bounded scroll parent.
-            */}
-            <main
-              id="main"
-              tabIndex={-1}
-              data-shell-outlet=""
-              className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
-            >
-              <Outlet />
-            </main>
-            <ShellNavigationEffects />
-            <ContextPanel inline={wide} />
+      {/* The rail and the palette read the pathname from here: a typed `?q=` re-renders neither. */}
+      <PathnameProvider>
+        {/* The side safe areas: a phone on its side keeps the rail and the header off the notch. */}
+        <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
+          <a
+            href="#main"
+            className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
+          >
+            {t('skipToContent')}
+          </a>
+          <GlobalShortcuts />
+          {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+            <Header panelInline={wide} railHidden={railHidden} phone={phone} />
+            <ConnectionBanner />
+            <div className="flex min-h-0 flex-1">
+              {/*
+                The outlet is a bounded flex column at every width: the row above
+                has a definite height (h-dvh minus header and footer), and
+                min-h-0 lets it shrink. Pages either grow (main scrolls) or fill
+                it with `flex-1 min-h-0` / `h-full` and scroll inside, which gives
+                VirtualList / VirtualGrid a bounded scroll parent.
+              */}
+              <main
+                id="main"
+                tabIndex={-1}
+                data-shell-outlet=""
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
+              >
+                <Outlet />
+              </main>
+              <ShellNavigationEffects />
+              <ContextPanel inline={wide} />
+            </div>
+            {player && <player.ExternalPlaybackFooter />}
+            {phone && (
+              <Suspense fallback={<TabBarSkeleton />}>
+                <TabBar />
+              </Suspense>
+            )}
           </div>
-          {player && <player.ExternalPlaybackFooter />}
-          {phone && <TabBar />}
-        </div>
-        {player && <player.PlayerDock />}
-        <Suspense fallback={null}>
-          <CommandPalette />
-          <ShortcutOverlay />
-        </Suspense>
-        <ToastViewport />
-        <SecureContextNotice />
-        <Suspense fallback={null}>
-          <ParentalGateHost />
-        </Suspense>
-        {/* recording: it imports the player, so it mounts with it (it picks up reminders that fired before it listened). */}
-        {player && (
+          {player && <player.PlayerDock />}
+          <PaletteHost />
+          <ShortcutOverlayHost />
+          <ToastViewport />
+          <SecureContextNotice />
           <Suspense fallback={null}>
-            <RecordingWatcher />
+            <ParentalGateHost />
           </Suspense>
-        )}
-        {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
-        <ListsDialogHost />
-        <ChannelEditDialogHost />
-        <Suspense fallback={null}>
-          <OnboardingHost />
-        </Suspense>
-      </div>
+          {/* recording: it imports the player, so it mounts with it (it picks up reminders that fired before it listened). */}
+          {player && (
+            <Suspense fallback={null}>
+              <RecordingWatcher />
+            </Suspense>
+          )}
+          {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
+          <ListsDialogHost />
+          <ChannelEditDialogHost />
+          <Suspense fallback={null}>
+            <OnboardingHost />
+          </Suspense>
+        </div>
+      </PathnameProvider>
     </>
   );
 }

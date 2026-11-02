@@ -14,6 +14,8 @@ vi.mock('@/features/player', () => {
   loads.count++;
   return { restorePlayback: async () => false, PlayerDock: () => null, ExternalPlaybackFooter: () => null };
 });
+// The shell loads the dock from its own module (F1-1), with the same stand-ins.
+vi.mock('@/features/player/dock', () => import('@/features/player'));
 
 const { PLAYER_IDLE_TIMEOUT_MS, PLAYER_RESUME_KEY, schedulePlayerLoad } = await import('@/shell/ShellLayout');
 

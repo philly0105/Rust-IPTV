@@ -74,7 +74,8 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
   const setVisibleRange = useCallback((start: number, end: number) => {
     setRange((r) => (r.start === start && r.end === end ? r : { start, end }));
   }, []);
-  const near = favorites.slice(Math.max(0, range.start - AROUND), range.end + AROUND + 1);
+  const nearFrom = Math.max(0, range.start - AROUND);
+  const near = favorites.slice(nearFrom, range.end + AROUND + 1);
   // One `catalog.items` call for the rows asked for together, each under its own `catalog.item` key.
   const items = useQueries({ queries: near.map((e) => batchedItemQuery(e.ref, CHANNEL_STALE_MS)) });
   // A new function whenever a favorite's channel arrives, so the rows read it.
@@ -109,27 +110,34 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
     [favorites],
   );
 
+  // The query fields the view reads, not the results themselves: useQuery returns a new tracking
+  // object on every render, so depending on it rebuilt the view (and walked every favorite, a
+  // query-cache hash each) on every guide render, 1 ms at 1,000 favorites (F3-4).
+  const isList = view?.kind === 'list';
+  const q = isList ? list : favs;
+  const { data, isLoading, error, refetch } = q;
   return useMemo(() => {
     if (!view) return null;
-    const isList = view.kind === 'list';
-    const q = isList ? list : favs;
     const total = isList ? listChannels.length : favorites.length;
     const getChannel = isList ? listChannel : favoriteChannel;
+    // Favorites have channels only near the rows on screen, as on Live (useLiveViewChannels): the
+    // callers that need a far row (a reveal, Go to playing) fall back to `indexOf`.
     const loaded: { index: number; channel: Channel }[] = [];
-    for (let i = 0; i < total; i++) {
+    const [from, to] = isList ? [0, total] : [nearFrom, nearFrom + near.length];
+    for (let i = from; i < to; i++) {
       const channel = getChannel(i);
       if (channel) loaded.push({ index: i, channel });
     }
     return {
-      total: q.data ? total : undefined,
+      total: data ? total : undefined,
       getChannel,
       getNowNext: () => undefined,
       isFavorite: () => false,
       setVisibleRange,
-      isLoading: q.isLoading,
+      isLoading,
       refreshing: false,
-      error: q.error,
-      retry: () => void q.refetch(),
+      error,
+      retry: () => void refetch(),
       loaded,
       indexOf: isList ? listIndexOf : favoriteIndexOf,
       refAt: isList ? listRefAt : favoriteRefAt,
@@ -137,5 +145,6 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
       guideUnavailable: false,
       retryGuide: () => undefined,
     };
-  }, [view?.kind, list, favs, listChannels, favorites, listChannel, favoriteChannel, listIndexOf, favoriteIndexOf, listRefAt, favoriteRefAt, setVisibleRange]); // eslint-disable-line react-hooks/exhaustive-deps
+    // `near` follows `favorites` and the range.
+  }, [view?.kind, data, isLoading, error, refetch, listChannels, favorites, nearFrom, near.length, listChannel, favoriteChannel, listIndexOf, favoriteIndexOf, listRefAt, favoriteRefAt, setVisibleRange]); // eslint-disable-line react-hooks/exhaustive-deps
 }

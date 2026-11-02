@@ -229,7 +229,7 @@ async fn year_facets_rpc(
     let hide = crate::parental::hide_filter(&state).await?;
     let ct = a.content_type;
     let rows = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             year_facets_filtered(
                 c,
                 &a.source_id,

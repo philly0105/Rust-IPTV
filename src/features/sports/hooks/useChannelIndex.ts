@@ -8,7 +8,7 @@
  */
 
 import { useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import type { CatalogSearchResult } from '@/api/rpc';
@@ -285,6 +285,7 @@ function buildIndex(
 }
 
 const NO_SOURCES: Source[] = [];
+const NO_CHANNELS: IndexedChannel[] = [];
 
 /**
  * The sports channel index of every visible source. `loading` until each part has answered once (rows
@@ -293,7 +294,14 @@ const NO_SOURCES: Source[] = [];
 export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; loading: boolean; error: unknown } {
   const client = useQueryClient();
   const sources = useVisibleSources();
-  const list = sources.data ?? NO_SOURCES;
+  const raw = sources.data ?? NO_SOURCES;
+  // Only a source's id, kind and name reach the index. Every import refetches sources.list (an unchanged
+  // one too), and a failed refresh or a backoff changes its status: a new list there rebuilt the index,
+  // and with it the candidate map (about 0.4 s for 96k programmes) and every game's matches (F5-3). The
+  // signature keeps the sources' order, so `lists[i]` stays the groups of `list[i]`.
+  const sig = raw.map((s) => `${s.id}\u0000${s.kind}\u0000${s.name}`).join('\u0001');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const list = useMemo(() => raw, [sig]);
   const groups = useQueries({
     queries: list.map((s) => ({
       queryKey: sportsGroupsKey(s.id),
@@ -309,7 +317,15 @@ export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; l
     staleTime: INDEX_STALE_MS,
     enabled: enabled && list.length > 0,
   });
-  const channels = useMemo(() => buildIndex(list, groups.lists, networks.data), [list, groups.lists, networks.data]);
+  // Not built for an instance never enabled: the page's live pass is idle while every live game is in the
+  // day list, and built a second 7k-row index (and the guide keys of its refs) for nothing (F5-1). Once
+  // enabled it stays built, so an instance turned off and on again keeps its index and the prepared map.
+  const [wanted, setWanted] = useState(enabled);
+  if (enabled && !wanted) setWanted(true);
+  const channels = useMemo(
+    () => (wanted ? buildIndex(list, groups.lists, networks.data) : NO_CHANNELS),
+    [wanted, list, groups.lists, networks.data],
+  );
   const loading = enabled && (sources.isPending || groups.pending || (list.length > 0 && networks.isPending));
   return { channels, loading, error: sources.error ?? groups.error ?? networks.error ?? null };
 }

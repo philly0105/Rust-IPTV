@@ -6,6 +6,7 @@ import { useLocation } from 'react-router';
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey } from '@/api/types';
+import { prewarmTsWorkers } from '@/features/player/enginePreload';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
@@ -108,6 +109,12 @@ export function MultiviewPage() {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   const count = tiles.length;
+  // The tiles the wall opens with look their streams up first: their mpegts.js workers boot
+  // meanwhile (F2-2). Once, at mount; a tile added later finds the spare mpegts.js keeps.
+  const openingTiles = useRef(count);
+  useEffect(() => {
+    if (openingTiles.current > 0) prewarmTsWorkers(openingTiles.current);
+  }, []);
   const { active: fsActive, supported: fsSupported, toggle: fsToggle, exit: fsExit } = useWallFullscreen(stageRef);
   const chrome = useIdleChrome(fsActive);
   const { mainPlaying, stopMain } = useMainPlayerHandoff(count > 0);

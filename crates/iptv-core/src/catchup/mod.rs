@@ -131,23 +131,10 @@ fn not_ended(list: &[EpgProgram], now: i64, offset_minutes: i64, limit: usize) -
 /// The panel's complete archive table for an Xtream live channel, with its
 /// channel guide shift applied. Empty for other source kinds.
 pub async fn table(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Vec<EpgProgram>> {
-    if r.content_type != ContentType::Live
-        || source_kind(state, &r.source_id).await? != Some(SourceKind::Xtream)
-    {
-        return Ok(Vec::new());
-    }
-    let key = (r.source_id.clone(), r.item_id.clone());
-    let list = runtime(state)
-        .archive
-        .get_or_fetch(key, || crate::xtream::service::simple_data_table(state, r))
-        .await?;
-    // Moved by the channel's guide shift before the range picks.
-    let shift = crate::epg::channel_shift(state, r).await?;
-    Ok(list
-        .iter()
-        .cloned()
-        .map(|p| crate::epg::shifted(p, shift))
-        .collect())
+    Ok(match cached_table(state, r).await? {
+        Some((list, shift)) => select(&list, shift, None),
+        None => Vec::new(),
+    })
 }
 
 /// The panel's archive programmes of an Xtream live channel overlapping
@@ -164,20 +151,77 @@ pub async fn programs(
     if to <= from {
         return Err(CoreError::invalid("to must be after from"));
     }
-    Ok(table(state, r)
-        .await?
-        .into_iter()
-        .filter(
-            |p| matches!((secs(&p.start), secs(&p.end)), (Some(s), Some(e)) if e > from && s < to),
-        )
-        .collect())
+    Ok(match cached_table(state, r).await? {
+        Some((list, shift)) => select(&list, shift, Some((from, to))),
+        None => Vec::new(),
+    })
+}
+
+/// The cached archive table of an Xtream live channel (as the panel sent
+/// it) and the channel's guide shift in seconds; `None` for other kinds.
+async fn cached_table(
+    state: &Arc<AppState>,
+    r: &ItemRef,
+) -> CoreResult<Option<(Arc<Vec<EpgProgram>>, i64)>> {
+    if r.content_type != ContentType::Live
+        || source_kind(state, &r.source_id).await? != Some(SourceKind::Xtream)
+    {
+        return Ok(None);
+    }
+    let key = (r.source_id.clone(), r.item_id.clone());
+    let list = runtime(state)
+        .archive
+        .get_or_fetch(key, || crate::xtream::service::simple_data_table(state, r))
+        .await?;
+    let shift = crate::epg::channel_shift(state, r).await?;
+    Ok(Some((list, shift)))
+}
+
+/// The programmes of a cached table overlapping `range` (all of them
+/// without one), moved by the channel's guide `shift` before the range
+/// picks. Each programme is matched by reference on the times it will have
+/// once moved ([`shifted_secs`]), and only the ones kept are cloned and
+/// moved: cloning and moving the whole table (up to 5000 programmes with
+/// descriptions) for a one-day range threw nearly all of it away (R2-3).
+fn select(list: &[EpgProgram], shift: i64, range: Option<(i64, i64)>) -> Vec<EpgProgram> {
+    list.iter()
+        .filter(|p| {
+            range.is_none_or(|(from, to)| {
+                matches!(
+                    (shifted_secs(&p.start, shift), shifted_secs(&p.end, shift)),
+                    (Some(s), Some(e)) if e > from && s < to
+                )
+            })
+        })
+        .map(|p| crate::epg::shifted(p.clone(), shift))
+        .collect()
+}
+
+/// [`secs`] of `time` once [`crate::epg::shifted`] has moved it by `shift`,
+/// without writing the moved string: an RFC 3339 time moves (and is read
+/// back as the same instant in the years RFC 3339 can write, else through
+/// the string `shifted` writes), anything else stays as it is.
+fn shifted_secs(time: &str, shift: i64) -> Option<i64> {
+    if shift == 0 {
+        return secs(time);
+    }
+    match chrono::DateTime::parse_from_rfc3339(time.trim()) {
+        Ok(t) => {
+            let moved = t.timestamp().saturating_add(shift);
+            match chrono::DateTime::from_timestamp(moved, 0) {
+                Some(d) if (0..=9999).contains(&chrono::Datelike::year(&d)) => Some(moved),
+                _ => secs(&crate::epg::query::to_rfc3339(moved)),
+            }
+        }
+        Err(_) => secs(time),
+    }
 }
 
 #[cfg(test)]
 mod offset_tests {
     use super::*;
 
-    fn prog(start: &str, end: &str) -> EpgProgram {
+    pub(super) fn prog(start: &str, end: &str) -> EpgProgram {
         EpgProgram {
             channel_id: "c".into(),
             start: start.into(),
@@ -211,5 +255,83 @@ mod offset_tests {
         let ahead = not_ended(&list, now, -60, 4);
         assert_eq!(ahead[0].start, "2026-10-12T11:00:00Z");
         assert_eq!(not_ended(&list, now, 30, 1).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod select_tests {
+    use super::offset_tests::prog;
+    use super::*;
+
+    /// The table answer before R2-3: every programme cloned and moved.
+    fn table_before(list: &[EpgProgram], shift: i64) -> Vec<EpgProgram> {
+        list.iter()
+            .cloned()
+            .map(|p| crate::epg::shifted(p, shift))
+            .collect()
+    }
+
+    /// The programs answer before R2-3: the moved table, then the range.
+    fn programs_before(list: &[EpgProgram], shift: i64, from: i64, to: i64) -> Vec<EpgProgram> {
+        table_before(list, shift)
+            .into_iter()
+            .filter(|p| {
+                matches!((secs(&p.start), secs(&p.end)), (Some(s), Some(e)) if e > from && s < to)
+            })
+            .collect()
+    }
+
+    /// R2-3: picking by reference before cloning gives byte-identical
+    /// answers to moving the whole table first, for every shift and range,
+    /// including times `shifted` leaves alone (unix seconds, other text),
+    /// other offsets, padding, and a move past the year 9999.
+    #[test]
+    fn select_matches_moving_the_whole_table_first() {
+        let list: Vec<EpgProgram> = [
+            ("2026-10-12T09:00:00Z", "2026-10-12T10:00:00Z"),
+            ("2026-10-12T10:00:00Z", "2026-10-12T11:30:00Z"),
+            ("2026-10-12T13:00:00+02:00", "2026-10-12T14:00:00+02:00"),
+            (" 2026-10-12T12:00:00Z ", "2026-10-12T12:45:00Z"),
+            ("1791801000", "1791804600"),
+            ("2026-10-12T15:00:00Z", "1791824400"),
+            ("soon", "2026-10-12T16:00:00Z"),
+            ("2026-10-12T16:00:00Z", "later"),
+            ("9999-12-31T22:00:00Z", "9999-12-31T23:30:00Z"),
+            ("0000-01-01T01:00:00Z", "0000-01-01T02:00:00Z"),
+        ]
+        .iter()
+        .map(|(s, e)| prog(s, e))
+        .collect();
+        let day = secs("2026-10-12T00:00:00Z").unwrap();
+        let h = 3600;
+        let ranges = [
+            (day, day + 86_400),
+            (day + 9 * h, day + 10 * h),
+            (day + 10 * h + 1, day + 11 * h),
+            (day + 11 * h, day + 12 * h),
+            (day + 15 * h, day + 17 * h),
+            (secs("9999-12-31T00:00:00Z").unwrap(), i64::MAX),
+            (i64::MIN, secs("0001-01-01T00:00:00Z").unwrap()),
+            (i64::MIN, i64::MAX),
+        ];
+        for shift in [0, h, -90 * 60, 12 * h, -12 * h, 3 * h] {
+            assert_eq!(
+                select(&list, shift, None),
+                table_before(&list, shift),
+                "table, shift {shift}"
+            );
+            for (from, to) in ranges {
+                assert_eq!(
+                    select(&list, shift, Some((from, to))),
+                    programs_before(&list, shift, from, to),
+                    "shift {shift}, range {from}..{to}"
+                );
+            }
+        }
+        // The pick is not empty for the cases that matter.
+        assert_eq!(
+            select(&list, h, Some((day + 10 * h, day + 11 * h))).len(),
+            2
+        );
     }
 }

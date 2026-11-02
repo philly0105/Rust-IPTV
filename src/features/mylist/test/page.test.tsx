@@ -119,6 +119,18 @@ describe('MyListPage: list and header', () => {
     press(itemOf('Dark'), 'Enter');
     await waitFor(() => expect(h.location.current).toBe('/s/src1/series/s1'));
   });
+
+  it('starts the title’s detail data with the open, before its page has loaded (F4-1)', async () => {
+    await loaded();
+    rpc.handlers['xtream.seriesDetail'] = () => new Promise(() => undefined);
+    rpc.handlers['catalog.items'] = (args) => (args as { refs: ItemRef[] }).refs.map((ref) => ({ item: { ref, title: 'Dark', categoryId: 'c' } }));
+    itemOf('Dark').focus();
+    press(itemOf('Dark'), 'Enter');
+    // No route renders the detail page here: these come from the open itself.
+    expect(rpc.callsOf('xtream.seriesDetail')).toEqual([{ ref: s('s1') }]);
+    await waitFor(() => expect(rpc.callsOf('catalog.items')).toEqual([{ refs: [s('s1')] }]));
+    await waitFor(() => expect(h.location.current).toBe('/s/src1/series/s1'));
+  });
 });
 
 describe('MyListPage: designed states', () => {

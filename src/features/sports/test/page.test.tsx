@@ -32,6 +32,8 @@ const data = vi.hoisted(() => ({
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
   streamCalls: [] as { keys: string[]; enabled: boolean }[],
+  /** The guide window each call was given, beside `streamCalls`. */
+  windows: [] as ({ from: number; to: number } | undefined)[],
   /** One stable answer per (day, leagues), as React Query's combine gives. */
   cache: new Map<string, unknown>(),
 }));
@@ -53,8 +55,9 @@ vi.mock('../hooks/useGames', () => ({
   },
 }));
 vi.mock('../hooks/useGameStreams', () => ({
-  useGameStreams: (games: readonly { key: string }[], enabled = true) => {
+  useGameStreams: (games: readonly { key: string }[], enabled = true, opts: { window?: { from: number; to: number } } = {}) => {
     data.streamCalls.push({ keys: games.map((g) => g.key), enabled });
+    data.windows.push(opts.window && { from: opts.window.from, to: opts.window.to });
     return enabled ? { streams: data.streams, loading: data.streamsLoading } : { streams: new Map(), loading: false };
   },
 }));
@@ -76,6 +79,18 @@ vi.mock('@/features/live/lib/playback', () => ({
     player.catchups.push({ channel, kind, program, displayName });
   },
 }));
+/** How often each card ran: GameCard asks streamAction once a render for a game with one stream. */
+const cards = vi.hoisted(() => ({ renders: new Map<string, number>() }));
+vi.mock('../components/StreamList', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../components/StreamList')>();
+  return {
+    ...actual,
+    streamAction: (...args: Parameters<typeof actual.streamAction>) => {
+      cards.renders.set(args[0].key, (cards.renders.get(args[0].key) ?? 0) + 1);
+      return actual.streamAction(...args);
+    },
+  };
+});
 vi.mock('@/features/player/store', () => ({
   usePlayerStore: {
     getState: () => player.state,
@@ -88,10 +103,10 @@ const rpc = h.createRpcMock();
 rpcMock.current = rpc;
 const { SportsPage } = await import('../pages/SportsPage');
 const { useShellStore } = await import('@/shell/store');
-const { etDate, etDays, TYPICAL_LENGTH_MS } = await import('../lib/espn');
+const { etDate, etDays, gameWindow, TYPICAL_LENGTH_MS } = await import('../lib/espn');
 const { formatClock } = await import('@/features/live/lib/epgTime');
 const { pickDay } = await import('../paths');
-const { gameProgram, streamAction } = await import('../components/StreamList');
+const { cardNow, gameProgram, streamAction, TIMELESS } = await import('../components/StreamList');
 const { forgetFollowedTeamsForTests } = await import('../hooks/useFollowedTeams');
 const { useMultiviewStore } = await import('@/features/multiview/store');
 const { invalidate } = await import('@/api/query');
@@ -145,6 +160,7 @@ beforeEach(() => {
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
   data.streamCalls.length = 0;
+  data.windows.length = 0;
   data.cache.clear();
   player.played.length = 0;
   player.catchups.length = 0;
@@ -277,6 +293,73 @@ describe('sports page', () => {
     open('/sports?league=cricket');
     expect(screen.getByRole('tab', { name: /^All / }).getAttribute('aria-selected')).toBe('true');
     expect(data.dayCalls.at(-1)?.leagues).toEqual(ALL);
+  });
+
+  it('reads the guide over a window that only grows while the day stays, so league tabs keep it (F5-1)', async () => {
+    const days = etDays(Date.now(), 7, 7);
+    const nba = h.game('1', { startMs: Date.now() + h.HOUR });
+    const nfl = h.game('2', { league: 'nfl', startMs: Date.now() + 3 * h.HOUR, home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
+    const next = h.game('3', { startMs: Date.now() + 26 * h.HOUR, etDate: days[8] });
+    setDay([nba, nfl]);
+    setDay([next], days[8]);
+    const span = (...games: Game[]) => ({ from: Math.min(...games.map((g) => gameWindow(g).from)), to: Math.max(...games.map((g) => gameWindow(g).to)) });
+    /** The day pass's window: it asks first, the live pass second. */
+    const dayWindow = () => data.windows.at(-2);
+    await openReady('/sports?league=nba');
+    // A first visit reads what its games need, as before.
+    expect(dayWindow()).toEqual(span(nba));
+    fireEvent.click(screen.getByRole('tab', { name: /^All / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1', 'nfl:2']));
+    expect(dayWindow()).toEqual(span(nba, nfl));
+    // Back to one league, or another inside the span: the window and the guide keys stay.
+    fireEvent.click(screen.getByRole('tab', { name: /^NBA / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1']));
+    expect(dayWindow()).toEqual(span(nba, nfl));
+    fireEvent.click(screen.getByRole('tab', { name: /^NFL / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nfl:2']));
+    expect(dayWindow()).toEqual(span(nba, nfl));
+    // Another day starts over.
+    fireEvent.click(screen.getByRole('tab', { name: /^Tomorrow / }));
+    fireEvent.click(screen.getByRole('tab', { name: /^All / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:3']));
+    expect(dayWindow()).toEqual(span(next));
+  });
+
+  it("starts the live pass's window over at Eastern midnight while a far day stays picked", async () => {
+    // A minute before the next Eastern midnight: the page's minute clock next ticks just after it.
+    const step = 30 * h.MINUTE;
+    let midnight = Math.ceil(Date.now() / h.MINUTE) * h.MINUTE;
+    const before = etDate(midnight);
+    while (etDate(midnight) === before) midnight += step;
+    while (etDate(midnight - h.MINUTE) !== before) midnight -= h.MINUTE;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(midnight - h.MINUTE + 1000);
+    try {
+      // Five days back: still on the strip once it moves on a day.
+      const far = etDays(Date.now(), 7, 7)[2]!;
+      setDay([h.finalGame('5', { startMs: Date.now() - 5 * 24 * h.HOUR, etDate: far })], far);
+      pickDay(far);
+      const late = h.liveGame('8', { startMs: Date.now() - 2 * h.HOUR });
+      data.live = [late];
+      /** The live pass's window: the day pass asks first, the live pass second. */
+      const liveWindow = () => data.windows.at(-1);
+      await openReady(`/sports?day=${far}`);
+      expect(liveWindow()).toEqual(gameWindow(late));
+      // Past midnight the late game is over and a new one is live.
+      const early = h.liveGame('9', { startMs: midnight - 10 * h.MINUTE });
+      data.live = [early];
+      data.cache.delete(`live|${ALL.join()}`);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(h.MINUTE);
+      });
+      expect(etDate(Date.now())).not.toBe(before);
+      expect(data.streamCalls.at(-1)?.keys).toEqual(['nba:9']);
+      expect(data.dayCalls.at(-1)?.day).toBe(far);
+      // The new day's live games only: it no longer spans yesterday's late game too.
+      expect(liveWindow()).toEqual(gameWindow(early));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('leads with Live now whatever day is picked', async () => {
@@ -770,6 +853,60 @@ describe('sports page', () => {
     expect(player.state.zapContext).toBeUndefined();
   });
 
+  it('re-renders only the cards a keystroke, a poll or a clock tick changes (F5-2)', async () => {
+    // A second into a minute: the page's minute clock next ticks 59 s from now.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(Math.ceil(Date.now() / h.MINUTE) * h.MINUTE + 1000);
+    try {
+      const live = h.liveGame('1');
+      const far = h.game('2', { startMs: Date.now() + 2 * h.HOUR });
+      // Watch comes 15 minutes before the start: half a minute after the next tick.
+      const soon = h.game('3', { startMs: Date.now() + 15 * h.MINUTE + 30_000 });
+      const final = h.finalGame('4');
+      const later = Array.from({ length: 20 }, (_, i) => h.game(`${10 + i}`, { startMs: Date.now() + (3 + i) * h.HOUR }));
+      const all = [live, far, soon, final, ...later];
+      setDay(all);
+      const archived = h.channel('8', 'ESPN 2', { archive: { enabled: true, durationHours: 72 } });
+      for (const g of all) setStreams(g, [h.match(g === final ? archived : ESPN)]);
+      rpc.handlers['recordings.capabilities'] = () => ({ supported: false });
+      await openReady();
+      await waitFor(() => expect(rpc.callsOf('recordings.capabilities').length).toBeGreaterThan(0));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(within(card(soon)).getByTestId('sports-watch-from')).toBeTruthy();
+      expect(within(card(final)).getByTestId('sports-replay')).toBeTruthy();
+      const rendered = () => Object.fromEntries([...cards.renders].filter(([, n]) => n > 0));
+
+      // A search keystroke that leaves every card on screen.
+      cards.renders.clear();
+      act(() => useShellStore.getState().header!.search!.onChange('k'));
+      expect(screen.getAllByTestId('sports-game')).toHaveLength(all.length);
+      // Before F5-2 every one of the 24 cards ran again.
+      expect(rendered()).toEqual({});
+
+      // An ESPN poll that moved one score: structural sharing keeps the other games' objects.
+      cards.renders.clear();
+      const scored = { ...live, home: { ...live.home, score: 74 } };
+      data.cache.set(`day|${today()}|${ALL.join()}`, { games: all.map((g) => (g === live ? scored : g)), loading: false, error: null, refetch: () => undefined });
+      act(() => useShellStore.getState().header!.search!.onChange('kn'));
+      expect(rendered()).toEqual({ [live.key]: 1 });
+
+      // A clock tick: only the final (its replay's end follows the clock) and the game whose Watch it brings.
+      cards.renders.clear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(h.MINUTE);
+      });
+      expect(rendered()).toEqual({ [soon.key]: 1, [final.key]: 1 });
+      expect(within(card(soon)).getByTestId('sports-watch')).toBeTruthy();
+      expect(within(card(soon)).queryByTestId('sports-watch-from')).toBeNull();
+      expect(within(card(final)).getByTestId('sports-replay')).toBeTruthy();
+      expect(within(card(far)).getByTestId('sports-watch-from')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('replays a final game from a channel archive, and offers nothing without one', async () => {
     const g = h.finalGame('1');
     const archived = h.channel('8', 'ESPN 2', { archive: { enabled: true, durationHours: 72 } });
@@ -1061,5 +1198,37 @@ describe('the programme a replay or recording covers', () => {
     const slot = { channelId: '8', start: iso(g.startMs - 30 * h.MINUTE), end: iso(now + 2 * h.HOUR), title: 'NBA Basketball' };
     expect(streamAction(g, h.match(archived, { reason: 'guide', program: slot }), now, true, title)).toEqual({ kind: 'replay', program: { ...slot, title, end: iso(now) } });
     expect(streamAction(g, h.match(ESPN), now, true, title)).toBeNull();
+  });
+});
+
+describe('the clock a card gets (F5-2)', () => {
+  it('is the page clock only where it can change an action, and a constant that gives the same actions elsewhere', () => {
+    const now = Date.now();
+    const title = 'Boston Celtics at New York Knicks';
+    const games = {
+      live: h.liveGame('1'),
+      far: h.game('2', { startMs: now + 2 * h.HOUR }),
+      tbd: h.game('3', { timeValid: false }),
+      flex: h.game('4', { league: 'cfb', timeNote: 'FLEX: 3:30 - 4:30pm OR 6 - 8pm ET start' }),
+      postponed: h.game('5', { league: 'mlb', state: 'post', phase: 'postponed' }),
+      canceled: h.game('6', { league: 'mlb', state: 'post', phase: 'canceled' }),
+      soon: h.game('7', { startMs: now + 15 * h.MINUTE }),
+      delayed: h.game('8', { startMs: now - 20 * h.MINUTE }),
+      final: h.finalGame('9'),
+    };
+    const sensitive = Object.entries(games)
+      .filter(([, g]) => cardNow(g, now) === now)
+      .map(([name]) => name);
+    expect(sensitive).toEqual(['soon', 'delayed', 'final']);
+    const archived = h.channel('8', 'ESPN 2', { archive: { enabled: true, durationHours: 72 } });
+    for (const [name, g] of Object.entries(games)) {
+      if (cardNow(g, now) !== TIMELESS) continue;
+      const slot = { channelId: '8', start: new Date(g.startMs - 10 * h.MINUTE).toISOString(), end: new Date(g.startMs + 3 * h.HOUR).toISOString(), title: 'NBA Basketball' };
+      for (const m of [h.match(ESPN), h.match(archived, { reason: 'guide', program: slot })]) {
+        for (const canRecord of [true, false]) {
+          expect(streamAction(g, m, TIMELESS, canRecord, title), name).toEqual(streamAction(g, m, now, canRecord, title));
+        }
+      }
+    }
   });
 });

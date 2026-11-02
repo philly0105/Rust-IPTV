@@ -5,21 +5,31 @@
 //! over `epg_programs` (migration 0015). The index is not kept in step row
 //! by row: ingestion writes millions of rows through staging and swaps them
 //! in with a few bulk statements, so triggers would double the cost of every
-//! refresh. Instead the whole index is rebuilt after each change, and an
-//! `app_state` marker ([`INDEX_MARKER`]) says whether it matches the table:
+//! refresh. Instead a refresh's swap replaces that feed's index entries in
+//! bulk, other changes rebuild the whole index, and an `app_state` marker
+//! ([`INDEX_MARKER`]) says whether it matches the table:
 //!
-//! - every statement that deletes or swaps programmes removes the marker in
-//!   the same transaction (`store::commit_staging`, `clear_all`, `prune`,
-//!   and the staging cleanups when they deleted rows);
+//! - `store::commit_staging` keeps a matching index matching in its own
+//!   transaction ([`SwapUpkeep`]): before the feed's old programmes go, it
+//!   removes their entries (each title folded by the same [`fold`] it was
+//!   indexed with) and their `epg_search_rows`, and after the copy it
+//!   indexes the new ones; or, when the other feeds hold too few
+//!   programmes for that to pay, it empties both and indexes everything
+//!   again. Rebuilding every feed after each refresh, in a second write
+//!   transaction, grew with the square of the feed count (R2-1);
+//! - every other statement that deletes or swaps programmes removes the
+//!   marker in the same transaction (`commit_staging` when the index was
+//!   stale already, `clear_all`, `prune`, and the staging cleanups when
+//!   they deleted rows);
 //! - [`rebuild_index`] empties the index, indexes every title as [`fold`]
 //!   folds it, refills `epg_search_rows` (each programme's start, stop,
 //!   feed and guide channel by rowid, migration 0019: the hits are read
 //!   there instead of in the wide programme rows), and sets the marker to
-//!   [`INDEX_VERSION`] in one transaction: after each refresh, after
-//!   `epg.clearAll`, after a prune, and once in the background at startup
-//!   when the marker is missing or from an older version and programmes
-//!   exist (an upgraded database, or a crash between a swap and its
-//!   rebuild);
+//!   [`index_marker`] in one transaction: after a refresh that found the
+//!   index stale, after `epg.clearAll`, after a prune, and once in the
+//!   background at startup when the marker is missing or from an older
+//!   version and programmes exist (an upgraded database, or a crash between
+//!   a swap and its rebuild);
 //! - [`search`] reads the index only while the marker holds the current
 //!   version and falls back to a scan of the time window otherwise, so
 //!   results are never stale and rowids reused by later inserts never
@@ -49,10 +59,29 @@ use std::sync::Arc;
 
 /// `app_state` key present while `epg_programs_fts` matches `epg_programs`.
 pub const INDEX_MARKER: &str = "epg_search_index";
-/// Marker value of an index of [`fold`]ed titles with its
-/// `epg_search_rows`. A marker with any other value (`ready`: raw titles,
-/// before the fold; `folded-1`: before the search rows) counts as missing.
+/// Version of an index of [`fold`]ed titles with its `epg_search_rows`, the
+/// first part of [`index_marker`]. A marker with any other value (`ready`:
+/// raw titles, before the fold; `folded-1`: before the search rows; one
+/// from other Unicode tables) counts as missing. Bump it with any change to
+/// what [`fold`] returns (`fold_output_is_pinned` fails until then).
 pub const INDEX_VERSION: &str = "folded-2";
+
+/// The marker value [`rebuild_index`] writes and [`index_ready`] expects:
+/// [`INDEX_VERSION`] and the Unicode version of std's case tables. The swap's
+/// per-feed upkeep hands FTS5's `'delete'` each stored title folded again,
+/// which silently corrupts the index unless [`fold`] gives exactly what the
+/// build that indexed it gave (RB-F review). `str::to_lowercase` follows the
+/// toolchain's Unicode tables, and the toolchain floats on stable, so a
+/// build with other tables finds the marker stale and rebuilds the index
+/// once at startup. The diacritic table of `tmdb::normalize` is the crate's
+/// own: a change there needs an [`INDEX_VERSION`] bump.
+pub fn index_marker() -> &'static str {
+    static MARKER: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        let (major, minor, update) = char::UNICODE_VERSION;
+        format!("{INDEX_VERSION}/unicode-{major}.{minor}.{update}")
+    });
+    &MARKER
+}
 /// SQL function [`rebuild_index`] registers to fold titles while indexing.
 const FOLD_SQL_FUNCTION: &str = "epg_search_fold";
 /// Query length bounds, in characters after trimming.
@@ -114,20 +143,18 @@ pub fn index_ready(conn: &Connection) -> CoreResult<bool> {
     Ok(conn
         .query_row(
             "SELECT 1 FROM app_state WHERE key = ?1 AND value = ?2",
-            [INDEX_MARKER, INDEX_VERSION],
+            [INDEX_MARKER, index_marker()],
             |_| Ok(()),
         )
         .optional()?
         .is_some())
 }
 
-/// Rebuilds the whole index from `epg_programs` and marks it ready, in one
-/// write transaction. Titles are indexed as [`fold`] folds them (not with
-/// `'rebuild'`, which would index the raw titles of the content table), so
-/// the index and the scan agree on every script; queries are folded the
-/// same way before they reach the tokenizer.
-pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
-    let started = std::time::Instant::now();
+/// Registers [`FOLD_SQL_FUNCTION`] on `conn`: [`fold`], the one fold every
+/// statement that adds index entries or removes them runs titles through.
+/// An FTS5 `'delete'` must be given exactly the text that was indexed, or
+/// it silently corrupts the index, so there is no other.
+pub(crate) fn register_fold(conn: &Connection) -> CoreResult<()> {
     conn.create_scalar_function(
         FOLD_SQL_FUNCTION,
         1,
@@ -140,28 +167,130 @@ pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
             Ok(title.map(fold))
         },
     )?;
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.execute(
+    Ok(())
+}
+
+/// Removes the index entries of feed `?1`'s programmes, their titles folded
+/// as they were indexed ([`register_fold`]).
+pub const UNINDEX_FTS_SQL: &str = "INSERT INTO epg_programs_fts(epg_programs_fts, rowid, title)
+     SELECT 'delete', rowid, epg_search_fold(title) FROM epg_programs WHERE epg_url = ?1";
+/// Removes the search rows of feed `?1` (`idx_epg_search_rows_feed`, 0028).
+pub const UNINDEX_ROWS_SQL: &str =
+    "DELETE FROM epg_search_rows WHERE feed = (SELECT rowid FROM epg_sources WHERE url = ?1)";
+/// Indexes the titles of every programme ([`register_fold`]).
+const INDEX_ALL_FTS_SQL: &str = "INSERT INTO epg_programs_fts(rowid, title)
+     SELECT rowid, epg_search_fold(title) FROM epg_programs";
+/// Indexes the titles of feed `?1`'s programmes ([`register_fold`]).
+pub const INDEX_FTS_SQL: &str = "INSERT INTO epg_programs_fts(rowid, title)
+     SELECT rowid, epg_search_fold(title) FROM epg_programs WHERE epg_url = ?1";
+/// Writes the search rows of every programme.
+const INDEX_ALL_ROWS_SQL: &str = "INSERT INTO epg_search_rows(id, start, stop, feed, channel_id)
+     SELECT p.rowid, p.start, p.stop, s.rowid, p.channel_id
+     FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url";
+/// Writes the search rows of feed `?1`'s programmes.
+pub const INDEX_ROWS_SQL: &str = "INSERT INTO epg_search_rows(id, start, stop, feed, channel_id)
+     SELECT p.rowid, p.start, p.stop, s.rowid, p.channel_id
+     FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url WHERE p.epg_url = ?1";
+
+/// How `store::commit_staging` keeps a matching index matching through the
+/// swap of one feed, in the swap's own transaction. Both leave the index a
+/// rebuild would write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwapUpkeep {
+    /// Remove the feed's old entries and search rows before its programmes
+    /// go, and add the new ones after the copy.
+    Feed,
+    /// Empty the index and the search rows before the swap, and index every
+    /// programme after it, as [`rebuild_index`] does.
+    Whole,
+}
+
+impl SwapUpkeep {
+    /// The cheaper upkeep for a feed with `old` programmes before the swap
+    /// and `new` after it, while the other feeds hold `others`. Measured on
+    /// three feeds of 200k programmes (debug build, SQLite at -O1): removing
+    /// a feed's entries costs about 2.6 us per programme (FTS5's `'delete'`
+    /// must be handed each title folded again, 2.1 us, then the search row,
+    /// 0.5 us) and adding them about 3.25 us (2.35 + 0.9), while emptying
+    /// both is almost free and indexing everything costs about 2.2 us per
+    /// programme of every feed (1.5 + 0.7). So the feed's own entries are
+    /// replaced only when the other feeds hold more than `old + new / 2`
+    /// programmes: from three feeds of a similar size up (1.2 s for the
+    /// feed's own entries against 1.3 s to index all three, 2.2 s for five),
+    /// where re-indexing every feed on each refresh made a cycle of refreshes
+    /// grow with the square of the feed count.
+    pub(crate) fn choose(old: i64, new: i64, others: i64) -> Self {
+        if others > old + new / 2 {
+            Self::Feed
+        } else {
+            Self::Whole
+        }
+    }
+}
+
+/// Before the swap deletes the programmes of `url`: removes their index
+/// entries and search rows, or empties both ([`SwapUpkeep`]).
+pub(crate) fn unindex_before_swap(
+    conn: &Connection,
+    url: &str,
+    upkeep: SwapUpkeep,
+) -> CoreResult<()> {
+    match upkeep {
+        SwapUpkeep::Feed => {
+            conn.execute(UNINDEX_FTS_SQL, [url])?;
+            conn.execute(UNINDEX_ROWS_SQL, [url])?;
+        }
+        SwapUpkeep::Whole => clear_index(conn)?,
+    }
+    Ok(())
+}
+
+/// After the swap copied the programmes of `url` in: indexes them and writes
+/// their search rows, or every programme's ([`SwapUpkeep`]). The marker
+/// stays: the index matches the table again.
+pub(crate) fn index_after_swap(conn: &Connection, url: &str, upkeep: SwapUpkeep) -> CoreResult<()> {
+    match upkeep {
+        SwapUpkeep::Feed => {
+            conn.execute(INDEX_FTS_SQL, [url])?;
+            conn.execute(INDEX_ROWS_SQL, [url])?;
+        }
+        SwapUpkeep::Whole => index_everything(conn)?,
+    }
+    Ok(())
+}
+
+/// Empties the index and the search rows (`'delete-all'` is almost free).
+fn clear_index(conn: &Connection) -> CoreResult<()> {
+    conn.execute(
         "INSERT INTO epg_programs_fts(epg_programs_fts) VALUES('delete-all')",
         [],
     )?;
-    tx.execute(
-        &format!(
-            "INSERT INTO epg_programs_fts(rowid, title) SELECT rowid, {FOLD_SQL_FUNCTION}(title) FROM epg_programs"
-        ),
-        [],
-    )?;
-    tx.execute("DELETE FROM epg_search_rows", [])?;
-    tx.execute(
-        "INSERT INTO epg_search_rows(id, start, stop, feed, channel_id)
-         SELECT p.rowid, p.start, p.stop, s.rowid, p.channel_id
-         FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url",
-        [],
-    )?;
+    conn.execute("DELETE FROM epg_search_rows", [])?;
+    Ok(())
+}
+
+/// Indexes every programme and writes its search row.
+fn index_everything(conn: &Connection) -> CoreResult<()> {
+    conn.execute(INDEX_ALL_FTS_SQL, [])?;
+    conn.execute(INDEX_ALL_ROWS_SQL, [])?;
+    Ok(())
+}
+
+/// Rebuilds the whole index from `epg_programs` and marks it ready, in one
+/// write transaction. Titles are indexed as [`fold`] folds them (not with
+/// `'rebuild'`, which would index the raw titles of the content table), so
+/// the index and the scan agree on every script; queries are folded the
+/// same way before they reach the tokenizer.
+pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
+    let started = std::time::Instant::now();
+    register_fold(conn)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    clear_index(&tx)?;
+    index_everything(&tx)?;
     tx.execute(
         "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        [INDEX_MARKER, INDEX_VERSION],
+        [INDEX_MARKER, index_marker()],
     )?;
     tx.commit()?;
     tracing::debug!(
@@ -192,8 +321,9 @@ pub fn ensure_index(conn: &mut Connection, only_if_programmes: bool) -> CoreResu
     Ok(true)
 }
 
-/// [`ensure_index`] for the write paths (refresh, clear, prune): a failure
-/// is logged and leaves search on its fallback; it never fails the caller.
+/// [`ensure_index`] for the write paths (a refresh that found the index
+/// stale, clear, prune): a failure is logged and leaves search on its
+/// fallback; it never fails the caller.
 pub fn refresh_index(conn: &mut Connection) {
     if let Err(e) = ensure_index(conn, false) {
         tracing::warn!(error = %e, "could not rebuild the guide search index; search scans until the next refresh");
@@ -402,7 +532,7 @@ impl SearchMemo {
         }
         let found: Option<Arc<str>> = match dir.find_id(id) {
             Some(canonical) => Some(canonical.into()),
-            None if resolve::has_programmes(conn, id)? => Some(id.into()),
+            None if dir.has_programmes(conn, id)? => Some(id.into()),
             None => None,
         };
         self.ids.insert(id.to_string(), found.clone());
@@ -864,7 +994,7 @@ pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<Guid
     let rt = runtime(state);
     let started = std::time::Instant::now();
     let (hits, used_index) = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             ensure_source(c, &q.source_id)?;
             let dir = resolve::directory(c, &rt)?;
             // One read snapshot: a guide refresh that commits between the
@@ -905,6 +1035,81 @@ mod tests {
             w("  Le Journal-de 20h! "),
             vec!["le", "journal", "de", "20h"]
         );
+    }
+
+    /// FNV-1a over `fold` of every code point in `ranges`, one at a time.
+    fn fold_digest(ranges: &[std::ops::RangeInclusive<u32>]) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for c in ranges.iter().cloned().flatten().filter_map(char::from_u32) {
+            for b in fold(&c.to_string()).bytes().chain([0]) {
+                h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        h
+    }
+
+    /// RB-F review: the per-feed index upkeep is only correct while `fold`
+    /// gives what the build that indexed a title gave. This pins its output
+    /// on samples and over every block the diacritic table of
+    /// `tmdb::normalize` covers. A change to `fold` or that table breaks it:
+    /// bump INDEX_VERSION, then update the expected values. A toolchain whose
+    /// Unicode tables move the digest changes `index_marker` by itself, so
+    /// only the digest needs updating then.
+    #[test]
+    fn fold_output_is_pinned() {
+        let samples = [
+            (
+                "Ça Ñandú Øre Æsir Straße Łódź Đà",
+                "ca nandu øre æsir straße łodz đa",
+            ),
+            ("ÀÉÎÕÜ àéîõü Ÿÿ Ő ő Ș ș Ț ț", "aeiou aeiou yy o o s s t t"),
+            (
+                "Ελληνικά ΆΈΉΊΌΎΏ ΐΰ Ϊ ϋ ἀρχή ῥ ᾷ",
+                "ελληνικα αεηιουω ιυ ι υ αρχη ρ α",
+            ),
+            ("Thời sự Hà Nội Đường phố", "thoi su ha noi đuong pho"),
+            ("Ёлка Йошкар-Ола Ўзбек Ї", "елка иошкар-ола узбек і"),
+            ("Ω K Å ẞ İ", "ω k a ß i"),
+            ("한국어 ニュース नमस्ते", "한국어 ニュース नमस्ते"),
+            ("ΣΟΦΟΣ σοφος", "σοφοσ σοφοσ"),
+        ];
+        for (input, folded) in samples {
+            assert_eq!(fold(input), folded, "{input}");
+        }
+        let digest = fold_digest(&[
+            0x00C0..=0x04FF,
+            0x1E00..=0x1FFF,
+            0x2100..=0x23FF,
+            0x2A00..=0x2AFF,
+            0x10500..=0x105FF,
+        ]);
+        assert_eq!(digest, 0xe317_aa09_7a63_6acc, "fold digest");
+        assert!(index_marker().starts_with(&format!("{INDEX_VERSION}/unicode-")));
+    }
+
+    /// RB-F review: a marker written by a build with other Unicode tables
+    /// (here, the bare version an older build wrote) is stale, so the
+    /// startup build indexes once with this build's fold.
+    #[test]
+    fn a_marker_from_other_unicode_tables_is_stale() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_state(key, value) VALUES (?1, ?2)",
+            [INDEX_MARKER, INDEX_VERSION],
+        )
+        .unwrap();
+        assert!(!index_ready(&conn).unwrap());
+        rebuild_index(&mut conn).unwrap();
+        assert!(index_ready(&conn).unwrap());
+        let stored: String = conn
+            .query_row(
+                "SELECT value FROM app_state WHERE key = ?1",
+                [INDEX_MARKER],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, index_marker());
     }
 
     #[test]

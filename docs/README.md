@@ -6,7 +6,7 @@
 
 The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`) are thin hosts around `crates/iptv-core`. Each builds an `AppState` (SQLite pool, HTTP client, settings cache, event sink), registers every module's commands with `rpc::build_router()`, and starts module runtimes with `rpc::init_all()`. The UI calls `rpc(cmd, args)`: a Tauri command on desktop, `POST /api/rpc/{cmd}` on the server. Core events reach the UI as the Tauri `app-event` event or over the `/api/events` WebSocket, and `src/api/query.ts` turns them into TanStack Query invalidations.
 
-`init_all` order: the importers (m3u, xtream, stalker) register first, then `sources` schedules the startup refresh, then catalog, userstate, settings, backup (applies parked restores), epg, downloads, tmdb, remote, recording, parental (starts the unlock-expiry timer), watchlist, lists, stats (prunes the watch log), imagecache (reconciles the image cache index with its files in the background), and player. A module that fails to start is logged and skipped.
+`init_all` order: the importers (m3u, xtream, stalker) register first, then `sources` schedules the startup refresh, then catalog, userstate, settings, backup (applies parked restores), epg, downloads, tmdb, remote, recording, parental (starts the unlock-expiry timer), watchlist, lists, stats (prunes the watch log), imagecache (reconciles the image cache index with its files in the background after an unclean shutdown or once a week), and player. A module that fails to start is logged and skipped.
 
 ## Core subsystems (`crates/iptv-core`)
 

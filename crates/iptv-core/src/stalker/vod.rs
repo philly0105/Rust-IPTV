@@ -51,7 +51,7 @@ pub struct Listed {
     pub category_id: String,
 }
 
-fn page_size_key(source_id: &str, kind: Kind) -> String {
+pub(super) fn page_size_key(source_id: &str, kind: Kind) -> String {
     format!("{source_id}|{}", kind.as_str())
 }
 

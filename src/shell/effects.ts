@@ -560,6 +560,10 @@ export function useLastRoutePersistence(enabled: boolean, initial: string | unde
 
 export const WINDOW_SAVE_DEBOUNCE_MS = 800;
 
+function geometryKey(s: WindowState): string {
+  return `${s.x}|${s.y}|${s.width}|${s.height}|${s.maximized}`;
+}
+
 /**
  * Desktop only: mirrors the main window geometry into the core
  * (`window.setState`, C4) on move/resize, debounced.
@@ -590,6 +594,11 @@ export function useWindowStatePersistence(): void {
         const win = getCurrentWindow();
         let lastNormal: WindowState | null = await rpc('window.getState').catch(() => null);
         if (disposed) return;
+        // What the core holds, so an unchanged geometry is not written again (R4-1). A fullscreen
+        // toggle fires onResized but keeps lastNormal, and the boot record usually repeats the
+        // stored geometry; each of those was an app_state write, and during an import save one
+        // that waited on the write lock.
+        let lastSent = lastNormal ? geometryKey(lastNormal) : null;
 
         // The small always-on-top PiP window is not a geometry to come back to:
         // while PiP is on nothing is recorded, so lastNormal keeps the size from
@@ -610,7 +619,14 @@ export function useWindowStatePersistence(): void {
                 lastNormal = { x: pos.x, y: pos.y, width: size.width, height: size.height, maximized: false };
               }
               if (!lastNormal) return;
-              await rpc('window.setState', { state: { ...lastNormal, maximized } });
+              const state = { ...lastNormal, maximized };
+              const key = geometryKey(state);
+              if (key === lastSent) return;
+              lastSent = key;
+              await rpc('window.setState', { state }).catch((err: unknown) => {
+                if (lastSent === key) lastSent = null; // not stored: the next settle sends it again
+                throw err;
+              });
             } catch {
               // window closing; nothing to save
             }

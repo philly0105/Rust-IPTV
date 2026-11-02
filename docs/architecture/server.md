@@ -24,7 +24,10 @@ shutdown: event sockets get a close frame, new connections stop, and open
 requests get 10 s to finish. Then running recordings are closed
 (`recording::shutdown`) and `db::note_clean_shutdown` removes the
 database's running marker, so the next start can skip the background check
-of a large database (SPEC C3).
+of a large database (SPEC C3). Whether the marker was still there at open
+is kept as `AppState::unclean_start` (`db::open_and_migrate_at_boot`); it
+decides whether the image cache reconciles its folder at start
+(image-cache.md).
 
 ## Layout
 
@@ -44,7 +47,7 @@ of a large database (SPEC C3).
 | `tests/server.rs` | End-to-end tests over real sockets |
 | `tests/l2_import_detached.rs` | A `sources.add` whose client goes away still finishes |
 | `tests/l2_cross_cancel.rs` | Which commands stop when the client goes away (`CANCEL_ON_DISCONNECT`); every write runs detached |
-| `tests/l3_serve_compression.rs` | Which replies are compressed; precompressed files win; Range and images stay plain |
+| `tests/l3_serve_compression.rs` | Which replies are compressed; brotli at quality 1 and gzip at level 4; precompressed files win; Range and images stay plain |
 
 ## Routes
 
@@ -56,6 +59,20 @@ Conflict 409, and Io, Db or Internal 500 (`RpcErrorCode::http_status` in error.r
 A body that is not JSON is 400 `invalid`. Limit 256 MiB (backup imports,
 pasted playlists). Errors are logged with the command name and message, never
 the args.
+
+`api::parse_body` takes the request bytes by value, so an uploaded playlist
+or backup is freed once it is parsed, before the command runs, instead of
+staying beside its parsed copy for the whole import. A success is the core's
+JSON text from `RpcRouter::dispatch_raw`, sent as `application/json` and
+moved into the body without a copy (`json_reply`): the result is serialized
+once, where it used to become a `serde_json::Value` that the server then
+serialized again (performance audit DB-5; 239 against 79 µs for a 120-row
+channel page). Object keys therefore follow the Rust struct's field order,
+not alphabetical order, and the replies that are maps keyed by item ref
+(`epg.grid`, `epg.nowNext`) come out in hash order, so two identical calls
+can differ in bytes but not in value. The UI looks those up by key.
+`rpc_replies_are_the_cores_json_text` in `tests/server.rs` checks both
+dispatch paths.
 
 Each call runs on its own task (`api::dispatch_detached`: `tokio::spawn`,
 then the handler awaits the `JoinHandle`). Axum drops a handler's future when
@@ -70,10 +87,12 @@ refusals (see Security) and the JSON check run before the task starts.
 The exceptions are the read-only queries the UI supersedes and aborts while the
 user scrolls or types, listed in `api::CANCEL_ON_DISCONNECT`: `epg.grid`,
 `epg.programs`, `epg.search`, `epg.nowNext`, `epg.channelsSearch`,
-`catalog.search`, `catalog.channels`, `catalog.movies`, `catalog.series`,
-`catalog.categories` and `catalog.yearFacets`. They run inline under
+`catalog.search`, `catalog.matchTitles`, `catalog.channels`,
+`catalog.movies`, `catalog.series`, `catalog.categories` and
+`catalog.yearFacets`. They run inline under
 `iptv_core::state::cancel_on_drop`. When the client goes away, axum drops the
-call, and `AppState::db_call` interrupts its SQLite statement (or skips it
+call, and `AppState::db_read_call` (all of these run on the core's read-only
+pool; `db_call` behaves the same) interrupts its SQLite statement (or skips it
 while it still waits for a pooled connection) instead of running it for
 nobody. Writes are never on the list, because an interrupted write rolls
 back; they finish as above. The desktop app does not use this path.
@@ -131,7 +150,11 @@ needs source headers or would be mixed content.
    (EPG refreshes, download progress, the image index) can hold every pooled
    connection, and a segment request then waited 15 s and failed with 500. A
    WAL reader never waits for the write lock. When that connection can't be
-   opened or its query fails, the lookup uses the pool.
+   opened or its query fails, the lookup uses the pool. The core's own hot
+   reads use the same idea through a read-only pool (`AppState::db_read_call`,
+   userstate.md); the image cache's index lookup (`/api/img`) runs there
+   too, and so does its read of the source row, which it needs only for a
+   miss or an address the guard refused without the source (image-cache.md).
 3. Address policy (below). Refusals are 403 with an `RpcError` body.
 4. Fetch with the source's User-Agent / Referer / Origin (non-empty `ua`,
    `referer` and `origin` query parameters override them, for per-channel
@@ -316,19 +339,51 @@ with its `Content-Encoding`.
   the list; before, each deploy's chunks piled up in the one cache
   (performance audit SH-11). A tab still running the old build can no
   longer load an old lazy chunk from the cache after that, which the server
-  no longer has either.
+  no longer has either. The activate handler also turns on navigation
+  preload where the browser has it, so a navigation's request starts while
+  the worker boots and the navigation uses that response (21-40 ms to first
+  byte before, against 5-10 ms with no worker, on a fast desktop). Both
+  paths hand the network response to the page at once and write their cache
+  copy under `event.waitUntil`: `cache.put` resolves only once the whole
+  body is read and stored, so awaiting it held each asset miss (a lazy chunk
+  after a deploy, hls.js, shaka) until it was fully downloaded and written,
+  and every app open waited for a write of `index.html`.
 
 ### Compression
-`compression()` in `src/lib.rs` (tower-http `CompressionLayer`) wraps only
-`POST /api/rpc/{cmd}` and the UI fallback. It sends brotli or gzip at level
-4 (`COMPRESS_LEVEL`), as the client's `Accept-Encoding` allows, for bodies of
-at least 1 KiB (`COMPRESS_MIN_BYTES`), and adds `Vary: Accept-Encoding`. It
-leaves alone images other than SVG, `text/event-stream`, fonts (`font/*`,
-`application/font-woff`), and replies that already carry `Content-Encoding`
-(the precompressed UI files) or `Content-Range` (a Range request).
-`/api/events`, `/api/proxy`, `/api/img`, `/api/files` and `/api/recordings`
-are outside the layer: they are streams, byte ranges or media that is
-already compressed. The desktop loopback proxy does not use it.
+`compression()` in `src/lib.rs` wraps only `POST /api/rpc/{cmd}` and the UI
+fallback. It stacks two tower-http `CompressionLayer`s, because one layer
+has a single level for every encoding: the inner one sends brotli at quality
+1 (`BROTLI_LEVEL`) to clients that accept br, and the outer one gzips at
+level 4 (`GZIP_LEVEL`) what the inner one left alone, as the client's
+`Accept-Encoding` allows. The outer layer never recompresses a reply that
+already has a `Content-Encoding`, and `Vary: Accept-Encoding` is sent once.
+A client that accepts br gets br even when it ranks gzip higher (browsers
+send no ranks). Both compress bodies of at least 1 KiB
+(`COMPRESS_MIN_BYTES`). They leave alone images other than SVG,
+`text/event-stream`, fonts (`font/*`, `application/font-woff`), and replies
+that already carry `Content-Encoding` (the precompressed UI files) or
+`Content-Range` (a Range request). `/api/events`, `/api/proxy`, `/api/img`,
+`/api/files` and `/api/recordings` are outside the layers: they are streams,
+byte ranges or media that is already compressed. The desktop loopback proxy
+does not use them.
+
+Every RPC reply over 1 KiB is compressed inline on a runtime worker after
+its handler returns, so the levels are chosen for CPU (R7-2):
+
+- Brotli quality 1 takes about half the CPU of quality 4: 410 against 530 µs
+  per 40 KB and 1.3 against 2.5 ms per 165 KB at the desktop's opt-level
+  "s", 200 against 280 µs and 0.5 against 1.4 ms at the server image's
+  opt-level 3 (Docker, below). The replies grow 1-3 % on varied rows and
+  10-25 % on the test fixtures' repetitive `catalog.channels` and `epg.grid`
+  replies (3.5 against 3.2 KB for a 45 KB channel page, 5.5 against 4.6 KB
+  for a 70 KB grid). Qualities 2 and 3 are slower than 4 in this encoder at
+  these sizes.
+- Gzip stays at level 4. Browsers offer br only over HTTPS or on localhost,
+  so a plain-HTTP LAN client gets gzip, and with the zlib-rs backend level 1
+  is deflate_quick, with static Huffman codes only: 40-57 % larger than
+  level 4 on the same replies (5.8 against 4.2 KB for the channel page;
+  level 2 is 4-27 % larger). The highest levels cost tens of ms for a few
+  % more; only the precompressed UI files use them.
 
 ## Security
 
@@ -371,7 +426,8 @@ Publish the port on loopback or put an authenticating reverse proxy in front.
 ## Docker
 
 `Dockerfile` at the repo root: node 24 builds `dist/` with `pnpm build`, rust
-1.96 builds `iptv-server` in release, and a `debian:bookworm-slim` runtime
+1.96 builds `iptv-server` with the `release-server` profile and installs
+`target/release-server/iptv-server`, and a `debian:bookworm-slim` runtime
 runs it as uid 10001 under `tini`, with `VOLUME /data`, `EXPOSE 7180` and a
 `HEALTHCHECK` that runs `iptv-server --health`. Set `IPTV_ALLOWED_HOSTS` when
 the app is reached under a host name other than localhost or an IP address.
@@ -385,6 +441,17 @@ Record (see recording.md). The remote control server listens on the
 container's own 127.0.0.1 only, and server mode has no LAN pairing, so the
 remote page cannot be reached from outside the container; publishing its
 port does not change that (remote-control.md).
+
+`[profile.release-server]` in `Cargo.toml` inherits the release profile (fat
+LTO, one codegen unit, strip, unwinding panics) and sets opt-level 3 for the
+whole binary, the LTO post-link pass included, where the desktop release
+stays at "s" with only the bundled SQLite at 3. The image has no installer
+size to keep small, and "s" turns off loop and SLP vectorization: without
+LTO on one Xeon core, serializing a 120-row channel page took 79-92 µs at
+"s" against 34 µs at 3, brotli quality 4 of a 165 KB reply 2.7 against
+1.6 ms, and quick-xml tokenized 590 against 775 MB/s (performance audit
+HO-6, server half). The cost is a longer image build and a somewhat larger
+binary; the image size was not measured.
 
 ```
 docker build -t tsrust-iptv .
@@ -447,7 +514,8 @@ anyone who can reach Caddy.
 cache rules) and `tests/server.rs`, which starts the router on a free port
 with a temp data dir and an in-test axum upstream:
 
-- health and `app.info` RPC, error status mapping
+- health and `app.info` RPC, error status mapping, replies sent as the core's
+  JSON text on the inline and detached paths
 - SPA fallback and cache headers, asset 404, 405
 - playlist rewrite with header injection, follow-up segment fetch, sniffing,
   redirects (relative URIs resolve against the final URL)

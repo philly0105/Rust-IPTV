@@ -18,14 +18,21 @@ vi.mock('@/api/transport', async (importOriginal) => ({
   isDesktop: false,
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
+// Counted, not changed: how often the hooks prepare and match is what some tests below pin.
+vi.mock('../lib/match', async (orig) => {
+  const actual = await orig<typeof import('../lib/match')>();
+  return { ...actual, matchGame: vi.fn(actual.matchGame), prepareMatch: vi.fn(actual.prepareMatch) };
+});
 
-const { queryClient, invalidate } = await import('@/api/query');
+const { queryClient, invalidate, rpcKey } = await import('@/api/query');
+const match = await import('../lib/match');
 const { itemKey } = await import('@/api/types');
 const { NETWORKS } = await import('../lib/names');
-const { etDate } = await import('../lib/espn');
+const { etDate, gameWindow } = await import('../lib/espn');
 const { toIndexed, useChannelIndex, INDEX_PAGE_LIMIT, NETWORK_SEARCH_LIMIT } = await import('../hooks/useChannelIndex');
 const { useGuideWindow, GRID_CHUNK } = await import('../hooks/useGuideWindow');
 const { useGameStreams, fallbackQuery, FALLBACK_CONCURRENCY, FALLBACK_LIMIT } = await import('../hooks/useGameStreams');
+const { useGrowingWindow } = await import('../hooks/useGrowingWindow');
 const { PAGE_READS } = await import('../hooks/sportsRead');
 
 // ---------------------------------------------------------------------------
@@ -349,6 +356,24 @@ describe('useChannelIndex', () => {
     expect(callsOf('catalog.categories')).toEqual([]);
     expect(callsOf('catalog.search')).toEqual([]);
   });
+
+  it('builds no index for an instance never enabled, and keeps it for one turned off and on (F5-1)', async () => {
+    serve();
+    let on = true;
+    const { result, rerender } = renderHook(() => ({ used: useChannelIndex(on), idle: useChannelIndex(false) }), { wrapper });
+    await waitFor(() => expect(result.current.used.loading).toBe(false));
+    const channels = result.current.used.channels;
+    expect(channels.length).toBeGreaterThan(2500);
+    // The page's idle live pass: the answers are cached, but nothing reads its index.
+    expect(result.current.idle.channels).toEqual([]);
+    // A league tab with no games turns the day pass off, and back: the same index, so the same prepared map.
+    on = false;
+    rerender();
+    expect(result.current.used.channels).toBe(channels);
+    on = true;
+    rerender();
+    expect(result.current.used.channels).toBe(channels);
+  });
 });
 
 describe('useGuideWindow', () => {
@@ -403,6 +428,37 @@ describe('useGuideWindow', () => {
     for (const c of channels) {
       expect(result.current.programs.get(itemKey(c.channel.ref)), c.channel.name).toEqual([answers[c.channel.ref.itemId]]);
     }
+  });
+
+  it('keeps the shifted programmes a guide refresh left as they were, so matching never tokenizes them twice (F5-1)', async () => {
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 60 });
+    let refreshed = false;
+    const show = (ref: ItemRef, title: string, start: string, end: string): EpgProgram => ({ channelId: ref.itemId, title, start, end });
+    handlers['epg.grid'] = (a: GridArgs) => {
+      const first = a.refs[0]!;
+      // The refresh changes one programme of the second chunk's first channel; the rest answer as before.
+      const changed = refreshed && first.itemId === 'c500';
+      return {
+        [itemKey(first)]: [
+          show(first, changed ? 'Heat at Magic' : 'Knicks at Celtics', '2026-10-23T22:00:00Z', '2026-10-24T00:30:00Z'),
+          show(first, 'Late game', '2026-10-24T01:00:00Z', '2026-10-24T03:30:00Z'),
+        ],
+      };
+    };
+    const { result } = renderHook(() => useGuideWindow(index, Date.parse('2026-10-23T22:30Z'), Date.parse('2026-10-24T05:30Z'), true), { wrapper });
+    await waitFor(() => expect(result.current.programs.size).toBe(3));
+    const listOf = (i: number) => result.current.programs.get(itemKey(index[i]!.channel.ref))!;
+    const before = [listOf(0), listOf(500)] as const;
+    expect(before[0][0]!.start).toBe('2026-10-23T23:00:00.000Z');
+
+    refreshed = true;
+    await invalidate('epg.');
+    await waitFor(() => expect(listOf(500)[0]!.title).toBe('Heat at Magic'));
+    // Shifted again: the changed programme only. Before F5-1 every programme got a new object.
+    expect(listOf(500)[0]).not.toBe(before[1][0]);
+    expect(listOf(500)[1]).toBe(before[1][1]);
+    expect(listOf(0)).toBe(before[0]);
+    expect(listOf(1000)[0]!.start).toBe('2026-10-23T23:00:00.000Z');
   });
 
   it('holds the programmes back until every chunk has answered', async () => {
@@ -723,5 +779,138 @@ describe('useGameStreams', () => {
     renderHook(() => useGameStreams([game('nba', KNICKS, CELTICS, Date.now())], false), { wrapper });
     await tick(20);
     expect(calls.filter((c) => c.cmd !== 'sources.list' && c.cmd !== 'settings.get')).toEqual([]);
+  });
+
+  it('keeps the index, its prepared map and every match when only a source’s status moves (F5-3)', async () => {
+    const now = Date.now();
+    const games = [game('nba', KNICKS, CELTICS, now + HOUR), game('nfl', STEELERS, BUCS, now + 26 * HOUR)];
+    serve([ch('s1', 'ev', 'NBA 05: Knicks @ Celtics'), ch('s1', 'st3', 'NFL Sunday Ticket 3')]);
+    const { result } = renderHook(() => ({ index: useChannelIndex(), streams: useGameStreams(games) }), { wrapper });
+    await waitFor(() => expect(result.current.streams.loading).toBe(false));
+    const channels = result.current.index.channels;
+    const streams = result.current.streams.streams;
+    const prepared = vi.mocked(match.prepareMatch).mock.calls.length;
+    const matched = vi.mocked(match.matchGame).mock.calls.length;
+
+    // An import that left the playlist as it was, or a failed refresh: sources.list comes back with only
+    // its times, error or counts changed.
+    queryClient.setQueryData(rpcKey('sources.list'), [{ ...SOURCES[0], lastRefreshAt: '2026-10-31T09:00:00Z', lastError: 'HTTP 503' }]);
+    await tick(20);
+    expect(result.current.index.channels).toBe(channels);
+    expect(result.current.streams.streams.get(games[0]!.key)).toBe(streams.get(games[0]!.key));
+    // Before F5-3 the index was rebuilt: its candidate map prepared again and every game matched again.
+    expect(vi.mocked(match.prepareMatch).mock.calls.length).toBe(prepared);
+    expect(vi.mocked(match.matchGame).mock.calls.length).toBe(matched);
+
+    // A rename reaches the rows (the stream list names a source when there are several): rebuilt.
+    queryClient.setQueryData(rpcKey('sources.list'), [{ ...SOURCES[0], name: 'Living room' }]);
+    await waitFor(() => expect(result.current.index.channels).not.toBe(channels));
+    expect(result.current.index.channels.map((r) => r.sourceName)).toEqual(['Living room', 'Living room']);
+  });
+
+  it('asks nothing and matches nothing again for one league of the games over the same window (F5-1)', async () => {
+    const now = Date.now();
+    const nba = game('nba', KNICKS, CELTICS, now + HOUR);
+    const nfl = game('nfl', STEELERS, BUCS, now + 3 * HOUR);
+    serve([ch('s1', 'ev', 'NBA 05: Knicks @ Celtics'), ch('s1', 'st3', 'NFL Sunday Ticket 3')], { search: () => [] });
+    const window = { from: gameWindow(nba).from, to: gameWindow(nfl).to };
+    let games = [nba, nfl];
+    const seen: boolean[] = [];
+    const { result, rerender } = renderHook(
+      () => {
+        const r = useGameStreams(games, true, { window });
+        seen.push(r.loading);
+        return r;
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const grids = callsOf('epg.grid').length;
+    const matched = vi.mocked(match.matchGame).mock.calls.length;
+    const streams = result.current.streams.get(nba.key);
+    seen.length = 0;
+    // The NBA tab: the same window, so the same guide keys.
+    games = [nba];
+    rerender();
+    await tick(20);
+    expect(callsOf('epg.grid')).toHaveLength(grids);
+    expect(seen).not.toContain(true);
+    expect(result.current.streams.get(nba.key)).toBe(streams);
+    expect(vi.mocked(match.matchGame).mock.calls.length).toBe(matched);
+  });
+});
+
+describe('useGameStreams with the page clock (F5-2)', () => {
+  it('matches by the clock it is given, and keeps a fallback match list from tick to tick', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    // Undated event names count for a game starting within 24 hours: this one is, an hour from now.
+    const tomorrow = game('nfl', STEELERS, BUCS, now + 24 * HOUR + 30 * MINUTE);
+    handlers['sources.list'] = () => [SOURCES[0]];
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    handlers['catalog.categories'] = () => [cat('c1', 'USA SPORTS', 1)];
+    handlers['catalog.channels'] = pages({ 's1/c1': [ch('s1', 'nfl2', 'NFL 02: Steelers @ Buccaneers')] });
+    handlers['epg.grid'] = () => ({});
+    // Only the search finds the live game's channel: its group's name doesn't look like sports.
+    handlers['catalog.search'] = (a: SearchArgs) => ({
+      live: a.limit === FALLBACK_LIMIT ? [ch('s1', 'ev', 'NBA 05: Knicks @ Celtics', { categoryName: 'Events' })] : [],
+      movies: [],
+      series: [],
+    });
+    const games = [live, tomorrow];
+    let clock = now;
+    const { result, rerender } = renderHook(() => useGameStreams(games, true, { now: clock }), { wrapper });
+    await waitFor(() => expect(result.current.streams.get(live.key)).toHaveLength(1));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.streams.get(tomorrow.key)).toEqual([]);
+    const hits = result.current.streams.get(live.key);
+
+    clock = now + HOUR;
+    rerender();
+    expect(result.current.streams.get(tomorrow.key)!.map((m) => [m.channel.name, m.reason])).toEqual([['NFL 02: Steelers @ Buccaneers', 'event']]);
+    // Before F5-2 the fallback list was made anew on every tick, and its card re-rendered with it.
+    expect(result.current.streams.get(live.key)).toBe(hits);
+  });
+});
+
+describe('useGrowingWindow', () => {
+  const now = Date.parse('2026-10-25T16:00Z');
+  const nba = game('nba', KNICKS, CELTICS, now + 3 * HOUR);
+  const nfl = game('nfl', STEELERS, BUCS, now + 30 * MINUTE);
+  const late = game('mlb', YANKEES, RED_SOX, now + 8 * HOUR);
+  const span = (...gs: Game[]) => ({ from: Math.min(...gs.map((g) => gameWindow(g).from)), to: Math.max(...gs.map((g) => gameWindow(g).to)) });
+
+  it('grows to cover every game it is given, never shrinks, and starts over on another key', () => {
+    let games: Game[] = [nba];
+    let key = 'sun';
+    const { result, rerender } = renderHook(() => useGrowingWindow(games, key));
+    expect(result.current).toMatchObject(span(nba));
+    games = [nba, nfl];
+    rerender();
+    expect(result.current).toMatchObject(span(nba, nfl));
+    // One league of them, or a game going final: the span read stays.
+    games = [nba];
+    rerender();
+    expect(result.current).toMatchObject(span(nba, nfl));
+    // A league with no game here gives no window, which must not stretch the span to 1970.
+    games = [];
+    rerender();
+    expect(result.current).toMatchObject(span(nba, nfl));
+    games = [late];
+    rerender();
+    expect(result.current).toMatchObject(span(nba, nfl, late));
+    key = 'mon';
+    games = [nfl];
+    rerender();
+    expect(result.current).toMatchObject(span(nfl));
+  });
+
+  it('takes the first games a day gives after none', () => {
+    let games: Game[] = [];
+    const { result, rerender } = renderHook(() => useGrowingWindow(games, 'sun'));
+    expect(result.current).toMatchObject({ from: 0, to: 0 });
+    games = [nba];
+    rerender();
+    expect(result.current).toMatchObject(span(nba));
   });
 });

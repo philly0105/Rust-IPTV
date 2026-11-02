@@ -716,12 +716,7 @@ pub async fn catchup_url(
         // First contact since install: learn the server clock, best effort.
         if let Ok(acc) = cx.client.account().await {
             let m = ServerMeta::from_account(&acc);
-            let rt = meta::runtime(state);
-            let sid = r.source_id.clone();
-            let m2 = m.clone();
-            let _ = state
-                .db_call(move |c| meta::store_meta(c, &rt, &sid, &m2))
-                .await;
+            meta::remember_meta(state, &r.source_id, &m);
             cx.meta = Some(m);
         }
     }
@@ -945,12 +940,7 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
     let http = crate::http::trusted_client(state, &source.config.server_url);
     let client = XtreamClient::new(http, &source.config)?;
     let acc = client.account().await?;
-    let m = ServerMeta::from_account(&acc);
-    let rt = meta::runtime(state);
-    let sid = source_id.to_string();
-    state
-        .db_call(move |c| meta::store_meta(c, &rt, &sid, &m))
-        .await?;
+    meta::remember_meta(state, source_id, &ServerMeta::from_account(&acc));
     Ok(info_from_raw(acc))
 }
 

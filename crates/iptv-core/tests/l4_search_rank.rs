@@ -403,7 +403,7 @@ fn compare_all(
                     for &(english, quality) in modes {
                         for hide in [None, Some(Hide { auto_adult: true })] {
                             let got = catalog::search_groups(
-                                c, q, source, groups, limit, english, quality, hide,
+                                c, q, source, groups, limit, english, quality, hide, true,
                             );
                             let got = keys(got.unwrap());
                             let (sql, args) =
@@ -457,8 +457,9 @@ async fn search_ranks_like_the_window_statement_with_every_filter() {
             let groups: &[&[ContentType]] = &[&[LIVE, RADIO], &[MOVIE]];
             let mut counts = Vec::new();
             for quality in [None, FHD_TAGGED] {
-                let lists =
-                    catalog::search_groups(c, "sky", None, groups, 1001, false, quality, None)?;
+                let lists = catalog::search_groups(
+                    c, "sky", None, groups, 1001, false, quality, None, true,
+                )?;
                 let live = lists[0]
                     .iter()
                     .filter(|n| n.row.content_type == LIVE)
@@ -493,7 +494,8 @@ async fn search_ranks_like_the_window_statement_with_every_filter() {
                 let (sql, args) = new_sql(c, source, groups, 61);
                 let mut all: Vec<SqlValue> = vec![fts_query("th").unwrap().into()];
                 all.extend(args.iter().cloned());
-                let got = catalog::search_groups(c, "th", source, groups, 61, false, None, None)?;
+                let got =
+                    catalog::search_groups(c, "th", source, groups, 61, false, None, None, true)?;
                 let want = keys(got);
                 assert_eq!(
                     rows(c, &sql, "th", &args, 3),

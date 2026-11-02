@@ -121,10 +121,16 @@ export interface RpcQueryOptions {
   queryKeyHashFn?: (key: QueryKey) => string;
 }
 
+/** {@link RpcQueryOptions} plus a `select` that keeps the command's result type (a filter, say). */
+export interface RpcQuerySelectOptions<K extends RpcName> extends RpcQueryOptions {
+  /** Keep it stable (memoized): TanStack runs a new `select` again on the cached data. */
+  select?: (data: RpcResult<K>) => RpcResult<K>;
+}
+
 export function useRpcQuery<K extends RpcName>(
   cmd: K,
   args: RpcArgs<K>,
-  opts?: RpcQueryOptions,
+  opts?: RpcQuerySelectOptions<K>,
 ): UseQueryResult<RpcResult<K>, RpcError> {
   const options: UseQueryOptions<RpcResult<K>, RpcError> = {
     queryKey: rpcKey(cmd, args),
@@ -137,6 +143,7 @@ export function useRpcQuery<K extends RpcName>(
   if (opts?.gcTime !== undefined) options.gcTime = opts.gcTime;
   if (opts?.keepPrevious) options.placeholderData = keepPreviousData;
   if (opts?.queryKeyHashFn) options.queryKeyHashFn = opts.queryKeyHashFn;
+  if (opts?.select) options.select = opts.select;
   return useQuery<RpcResult<K>, RpcError>(options);
 }
 

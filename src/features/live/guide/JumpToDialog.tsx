@@ -10,7 +10,7 @@ import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, cn, Dialog, Select, type SelectOption } from '@/ui';
-import { intlLocale } from '@/lib/intl';
+import { intlLocale, relativeTimeFormat } from '@/lib/intl';
 
 import {
   atWallTime,
@@ -44,10 +44,14 @@ export function slotOptions(slots: readonly number[], locale: string): SelectOpt
   return slots.map((t, i) => ({ value: String(t), label: (seen.get(labels[i]!) ?? 0) > 1 ? formatClockZone(t, locale) : labels[i]! }));
 }
 
-/** "today", "tomorrow", "yesterday" in the UI language, or nothing for other days. */
+/**
+ * "today", "tomorrow", "yesterday" in the UI language, or nothing for other days. The formatter is
+ * the shared cached one: the dialog re-renders on the guide's toolbar publishes and clock ticks even
+ * while closed, and built four of them each time (11-63 µs each, F3-4).
+ */
 function relativeDay(diff: number, locale: string): string | undefined {
   if (diff < -1 || diff > 1) return undefined;
-  return new Intl.RelativeTimeFormat(intlLocale(locale), { numeric: 'auto' }).format(diff, 'day');
+  return relativeTimeFormat(intlLocale(locale), { numeric: 'auto' }).format(diff, 'day');
 }
 
 export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpToDialogProps) {

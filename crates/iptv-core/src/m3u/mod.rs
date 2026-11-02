@@ -19,8 +19,9 @@ use crate::error::CoreResult;
 use crate::state::AppState;
 use std::sync::Arc;
 
-/// Registers the m3u importer, clears temp files left by a crash, and deletes
-/// cached playlist copies whose source no longer exists.
+/// Registers the m3u importer, clears temp files left by a crash (playlist
+/// downloads, and the Xtream lists a sync stages, `xtream::sync`), and
+/// deletes cached playlist copies whose source no longer exists.
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     crate::sources::register_importer(&state, Arc::new(M3uImporter));
     let tmp = state.data_dir.join("tmp");
@@ -28,7 +29,8 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
         while let Ok(Some(entry)) = dir.next_entry().await {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with("m3u-") && name.ends_with(".part") {
+            if (name.starts_with("m3u-") || name.starts_with("xtream-")) && name.ends_with(".part")
+            {
                 let _ = tokio::fs::remove_file(entry.path()).await;
             }
         }

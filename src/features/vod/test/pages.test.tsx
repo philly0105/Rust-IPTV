@@ -475,16 +475,25 @@ describe('ActorPage', () => {
       ],
     });
     const wonka: VodItem = { ref: { sourceId: 'src1', contentType: 'movie', itemId: 'w1' }, title: 'Wonka (2023)', titleBase: 'Wonka', year: 2024, categoryId: 'c1' };
-    rpcMock.handlers['catalog.search'] = (a) => ({ live: [], movies: (a as { query: string }).query === 'Wonka' ? [wonka] : [], series: [] });
+    rpcMock.handlers['catalog.matchTitles'] = (a) => (a as { titles: { title: string }[] }).titles.map((t) => (t.title === 'Wonka' ? [wonka] : []));
     renderAt(`/s/src1/actor/${ACTOR_ID}`, [{ path: '/s/:sourceId/actor/:personId', element: <ActorPage /> }]);
     await screen.findByRole('heading', { name: 'Timothee Chalamet' });
     expect(screen.getByText('American actor.')).toBeTruthy();
     // A year apart still matches (providers list other release dates); the title the source lacks is left out.
     expect((await screen.findByRole('link', { name: /Wonka/ })).getAttribute('href')).toBe('/s/src1/movie/w1');
     expect(screen.queryByRole('link', { name: /Not Here/ })).toBeNull();
-    expect(callsOf('catalog.search').map((c) => c.args)).toEqual(
-      expect.arrayContaining([{ query: 'Wonka', sourceId: 'src1', contentTypes: ['movie'], limit: 8 }]),
-    );
+    // One lookup for the movies (no show is listed), none per title (F4-3).
+    expect(callsOf('catalog.matchTitles').map((c) => c.args)).toEqual([
+      {
+        sourceId: 'src1',
+        contentType: 'movie',
+        titles: [
+          { title: 'Wonka', year: 2023, tmdbId: 1 },
+          { title: 'Not Here', year: 2019, tmdbId: 2 },
+        ],
+      },
+    ]);
+    expect(callsOf('catalog.search')).toHaveLength(0);
   });
 
   it('explains that TMDB is off', async () => {

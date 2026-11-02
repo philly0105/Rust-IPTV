@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { WatchlistEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
-import { joinList } from '@/shell/dashboard/cards';
+import { joinList } from '@/lib/intl';
 import { CARD_ART } from '@/ui/card';
 
 import { IconButton, Poster, ProgressBar, WatchedChip, cn } from '../deps';

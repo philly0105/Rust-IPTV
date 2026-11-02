@@ -778,14 +778,112 @@ async fn f_server_mode_refuses_private_urls_without_a_trusted_source() {
     assert_eq!(mock_hits(&mock, path).await, 2);
 }
 
+/// R6-5: in server mode a hit that the guard allows without trusting a
+/// source is served without reading the source row; a miss still reads it,
+/// since its headers go with the fetch.
+#[tokio::test]
+async fn server_mode_hits_do_not_read_the_source_row() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    // Private targets allowed: the stub is on loopback, and every URL then
+    // passes the check that trusts no source.
+    ServerMode::install(&state, true).unwrap();
+    let config = serde_json::json!({
+        "url": stub.url("/list.m3u"),
+        "headers": {"userAgent": GATE_AGENT}
+    })
+    .to_string();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources(id, kind, name, config_json) VALUES ('s1', 'm3u', 'S', ?1)",
+                [config],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // The gated host answers only with the source's User-Agent.
+    let url = stub.url("/gated/hit");
+    assert!(
+        !imagecache::fetch(&state, &url, Some("s1"))
+            .await
+            .unwrap()
+            .hit
+    );
+
+    // From now on reading the source row fails.
+    state
+        .db_call(|c| {
+            c.execute("UPDATE sources SET config_json = x'00' WHERE id = 's1'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let hit = imagecache::fetch_sized(&state, &url, Some("s1"), None)
+        .await
+        .unwrap();
+    assert!(hit.hit);
+    assert_eq!(stub.hits("/gated/hit"), 1);
+    let err = imagecache::fetch(&state, &stub.url("/gated/miss"), Some("s1"))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ImageErrorKind::Local, "{err:?}");
+    assert_eq!(stub.hits("/gated/miss"), 0);
+}
+
 // Startup ----------------------------------------------------------------------
+
+/// Sets the modification time of `path` an hour back, past the reconcile's
+/// grace for files a fetch may still be writing.
+fn age(path: &Path) {
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(3600))
+        .unwrap();
+}
+
+/// The `image_cache_reconciled_at` stamp, in unix seconds.
+async fn reconciled_at(state: &Arc<AppState>) -> Option<i64> {
+    state
+        .db_call(|c| {
+            use rusqlite::OptionalExtension;
+            Ok(c.query_row(
+                "SELECT value FROM app_state WHERE key = 'image_cache_reconciled_at'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+        })
+        .await
+        .unwrap()
+        .map(|v| v.parse().unwrap())
+}
+
+/// Waits up to 10 s for the reconcile `init` started to record its pass.
+async fn wait_for_reconcile(state: &Arc<AppState>, after: i64) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while reconciled_at(state).await.is_none_or(|at| at < after) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the reconcile did not run"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
 
 #[tokio::test]
 async fn init_reconciles_rows_and_files() {
+    // Start at once: other tests in this process keep the database busy.
+    imagecache::set_reconcile_wait_for_tests(Duration::ZERO);
     let stub = spawn_stub().await;
     let dir = tempfile::tempdir().unwrap();
     let (keep, lose) = (stub.url("/png/keep"), stub.url("/png/lose"));
     {
+        // Never shut down cleanly, so the next start reconciles.
         let state = new_state(dir.path()).await;
         imagecache::get(&state, &keep, None).await.unwrap();
         let lost = imagecache::get(&state, &lose, None).await.unwrap();
@@ -805,17 +903,12 @@ async fn init_reconciles_rows_and_files() {
     for p in [&orphan, &temp, &young] {
         std::fs::write(p, png(100)).unwrap();
     }
-    let long_ago = SystemTime::now() - Duration::from_secs(3600);
     for p in [&orphan, &temp] {
-        std::fs::File::options()
-            .write(true)
-            .open(p)
-            .unwrap()
-            .set_modified(long_ago)
-            .unwrap();
+        age(p);
     }
 
     let state = new_state(dir.path()).await;
+    assert!(state.unclean_start);
     imagecache::init(state.clone()).await.unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -834,6 +927,126 @@ async fn init_reconciles_rows_and_files() {
     // The row of the missing file is gone, so it is fetched again.
     assert!(!imagecache::get(&state, &lose, None).await.unwrap().hit);
     assert_eq!(stub.hits("/png/lose"), 2);
+}
+
+/// R6-3: after a clean shutdown the reconcile runs only when the last pass
+/// is a week old or missing; an unclean start always runs it.
+#[tokio::test]
+async fn a_clean_start_reconciles_only_when_the_last_pass_is_a_week_old() {
+    imagecache::set_reconcile_wait_for_tests(Duration::ZERO);
+    let dir = tempfile::tempdir().unwrap();
+    let shard = dir.path().join(imagecache::DIR_NAME).join("ff");
+    let orphan = shard.join("f".repeat(64));
+    let plant = || {
+        std::fs::create_dir_all(&shard).unwrap();
+        std::fs::write(&orphan, png(100)).unwrap();
+        age(&orphan);
+    };
+    let began = unix_now();
+
+    // A new data dir has no pass yet.
+    let state = new_state(dir.path()).await;
+    assert!(!state.unclean_start);
+    plant();
+    imagecache::init(state.clone()).await.unwrap();
+    wait_for_reconcile(&state, began).await;
+    assert!(!orphan.exists());
+
+    // Clean shutdown and a recent pass: skipped, the orphan stays.
+    iptv_core::db::note_clean_shutdown(&state.db_path());
+    drop(state);
+    plant();
+    let state = new_state(dir.path()).await;
+    assert!(!state.unclean_start);
+    imagecache::init(state.clone()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(orphan.exists(), "skipped after a clean shutdown");
+
+    // Clean shutdown but the last pass is 8 days old: reconciled.
+    let stale = began - 8 * 24 * 3600;
+    state
+        .db_call(move |c| {
+            c.execute(
+                "UPDATE app_state SET value = ?1 WHERE key = 'image_cache_reconciled_at'",
+                [stale.to_string()],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    iptv_core::db::note_clean_shutdown(&state.db_path());
+    drop(state);
+    let state = new_state(dir.path()).await;
+    imagecache::init(state.clone()).await.unwrap();
+    wait_for_reconcile(&state, began).await;
+    assert!(!orphan.exists(), "reconciled when the last pass is stale");
+
+    // No clean shutdown (a crash) with a recent pass: reconciled.
+    drop(state);
+    plant();
+    let state = new_state(dir.path()).await;
+    assert!(state.unclean_start);
+    imagecache::init(state.clone()).await.unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while orphan.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "not reconciled after an unclean shutdown"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    wait_for_reconcile(&state, began).await;
+
+    // Another crash, and the pass it owes does not run to the end (an index
+    // row it cannot read fails it; closing the app while it waits for a
+    // quiet database is the same). The earlier stamp is recent, but the pass
+    // is still owed: the next start reconciles though it follows a clean
+    // shutdown.
+    drop(state);
+    plant();
+    let state = new_state(dir.path()).await;
+    assert!(state.unclean_start);
+    state
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO image_cache (key, url, content_type, bytes, created_at, last_access)
+                 VALUES (X'01', 'u', 'image/png', 0, 0, 0)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    imagecache::init(state.clone()).await.unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while reconciled_at(&state).await.is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the stamp of the last pass was kept after an unclean shutdown"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(orphan.exists(), "the failed pass removed nothing");
+    assert_eq!(
+        reconciled_at(&state).await,
+        None,
+        "a failed pass is no pass"
+    );
+    state
+        .db_call(|c| {
+            c.execute("DELETE FROM image_cache WHERE key = X'01'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    iptv_core::db::note_clean_shutdown(&state.db_path());
+    drop(state);
+    let state = new_state(dir.path()).await;
+    assert!(!state.unclean_start);
+    imagecache::init(state.clone()).await.unwrap();
+    wait_for_reconcile(&state, began).await;
+    assert!(!orphan.exists(), "the owed pass ran after a clean shutdown");
 }
 
 #[tokio::test]

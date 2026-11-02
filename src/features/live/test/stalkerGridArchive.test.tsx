@@ -48,6 +48,7 @@ interface EpgArgs {
   ref: ItemRef;
   limit: number;
   from?: string;
+  to?: string;
 }
 
 function handlers() {
@@ -118,6 +119,29 @@ describe('EpgGridPage on a Stalker portal without XMLTV', () => {
     expect(fakes.recorded.playSource[0]).toMatchObject({ url: 'http://portal/archive.ts', isLive: false });
   });
 
+  it('bounds a past window\'s archive request by its end, so the portal reads only its days', async () => {
+    const at = Date.now() - 2 * DAY;
+    renderAt(`/epg?source=src1&at=${at}`, [{ path: '/epg', element: <EpgGridPage /> }]);
+    await waitFor(() => expect(epgCalls('c0').length).toBeGreaterThan(0));
+    const { from, to, limit } = epgCalls('c0')[0]!;
+    expect(limit).toBe(1);
+    // The data window, from its start to its end: whole six-hour steps, all of them over.
+    expect(Date.parse(from!)).toBeLessThanOrEqual(at);
+    expect(Date.parse(to!)).toBeGreaterThan(at);
+    expect(Date.parse(to!)).toBeLessThan(Date.now());
+    expect((Date.parse(to!) - Date.parse(from!)) % (6 * HOUR)).toBe(0);
+    // Channels without an archive keep the plain request.
+    await waitFor(() => expect(epgCalls('c5').length).toBeGreaterThan(0));
+    expect(epgCalls('c5')[0]).toEqual({ ref: makeChannel(5).ref, limit: expect.any(Number) });
+  });
+
+  it('leaves `to` out while the window reaches now', async () => {
+    renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
+    expect(await screen.findByRole('button', { name: /^Noon c0,/ })).toBeTruthy();
+    expect(epgCalls('c0')[0]!.from).toBeDefined();
+    expect(epgCalls('c0').every((c) => !('to' in c))).toBe(true);
+  });
+
   it('keeps the plain airing-onwards request for channels without an archive', async () => {
     renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
     // makeChannel gives c0..c2 an archive; c5 has none.
@@ -161,7 +185,16 @@ describe('stalkerArchiveQuery', () => {
   const now = Date.UTC(2026, 9, 11, 12, 0);
   it('passes the window start while the window reaches into the archive', () => {
     expect(stalkerArchiveQuery(now - 30 * MINUTE, now + 330 * MINUTE, now)).toEqual({ from: now - 30 * MINUTE, limit: 12 });
-    expect(stalkerArchiveQuery(now - DAY, now - DAY + 6 * HOUR, now)).toEqual({ from: now - DAY, limit: 1 });
+    expect(stalkerArchiveQuery(now - DAY, now - DAY + 6 * HOUR, now)).toEqual({ from: now - DAY, to: now - DAY + 6 * HOUR, limit: 1 });
+  });
+
+  it('passes the window end only once the whole window is over', () => {
+    // A window reaching now: the core would read the same day tables with `to`, so the key holds.
+    expect(stalkerArchiveQuery(now - 30 * MINUTE, now + 330 * MINUTE, now).to).toBeUndefined();
+    expect(stalkerArchiveQuery(now - 6 * HOUR, now, now).to).toBe(now);
+    expect(stalkerArchiveQuery(now - 3 * DAY, now - 2 * DAY, now).to).toBe(now - 2 * DAY);
+    // No `from`, no `to`: the core reads `to` only with it.
+    expect(stalkerArchiveQuery(now - 8 * DAY, now - 8 * DAY + 6 * HOUR, now).to).toBeUndefined();
   });
 
   it('drops `from` for future windows and windows older than the 7-day archive', () => {

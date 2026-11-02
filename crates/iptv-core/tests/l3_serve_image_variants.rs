@@ -59,6 +59,14 @@ fn logo_png(side: u32) -> Vec<u8> {
 const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
 const SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><rect width='10' height='10'/></svg>";
 
+/// A GIF larger than the 256 KiB up to which a kept original is copied
+/// under its variant key.
+fn big_gif() -> Vec<u8> {
+    let mut body = GIF.to_vec();
+    body.resize(300 * 1024, 0);
+    body
+}
+
 struct Stub {
     base: String,
     hits: Arc<Mutex<HashMap<String, usize>>>,
@@ -113,6 +121,7 @@ async fn spawn_stub() -> Stub {
             "/mark.svg",
             get(|| async { typed("image/svg+xml", SVG.as_bytes().to_vec()) }),
         )
+        .route("/big.gif", get(|| async { typed("image/gif", big_gif()) }))
         .layer(axum::middleware::from_fn_with_state(hits.clone(), count));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -242,17 +251,18 @@ async fn small_gif_and_svg_images_are_served_as_stored_and_fetched_once() {
     let stub = spawn_stub().await;
     let dir = tempfile::tempdir().unwrap();
     let state = new_state(dir.path()).await;
-    for (path, len) in [
+    let cases = [
         ("/small.png", logo_png(100).len()),
         ("/anim.gif", GIF.len()),
         ("/mark.svg", SVG.len()),
-    ] {
+    ];
+    for (path, len) in cases {
         let url = stub.url(path);
         let first = imagecache::fetch_sized(&state, &url, None, Some(128))
             .await
             .unwrap();
         assert_eq!(first.bytes, len as u64, "{path}");
-        // Stored once, as the original: a plain request is a disk hit.
+        // Stored as the original: a plain request is a disk hit.
         let plain = imagecache::fetch(&state, &url, None).await.unwrap();
         assert!(plain.hit, "{path}");
         assert_eq!(plain.path, first.path, "{path}");
@@ -264,9 +274,69 @@ async fn small_gif_and_svg_images_are_served_as_stored_and_fetched_once() {
         assert_eq!(again.path, first.path, "{path}");
         assert_eq!(stub.hits(path), 1, "{path}");
     }
+    // R6-2: each small original is also stored under the variant keys it
+    // served (the 128 and 192 buckets), byte for byte, so the decision
+    // outlives the process.
     let stored = rows(&state).await;
-    assert_eq!(stored.len(), 3, "no variant rows: {stored:?}");
-    assert!(stored.iter().all(|r| !r.1.contains("#w=")), "{stored:?}");
+    assert_eq!(stored.len(), 9, "{stored:?}");
+    for (path, len) in cases {
+        let norm = normalize_url(&stub.url(path)).unwrap();
+        for (key, label) in [
+            (cache_key(&norm), norm.to_string()),
+            (variant_key(&norm, 128), format!("{norm}#w=128")),
+            (variant_key(&norm, 192), format!("{norm}#w=192")),
+        ] {
+            let row = stored.iter().find(|r| r.0 == key);
+            assert_eq!(
+                row.map(|r| (&r.1, r.2)),
+                Some((&label, len as u64)),
+                "{path}"
+            );
+        }
+    }
+    drop(state);
+
+    // After a restart a hint finds the copy under its own key: no fetch, no
+    // read of the original and no decode.
+    let state = new_state(dir.path()).await;
+    let image_dir = dir.path().join(imagecache::DIR_NAME);
+    for (path, len) in cases {
+        let url = stub.url(path);
+        let norm = normalize_url(&url).unwrap();
+        let img = imagecache::fetch_sized(&state, &url, None, Some(128))
+            .await
+            .unwrap();
+        assert!(img.hit, "{path}");
+        assert_eq!(
+            img.path,
+            imagecache::file_path(&image_dir, &variant_key(&norm, 128)),
+            "{path}"
+        );
+        assert_eq!(std::fs::read(&img.path).unwrap().len(), len, "{path}");
+        assert_eq!(stub.hits(path), 1, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn a_large_kept_original_is_remembered_in_memory_without_a_copy() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    let url = stub.url("/big.gif");
+    let first = imagecache::fetch_sized(&state, &url, None, Some(128))
+        .await
+        .unwrap();
+    assert_eq!(first.bytes, big_gif().len() as u64);
+    let again = imagecache::fetch_sized(&state, &url, None, Some(100))
+        .await
+        .unwrap();
+    assert!(again.hit);
+    assert_eq!(again.path, first.path);
+    assert_eq!(stub.hits("/big.gif"), 1);
+    // Over 256 KiB: only the original is stored.
+    let stored = rows(&state).await;
+    assert_eq!(stored.len(), 1, "{stored:?}");
+    assert_eq!(stored[0].0, cache_key(&normalize_url(&url).unwrap()));
 }
 
 #[test]

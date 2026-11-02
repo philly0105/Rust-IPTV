@@ -57,6 +57,7 @@ import { cn } from '../cn';
 import { focusFromPointer, formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, pressKeepsFocus, SEEK_STEP_JL } from '../format';
 import { setHistoryOpen, useHistoryStore } from '../history';
 import { useMediaStore, type TimeRange } from '../media';
+import { notePlayerMenuEscape, playerMenuJustClosed } from '../menuClose';
 import { noteMenuDismissed } from '../menuDismiss';
 import { ASPECTS, setPicture, usePictureStore, ZOOMS, type PictureAspect, type PictureZoom } from '../picture';
 import { usePipStore } from '../pip';
@@ -696,16 +697,9 @@ function PlayerPopup({
   );
 }
 
-/** When an Escape last closed a player menu (see `playerMenuJustClosed`). */
-let menuEscapeAt = Number.NEGATIVE_INFINITY;
-
-/**
- * True right after Escape closed a player menu. A page-level Escape (close the player) lets such
- * a key go: a held or doubled Escape must not run on from closing the menu into stopping playback.
- */
-export function playerMenuJustClosed(withinMs = 600): boolean {
-  return Date.now() - menuEscapeAt < withinMs;
-}
+// When an Escape last closed a player menu lives in a leaf (F1-1), so the detail pages read it
+// without this module; re-exported for the tests.
+export { playerMenuJustClosed };
 
 /** The commands at the foot of the options menu, which the bar keeps out of its row (PL-BAR-HIERARCHY). */
 interface MenuCommands {
@@ -852,7 +846,7 @@ function OptionsMenu({
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
-          if (view === 'root') menuEscapeAt = Date.now();
+          if (view === 'root') notePlayerMenuEscape();
           setView(view === 'root' ? null : view === 'subStyle' ? 'text' : 'root');
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

@@ -15,7 +15,7 @@ import { useAlternatesStore } from '../failover';
 import { setMediaCommands, useMediaStore } from '../media';
 import { bindMpvExtras, clearMpvUnavailable, markMpvUnavailable, mpvUnavailable, sendSubtitleStyle } from '../mpvExtras';
 import { useStreamInfoStore } from '../streamInfo';
-import { dimOverlayCommand, LAYOUT_WATCH_SELECTOR, measureMpvLayout, measureScrim, OVERLAY_SELECTOR } from '../mpvBounds';
+import { computeMpvBounds, dimOverlayCommand, LAYOUT_WATCH_SELECTOR, measureMpvLayout, measureScrim, OVERLAY_SELECTOR, rectOf } from '../mpvBounds';
 import { aspectFromVideoParams, exitPip, refreshPipAspect, setPipAspectSource, togglePip, usePipStore } from '../pip';
 import { reportAnswered } from '../playbackReport';
 import { tryAnotherSource, useReconnectStore } from '../reconnect';
@@ -42,8 +42,11 @@ export const MPV_FALLBACK_TOAST = 'mpv-fallback';
 /** Settings > External players, where the mpv path is set. */
 const PLAYER_SETTINGS_PATH = '/settings/players';
 
-/** AppKit's video view lets pointer events reach WebKit; Windows mpv handles them itself. */
-const MAC_DOM_VIDEO_EVENTS = isDesktop && typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
+/**
+ * AppKit's video view lets pointer events reach WebKit; Windows mpv handles them itself. The
+ * fullscreen chrome polls the desktop cursor only where they do not (PlayerSurface).
+ */
+export const MAC_DOM_VIDEO_EVENTS = isDesktop && typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
 
 /** Off-screen bounds while a modal dialog covers most of the video (the native surface paints above the DOM). */
 export const HIDDEN_BOUNDS: Bounds = { x: -16000, y: -16000, width: 16, height: 16 };
@@ -86,6 +89,16 @@ function touchesLayout(r: MutationRecord): boolean {
   for (const n of Array.from(r.addedNodes)) if (touchesNode(n)) return true;
   for (const n of Array.from(r.removedNodes)) if (touchesNode(n)) return true;
   return false;
+}
+
+/**
+ * How often the layout poll measures in full while only the surface's own rect is watched: every
+ * 5th 400 ms tick (2 s), for changes no observer reports (a class that moves chrome over the video).
+ */
+const FULL_MEASURE_TICKS = 5;
+
+function rectKey(r: DOMRect): string {
+  return `${r.left},${r.top},${r.width},${r.height}`;
 }
 
 /**
@@ -235,6 +248,13 @@ export function MpvSurface({ className }: { className?: string }) {
     /** The dim mpv draws under a dialog's backdrop, as last sent (a new session starts without). */
     let lastDim = 'null';
     let raf = 0;
+    /**
+     * The surface's rect at the last full measure when nothing else shaped the window (no holes,
+     * no scrim, no reserved chrome or clip cutting it), else null.
+     */
+    let plainRect: string | null = null;
+    /** Poll ticks since the last full measure. */
+    let sinceFull = 0;
 
     const send = (): void => {
       raf = 0;
@@ -251,6 +271,9 @@ export function MpvSurface({ className }: { className?: string }) {
           void rpc('mpv.command', { cmd: dimOverlayCommand(dim) }).catch(() => undefined);
         }
       }
+      sinceFull = 0;
+      const surface = ref.current.getBoundingClientRect();
+      plainRect = holes.length === 0 && lastDim === 'null' && boundsEqual(computeMpvBounds(rectOf(surface)), b) ? rectKey(surface) : null;
       const holesKey = JSON.stringify(holes);
       if (boundsEqual(lastSent, b) && holesKey === lastHoles) return;
       lastSent = b;
@@ -266,8 +289,16 @@ export function MpvSurface({ className }: { className?: string }) {
     window.addEventListener('resize', schedule);
     window.addEventListener('scroll', schedule, true);
     document.addEventListener('fullscreenchange', schedule);
-    // Moves without resize (layout shifts, the mini player being dragged).
-    const poll = setInterval(schedule, 400);
+    // Moves without resize (layout shifts, the mini player being dragged). While nothing but the
+    // surface shapes the window (docked with the bar below it, fullscreen with the chrome hidden),
+    // a tick reads only the surface's rect and measures in full when it moved: about 0.005 ms
+    // against 1.5 ms (4x CPU slowdown) for the ancestor walk, three document-wide selector
+    // matches and their computed styles (F2-3). Otherwise, and every FULL_MEASURE_TICKS, in full.
+    const poll = setInterval(() => {
+      const el = ref.current;
+      if (++sinceFull < FULL_MEASURE_TICKS && plainRect !== null && el && rectKey(el.getBoundingClientRect()) === plainRect) return;
+      schedule();
+    }, 400);
     // Menus, tooltips, dialogs and toasts appear anywhere (portals, the live row menu in the
     // page): re-measure in the next frame when one comes or goes, and only then, so list
     // scrolling and other DOM churn cost a selector match per added node.

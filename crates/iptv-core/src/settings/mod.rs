@@ -547,11 +547,16 @@ pub async fn window_state(state: &AppState) -> CoreResult<Option<WindowState>> {
 }
 
 /// Validates and stores window geometry.
+///
+/// The desktop shell sends this after every move, resize and fullscreen
+/// toggle settles, and nobody waits on it but that call: it passes the gate
+/// of the periodic writes ([`AppState::db_background`]), so during an
+/// import save it parks no pooled connection of its own (R4-1).
 pub async fn set_window_state(state: &AppState, ws: WindowState) -> CoreResult<()> {
     validate_window(&ws)?;
     let json = serde_json::to_string(&ws)?;
     state
-        .db_call(move |conn| {
+        .db_background(move |conn| {
             conn.execute(
                 "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",

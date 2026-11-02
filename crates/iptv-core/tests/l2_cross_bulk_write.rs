@@ -321,6 +321,176 @@ async fn a_failed_bulk_rewrite_rolls_back_rows_and_indexes() {
         .unwrap();
 }
 
+/// Hits of an FTS query.
+fn hits(c: &Connection, q: &str) -> u64 {
+    c.query_row(
+        "SELECT count(*) FROM items_fts WHERE items_fts MATCH ?1",
+        [q],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap() as u64
+}
+
+/// Bytes the search index stores. A per-row delete adds a delete marker
+/// for every word of every row it removes; a rebuild keeps only the rows
+/// left.
+fn fts_bytes(c: &Connection) -> i64 {
+    c.query_row(
+        "SELECT coalesce(sum(length(block)), 0) FROM items_fts_data",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+/// The search index matches `items` row for row (FTS5 checks every entry
+/// against the content table).
+fn assert_fts_intact(c: &Connection) {
+    c.execute(
+        "INSERT INTO items_fts(items_fts, rank) VALUES ('integrity-check', 1)",
+        [],
+    )
+    .unwrap();
+}
+
+/// R1-4: a refresh that replaces more rows than it keeps indexes the kept
+/// rows afresh in `begin` (FTS 'rebuild' once the replaced rows are gone)
+/// instead of deleting the old entries one by one, and `finish` adds the
+/// new rows once: search finds the new rows and the kept source's, never
+/// the replaced ones.
+#[tokio::test]
+async fn a_refresh_that_replaces_more_than_it_keeps_rebuilds_the_search_index() {
+    let env = env().await;
+    bare_source(&env.state, "s1").await;
+    bare_source(&env.state, "s2").await;
+    env.state
+        .db_call(|c| {
+            write_declared(c, "s1", &movies("s1", "a"));
+            write_declared(c, "s2", &plain("s2", "k", 3_000));
+            let before = fts_bytes(c);
+            write_declared(c, "s1", &movies("s1", "c"));
+            assert_fts_intact(c);
+            assert_items_rank(c);
+            assert_eq!(hits(c, "night"), N / 4, "the new rows, once each");
+            assert_eq!(hits(c, "a7"), 0, "a replaced row");
+            assert_eq!(hits(c, "c7"), 1, "a new row");
+            assert_eq!(hits(c, "k7"), 1, "the kept source's row");
+            assert_eq!(hits(c, "movie"), N / 4 + 3_000);
+            let after = fts_bytes(c);
+            assert!(
+                after < before + before / 4,
+                "no delete markers for the replaced rows: {before} -> {after} bytes"
+            );
+            // The triggers are live again for later writes.
+            c.execute(
+                "INSERT INTO items (source_id, content_type, item_id, category_id, title) VALUES ('s2', 'movie', 'z', 'c0', 'Zebra')",
+                [],
+            )?;
+            assert_eq!(hits(c, "zebra"), 1);
+            assert_fts_intact(c);
+            assert_items_rank(c);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// `items` index names in creation order.
+fn index_order(c: &Connection) -> Vec<String> {
+    let mut stmt = c
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY rowid",
+        )
+        .unwrap();
+    stmt.query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+fn schema_version(c: &Connection) -> i64 {
+    c.query_row("PRAGMA schema_version", [], |r| r.get(0))
+        .unwrap()
+}
+
+/// R1-4 / R5-4 (DB-2 remainder): removing a source of at least
+/// BULK_MIN_ROWS rows that outnumbers the rest drops the secondary indexes
+/// of `items` before the cascade and builds them again in their creation
+/// order, and rebuilds the search index from the kept rows. A small removal
+/// keeps the per-row path. Either way search, counts, `items_rank` and the
+/// query plans of the kept source stay right.
+#[tokio::test]
+async fn removing_a_large_source_rebuilds_indexes_and_search_for_the_kept_ones() {
+    let env = env().await;
+    for s in ["s1", "s2", "s3"] {
+        bare_source(&env.state, s).await;
+    }
+    env.state
+        .db_call(|c| {
+            let before = item_indexes(c);
+            let order = index_order(c);
+            write_declared(c, "s1", &movies("s1", "a"));
+            write_declared(c, "s2", &plain("s2", "k", 3_000));
+            write_declared(c, "s3", &plain("s3", "m", 500));
+            let (version, bytes) = (schema_version(c), fts_bytes(c));
+
+            iptv_core::sources::store::delete(c, "s1")?;
+            assert_eq!(item_indexes(c), before, "every index built again");
+            assert_eq!(index_order(c), order, "in creation order");
+            assert!(schema_version(c) > version, "the indexes were rebuilt");
+            assert_fts_intact(c);
+            assert_items_rank(c);
+            assert!(
+                fts_bytes(c) < bytes / 2,
+                "rebuilt from the kept rows: {bytes} -> {} bytes",
+                fts_bytes(c)
+            );
+            assert_eq!(hits(c, "night"), 0, "the removed source's rows");
+            assert_eq!(hits(c, "k7"), 1);
+            assert_eq!(hits(c, "movie"), 3_500);
+            let (rows, counted, movies, suspended): (i64, i64, i64, i64) = c.query_row(
+                "SELECT (SELECT count(*) FROM items WHERE source_id = 's2'), \
+                 (SELECT sum(item_count) FROM categories WHERE source_id = 's2'), \
+                 (SELECT movie_count FROM source_counts WHERE source_id = 's2'), \
+                 (SELECT count(*) FROM fts_suspend)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+            assert_eq!((rows, counted, movies, suspended), (3_000, 3_000, 3_000, 0));
+            let p = plan(
+                c,
+                "SELECT count(*) FROM items WHERE source_id = 's2' AND content_type = 'movie' AND category_id = 'c0' AND non_english = 0",
+            );
+            assert!(p.contains("COVERING INDEX idx_items_cat ("), "{p}");
+            let p = plan(
+                c,
+                "SELECT rowid FROM items WHERE source_id = 's2' AND content_type = 'movie' AND non_english = 0 ORDER BY title COLLATE NOCASE, position LIMIT 60",
+            );
+            assert!(p.contains("idx_items_title") && !p.contains("TEMP B-TREE"), "{p}");
+
+            // A small removal: per-row deletes, no schema change.
+            let version = schema_version(c);
+            iptv_core::sources::store::delete(c, "s3")?;
+            assert_eq!(schema_version(c), version, "small: indexes kept");
+            assert_fts_intact(c);
+            assert_items_rank(c);
+            assert_eq!(hits(c, "movie"), 3_000);
+            assert_eq!(hits(c, "m7"), 0);
+
+            // The triggers are live again for later writes.
+            c.execute(
+                "INSERT INTO items (source_id, content_type, item_id, category_id, title) VALUES ('s2', 'movie', 'z', 'c0', 'Zebra')",
+                [],
+            )?;
+            assert_eq!(hits(c, "zebra"), 1);
+            assert_fts_intact(c);
+            assert_items_rank(c);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
 /// Live channels with every kind of quality marker, and none.
 fn channels(source: &str, salt: &str) -> Vec<ItemRow> {
     (0..N)

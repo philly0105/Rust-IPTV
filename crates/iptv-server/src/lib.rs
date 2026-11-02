@@ -19,7 +19,7 @@
 //! - Everything else: the built UI (`dist/`) with SPA fallback and cache headers.
 //!
 //! RPC replies and the built UI are compressed for clients that accept it
-//! ([`compression`]: brotli or gzip at level 4, bodies of 1 KiB or more;
+//! ([`compression`]: brotli at quality 1 or gzip at level 4, bodies of 1 KiB or more;
 //! precompressed `.br`/`.gz` files next to the assets win when present).
 //! The event socket, the media proxy, downloads, recordings and images are
 //! never compressed: they are streams, ranges or already-compressed media.
@@ -49,6 +49,7 @@ use iptv_core::AppState;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
+use tower::layer::util::Stack;
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::compression::{CompressionLayer, CompressionLevel, DefaultPredicate};
 use tower_http::trace::{DefaultOnFailure, DefaultOnResponse, TraceLayer};
@@ -64,22 +65,51 @@ pub const EVENT_CAPACITY: usize = 1024;
 pub const BODY_LIMIT: usize = 256 * 1024 * 1024;
 /// Smallest reply body worth compressing.
 pub const COMPRESS_MIN_BYTES: u16 = 1024;
-/// Brotli and gzip level: about 9x smaller JSON for a fraction of a
-/// millisecond per 100 KB (level 11 costs tens of ms for a few % more).
-pub const COMPRESS_LEVEL: i32 = 4;
+/// Brotli quality. Every RPC reply over [`COMPRESS_MIN_BYTES`] is compressed
+/// inline on a runtime worker after its handler returns. Measured on
+/// channel-page JSON at the desktop's opt-level "s": quality 4 took 530 us
+/// per 40 KB and 2.5 ms per 165 KB, quality 1 410 us and 1.3 ms (280 us and
+/// 1.4 ms against 200 us and 0.5 ms at the server image's opt-level 3). The
+/// output grows 1-3 % on varied rows and 10-25 % on the fixtures' repetitive
+/// catalog.channels and epg.grid replies (3.5 against 3.2 KB for a 45 KB
+/// channel page). Qualities 2 and 3 are slower than 4 in this encoder at
+/// these sizes (R7-2).
+pub const BROTLI_LEVEL: i32 = 1;
+/// Gzip level. Browsers offer br only over HTTPS or on localhost, so a
+/// plain-HTTP LAN client gets gzip. With the zlib-rs backend level 1 is
+/// deflate_quick (static Huffman codes only): 40-57 % larger than level 4
+/// on the same replies (level 2: 4-27 %), so gzip stays at 4. The highest
+/// levels cost tens of ms for a few % more; only the precompressed UI files
+/// use them.
+pub const GZIP_LEVEL: i32 = 4;
 
 /// Brotli/gzip for RPC replies and the built UI. Skipped for bodies under
 /// [`COMPRESS_MIN_BYTES`], images (SVG aside), event streams, fonts (WOFF2
 /// is already compressed), replies that carry a `Content-Encoding` (the
 /// precompressed assets) and ranges.
-pub fn compression() -> CompressionLayer<impl Predicate> {
-    let when = DefaultPredicate::new()
-        .and(SizeAbove::new(COMPRESS_MIN_BYTES))
-        .and(NotForContentType::const_new("font/"))
-        .and(NotForContentType::const_new("application/font-woff"));
-    CompressionLayer::new()
-        .quality(CompressionLevel::Precise(COMPRESS_LEVEL))
-        .compress_when(when)
+///
+/// Two layers, because a tower-http layer has one level for every encoding:
+/// the inner one brotli-compresses for clients that accept br
+/// ([`BROTLI_LEVEL`]), and the outer one gzips what it left alone
+/// ([`GZIP_LEVEL`]); it never recompresses a reply that has a
+/// `Content-Encoding`. A client that accepts br gets br even when it ranks
+/// gzip higher (browsers send no ranks).
+pub fn compression() -> Stack<CompressionLayer<impl Predicate>, CompressionLayer<impl Predicate>> {
+    let when = || {
+        DefaultPredicate::new()
+            .and(SizeAbove::new(COMPRESS_MIN_BYTES))
+            .and(NotForContentType::const_new("font/"))
+            .and(NotForContentType::const_new("application/font-woff"))
+    };
+    let brotli = CompressionLayer::new()
+        .no_gzip()
+        .quality(CompressionLevel::Precise(BROTLI_LEVEL))
+        .compress_when(when());
+    let gzip = CompressionLayer::new()
+        .no_br()
+        .quality(CompressionLevel::Precise(GZIP_LEVEL))
+        .compress_when(when());
+    Stack::new(brotli, gzip)
 }
 
 /// Runtime options that are not part of the core state.

@@ -80,3 +80,6 @@ export type { DetailModel } from '@/features/vod/lib/merge';
 export { useEdgeFades } from '@/features/vod/hooks/useEdgeFades';
 // vod: the search page's recent searches, which Clear history clears with the watch history.
 export { clearSearches, recentSearchList, rememberSearch } from '@/features/vod/lib/recentSearches';
+// vod: a movie or series opened from Favorites or Recently watched starts its detail page's data
+// with the click (F4-1). The entry has it already, through the dashboard cards' hover prefetch.
+export { prefetchVodDetail } from '@/features/vod/hooks/prefetch';

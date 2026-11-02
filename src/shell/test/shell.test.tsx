@@ -65,6 +65,8 @@ vi.mock('@/features/player', () => ({
   PlayerDock: () => <div data-testid="player-dock" />,
   ExternalPlaybackFooter: () => null,
 }));
+// The shell loads the dock from its own module (F1-1), with the same stand-ins.
+vi.mock('@/features/player/dock', () => import('@/features/player'));
 
 const { ShellLayout } = await import('../ShellLayout');
 const { shellRoutes } = await import('../routes');
@@ -1444,9 +1446,11 @@ describe('Run 3 onboarding wiring', () => {
       window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: query === '(max-width: 639px)' || query === '(max-width: 1023px)' })) as typeof window.matchMedia;
       renderRoutes(routes(<SearchFieldPage />), '/favorites');
       await screen.findByText('favorites page');
+      // The bar is its own chunk on phones (F1-7).
+      const bar = await screen.findByTestId('tab-bar');
       const search = document.querySelectorAll('[data-tour="search"]');
       expect(search).toHaveLength(1);
-      expect(screen.getByTestId('tab-bar').contains(search[0]!)).toBe(true);
+      expect(bar.contains(search[0]!)).toBe(true);
       // The Live TV tab holds the first step's anchor.
       const live = document.querySelectorAll('[data-tour="live"]');
       expect([...live]).toEqual([within(screen.getByTestId('tab-bar')).getByRole('link', { name: 'Live TV' })]);

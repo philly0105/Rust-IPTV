@@ -71,6 +71,13 @@ impl ProgramCache {
     }
 
     fn store(&self, key: Key, programs: Arc<Vec<EpgProgram>>, at: Instant) {
+        // An answer past its TTL is never served again ([`Self::fresh`]): drop
+        // them all here instead of one per insert at capacity, or the archive
+        // cache keeps up to 200 whole tables (tens of MB, a few thousand
+        // programmes each with a two-week archive) of channels the guide
+        // passed once (R2-3). A retain is cheap at a few thousand entries.
+        self.entries
+            .retain(|_, e| at.saturating_duration_since(e.at) < self.ttl);
         if self.entries.len() >= self.max_entries && !self.entries.contains_key(&key) {
             // Drop the oldest answer; a full scan is fine at a few thousand.
             let oldest = self
@@ -259,6 +266,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 5);
+    }
+
+    /// R2-3: storing an answer drops every answer past its TTL, not only
+    /// the oldest one at capacity.
+    #[test]
+    fn expired_answers_are_dropped_when_another_is_stored() {
+        let cache = ProgramCache::new(Duration::from_secs(60), 1, 100, false);
+        let t0 = Instant::now();
+        cache.store(key("s", "1"), Arc::new(vec![prog(600)]), t0);
+        cache.store(
+            key("s", "2"),
+            Arc::new(vec![prog(600)]),
+            t0 + Duration::from_secs(30),
+        );
+        assert_eq!(cache.len(), 2);
+        cache.store(
+            key("s", "3"),
+            Arc::new(vec![]),
+            t0 + Duration::from_secs(60),
+        );
+        // "1" is 60 s old, past its TTL; "2" is 30 s old.
+        assert!(!cache.entries.contains_key(&key("s", "1")));
+        assert!(cache.entries.contains_key(&key("s", "2")));
+        assert!(cache.entries.contains_key(&key("s", "3")));
+        assert_eq!(cache.len(), 2);
     }
 
     #[tokio::test]

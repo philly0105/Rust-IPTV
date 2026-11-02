@@ -8,6 +8,7 @@ use crate::rpc::RpcRouter;
 use crate::state::AppState;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Default per-type limit of `catalog.search`.
@@ -152,6 +153,31 @@ pub struct SearchResult {
     pub series: Vec<SeriesItem>,
 }
 
+/// Most titles one `catalog.matchTitles` call takes. The UI sends at most
+/// 20: a "More like this" rail, or one kind of an actor's "Known for".
+pub const MAX_MATCH_TITLES: usize = 40;
+
+/// One title `catalog.matchTitles` looks up: a TMDB brief's title, with its
+/// year and TMDB id when TMDB gave them.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchTitle {
+    pub title: String,
+    #[serde(default)]
+    pub year: Option<i64>,
+    #[serde(default)]
+    pub tmdb_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchTitlesArgs {
+    pub source_id: String,
+    /// `movie` or `series`.
+    pub content_type: ContentType,
+    pub titles: Vec<MatchTitle>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentlyAddedArgs {
@@ -227,7 +253,7 @@ pub async fn categories(
         hide(&state).await?
     };
     Ok(state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             super::visible_categories(
                 c,
                 &a.source_id,
@@ -301,7 +327,7 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
     };
     // guide: M3U catch-up overrides are applied on read.
     let page = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let mut page = super::query_named(c, &q, hide)?.map(NamedRow::into_channel);
             crate::catchup::m3u::apply_overrides(c, &mut page.items)?;
             // C2: custom names on read.
@@ -327,7 +353,7 @@ pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem
         vod,
     };
     let page = state
-        .db_call(move |c| super::query_named(c, &q, hide))
+        .db_read_call(move |c| super::query_named(c, &q, hide))
         .await?;
     Ok(page.map(NamedRow::into_vod))
 }
@@ -347,7 +373,7 @@ pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesI
         vod,
     };
     let page = state
-        .db_call(move |c| super::query_named(c, &q, hide))
+        .db_read_call(move |c| super::query_named(c, &q, hide))
         .await?;
     Ok(page.map(NamedRow::into_series))
 }
@@ -359,12 +385,26 @@ enum Gone {
     Locked,
 }
 
-/// The `catalog.item` read of `r` on an open connection, so `catalog.items`
-/// runs it for each of its refs inside one `db_call`.
+/// The `catalog.item` read of `r` on an open connection.
 fn lookup(
     c: &Connection,
     r: &ItemRef,
     hide: Option<crate::parental::Hide>,
+) -> CoreResult<Result<AnyItem, Gone>> {
+    let mut found = [find(c, r, hide, &mut HashMap::new())?];
+    finish_channels(c, &mut found)?;
+    let [found] = found;
+    Ok(found)
+}
+
+/// [`lookup`] without the channel post-processing ([`finish_channels`]),
+/// which `catalog.items` applies once over every ref's answer. `m3u` caches
+/// [`super::is_m3u_source`] per source id across the refs of one call.
+fn find(
+    c: &Connection,
+    r: &ItemRef,
+    hide: Option<crate::parental::Hide>,
+    m3u: &mut HashMap<String, bool>,
 ) -> CoreResult<Result<AnyItem, Gone>> {
     let Some(named) = super::get_named(c, r)? else {
         return Ok(Err(Gone::Missing));
@@ -377,20 +417,49 @@ fn lookup(
     }
     // An M3U movie plays and downloads from the playlist's own link;
     // Xtream and Stalker movies get theirs from their streamUrl.
-    let mut item =
-        if named.row.content_type == ContentType::Movie && super::is_m3u_source(c, &r.source_id)? {
-            AnyItem::Vod(named.into_m3u_vod())
-        } else {
-            to_any(named)
+    let is_m3u_movie = named.row.content_type == ContentType::Movie
+        && match m3u.get(&r.source_id) {
+            Some(known) => *known,
+            None => {
+                let known = super::is_m3u_source(c, &r.source_id)?;
+                m3u.insert(r.source_id.clone(), known);
+                known
+            }
         };
-    // guide: M3U catch-up overrides are applied on read.
-    if let AnyItem::Channel(ch) = &mut item {
-        crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;
-        // C2: a hidden channel is still returned (the hidden-channels
-        // dialog and the player open it), with its custom name.
-        crate::channeledit::apply_names(c, std::slice::from_mut(ch))?;
+    Ok(Ok(if is_m3u_movie {
+        AnyItem::Vod(named.into_m3u_vod())
+    } else {
+        to_any(named)
+    }))
+}
+
+/// Applies the M3U catch-up overrides (guide) and the custom names (C2) to
+/// every channel among `found`, in one call each: both read their
+/// per-source data (the source's config, every custom name of the source)
+/// once per call, so `catalog.items` with 42 favourite channels ran about
+/// 150 statements and 42 config parses one ref at a time. A hidden channel
+/// is still returned (the hidden-channels dialog and the player open it),
+/// with its custom name.
+fn finish_channels(c: &Connection, found: &mut [Result<AnyItem, Gone>]) -> CoreResult<()> {
+    let mut at = Vec::new();
+    let mut channels = Vec::new();
+    for (i, slot) in found.iter_mut().enumerate() {
+        if matches!(slot, Ok(AnyItem::Channel(_))) {
+            if let Ok(AnyItem::Channel(ch)) = std::mem::replace(slot, Err(Gone::Missing)) {
+                at.push(i);
+                channels.push(ch);
+            }
+        }
     }
-    Ok(Ok(item))
+    if channels.is_empty() {
+        return Ok(());
+    }
+    crate::catchup::m3u::apply_overrides(c, &mut channels)?;
+    crate::channeledit::apply_names(c, &mut channels)?;
+    for (i, ch) in at.into_iter().zip(channels) {
+        found[i] = Ok(AnyItem::Channel(ch));
+    }
+    Ok(())
 }
 
 /// `catalog.item`'s answer for a lookup of the item `id`.
@@ -412,7 +481,7 @@ pub async fn item(state: Arc<AppState>, a: RefArgs) -> Result<AnyItem, RpcError>
     let r = a.item_ref;
     let id = r.item_id.clone();
     let hide = hide(&state).await?;
-    let found = state.db_call(move |c| lookup(c, &r, hide)).await?;
+    let found = state.db_read_call(move |c| lookup(c, &r, hide)).await?;
     item_answer(&id, found)
 }
 
@@ -434,7 +503,7 @@ pub enum ItemAnswer {
 }
 
 /// `catalog.items`: `catalog.item` for many refs in one call and one
-/// `db_call`, one answer per ref in their order. The favourites and recently
+/// `db_read_call`, one answer per ref in their order. The favourites and recently
 /// watched views and the channel pickers ask for the channels of 20 to 60
 /// rows at once; one request each queued them on the pool (and in server mode
 /// on the browser's six connections), and every answer re-rendered the page.
@@ -446,16 +515,20 @@ pub async fn items(state: Arc<AppState>, a: RefsArgs) -> Result<Vec<ItemAnswer>,
     }
     let hide = hide(&state).await?;
     let found = state
-        .db_call(move |c| {
-            a.refs
-                .into_iter()
-                .map(|r| Ok((lookup(c, &r, hide)?, r.item_id)))
-                .collect::<CoreResult<Vec<_>>>()
+        .db_read_call(move |c| {
+            let mut m3u = HashMap::new();
+            let mut found = a
+                .refs
+                .iter()
+                .map(|r| find(c, r, hide, &mut m3u))
+                .collect::<CoreResult<Vec<_>>>()?;
+            finish_channels(c, &mut found)?;
+            Ok(found.into_iter().zip(a.refs).collect::<Vec<_>>())
         })
         .await?;
     Ok(found
         .into_iter()
-        .map(|(l, id)| match item_answer(&id, l) {
+        .map(|(l, r)| match item_answer(&r.item_id, l) {
             Ok(item) => ItemAnswer::Item {
                 item: Box::new(item),
             },
@@ -471,7 +544,7 @@ pub async fn channel_by_number(
     let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     let row = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let mut ch =
                 super::channel_by_number(c, &a.source_id, a.number, a.content_type, quality, hide)?
                     .map(NamedRow::into_channel);
@@ -492,7 +565,7 @@ pub async fn neighbors(
     let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     let (prev, next) = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let (prev, next) = super::neighbors(
                 c,
                 &a.item_ref,
@@ -524,7 +597,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
     let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let mut out = SearchResult::default();
             let live_types: Vec<ContentType> = wanted
                 .iter()
@@ -548,6 +621,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                 english,
                 quality,
                 hide,
+                true,
             )?
             .into_iter();
             let mut next = || found.next().unwrap_or_default();
@@ -578,7 +652,7 @@ pub async fn recently_added(
     let english = english_only(&state);
     let hide = hide(&state).await?;
     let rows = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             super::recently_added(c, a.source_id.as_deref(), ct, a.limit, english, hide)
         })
         .await?;
@@ -590,10 +664,49 @@ pub async fn recently_added(
     })
 }
 
+/// `catalog.matchTitles`: for each of up to [`MAX_MATCH_TITLES`] TMDB titles,
+/// the source's rows that may be it, one list per title in their order (see
+/// [`super::match_titles`]); the UI picks the match from each list. "More
+/// like this" and an actor's "Known for" sent one ranked `catalog.search` per
+/// title instead: 20 to 40 at once on the 8 pooled connections, 10-60 ms
+/// each, plus a 50-120 ms substring pass for a title with no word-prefix hit.
+/// Now one `db_read_call` and one settings and parental read per rail, and a base
+/// title the source has costs an index probe.
+pub async fn match_titles(
+    state: Arc<AppState>,
+    a: MatchTitlesArgs,
+) -> Result<Vec<VodOrSeriesList>, RpcError> {
+    let ct = a.content_type;
+    if !matches!(ct, ContentType::Movie | ContentType::Series) {
+        return Err(RpcError::invalid(
+            "matchTitles supports contentType 'movie' or 'series'",
+        ));
+    }
+    if a.titles.len() > MAX_MATCH_TITLES {
+        return Err(RpcError::invalid(format!(
+            "catalog.matchTitles takes at most {MAX_MATCH_TITLES} titles"
+        )));
+    }
+    let english = english_only(&state);
+    let hide = hide(&state).await?;
+    let lists = state
+        .db_read_call(move |c| super::match_titles(c, &a.source_id, ct, &a.titles, english, hide))
+        .await?;
+    Ok(lists
+        .into_iter()
+        .map(|rows| match ct {
+            ContentType::Series => {
+                VodOrSeriesList::Series(rows.into_iter().map(NamedRow::into_series).collect())
+            }
+            _ => VodOrSeriesList::Movies(rows.into_iter().map(NamedRow::into_vod).collect()),
+        })
+        .collect())
+}
+
 pub async fn same_title(state: Arc<AppState>, a: RefArgs) -> Result<Vec<VodItem>, RpcError> {
     let hide = hide(&state).await?;
     let rows = state
-        .db_call(move |c| super::same_title(c, &a.item_ref, hide))
+        .db_read_call(move |c| super::same_title(c, &a.item_ref, hide))
         .await?;
     Ok(rows.into_iter().map(NamedRow::into_vod).collect())
 }
@@ -606,7 +719,7 @@ pub async fn all_live_channels(
     let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     let rows = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let found = super::all_live_channels(c, &a.source_id, english, quality, hide)?;
             let mut v: Vec<Channel> = found.into_iter().map(NamedRow::into_channel).collect();
             // guide: M3U catch-up overrides are applied on read.
@@ -633,6 +746,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("catalog.search", search);
     r.add("catalog.recentlyAdded", recently_added);
     r.add("catalog.sameTitle", same_title);
+    r.add("catalog.matchTitles", match_titles);
     r.add("catalog.allLiveChannels", all_live_channels);
     // vod: `catalog.yearFacets` (Run 2 C4) is registered by the vodfilter
     // module, which owns its handler.

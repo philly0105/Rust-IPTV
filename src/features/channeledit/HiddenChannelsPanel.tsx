@@ -1,8 +1,9 @@
+import { useQuery } from '@tanstack/react-query';
 import { Eye, EyeOff, RotateCcw } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useRpcQuery } from '@/api/query';
+import { batchedItemQuery } from '@/api/query';
 import { itemKey, type Channel, type ChannelEdit } from '@/api/types';
 import { ChannelLogo } from '@/features/live/components/ChannelLogo';
 import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, SkeletonList, cn, useListVirtualizer, useRowHeight } from '@/ui';
@@ -323,7 +324,8 @@ function HiddenRow({
   const { t } = useTranslation('channels');
   // The logo, and whether the provider still lists the channel. catalog.item still answers for hidden channels (C2);
   // a channel parental Hide mode locks answers not_found with details.parentalLocked and is still listed.
-  const item = useRpcQuery('catalog.item', { ref: row.edit.ref }, { staleTime: ITEM_STALE_MS });
+  // Through the catalog.items batch: the 15 or so rows of an open or a scroll ask in one call, not one each (F5-4).
+  const item = useQuery(batchedItemQuery(row.edit.ref, ITEM_STALE_MS));
   const logo = item.data && 'logoUrl' in item.data ? (item.data as Channel).logoUrl : undefined;
   const gone = item.error != null && isGoneAnswer(item.error);
   const radio = row.edit.ref.contentType === 'radio';

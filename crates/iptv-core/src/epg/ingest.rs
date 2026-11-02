@@ -89,6 +89,24 @@ pub fn runtime(state: &AppState) -> Arc<EpgRuntime> {
     state.ext_or_insert_with(RUNTIME_KEY, || Arc::new(EpgRuntime::default()))
 }
 
+/// [`EpgRuntime::bump`], then builds the new channel directory before the
+/// caller emits `epg.changed`. The event makes the UI refetch every mounted
+/// `epg.*` query at once; the first of them built the directory (every
+/// channel of every enabled feed, 0.1-0.25 s at 30-60k guide channels, about
+/// three times that on an N100) under `rt.names` while the others waited
+/// on that lock, each holding a pooled connection (R2-4). A failure is
+/// logged: the next read builds it as before.
+pub(crate) async fn bump_and_prewarm(state: &AppState, rt: &Arc<EpgRuntime>) {
+    rt.bump();
+    let r = rt.clone();
+    if let Err(e) = state
+        .db_read_call(move |c| super::resolve::directory(c, &r).map(|_| ()))
+        .await
+    {
+        tracing::warn!(error = %e, "could not build the guide channel directory");
+    }
+}
+
 /// `epg.progress` payload.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,8 +179,9 @@ pub fn ingest_reader(
         "PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0; PRAGMA temp_store=FILE;",
     )?;
     let result = ingest_inner(conn, url, reader, window, etag, on_progress);
-    // Guide search (C5): the swap (or a discarded staging) marked the title
-    // index stale; rebuild it while the bulk-load cache is still large.
+    // Guide search (C5): when the swap found the title index stale already
+    // (or a discarded staging marked it), rebuild it while the bulk-load
+    // cache is still large. A matching index was kept in step by the swap.
     super::search::refresh_index(conn);
     let restore = conn.execute_batch(&format!(
         "PRAGMA cache_size={cache}; PRAGMA wal_autocheckpoint={autockpt}; PRAGMA temp_store={temp_store};"
@@ -383,7 +402,7 @@ async fn run_refresh(
             if stats.not_modified {
                 state.emit("epg.changed", STATUS_ONLY);
             } else {
-                rt.bump();
+                bump_and_prewarm(&state, &rt).await;
                 state.emit("epg.changed", serde_json::json!({}));
             }
         }
@@ -565,7 +584,7 @@ pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
         })
         .await?;
     if pruned > 0 {
-        rt.bump();
+        bump_and_prewarm(&state, &rt).await;
         state.emit("epg.changed", serde_json::json!({}));
     }
     let now = chrono::Utc::now();
@@ -938,6 +957,62 @@ mod tests {
             )
             .unwrap();
         assert_eq!(staging, 0);
+    }
+
+    /// Records, for every `epg.changed` that announces new guide data,
+    /// whether the channel directory of the current generation was built.
+    #[derive(Default)]
+    struct DirectoryAtChange {
+        rt: std::sync::OnceLock<Arc<EpgRuntime>>,
+        seen: Mutex<Vec<bool>>,
+    }
+
+    impl crate::events::EventSink for DirectoryAtChange {
+        fn emit(&self, event: crate::events::AppEvent) {
+            if event.kind != "epg.changed" || event.payload.get("reason").is_some() {
+                return;
+            }
+            let Some(rt) = self.rt.get() else { return };
+            let built = rt
+                .names
+                .lock()
+                .as_ref()
+                .is_some_and(|d| d.generation() == rt.generation());
+            self.seen.lock().push(built);
+        }
+    }
+
+    /// R2-4: a refresh that stored data builds the new channel directory
+    /// before `epg.changed` goes out, so the reads the event sets off find
+    /// it built instead of the first one building it while the rest wait.
+    /// The sink looks at the directory when the event arrives (RB-F
+    /// review): a build after the event, or in a task that finished before
+    /// the assertions, would pass a check made after the refresh.
+    #[tokio::test]
+    async fn a_refresh_builds_the_directory_before_it_announces_the_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sink = Arc::new(DirectoryAtChange::default());
+        let state = AppState::new(tmp.path().join("data"), sink.clone(), false)
+            .await
+            .unwrap();
+        let path = tmp.path().join("guide.xml");
+        std::fs::write(
+            &path,
+            "<tv><channel id=\"one.uk\"><display-name>Channel One</display-name></channel></tv>",
+        )
+        .unwrap();
+        let rt = runtime(&state);
+        assert!(sink.rt.set(rt.clone()).is_ok());
+        let before = rt.generation();
+        refresh_now(state.clone(), &path.to_string_lossy())
+            .await
+            .unwrap();
+        assert!(rt.generation() > before);
+        assert_eq!(*sink.seen.lock(), [true], "built when announced");
+        let built = rt.names.lock().clone().expect("the directory is built");
+        assert_eq!(built.generation(), rt.generation());
+        assert_eq!(built.find_id("ONE.UK"), Some("one.uk"));
+        assert_eq!(built.find_name("UK: Channel One HD"), Some("one.uk"));
     }
 
     #[test]

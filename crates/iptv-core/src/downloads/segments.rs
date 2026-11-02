@@ -48,7 +48,14 @@ const TICK: Duration = Duration::from_millis(250);
 /// The tick until the first new bytes are reported: like a single stream's
 /// first chunk, they show at once where the transfer starts.
 const FIRST_TICK: Duration = Duration::from_millis(20);
-const SAVE_EVERY: Duration = Duration::from_secs(2);
+/// How often a running transfer saves its sidecar. Each save syncs the whole
+/// `.part` first ([`save_synced`]), a device cache flush; every 2 s that was
+/// about 100 flushes of some 40 MB for a 4 GB film, each stalling other
+/// writers (a recording, SQLite) for 0.1-1 s on a USB disk or eMMC. The
+/// interval only bounds what an OS crash, a power cut or a killed process
+/// re-downloads; the plan save before new segments start and the final save
+/// on stop or end are unchanged (R6-4).
+const SAVE_EVERY: Duration = Duration::from_secs(15);
 /// How long a segment's request waits after another connection of the
 /// transfer closed: a panel counts a closed connection a moment longer, and
 /// a request sooner can be refused.
@@ -949,6 +956,14 @@ mod tests {
     use super::*;
 
     const MIB: i64 = 1024 * 1024;
+
+    /// R6-4: each periodic save flushes the whole `.part` to the device, so
+    /// it stays rare next to the progress tick.
+    #[test]
+    fn the_periodic_sidecar_save_waits_at_least_ten_seconds() {
+        assert!(SAVE_EVERY >= Duration::from_secs(10), "{SAVE_EVERY:?}");
+        assert!(SAVE_EVERY >= TICK * 40);
+    }
 
     #[test]
     fn a_plan_splits_the_largest_remainder_while_halves_stay_large() {

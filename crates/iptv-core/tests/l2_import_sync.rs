@@ -369,6 +369,236 @@ async fn a_removed_catalog_is_written_again_even_when_the_panel_did_not_change()
 }
 
 // ---------------------------------------------------------------------------
+// R3-4: lists staged on disk, decoded once every list is in
+// ---------------------------------------------------------------------------
+
+/// Staged list bodies of an Xtream sync in `data_dir/tmp`.
+fn staged_lists(state: &AppState) -> Vec<String> {
+    std::fs::read_dir(state.data_dir.join("tmp"))
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.starts_with("xtream-") && n.ends_with(".part"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A list answered with a login page fails when it is decoded, after
+/// every list is downloaded: that kind keeps its rows and says so, the
+/// other changed kind is written, and no staged list is left.
+#[tokio::test]
+async fn an_unreadable_xtream_list_keeps_its_rows_while_the_others_are_written() {
+    let mut e = env().await;
+    e.add_xtream(XT).await;
+    e.refresh(XT).await;
+    let channels = e.rows(XT, "live").await + e.rows(XT, "radio").await;
+    let movies = e.rows(XT, "movie").await;
+    for ct in ["live", "radio", "movie", "series"] {
+        e.mark(XT, ct).await;
+    }
+    {
+        let mut rules = e.rules.lock();
+        rules.trim.push(vec!["action=get_live_streams"]);
+        rules
+            .fail
+            .push((vec!["action=get_vod_streams"], 200, LOGIN_PAGE));
+    }
+    let (source, progress) = e.refresh(XT).await;
+    let err = source.last_error.expect("lastError says what is stale");
+    assert!(err.contains("Movies could not be loaded"), "{err}");
+    assert!(
+        progress.iter().any(|p| p["phase"] == "parsing"
+            && p["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("movies skipped"))),
+        "{progress:?}"
+    );
+    assert_eq!(
+        e.rows(XT, "live").await + e.rows(XT, "radio").await,
+        channels - 1,
+        "channels rewritten"
+    );
+    assert_eq!(e.marked(XT, "live").await + e.marked(XT, "radio").await, 0);
+    assert_eq!(e.marked(XT, "movie").await, movies, "movies kept");
+    assert_eq!(
+        e.marked(XT, "series").await,
+        e.rows(XT, "series").await,
+        "series unchanged"
+    );
+    assert!(staged_lists(&e.state).is_empty());
+}
+
+/// A fatal failure after a changed list was staged (the series list
+/// refused) writes nothing and leaves no staged list behind.
+#[tokio::test]
+async fn a_fatal_failure_after_a_staged_xtream_list_writes_nothing() {
+    let mut e = env().await;
+    e.add_xtream(XT).await;
+    e.refresh(XT).await;
+    let live = e.rows(XT, "live").await;
+    e.mark(XT, "live").await;
+    {
+        let mut rules = e.rules.lock();
+        rules.trim.push(vec!["action=get_live_streams"]);
+        rules.fail.push((vec!["action=get_series"], 401, "denied"));
+    }
+    while e.events.try_recv().is_ok() {}
+    let err = iptv_core::sources::refresh(e.state.clone(), XT)
+        .await
+        .expect_err("a refused list fails the sync");
+    assert!(matches!(err, iptv_core::CoreError::Auth(_)), "{err:?}");
+    assert_eq!(e.rows(XT, "live").await, live, "nothing written");
+    assert_eq!(e.marked(XT, "live").await, live, "nothing written");
+    assert!(staged_lists(&e.state).is_empty());
+}
+
+/// A changed list that cannot be staged (`data_dir/tmp` is a file here; a
+/// full or failing disk in use) fails the whole sync with `io`, as the
+/// write would: it is not skipped as "could not be loaded from the server"
+/// while the other kinds are written.
+#[tokio::test]
+async fn a_list_that_cannot_be_staged_fails_the_whole_xtream_sync() {
+    let mut e = env().await;
+    e.add_xtream(XT).await;
+    e.refresh(XT).await;
+    let channels = e.rows(XT, "live").await + e.rows(XT, "radio").await;
+    for ct in ["live", "movie", "series"] {
+        e.mark(XT, ct).await;
+    }
+    let marked = (
+        e.marked(XT, "live").await,
+        e.marked(XT, "movie").await,
+        e.marked(XT, "series").await,
+    );
+    let tmp = e.state.data_dir.join("tmp");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::write(&tmp, b"not a directory").unwrap();
+    e.rules.lock().trim.push(vec!["action=get_live_streams"]);
+    // The movie list changes too: it must not be written without live.
+    e.rules.lock().trim.push(vec!["action=get_vod_streams"]);
+
+    while e.events.try_recv().is_ok() {}
+    let err = iptv_core::sources::refresh(e.state.clone(), XT)
+        .await
+        .expect_err("a list that cannot be staged fails the sync");
+    assert!(matches!(err, iptv_core::CoreError::Io(_)), "{err:?}");
+    assert_eq!(
+        e.rows(XT, "live").await + e.rows(XT, "radio").await,
+        channels,
+        "nothing written"
+    );
+    assert_eq!(
+        (
+            e.marked(XT, "live").await,
+            e.marked(XT, "movie").await,
+            e.marked(XT, "series").await,
+        ),
+        marked,
+        "nothing written"
+    );
+    let source = iptv_core::sources::get(&e.state, XT).await.unwrap();
+    assert_eq!(
+        source.last_error_code,
+        Some(iptv_core::RpcErrorCode::Io),
+        "{:?}",
+        source.last_error
+    );
+
+    // The disk is fine again: no staged list was left, and the next
+    // refresh writes the changes.
+    std::fs::remove_file(&tmp).unwrap();
+    let (source, _) = e.refresh(XT).await;
+    assert_eq!(source.last_error, None);
+    assert_eq!(
+        e.rows(XT, "live").await + e.rows(XT, "radio").await,
+        channels - 1
+    );
+    assert!(staged_lists(&e.state).is_empty());
+}
+
+/// Failures are reported in kind order although the live list fails at
+/// decode, after the movie and series lists failed to download: a first
+/// import of a panel without movies or series whose live list is cut short
+/// fails with the live list's error, not the movie list's 404.
+#[tokio::test]
+async fn a_sync_where_every_kind_failed_returns_the_earliest_kinds_error() {
+    let e = env().await;
+    e.add_xtream(XT).await;
+    {
+        let mut rules = e.rules.lock();
+        rules.fail.push((
+            vec!["action=get_live_streams"],
+            200,
+            r#"[{"stream_id": 1, "name": "Cut"#,
+        ));
+        rules
+            .fail
+            .push((vec!["action=get_vod_streams"], 404, "Not Found"));
+        rules
+            .fail
+            .push((vec!["action=get_series"], 404, "Not Found"));
+    }
+    let err = iptv_core::sources::refresh(e.state.clone(), XT)
+        .await
+        .expect_err("every kind failed");
+    match &err {
+        iptv_core::CoreError::Invalid(m) => assert!(m.contains("live streams"), "{m}"),
+        other => panic!("expected the live list's error, got {other:?}"),
+    }
+    assert_eq!(e.rows(XT, "live").await, 0);
+    assert!(staged_lists(&e.state).is_empty());
+}
+
+/// The warning that becomes `lastError` is the earliest kind's too: a live
+/// list that fails at decode wins over movie categories that failed while
+/// downloading (the movies kept).
+#[tokio::test]
+async fn the_earliest_kinds_warning_becomes_last_error() {
+    let mut e = env().await;
+    e.add_xtream(XT).await;
+    e.refresh(XT).await;
+    let channels = e.rows(XT, "live").await + e.rows(XT, "radio").await;
+    let movies = e.rows(XT, "movie").await;
+    {
+        let mut rules = e.rules.lock();
+        rules
+            .fail
+            .push((vec!["action=get_live_streams"], 200, LOGIN_PAGE));
+        rules
+            .fail
+            .push((vec!["action=get_vod_categories"], 200, LOGIN_PAGE));
+    }
+    let (source, _) = e.refresh(XT).await;
+    let err = source.last_error.expect("lastError says what is stale");
+    assert!(err.starts_with("Channels could not be loaded"), "{err}");
+    assert_eq!(
+        source.last_error_code,
+        Some(iptv_core::error::RpcErrorCode::Invalid)
+    );
+    assert_eq!(
+        e.rows(XT, "live").await + e.rows(XT, "radio").await,
+        channels
+    );
+    assert_eq!(e.rows(XT, "movie").await, movies);
+}
+
+/// `m3u::init` deletes the staged lists a crash left.
+#[tokio::test]
+async fn startup_removes_staged_xtream_lists_left_by_a_crash() {
+    let e = env().await;
+    let tmp = e.state.data_dir.join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let left = tmp.join("xtream-xt1-movies-0123abcd.part");
+    let other = tmp.join("xtream-notes.txt");
+    std::fs::write(&left, b"[]").unwrap();
+    std::fs::write(&other, b"keep").unwrap();
+    iptv_core::m3u::init(e.state.clone()).await.unwrap();
+    assert!(!left.exists(), "staged list removed");
+    assert!(other.exists(), "other files stay");
+}
+
+// ---------------------------------------------------------------------------
 // L1-core-15
 // ---------------------------------------------------------------------------
 

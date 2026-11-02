@@ -5,6 +5,11 @@
 //! `journal_size_limit` of 64 MiB, a 32 MiB page cache, a busy handler that waits up to 5 s for the write lock (longer while a
 //! catalog import holds it, see [`long_write`]). Long imports should use one
 //! write transaction per source.
+//!
+//! The hot pure reads (catalog pages, the guide, user-state lists, image
+//! lookups) use a second, read-only pool ([`open_read`]): a WAL reader never
+//! waits for the write lock, so they keep answering while writers wait out
+//! an import's save on the write pool.
 
 use crate::error::{is_sqlite_corruption, CoreError, CoreResult};
 use r2d2_sqlite::SqliteConnectionManager;
@@ -26,6 +31,15 @@ pub const DB_FILE: &str = "iptv.db";
 /// pass `AppState::db_write`'s gate one at a time before they take a
 /// connection, so at most one of them holds one while it waits.
 pub const POOL_MAX: u32 = 8;
+/// Maximum connections of the read-only pool ([`open_read`]). The hot reads
+/// moved there: a scrolling grid alone keeps about 4 image lookups in
+/// flight next to its page, guide and now/next reads, and one slow search
+/// (50-250 ms) should not hold the quick ones up. Ungated writers that wait
+/// for an import's write lock (an EPG ingest, an import outcome, a
+/// connection-limit check's account save) used to park their connection
+/// among these reads; with 8 of them waiting, reads failed at the 15 s
+/// checkout timeout (R1-1).
+pub const READ_POOL_MAX: u32 = 6;
 /// How long a connection waits for the write lock before failing with
 /// "database is locked", when no catalog import is running.
 pub const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
@@ -246,6 +260,16 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0026_download_rate_limit",
         sql: include_str!("migrations/0026_download_rate_limit.sql"),
     },
+    Migration {
+        version: 27,
+        name: "0027_expiry_and_resume_indexes",
+        sql: include_str!("migrations/0027_expiry_and_resume_indexes.sql"),
+    },
+    Migration {
+        version: 28,
+        name: "0028_guide_search_feed_index",
+        sql: include_str!("migrations/0028_guide_search_feed_index.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -336,7 +360,8 @@ pub fn activity() -> Activity {
 }
 
 /// How long the database has been quiet: zero while a call is in flight.
-fn quiet_for() -> Duration {
+/// Also waited on by the image cache's startup reconcile.
+pub(crate) fn quiet_for() -> Duration {
     if ACTIVE_CALLS.load(std::sync::atomic::Ordering::SeqCst) > 0 {
         return Duration::ZERO;
     }
@@ -401,7 +426,10 @@ fn checked_recently(path: &Path) -> bool {
 /// "news" and "zzzz" (p50 25-30 -> 12-17 ms) for about 40 MB more peak
 /// memory in `l3_search_perf`; 16 MiB gave almost nothing and 64 MiB little
 /// more. The cache is private to each connection and fills only as pages are
-/// read, so the pool's [`POOL_MAX`] connections hold at most 256 MiB.
+/// read, so the pool's [`POOL_MAX`] connections hold at most 256 MiB (and
+/// the read pool's [`READ_POOL_MAX`] at most 192 MiB more; r2d2 hands out
+/// the most recently returned connection first, so a pool's extra
+/// connections, opened only for bursts, stay mostly cold).
 /// `mmap_size` (pages shared through the OS cache) measured no gain.
 ///
 /// Each connection caches [`STATEMENT_CACHE`] prepared statements instead of
@@ -421,7 +449,51 @@ pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
 /// Prepared statements cached per connection (see [`configure`]).
 pub const STATEMENT_CACHE: usize = 64;
 
-/// Opens a pool on `path` (max 8 connections, pragmas applied). Does not migrate;
+/// [`configure`] for a connection of the read-only pool ([`open_read`]):
+/// the same statement cache, SQL functions, temp store and 32 MiB page
+/// cache, and none of the write pragmas (`journal_mode` is stored in the
+/// file; the rest only matter to a writer).
+///
+/// The busy timeout is SQLite's plain 5 s, not [`busy_wait`]: a WAL reader
+/// never waits for the write lock, so the 600 s of [`long_write`] must not
+/// apply here. It only covers the brief locks a reader can meet (a WAL
+/// reset after a checkpoint, the WAL index rebuilt after a crash). Temp
+/// tables (`language::hidden_rowids`) and `PRAGMA data_version` work on a
+/// read-only connection; a write fails at once with `SQLITE_READONLY`.
+pub fn configure_read(conn: &mut Connection) -> rusqlite::Result<()> {
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    conn.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
+    crate::catalog::language::register(conn)?;
+    conn.execute_batch("PRAGMA temp_store=MEMORY; PRAGMA cache_size=-32768;")?;
+    Ok(())
+}
+
+/// Opens the read-only pool on `path` (at most [`READ_POOL_MAX`]
+/// connections, [`configure_read`] applied). Call only after
+/// [`open_and_migrate`]: the file must exist, be migrated and be past the
+/// corrupt-database quarantine. A read-only WAL reader also needs the
+/// `-wal` and `-shm` files, which the write pool's idle connection keeps
+/// (as for the background check and the server proxy's own connection).
+///
+/// Connections are kept for the life of the pool, as in [`open`] (DB-4).
+pub fn open_read(path: &Path) -> CoreResult<DbPool> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_URI;
+    let manager = SqliteConnectionManager::file(path)
+        .with_flags(flags)
+        .with_init(configure_read);
+    let pool = r2d2::Pool::builder()
+        .max_size(READ_POOL_MAX)
+        .min_idle(Some(1))
+        .idle_timeout(None)
+        .max_lifetime(None)
+        .connection_timeout(Duration::from_secs(15))
+        .build(manager)?;
+    Ok(pool)
+}
+
+/// Opens the write pool on `path` (max 8 connections, pragmas applied). Does not migrate;
 /// see [`open_and_migrate`] for the boot path with recovery.
 ///
 /// Connections are kept for the life of the pool (no idle timeout, no
@@ -725,17 +797,28 @@ pub fn note_error(db_path: &Path, err: &CoreError) -> bool {
 /// When the file is corrupt or not a database, quarantine it (see
 /// [`quarantine`]), log a warning, and recreate an empty one.
 pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
-    open_and_migrate_with(path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT).map(|(pool, _)| pool)
+    open_and_migrate_at_boot(path).map(|(pool, _)| pool)
+}
+
+/// [`open_and_migrate`] that also says whether the previous run did not
+/// shut down cleanly: the running marker written at open was still there
+/// (see [`note_clean_shutdown`]). `AppState::unclean_start` keeps it for
+/// startup repair work that a clean exit makes unnecessary, such as the
+/// image cache's reconcile.
+pub fn open_and_migrate_at_boot(path: &Path) -> CoreResult<(DbPool, bool)> {
+    open_and_migrate_with(path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT)
+        .map(|(pool, unclean, _)| (pool, unclean))
 }
 
 /// [`open_and_migrate`] with the size limit of the check at open and the
-/// schedule of the background check as parameters. Returns the background
-/// check's thread when one started.
+/// schedule of the background check as parameters. Returns whether the
+/// previous run did not shut down cleanly, and the background check's
+/// thread when one started.
 fn open_and_migrate_with(
     path: &Path,
     sync_check_max_bytes: u64,
     schedule: CheckSchedule,
-) -> CoreResult<(DbPool, Option<std::thread::JoinHandle<()>>)> {
+) -> CoreResult<(DbPool, bool, Option<std::thread::JoinHandle<()>>)> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -774,7 +857,7 @@ fn open_and_migrate_with(
     } else {
         spawn_background_check(path, schedule)
     };
-    Ok((pool, background))
+    Ok((pool, unclean, background))
 }
 
 /// Checkpoints the WAL into the database and truncates it to zero bytes,
@@ -832,10 +915,17 @@ mod tests {
             // epg/store.rs: replace, clear and remove a feed.
             "DELETE FROM epg_programs WHERE epg_url = ?1",
             "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
+            // epg/search.rs: the swap's upkeep of one feed's index entries and
+            // search rows.
+            crate::epg::search::UNINDEX_FTS_SQL,
+            crate::epg::search::INDEX_FTS_SQL,
+            crate::epg::search::INDEX_ROWS_SQL,
             // epg/search.rs: guide search through the title index, and its fallback scan.
             crate::epg::search::FTS_SQL,
             crate::epg::search::SCAN_SQL,
         ];
+        // The index upkeep statements fold titles in SQL.
+        crate::epg::search::register_fold(&conn).unwrap();
         for sql in statements {
             let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
             let args = vec![rusqlite::types::Null; stmt.parameter_count()];
@@ -1340,19 +1430,21 @@ mod tests {
 
         // First start: never checked.
         note_clean_shutdown(&path);
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         join_bounded(check.expect("no pass recorded yet"));
         assert!(checked.exists(), "a pass is recorded");
         drop(pool);
 
         // Clean shutdown, recent pass: skipped.
         note_clean_shutdown(&path);
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, unclean, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        assert!(!unclean, "the previous run shut down cleanly");
         assert!(check.is_none(), "skipped after a clean shutdown");
         drop(pool);
 
         // No clean shutdown (a crash): checked again.
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, unclean, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        assert!(unclean, "the running marker was left behind");
         join_bounded(check.expect("checked after an unclean shutdown"));
         drop(pool);
 
@@ -1360,7 +1452,7 @@ mod tests {
         note_clean_shutdown(&path);
         let old = chrono::Utc::now() - chrono::TimeDelta::days(8);
         std::fs::write(&checked, old.to_rfc3339()).unwrap();
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         join_bounded(check.expect("checked when the last pass is stale"));
         drop(pool);
         assert!(!recovery_flag_path(&path).exists());
@@ -1379,6 +1471,77 @@ mod tests {
         assert_eq!(size(&conn), -32768, "restored after the migrations");
     }
 
+    /// R1-1: the read pool sees the write pool's commits, answers while
+    /// another connection holds the write lock with `long_write` raised,
+    /// refuses a write at once instead of waiting for the lock, and keeps
+    /// what the readers use: temp tables, the app's SQL functions and the
+    /// page cache of the write side.
+    #[test]
+    fn read_pool_reads_past_a_held_write_lock_and_refuses_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        let pool = open_and_migrate(&path).unwrap();
+        let read = open_read(&path).unwrap();
+        let count = |c: &Connection| -> i64 {
+            c.query_row("SELECT count(*) FROM app_state", [], |r| r.get(0))
+                .unwrap()
+        };
+        pool.get()
+            .unwrap()
+            .execute("INSERT INTO app_state(key, value) VALUES ('a', '1')", [])
+            .unwrap();
+        let mut r = read.get().unwrap();
+        assert_eq!(count(&r), 1, "a commit of the write pool is visible");
+
+        let holder = Connection::open(&path).unwrap();
+        holder
+            .execute_batch("BEGIN IMMEDIATE; INSERT INTO app_state(key, value) VALUES ('b', '2');")
+            .unwrap();
+        let long = long_write();
+        let started = std::time::Instant::now();
+        assert_eq!(count(&r), 1, "the open write is not visible");
+        let err = r
+            .execute("INSERT INTO app_state(key, value) VALUES ('c', '3')", [])
+            .unwrap_err();
+        assert!(
+            matches!(&err, rusqlite::Error::SqliteFailure(e, _) if e.code == rusqlite::ErrorCode::ReadOnly),
+            "{err}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "waited {:?} behind the write lock",
+            started.elapsed()
+        );
+        holder.execute_batch("COMMIT").unwrap();
+        drop(long);
+        assert_eq!(count(&r), 2);
+
+        // `language::hidden_rowids` keeps its set in temp tables.
+        r.execute_batch(
+            "CREATE TEMP TABLE t (x INTEGER PRIMARY KEY); INSERT INTO temp.t SELECT rowid FROM app_state;",
+        )
+        .unwrap();
+        let temp: i64 = r
+            .query_row("SELECT count(*) FROM temp.t", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(temp, 2);
+        let tx = r.transaction().unwrap();
+        assert_eq!(count(&tx), 2, "a read transaction opens and commits");
+        tx.commit().unwrap();
+        let pragma = |name: &str| -> i64 {
+            r.query_row(&format!("PRAGMA {name}"), [], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(pragma("cache_size"), -32768);
+        assert_eq!(pragma("temp_store"), 2, "MEMORY");
+        let kept: i64 = r
+            .query_row("SELECT non_english('BBC One', 'UK | News')", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(kept, 0, "the app's SQL functions are registered");
+    }
+
     /// The desktop and server shells call `note_clean_shutdown` on exit: it
     /// removes the running marker written at open, and does nothing once the
     /// marker is gone.
@@ -1386,7 +1549,8 @@ mod tests {
     fn clean_shutdown_removes_the_running_marker() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(DB_FILE);
-        let pool = open_and_migrate(&path).unwrap();
+        let (pool, unclean) = open_and_migrate_at_boot(&path).unwrap();
+        assert!(!unclean, "a new database has no marker yet");
         let running = side_path(&path, RUNNING_SUFFIX);
         assert!(running.exists(), "written at open");
         note_clean_shutdown(&path);
@@ -1394,6 +1558,11 @@ mod tests {
         note_clean_shutdown(&path);
         assert!(!running.exists());
         drop(pool);
+        let (pool, unclean) = open_and_migrate_at_boot(&path).unwrap();
+        assert!(!unclean, "after a clean shutdown");
+        drop(pool);
+        let (_pool, unclean) = open_and_migrate_at_boot(&path).unwrap();
+        assert!(unclean, "the last run never shut down cleanly");
     }
 
     /// L3-perf-core-7: the background check does not start while a database
@@ -1410,7 +1579,7 @@ mod tests {
             idle: Duration::from_millis(200),
             max_wait: Duration::from_secs(20),
         };
-        let (pool, check) = open_and_migrate_with(&path, 0, schedule).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, schedule).unwrap();
         let check = check.expect("a background check is scheduled");
         std::thread::sleep(Duration::from_millis(800));
         assert!(!check.is_finished(), "waits while a call is in flight");
@@ -1433,7 +1602,7 @@ mod tests {
         let flag = recovery_flag_path(&path);
 
         // Limit 0: every database counts as large.
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         assert_eq!(corrupt_backups(dir.path()), 0, "not checked at open");
         let rows: i64 = pool
             .get()
@@ -1455,7 +1624,7 @@ mod tests {
 
         // The flagged boot runs the full check at open (even with limit 0)
         // and recovers. The recreated file is checked in the background.
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         assert_eq!(corrupt_backups(dir.path()), 1, "corrupt file moved aside");
         join_bounded(check.expect("the new file counts as large too"));
         assert!(!flag.exists(), "flag cleared after recovery");
@@ -1473,7 +1642,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(DB_FILE);
         populate(&path);
-        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        let (pool, _, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         join_bounded(check.expect("a background check started"));
         assert!(!recovery_flag_path(&path).exists());
         let rows: i64 = pool
@@ -1496,7 +1665,7 @@ mod tests {
         assert!(len > 1_000_000 && len < SYNC_CHECK_MAX_BYTES, "{len} bytes");
         corrupt_middle(&path);
 
-        let (pool, check) =
+        let (pool, _, check) =
             open_and_migrate_with(&path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT).unwrap();
         assert!(check.is_none(), "checked at open, not in the background");
         assert_eq!(corrupt_backups(dir.path()), 1);

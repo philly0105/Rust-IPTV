@@ -445,6 +445,20 @@ fn provider_name(conn: &Connection, r: &ItemRef) -> CoreResult<Option<String>> {
         .optional()?)
 }
 
+/// Provider name and category of a catalog channel (one primary-key probe),
+/// `None` when the catalog lacks it.
+fn catalog_row(conn: &Connection, r: &ItemRef) -> CoreResult<Option<(String, String)>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT title, category_id FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
+            params![r.source_id, r.content_type.as_str(), r.item_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
 fn has_row(conn: &Connection, r: &ItemRef) -> CoreResult<bool> {
     Ok(conn
         .prepare_cached(
@@ -546,7 +560,8 @@ pub fn list(conn: &Connection, source_id: &str, hidden_only: bool) -> CoreResult
 }
 
 /// Recomputes the category and source counts after the hidden set of a
-/// source changed (`catalog.categories` `itemCount`, `source_counts`).
+/// source changed wholesale (`channels.reset`, a backup import):
+/// `catalog.categories` `itemCount` and `source_counts`.
 fn recount(conn: &Connection, source_id: &str, types: &BTreeSet<ContentType>) -> CoreResult<()> {
     for ct in types {
         crate::catalog::recount_categories(conn, source_id, *ct)?;
@@ -583,10 +598,11 @@ pub fn set_hidden(
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let now = crate::userstate::now_ts();
     let mut touched: BTreeSet<(String, ContentType)> = BTreeSet::new();
+    let mut deltas = HiddenDeltas::default();
     for r in &refs {
-        let title = provider_name(&tx, r)?;
+        let (title, category) = catalog_row(&tx, r)?.unzip();
         if hidden {
-            let Some(title) = title else {
+            let (Some(title), Some(category)) = (title, category) else {
                 return Err(not_in_catalog(r));
             };
             // A channel that is already hidden is a no-op (no write, no
@@ -603,6 +619,7 @@ pub fn set_hidden(
             if n == 0 {
                 continue;
             }
+            deltas.add(r, &category, -1);
         } else {
             // Unhiding never needs the channel in the catalog: a channel
             // the provider has dropped can leave the hidden list, and a ref
@@ -617,32 +634,73 @@ pub fn set_hidden(
                 continue;
             }
             drop_if_empty(&tx, r)?;
+            // A channel the catalog lacks never counted as hidden.
+            if let Some(category) = category {
+                deltas.add(r, &category, 1);
+            }
         }
         touched.insert((r.source_id.clone(), r.content_type));
     }
-    let sources = recount_touched(&tx, &touched)?;
+    deltas.apply(&tx)?;
     tx.commit()?;
+    let mut sources: Vec<String> = touched.into_iter().map(|(s, _)| s).collect();
+    sources.dedup();
     Ok(sources)
 }
 
-/// Recounts every touched source; returns the distinct source ids in order.
-fn recount_touched(
-    conn: &Connection,
-    touched: &BTreeSet<(String, ContentType)>,
-) -> CoreResult<Vec<String>> {
-    let mut by_source: Vec<(String, BTreeSet<ContentType>)> = Vec::new();
-    for (s, ct) in touched {
-        match by_source.last_mut() {
-            Some((last, types)) if last == s => {
-                types.insert(*ct);
-            }
-            _ => by_source.push((s.clone(), BTreeSet::from([*ct]))),
+/// What one `channels.setHidden` changes in the stored counts: -1 for each
+/// channel it hides and +1 for each it unhides, in the channel's category
+/// and, for live channels, in the source's channel count (radio is counted
+/// from `items` on read). Only channels the catalog has count, as in
+/// [`hidden_counts`], so the stored counts stay what a full recount gives.
+///
+/// The full recount (`catalog::recount_categories` and `update_counts`)
+/// read every channel and every item of the source: 15 ms per click at
+/// 270k items, about 50 ms on an N100 with the write gate held, against
+/// under 0.1 ms for these updates (R4-4). Imports, `channels.reset` and a
+/// backup import still recount in full.
+#[derive(Default)]
+struct HiddenDeltas {
+    categories: HashMap<(String, ContentType, String), i64>,
+    channels: HashMap<String, i64>,
+}
+
+impl HiddenDeltas {
+    fn add(&mut self, r: &ItemRef, category_id: &str, delta: i64) {
+        *self
+            .categories
+            .entry((r.source_id.clone(), r.content_type, category_id.to_string()))
+            .or_default() += delta;
+        if r.content_type == ContentType::Live {
+            *self.channels.entry(r.source_id.clone()).or_default() += delta;
         }
     }
-    for (s, types) in &by_source {
-        recount(conn, s, types)?;
+
+    fn apply(&self, conn: &Connection) -> CoreResult<()> {
+        let mut category = conn.prepare_cached(
+            "UPDATE categories SET item_count = MAX(item_count + ?4, 0) WHERE source_id = ?1 AND content_type = ?2 AND category_id = ?3",
+        )?;
+        for ((source_id, content_type, category_id), delta) in &self.categories {
+            if *delta != 0 {
+                category.execute(params![
+                    source_id,
+                    content_type.as_str(),
+                    category_id,
+                    delta
+                ])?;
+            }
+        }
+        let mut channels = conn.prepare_cached(
+            "UPDATE source_counts SET channel_count = MAX(channel_count + ?2, 0), updated_at = CURRENT_TIMESTAMP WHERE source_id = ?1",
+        )?;
+        for (source_id, delta) in &self.channels {
+            // No counts row yet: the full count writes one.
+            if *delta != 0 && channels.execute(params![source_id, delta])? == 0 {
+                crate::catalog::update_counts(conn, source_id)?;
+            }
+        }
+        Ok(())
     }
-    Ok(by_source.into_iter().map(|(s, _)| s).collect())
 }
 
 /// Trims and checks a custom name: `Ok(None)` resets to the provider name

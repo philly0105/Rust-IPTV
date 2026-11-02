@@ -120,13 +120,64 @@ describe('desktop window state', () => {
     await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
     expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([]);
 
+    // Back at the size recorded before PiP: the core holds it already, so nothing is sent.
     usePipStore.setState({ active: false });
     win.state = { ...win.state, x: 40, y: 60, width: 1400, height: 900 };
     for (const l of win.listeners) l();
     await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([]);
+
+    // Maximizing records the pre-PiP size as the one to come back to.
+    win.state = { ...win.state, maximized: true, x: 0, y: 0, width: 2560, height: 1400 };
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
     expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([
-      { cmd: 'window.setState', args: { state: { x: 40, y: 60, width: 1400, height: 900, maximized: false } } },
+      { cmd: 'window.setState', args: { state: { x: 40, y: 60, width: 1400, height: 900, maximized: true } } },
     ]);
+  });
+
+  it('sends nothing for a geometry the core already holds (R4-1)', async () => {
+    vi.useFakeTimers();
+    rpcMock.handlers['window.getState'] = () => ({ x: 40, y: 60, width: 1400, height: 900, maximized: false });
+    rpcMock.handlers['window.setState'] = () => undefined;
+    renderHook(() => useWindowStatePersistence());
+    // The boot record matches the stored geometry.
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([]);
+
+    // The player's fullscreen toggle resizes the window twice and keeps the last normal geometry.
+    win.state = { ...win.state, fullscreen: true, x: 0, y: 0, width: 2560, height: 1440 };
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    win.state = { ...win.state, fullscreen: false, x: 40, y: 60, width: 1400, height: 900 };
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([]);
+
+    // A move is still recorded, once.
+    win.state = { ...win.state, x: 200 };
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([
+      { cmd: 'window.setState', args: { state: { x: 200, y: 60, width: 1400, height: 900, maximized: false } } },
+    ]);
+  });
+
+  it('sends a geometry again after a failed save', async () => {
+    vi.useFakeTimers();
+    rpcMock.handlers['window.getState'] = () => null;
+    let fail = true;
+    rpcMock.handlers['window.setState'] = () => {
+      if (fail) throw new Error('busy');
+    };
+    renderHook(() => useWindowStatePersistence());
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    fail = false;
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toHaveLength(2);
   });
 });
 

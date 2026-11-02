@@ -14,7 +14,7 @@ import { useEffect } from 'react';
 import { create } from 'zustand';
 
 import { onAppEvent } from '@/api/events';
-import { invalidate } from '@/api/query';
+import { invalidateWithEvents } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { ImportPhase, ImportProgressEvent } from '@/api/types';
 
@@ -116,7 +116,10 @@ export function handleImportEvent(e: ImportProgressEvent): void {
   if (pending) clearTimeout(pending);
   timers.delete(e.sourceId);
   if (FINAL_PHASES.has(e.phase)) {
-    void invalidate('sources.');
+    // Joins the event burst: 'done' opened one already, and after 'error' or 'cancelled' the core
+    // sends sources.changed {reason: 'status'} at once, which joins this one instead of fetching
+    // sources.* a second time (F5-5).
+    void invalidateWithEvents('sources.');
     timers.set(
       e.sourceId,
       setTimeout(() => {

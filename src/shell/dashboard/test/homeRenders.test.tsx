@@ -42,6 +42,8 @@ vi.mock('@/features/player', () => ({
   },
   ExternalPlaybackFooter: () => null,
 }));
+// The shell loads the dock from its own module (F1-1), with the same stand-ins.
+vi.mock('@/features/player/dock', () => import('@/features/player'));
 // Counts each card's renders by its title; the real card renders underneath.
 vi.mock('../cards', async (orig) => {
   const real = await orig<typeof import('../cards')>();

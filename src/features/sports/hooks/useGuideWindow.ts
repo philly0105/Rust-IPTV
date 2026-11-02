@@ -10,7 +10,7 @@ import { useMemo } from 'react';
 
 import { rpcKey } from '@/api/query';
 import type { EpgProgram, ItemKey, ItemRef, Settings } from '@/api/types';
-import { DAY, MINUTE, shiftPrograms } from '@/features/live/lib/epgTime';
+import { DAY, MINUTE, shiftProgram } from '@/features/live/lib/epgTime';
 import { useSettingsValue } from '@/shell/useSettings';
 
 import { sportsRead } from './sportsRead';
@@ -72,6 +72,30 @@ function gridChunks(channels: readonly IndexedChannel[]): ItemRef[][] {
 
 const NO_PROGRAMS = new Map<ItemKey, EpgProgram[]>();
 
+const shiftedLists = new WeakMap<EpgProgram[], { offset: number; list: EpgProgram[] }>();
+const shiftedOnes = new WeakMap<EpgProgram, { offset: number; program: EpgProgram }>();
+
+/**
+ * `shiftPrograms`, kept per answered list and per programme for the offset. Matching tokenizes each
+ * programme once per object (match.ts), and after a guide refresh the queries' structural sharing keeps
+ * the lists and programmes that did not change as they were, so only the new ones need it. A guide offset
+ * made new objects on every recompute instead, so all of them were tokenized again (F5-1).
+ */
+function shiftedList(list: EpgProgram[], offset: number): EpgProgram[] {
+  if (!offset) return list;
+  const hit = shiftedLists.get(list);
+  if (hit?.offset === offset) return hit.list;
+  const out = list.map((p) => {
+    const one = shiftedOnes.get(p);
+    if (one?.offset === offset) return one.program;
+    const program = shiftProgram(p, offset);
+    shiftedOnes.set(p, { offset, program });
+    return program;
+  });
+  shiftedLists.set(list, { offset, list: out });
+  return out;
+}
+
 /**
  * Programmes per channel overlapping [`from`, `to`) in display time (`settings.epgOffsetMinutes` applied, as
  * the guide shows them). The request window is the display window moved back by the offset, as the guide
@@ -113,7 +137,7 @@ export function useGuideWindow(
       if (!grid) continue;
       for (const [key, list] of Object.entries(grid) as [ItemKey, EpgProgram[]][]) {
         if (list.length === 0) continue;
-        map.set(key, shiftPrograms(list, offset));
+        map.set(key, shiftedList(list, offset));
       }
     }
     return map;

@@ -7,10 +7,12 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { RpcError } from '@/api/transport';
 import type { ItemRef, Source, VodDetail } from '@/api/types';
 
 import {
   PREFETCH_REST_MS,
+  prefetchOnOpen,
   prefetchVodDetail,
   resetPrefetchMemory,
   usePrefetchIntent,
@@ -405,8 +407,89 @@ describe('prefetchVodDetail (C4)', () => {
   it('uses the series command and chunk for a series ref', async () => {
     prefetchVodDetail(client, { ref: seriesRef, sourceKind: 'xtream' });
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(rpcMock.calls.map((c) => c.cmd)).toEqual(['xtream.seriesDetail']);
+    expect(rpcMock.calls.map((c) => c.cmd).filter((c) => c !== 'catalog.items')).toEqual(['xtream.seriesDetail']);
     expect(chunks.loaded).toEqual(['series']);
+  });
+
+  // F4-1: the page's hero comes from the title's catalog row while the provider answers.
+  it('reads an Xtream title’s own catalog row when no cached list holds it', async () => {
+    rpcMock.handlers['catalog.items'] = (args) => (args as { refs: ItemRef[] }).refs.map((ref) => ({ item: { ref, title: 'Row', categoryId: 'c' } }));
+    prefetchVodDetail(client, movieTarget);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.items').map((c) => c.args)).toEqual([{ refs: [movieRef] }]);
+    expect(client.getQueryData(['catalog.item', { ref: movieRef }])).toEqual({ ref: movieRef, title: 'Row', categoryId: 'c' });
+  });
+
+  it('skips the row read when a grid page holds the title, and for other source kinds', async () => {
+    client.setQueryData(['catalog.movies', { sourceId: 'x1', query: { offset: 0, limit: 60 } }], { items: [{ ref: movieRef, title: 'Grid row' }], total: 1, offset: 0, limit: 60 });
+    prefetchVodDetail(client, movieTarget);
+    rpcMock.handlers['stalker.vodDetail'] = (args) => movieDetail((args as { ref: ItemRef }).ref);
+    prefetchVodDetail(client, { ref: { ...movieRef, sourceId: 's1' }, sourceKind: 'stalker' });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(rpcMock.calls.map((c) => c.cmd)).toEqual(['xtream.vodDetail', 'stalker.vodDetail']);
+  });
+});
+
+describe('prefetchOnOpen (F4-1)', () => {
+  const sources = [makeSource('x1', 'xtream', 'X'), makeSource('m1', 'm3u', 'M')] as Source[];
+
+  it('starts the detail, its row, the chunk and the poster with the click, by the cached source kind', async () => {
+    client.setQueryData(['sources.list', null], sources);
+    rpcMock.handlers['catalog.items'] = (args) => (args as { refs: ItemRef[] }).refs.map((ref) => ({ item: { ref, title: 'Row' } }));
+    prefetchOnOpen(client, seriesRef, 'http://cdn/s7.jpg');
+    expect(chunks.loaded).toEqual(['series']);
+    expect(images.preloaded).toEqual([`/api/img?url=${encodeURIComponent('http://cdn/s7.jpg')}&sourceId=x1`]);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(rpcMock.calls.map((c) => c.cmd).sort()).toEqual(['catalog.items', 'xtream.seriesDetail']);
+  });
+
+  it('is not speculative: Data Saver and a coarse pointer do not skip it', async () => {
+    client.setQueryData(['sources.list', null], sources);
+    rpcMock.handlers['catalog.item'] = (args) => ({ ref: (args as { ref: ItemRef }).ref, title: 'Row' });
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(pointer: coarse)', addEventListener() {}, removeEventListener() {} }));
+    Object.defineProperty(navigator, 'connection', { value: { saveData: true }, configurable: true });
+    try {
+      prefetchOnOpen(client, { ...movieRef, sourceId: 'm1' });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+    } finally {
+      delete (navigator as { connection?: unknown }).connection;
+    }
+    expect(rpcMock.calls.map((c) => c.cmd)).toEqual(['catalog.item']);
+  });
+
+  it('keeps the client\'s retries for the page that mounts while the click\'s detail is out', async () => {
+    // The app's policy: a retryable RpcError is asked again (query.ts).
+    client = new QueryClient({ defaultOptions: { queries: { retry: (n, e) => e instanceof RpcError && e.retryable && n < 2, retryDelay: 10 } } });
+    client.setQueryData(['sources.list', null], sources);
+    rpcMock.handlers['catalog.items'] = (args) => (args as { refs: ItemRef[] }).refs.map((ref) => ({ item: { ref, title: 'Row', categoryId: 'c' } }));
+    let failures = 1;
+    rpcMock.handlers['xtream.vodDetail'] = (args) => new Promise((resolve, reject) => setTimeout(() => {
+      if (failures-- > 0) reject(new RpcError('timeout', 'provider timed out'));
+      else resolve(movieDetail((args as { ref: ItemRef }).ref));
+    }, 50));
+    prefetchOnOpen(client, movieRef);
+    // The route chunk loads well before the provider answers: the page joins the fetch in flight.
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    const source = makeSource('x1', 'xtream', 'X') as Source;
+    let state: { title?: string; error: boolean } | undefined;
+    function Detail() {
+      const q = useMovieDetail(source, { ...movieRef });
+      state = { title: q.data?.item.title, error: q.isError };
+      return null;
+    }
+    render(wrap(<Detail />));
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(state).toEqual({ title: 'Movie 42', error: false });
+    expect(detailCalls().filter((c) => c.cmd === 'xtream.vodDetail')).toHaveLength(2);
+  });
+
+  it('does nothing for a source the cached list does not hold, or a channel', async () => {
+    client.setQueryData(['sources.list', null], sources);
+    prefetchOnOpen(client, { ...movieRef, sourceId: 'gone' });
+    prefetchOnOpen(client, { sourceId: 'x1', contentType: 'live', itemId: '1' });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(rpcMock.calls).toEqual([]);
+    expect(chunks.loaded).toEqual([]);
   });
 
   it('sends only the ref fields, so extra properties do not split the cache', async () => {

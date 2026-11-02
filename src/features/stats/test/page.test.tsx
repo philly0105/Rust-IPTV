@@ -312,6 +312,14 @@ describe('stats page', () => {
     expect(links[0]!.textContent).toContain('30 min');
   });
 
+  it('starts a top title’s detail data with the click that opens it (F4-1)', async () => {
+    await loaded();
+    rpc.handlers['xtream.vodDetail'] = () => new Promise(() => undefined);
+    rpc.handlers['catalog.items'] = () => new Promise(() => undefined);
+    fireEvent.click(within(screen.getByTestId('stats-top-titles')).getAllByTestId('stats-open')[0]!);
+    expect(rpc.callsOf('xtream.vodDetail')).toEqual([{ ref: FILM }]);
+  });
+
   it('says so when one list is empty', async () => {
     await loaded({ ...FULL(), topTitles: [] });
     expect(within(screen.getByTestId('stats-top-titles')).getByText('No movies or series watched in this range.')).toBeTruthy();

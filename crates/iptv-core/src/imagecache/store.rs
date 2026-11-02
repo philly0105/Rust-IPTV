@@ -582,10 +582,12 @@ pub(super) struct ScanReport {
     pub removed: usize,
 }
 
-/// Walks the cache folder against the index `rows`.
-pub(super) fn scan(dir: &Path, rows: &HashMap<String, u64>) -> ScanReport {
+/// Walks the cache folder against the index `rows`. Each row is taken out
+/// of the map as its file turns up, so the rows left at the end are the ones
+/// without a file: no second set of every name seen, which halved the peak
+/// memory of a cache of hundreds of thousands of files (R6-3).
+pub(super) fn scan(dir: &Path, mut rows: HashMap<String, u64>) -> ScanReport {
     let mut report = ScanReport::default();
-    let mut seen = HashSet::new();
     let now = SystemTime::now();
     let old = |meta: &fs::Metadata| {
         meta.modified()
@@ -611,15 +613,15 @@ pub(super) fn scan(dir: &Path, rows: &HashMap<String, u64>) -> ScanReport {
                 let ours = is_key(&name) && name.starts_with(&shard);
                 let temp = name.ends_with(".tmp") && is_key(name.get(..64).unwrap_or(""));
                 let remove = if ours {
-                    match rows.get(&name) {
-                        Some(&bytes) => {
-                            seen.insert(name.clone());
+                    match rows.remove(&name) {
+                        Some(bytes) => {
                             let damaged = meta.len() != bytes;
-                            if damaged {
-                                report.stale.push(name.clone());
-                            }
                             // Unless a fetch may be replacing it right now.
-                            damaged && old(&meta)
+                            let remove = damaged && old(&meta);
+                            if damaged {
+                                report.stale.push(name);
+                            }
+                            remove
                         }
                         None => old(&meta) || meta.len() > MAX_IMAGE_BYTES,
                     }
@@ -633,11 +635,8 @@ pub(super) fn scan(dir: &Path, rows: &HashMap<String, u64>) -> ScanReport {
             }
         }
     }
-    for key in rows.keys() {
-        if !seen.contains(key) {
-            report.stale.push(key.clone());
-        }
-    }
+    // Rows whose file never turned up.
+    report.stale.extend(rows.into_keys());
     report.stale.sort();
     report.stale.dedup();
     report
@@ -671,12 +670,153 @@ mod tests {
         let rows: HashMap<String, u64> = [(a.clone(), 3), (b.clone(), 4), (c.clone(), 7)]
             .into_iter()
             .collect();
-        let report = scan(dir.path(), &rows);
+        let report = scan(dir.path(), rows);
         // b has the wrong size, c has no file; d is a young orphan.
         assert_eq!(report.stale, vec![b, c]);
         assert_eq!(report.removed, 0);
         assert!(file_path(dir.path(), &d).exists());
         assert!(dir.path().join("aa").join("notes.txt").exists());
+    }
+
+    /// The scan before R6-3, which kept a second set of every name seen.
+    fn scan_with_a_seen_set(dir: &Path, rows: &HashMap<String, u64>) -> ScanReport {
+        let mut report = ScanReport::default();
+        let mut seen = HashSet::new();
+        let now = SystemTime::now();
+        let old = |meta: &fs::Metadata| {
+            meta.modified()
+                .ok()
+                .and_then(|m| now.duration_since(m).ok())
+                .is_some_and(|age| age >= RECONCILE_GRACE)
+        };
+        if let Ok(subs) = fs::read_dir(dir) {
+            for sub in subs.flatten() {
+                let shard = sub.file_name().to_string_lossy().into_owned();
+                if !is_shard(&shard) || !sub.path().is_dir() {
+                    continue;
+                }
+                let Ok(files) = fs::read_dir(sub.path()) else {
+                    continue;
+                };
+                for file in files.flatten() {
+                    let name = file.file_name().to_string_lossy().into_owned();
+                    let Ok(meta) = file.metadata() else { continue };
+                    if !meta.is_file() {
+                        continue;
+                    }
+                    let ours = is_key(&name) && name.starts_with(&shard);
+                    let temp = name.ends_with(".tmp") && is_key(name.get(..64).unwrap_or(""));
+                    let remove = if ours {
+                        match rows.get(&name) {
+                            Some(&bytes) => {
+                                seen.insert(name.clone());
+                                let damaged = meta.len() != bytes;
+                                if damaged {
+                                    report.stale.push(name.clone());
+                                }
+                                damaged && old(&meta)
+                            }
+                            None => old(&meta) || meta.len() > MAX_IMAGE_BYTES,
+                        }
+                    } else {
+                        temp && old(&meta)
+                    };
+                    if remove {
+                        remove_quietly(&file.path());
+                        report.removed += 1;
+                    }
+                }
+            }
+        }
+        for key in rows.keys() {
+            if !seen.contains(key) {
+                report.stale.push(key.clone());
+            }
+        }
+        report.stale.sort();
+        report.stale.dedup();
+        report
+    }
+
+    /// Every file name left under `dir`, relative to it.
+    fn files_left(dir: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        for sub in fs::read_dir(dir).unwrap().flatten() {
+            if sub.path().is_dir() {
+                for f in fs::read_dir(sub.path()).unwrap().flatten() {
+                    out.push(format!(
+                        "{}/{}",
+                        sub.file_name().to_string_lossy(),
+                        f.file_name().to_string_lossy()
+                    ));
+                }
+            } else {
+                out.push(sub.file_name().to_string_lossy().into_owned());
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// R6-3: the scan that takes rows out of the map as their files turn up
+    /// reports and deletes exactly what the one with a `seen` set did, over
+    /// every kind of entry: intact, resized (young and old), missing, young
+    /// and old orphans, an oversized orphan, temp files, foreign files and a
+    /// key in the wrong shard.
+    #[test]
+    fn scan_matches_the_scan_with_a_seen_set() {
+        /// A file `name` of `len` bytes in its shard, an hour old if `old`.
+        fn put(dir: &Path, name: &str, len: u64, old: bool) {
+            let shard = dir.join(&name[..2]);
+            fs::create_dir_all(&shard).unwrap();
+            let f = fs::File::create(shard.join(name)).unwrap();
+            f.set_len(len).unwrap();
+            if old {
+                f.set_modified(SystemTime::now() - Duration::from_secs(3600))
+                    .unwrap();
+            }
+        }
+        let build = |dir: &Path| -> HashMap<String, u64> {
+            let mut rows = HashMap::new();
+            for i in 0..48u32 {
+                let key = format!("{:02x}{i:062x}", (i * 37) % 256);
+                let old = i % 2 == 0;
+                match i % 8 {
+                    0 | 1 => {
+                        put(dir, &key, 100, old);
+                        rows.insert(key, 100);
+                    }
+                    2 | 3 => {
+                        put(dir, &key, 90, old);
+                        rows.insert(key, 100);
+                    }
+                    4 => {
+                        rows.insert(key, 50);
+                    }
+                    5 => put(dir, &key, 70, old),
+                    6 => put(dir, &format!("{key}.{i:04}.tmp"), 10, old),
+                    _ => put(dir, &format!("{}x", &key[..2]), 5, old),
+                }
+            }
+            // A key whose file is in another shard, and an oversized orphan.
+            let misplaced = "ab".repeat(32);
+            let wrong = dir.join("cd");
+            fs::create_dir_all(&wrong).unwrap();
+            fs::write(wrong.join(&misplaced), b"1234").unwrap();
+            rows.insert(misplaced, 4);
+            put(dir, &"ef".repeat(32), MAX_IMAGE_BYTES + 1, false);
+            fs::write(dir.join("stray.txt"), b"x").unwrap();
+            rows
+        };
+        let (before, after) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let rows = build(before.path());
+        assert_eq!(build(after.path()), rows);
+        let old_report = scan_with_a_seen_set(before.path(), &rows);
+        let new_report = scan(after.path(), rows);
+        assert_eq!(new_report.stale, old_report.stale);
+        assert_eq!(new_report.removed, old_report.removed);
+        assert!(new_report.removed > 0 && !new_report.stale.is_empty());
+        assert_eq!(files_left(after.path()), files_left(before.path()));
     }
 
     #[test]

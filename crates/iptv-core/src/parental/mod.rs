@@ -220,7 +220,7 @@ async fn config_held(state: &AppState, rt: &Runtime) -> CoreResult<store::Config
     if let Some(c) = rt.cached() {
         return Ok(c);
     }
-    let c = state.db_call(|c| store::load_config(c)).await?;
+    let c = state.db_read_call(|c| store::load_config(c)).await?;
     rt.cache(&c);
     Ok(c)
 }
@@ -492,7 +492,7 @@ pub async fn lock_now(state: &AppState) -> CoreResult<ParentalStatus> {
 pub async fn locks(state: &AppState, source_id: Option<String>) -> CoreResult<Vec<ParentalLock>> {
     current(state).await?;
     state
-        .db_call(move |c| store::locks(c, source_id.as_deref()))
+        .db_read_call(move |c| store::locks(c, source_id.as_deref()))
         .await
 }
 
@@ -602,7 +602,7 @@ pub async fn check(
     }
     let auto_adult = cfg.auto_adult;
     Ok(state
-        .db_call(move |c| store::check(c, &items, auto_adult))
+        .db_read_call(move |c| store::check(c, &items, auto_adult))
         .await?)
 }
 
@@ -615,7 +615,7 @@ pub async fn adult_categories(
 ) -> CoreResult<Vec<String>> {
     current(state).await?;
     state
-        .db_call(move |c| store::adult_categories(c, &source_id, content_type))
+        .db_read_call(move |c| store::adult_categories(c, &source_id, content_type))
         .await
 }
 
@@ -649,7 +649,7 @@ pub async fn require_unlocked_to_drop_locks(
         return Ok(());
     }
     let has_locks = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             Ok(c.query_row(
                 "SELECT EXISTS(SELECT 1 FROM parental_locks WHERE ?1 IS NULL OR source_id = ?1)",
                 [source_id],
@@ -679,7 +679,7 @@ pub async fn hidden(
         return Ok(Vec::new());
     }
     state
-        .db_call(move |c| store::check(c, &items, hide.auto_adult))
+        .db_read_call(move |c| store::check(c, &items, hide.auto_adult))
         .await
 }
 

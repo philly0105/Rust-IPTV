@@ -24,6 +24,7 @@ const { queryClient } = await import('@/api/query');
 const { itemKey } = await import('@/api/types');
 const { matchGame, matchGameScanForTests, prepareMatch } = await import('../lib/match');
 const { useGameStreams } = await import('../hooks/useGameStreams');
+const { unionWindow } = await import('../hooks/useGrowingWindow');
 const { NETWORK_SEARCH_LIMIT } = await import('../hooks/useChannelIndex');
 const { PAGE_READS } = await import('../hooks/sportsRead');
 const { NETWORKS } = await import('../lib/names');
@@ -228,5 +229,39 @@ describe('the page’s reads on a big account', () => {
     );
     expect(matched).toBeGreaterThan(0);
     expect(stats.peak).toBeLessThanOrEqual(PAGE_READS);
+  }, 180_000);
+
+  it('keeps the guide when a league tab narrows the slate (F5-1)', async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    // The page reads every pass over its growing window: here the whole slate's.
+    const window = unionWindow(slate.SLATE);
+    let games = slate.SLATE;
+    const seen: boolean[] = [];
+    const { result, rerender } = renderHook(
+      () => {
+        const r = useGameStreams(games, true, { window });
+        seen.push(r.loading);
+        return r;
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 120_000, interval: 5 });
+    const calls = stats.gridCalls;
+    seen.length = 0;
+    const t0 = performance.now();
+    const { longest } = await longestBlock(async () => {
+      games = slate.SLATE.filter((g) => g.league === 'nba');
+      rerender();
+      await sleep(20);
+    });
+    log(
+      `league tab (${games.length} of ${slate.SLATE.length} games): ${stats.gridCalls - calls} epg.grid calls, ` +
+        `${ms(performance.now() - t0 - 20)} of work, longest block ${ms(longest)}, loading ${seen.includes(true) ? 'shown' : 'never shown'}`,
+    );
+    // Before F5-1 the window followed the league's games, a span of its own: every chunk asked again and
+    // prepared again.
+    expect(unionWindow(games)).not.toEqual(window);
+    expect(stats.gridCalls).toBe(calls);
+    expect(seen).not.toContain(true);
   }, 180_000);
 });

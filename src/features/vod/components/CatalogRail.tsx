@@ -1,14 +1,17 @@
-import { useMemo, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode, type RefObject } from 'react';
 
-import { itemKey, sameRef, type ItemRef, type SeriesItem, type VodItem } from '@/api/types';
+import { itemKey, sameRef, type ItemRef, type SeriesItem, type Settings, type SourceKind, type VodItem } from '@/api/types';
 import { ErrorState, SectionHeader } from '@/ui';
 
+import type { PrefetchTarget } from '../hooks/prefetch';
 import { useVodPage } from '../hooks/queries';
 import { useNearViewport } from '../hooks/useNearViewport';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
 import { useWatchedLookup } from '../hooks/useWatched';
-import { filterByRating, ratingFilterInCore, type GridQueryInput } from '../lib/paging';
-import { myListTarget } from './PosterCard';
+import { itemLanguage } from '../lib/language';
+import { effectiveMinRating, filterByRating, ratingFilterInCore, type GridQueryInput, type VodKind } from '../lib/paging';
+import { detailHref } from '../lib/search';
+import { myListTarget, PosterCard } from './PosterCard';
 import { PosterRail, type RailCardProps } from './PosterRail';
 
 /** Cards a catalog rail shows: a slice to browse, with See all for the rest. */
@@ -37,8 +40,9 @@ export interface CatalogRailProps {
  * category or the whole section by rating. Until it nears the viewport it is a placeholder of the
  * rail's height, so the page keeps its length (scroll memory lands where it left) and asks the
  * catalog only for rails the user gets to. A rail whose grid turns out empty goes away.
+ * Memoized: given stable props, a page's re-render does not reach the rail or its cards (F4-6).
  */
-export function CatalogRail({ title, count, seeAll, input, rootRef, card, eager, exclude }: CatalogRailProps) {
+export const CatalogRail = memo(function CatalogRail({ title, count, seeAll, input, rootRef, card, eager, exclude }: CatalogRailProps) {
   const [ref, near] = useNearViewport<HTMLDivElement>(rootRef);
   const cardWidth = useRailCardWidth();
   if (!eager && !near) {
@@ -50,7 +54,7 @@ export function CatalogRail({ title, count, seeAll, input, rootRef, card, eager,
     );
   }
   return <CatalogRailBody title={title} count={count} seeAll={seeAll} input={input} card={card} cardWidth={cardWidth} exclude={exclude} />;
-}
+});
 
 function CatalogRailBody({
   title,
@@ -82,6 +86,7 @@ function CatalogRailBody({
   const checking = hideWatched && !lookup.settled;
   // A retry clears the error state until the next answer.
   const [retrying, setRetrying] = useState(false);
+  const render = useCallback((item: VodItem | SeriesItem, i: number, rail: RailCardProps) => card(item, i, rail, watched.has(itemKey(item.ref))), [card, watched]);
   if (page.isSuccess && !checking && items.length === 0) return null;
   return (
     <PosterRail<VodItem | SeriesItem>
@@ -105,7 +110,97 @@ function CatalogRailBody({
         ) : undefined
       }
       myList={myListTarget}
-      render={(item, i, rail) => card(item, i, rail, watched.has(itemKey(item.ref)))}
+      render={render}
     />
   );
+}
+
+/**
+ * A poster of a catalog rail (VOD-LANDING-RENDERS): the landing's rails and a detail page's "More
+ * in <category>". Memoized, and it builds the card's My List target, prefetch target and language
+ * once per title, as the grids' GridPoster does, so a rail that re-renders draws only the cards
+ * whose title, progress, watched mark or lock changed. `showLanguage` puts the title's language
+ * badge on the poster (the landing's rails; the detail rails leave it off).
+ */
+export const CatalogPosterCard = memo(function CatalogPosterCard({
+  item,
+  index,
+  tabIndex,
+  progress,
+  watched,
+  locked,
+  showLanguage,
+  sourceKind,
+}: {
+  item: VodItem | SeriesItem;
+  index: number;
+  tabIndex: number;
+  progress?: number | undefined;
+  watched: boolean;
+  locked?: boolean;
+  showLanguage?: boolean;
+  sourceKind: SourceKind | undefined;
+}) {
+  const myList = useMemo(() => myListTarget(item), [item]);
+  const language = useMemo(() => (showLanguage ? itemLanguage(item.title, item.categoryName) : undefined), [item, showLanguage]);
+  const prefetch = useMemo<PrefetchTarget | undefined>(
+    () => (sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined),
+    [item, sourceKind],
+  );
+  return (
+    <PosterCard
+      index={index}
+      tabIndex={tabIndex}
+      title={item.titleBase || item.title}
+      fullTitle={item.title}
+      href={detailHref(item.ref) ?? '#'}
+      posterUrl={item.posterUrl}
+      year={item.year}
+      rating={item.rating}
+      progress={progress}
+      watched={watched}
+      language={language}
+      myList={myList}
+      locked={locked}
+      prefetch={prefetch}
+    />
+  );
+});
+
+/** The detail rails read the rating floor without a grid URL's "all ratings" override. */
+const NO_GRID_PARAMS = new URLSearchParams();
+
+/**
+ * A detail page's "More in <category>" rail (F4-6): its grid input (the category's newest titles,
+ * with the grids' rating floor and Hide watched, so See all opens on a cached page), its See all
+ * link and its card renderer, the same objects across the page's renders. The page re-renders for
+ * every query answer after the hero is up (TMDB, other sources, positions, favorites, downloads);
+ * inline props made the rail rebuild its page request and key hash and re-render all 20 cards
+ * each time. Undefined input until the source and the title's category are known.
+ */
+export function useCategoryRail(
+  sourceKind: SourceKind | undefined,
+  kind: VodKind,
+  sourceId: string,
+  categoryId: string | undefined,
+  settings: Pick<Settings, 'vodMinRating' | 'vodHideWatched'>,
+): { input: GridQueryInput | undefined; seeAll: { to: string } | undefined; card: CatalogRailProps['card'] } {
+  const minRating = effectiveMinRating(settings.vodMinRating, NO_GRID_PARAMS);
+  const hideWatched = settings.vodHideWatched === true;
+  const input = useMemo<GridQueryInput | undefined>(
+    () =>
+      sourceKind && categoryId
+        ? { sourceKind, kind, sourceId, categoryId, sort: 'added', dir: 'desc', search: '', minRating, ...(hideWatched ? { hideWatched: true } : {}) }
+        : undefined,
+    [sourceKind, kind, sourceId, categoryId, minRating, hideWatched],
+  );
+  const seeAll = useMemo(
+    () => (categoryId ? { to: `/s/${encodeURIComponent(sourceId)}/${kind === 'movie' ? 'movies' : 'series'}/c/${encodeURIComponent(categoryId)}` } : undefined),
+    [sourceId, kind, categoryId],
+  );
+  const card = useCallback<CatalogRailProps['card']>(
+    (item, index, rail, watched) => <CatalogPosterCard item={item} index={index} tabIndex={rail.tabIndex} watched={watched} sourceKind={sourceKind} />,
+    [sourceKind],
+  );
+  return { input, seeAll, card };
 }

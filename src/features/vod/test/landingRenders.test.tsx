@@ -9,13 +9,13 @@
  * when its props changed, which is what the real (memoized) card renders for.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { rpcKey } from '@/api/query';
-import type { Category, Page, PlaybackPosition, VodItem } from '@/api/types';
+import { queryClient, rpcKey } from '@/api/query';
+import type { Category, Page, PlaybackPosition, VodItem, WatchlistEntry } from '@/api/types';
 
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
@@ -30,7 +30,7 @@ const rpcMock = vi.hoisted(() => {
   };
   return { handlers, call };
 });
-const counts = vi.hoisted(() => ({ cards: new Map<string, number>() }));
+const counts = vi.hoisted(() => ({ cards: new Map<string, number>(), bodies: 0 }));
 
 vi.mock('@/api/transport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/transport')>()),
@@ -46,6 +46,12 @@ vi.mock('../components/PosterCard', async (orig) => {
     ...real,
     PosterCard: memo((p: Parameters<typeof real.PosterCard>[0]) => (counts.cards.set(p.title, (counts.cards.get(p.title) ?? 0) + 1), createElement(real.PosterCard, p))),
   };
+});
+// A card body formats its rating on every render, memo or context: on the landing, the count of
+// card bodies drawn, which a context change re-renders past the memos above.
+vi.mock('../lib/format', async (orig) => {
+  const real = await orig<typeof import('../lib/format')>();
+  return { ...real, formatRating: (...a: Parameters<typeof real.formatRating>) => (counts.bodies++, real.formatRating(...a)) };
 });
 
 /** Every rail counts as near the screen at once. */
@@ -114,6 +120,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  queryClient.clear();
 });
 
 const settle = () =>
@@ -123,8 +130,9 @@ const settle = () =>
 
 let client: QueryClient;
 
-async function openLanding() {
-  client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+/** `qc`: the app's client for a test that writes My List, whose helpers patch that client's cache. */
+async function openLanding(qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })) {
+  client = qc;
   render(
     <QueryClientProvider client={client}>
       <I18nextProvider i18n={i18n}>
@@ -179,5 +187,34 @@ describe('VOD-LANDING-RENDERS', () => {
     const typed = total() - before;
     console.info(`[VOD-LANDING-RENDERS] typing "${word}": ${typed} card renders`);
     expect(typed).toBe(0);
+  });
+
+  it('saving a title from its corner redraws that corner and chip, not every card body (F4-4)', async () => {
+    const saved: WatchlistEntry[] = [];
+    rpcMock.handlers['watchlist.list'] = () => [...saved];
+    rpcMock.handlers['watchlist.toggle'] = (a) => {
+      const { ref, snapshot } = a as Pick<WatchlistEntry, 'ref' | 'snapshot'>;
+      saved.push({ ref, snapshot, addedAt: '2026-10-31T12:00:00Z', watched: false });
+      return { inList: true };
+    };
+    await openLanding(queryClient);
+    const bodies = counts.bodies;
+    const cards = total();
+    // The card's wrapper holds its link and, beside it, the corner toggle.
+    const card = screen.getByRole('link', { name: /^c3 movie 5 \(/ }).parentElement!;
+    expect(within(card).queryByTestId('poster-saved')).toBeNull();
+    fireEvent.click(within(card).getByTestId('mylist-button'));
+    // The optimistic patch, then the server's rows after the toggle's refetch: two new lists.
+    await settle();
+    expect(within(card).getByTestId('poster-saved')).toBeTruthy();
+    expect(within(card).getByTestId('mylist-button').getAttribute('aria-pressed')).toBe('true');
+    const drawn = counts.bodies - bodies;
+    console.info(`[F4-4] one My List toggle on the landing: ${drawn} card bodies drawn (${5 + 24 + 20 + 12 * 20} cards mounted)`);
+    expect(drawn).toBe(0);
+    expect(total()).toBe(cards);
+    // Another rail's card did not change.
+    const other = screen.getByRole('link', { name: /^c4 movie 5 \(/ }).parentElement!;
+    expect(within(other).queryByTestId('poster-saved')).toBeNull();
+    expect(within(other).getByTestId('mylist-button').getAttribute('aria-pressed')).toBe('false');
   });
 });

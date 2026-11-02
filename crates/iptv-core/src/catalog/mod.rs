@@ -54,6 +54,13 @@ pub const FALLBACK_CATEGORY_NAME: &str = "Uncategorized";
 /// `tmdbId` (number), `catchup` (object `{type, days?, source?}`; enables
 /// archive when [`catchup_usable`]), `headers` (object with
 /// userAgent/referrer/origin; per-channel overrides).
+///
+/// An importer may hand the writer `extra` already serialized in
+/// `extra_json` instead (then `extra` is `Null`): a `serde_json::Map` is a
+/// BTreeMap whose first insert allocates a 632-byte leaf, so a mapped Xtream
+/// row's three-key extra held 662 B where its text takes 51 B, and the
+/// writer serialized and freed every map inside the write transaction.
+/// Readers never set it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemRow {
     pub source_id: String,
@@ -75,6 +82,9 @@ pub struct ItemRow {
     pub is_radio: bool,
     pub archive_hours: Option<i64>,
     pub extra: serde_json::Value,
+    /// `extra` as the JSON text to store, when the importer serialized it
+    /// already; [`CatalogWriter::insert`] stores it as is and ignores `extra`.
+    pub extra_json: Option<Box<str>>,
     pub position: i64,
 }
 
@@ -100,9 +110,21 @@ impl Default for ItemRow {
             is_radio: false,
             archive_hours: None,
             extra: serde_json::Value::Object(Default::default()),
+            extra_json: None,
             position: 0,
         }
     }
+}
+
+/// `extra` as the text [`ItemRow::extra_json`] holds: `None` for an empty
+/// object, which the writer stores as `{}` anyway. Importers serialize small
+/// borrowing structs whose fields are declared in key order, so the stored
+/// bytes are those a `serde_json::Map` would write.
+pub fn extra_text<T: serde::Serialize>(extra: &T) -> Option<Box<str>> {
+    serde_json::to_string(extra)
+        .ok()
+        .filter(|s| s != "{}")
+        .map(String::into_boxed_str)
 }
 
 impl ItemRow {
@@ -441,6 +463,53 @@ pub const BULK_MIN_ROWS: u64 = 20_000;
 /// `(untagged titles, foreign-script titles)`.
 type Undecided = HashMap<String, (Vec<i64>, Vec<i64>)>;
 
+/// Drops every secondary index of `items` and returns `(name, CREATE
+/// statement)` of each, in the order they were created, for
+/// [`create_item_indexes`]. The primary key stays: duplicate detection, the
+/// per-source deletes and the `sources` cascade find rows through it.
+/// Sorting the rows once afterwards is several times cheaper than updating
+/// all of them (twelve as of migration 0024) per row. Used by a large
+/// [`CatalogWriter`] rewrite and a large source removal
+/// (`sources::store::delete`), inside their transaction.
+pub(crate) fn drop_item_indexes(conn: &Connection) -> CoreResult<Vec<(String, String)>> {
+    let indexes = {
+        let mut stmt = conn.prepare(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (name, _) in &indexes {
+        conn.execute_batch(&format!("DROP INDEX \"{}\"", name.replace('"', "\"\"")))?;
+    }
+    Ok(indexes)
+}
+
+/// Builds the indexes [`drop_item_indexes`] dropped again, in the order they
+/// were created: among covering indexes of the same cost SQLite takes the
+/// newest, and migrations 0022 and 0024 create the narrow `idx_items_cat`
+/// last so counts read it.
+pub(crate) fn create_item_indexes(
+    conn: &Connection,
+    indexes: &[(String, String)],
+) -> CoreResult<()> {
+    for (_, sql) in indexes {
+        conn.execute_batch(sql)?;
+    }
+    Ok(())
+}
+
+/// Builds the search index (`items_fts`) afresh from the rows `items` holds.
+/// For a delete that removes more rows than it keeps: the per-row `'delete'`
+/// tokenizes every old title and writes a delete marker for each word, where
+/// this drops the whole index and tokenizes only the rows left. Run it only
+/// once `items` holds exactly the rows the index should have: after the
+/// deletes, before any insert whose entry is added in bulk.
+pub(crate) fn rebuild_search_index(conn: &Connection) -> CoreResult<()> {
+    conn.execute("INSERT INTO items_fts (items_fts) VALUES ('rebuild')", [])?;
+    Ok(())
+}
+
 /// The name a category is stored under (see [`CatalogWriter::finish`]).
 fn stored_category_name(name: &str) -> &str {
     let name = name.trim();
@@ -581,11 +650,21 @@ impl<'c> CatalogWriter<'c> {
         };
         // A large refresh drops the indexes before its deletes too.
         w.maybe_go_bulk()?;
+        // A refresh that replaces more rows than it keeps (a single-source
+        // user's every changed refresh) indexes the kept rows afresh after
+        // the deletes instead of deleting the old entries one by one:
+        // `begin` of a 250k-row refresh next to 40k kept rows took 1.1 s,
+        // now 0.45 s (dev profile). `kept` is only counted once the rewrite
+        // touches BULK_MIN_ROWS, so a small rewrite next to a big library
+        // never pays for a rebuild.
+        let rebuild_fts = w.kept.is_some_and(|kept| kept < w.replaced);
         for ct in types {
-            conn.execute(
-                "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
-                params![source_id, ct.as_str()],
-            )?;
+            if !rebuild_fts {
+                conn.execute(
+                    "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
+                    params![source_id, ct.as_str()],
+                )?;
+            }
             conn.execute(
                 "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1 AND content_type = ?2)",
                 params![source_id, ct.as_str()],
@@ -599,18 +678,20 @@ impl<'c> CatalogWriter<'c> {
                 params![source_id, ct.as_str()],
             )?;
         }
+        // Here, and only here, `items` holds just the kept rows: before the
+        // deletes it still has the replaced ones, and `finish` adds the new
+        // rows' entries itself.
+        if rebuild_fts {
+            rebuild_search_index(conn)?;
+        }
         w.replaced_gone = true;
         Ok(w)
     }
 
-    /// Drops every secondary index of `items` once the rewrite touches enough
-    /// rows ([`BULK_MIN_ROWS`]); [`CatalogWriter::finish`] runs their stored
-    /// CREATE statements again. Sorting the rows once is several times
-    /// cheaper than updating all eleven of them (as of migration 0019) per
-    /// row. The primary key stays (duplicate detection and the per-source
-    /// deletes use it). They are built again in the order they were created:
-    /// among covering indexes of the same cost SQLite takes the newest, and
-    /// migration 0022 orders them so counts read a narrow one.
+    /// Drops every secondary index of `items` ([`drop_item_indexes`]) once
+    /// the rewrite touches enough rows ([`BULK_MIN_ROWS`]);
+    /// [`CatalogWriter::finish`] builds them again in their creation order
+    /// ([`create_item_indexes`]).
     fn maybe_go_bulk(&mut self) -> CoreResult<()> {
         let touched = self.replaced + self.total + self.duplicates;
         if self.dropped_indexes.is_some() || touched < BULK_MIN_ROWS {
@@ -639,19 +720,7 @@ impl<'c> CatalogWriter<'c> {
         if touched < kept {
             return Ok(());
         }
-        let indexes = {
-            let mut stmt = self.conn.prepare(
-                "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY rowid",
-            )?;
-            let rows =
-                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-        for (name, _) in &indexes {
-            self.conn
-                .execute_batch(&format!("DROP INDEX \"{}\"", name.replace('"', "\"\"")))?;
-        }
-        self.dropped_indexes = Some(indexes);
+        self.dropped_indexes = Some(drop_item_indexes(self.conn)?);
         Ok(())
     }
 
@@ -690,11 +759,20 @@ impl<'c> CatalogWriter<'c> {
             Some((base, y)) => (Some(base.as_str()), item.year.or(*y)),
             None => (item.title_base.as_deref(), item.year),
         };
-        let extra = if item.extra.as_object().is_some_and(|o| o.is_empty()) || item.extra.is_null()
-        {
-            "{}".to_string()
-        } else {
-            item.extra.to_string()
+        // Text the importer serialized on the blocking pool is bound as is:
+        // no tree to serialize or free while the write lock is held.
+        let serialized;
+        let extra: &str = match item.extra_json.as_deref() {
+            Some(text) => text,
+            None if item.extra.is_null()
+                || item.extra.as_object().is_some_and(|o| o.is_empty()) =>
+            {
+                "{}"
+            }
+            None => {
+                serialized = item.extra.to_string();
+                &serialized
+            }
         };
         let verdict = language::title_verdict(&item.title);
         let undecided = matches!(
@@ -794,8 +872,8 @@ impl<'c> CatalogWriter<'c> {
         check_cancel(self.cancel.as_ref())?;
         // A bulk rewrite builds the indexes again first: the counts below
         // read them.
-        for (_, sql) in self.dropped_indexes.iter().flatten() {
-            self.conn.execute_batch(sql)?;
+        if let Some(indexes) = &self.dropped_indexes {
+            create_item_indexes(self.conn, indexes)?;
         }
         let mut insert_cat = self.conn.prepare_cached(
             "INSERT OR IGNORE INTO categories (source_id, content_type, category_id, name, hidden, position, item_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
@@ -929,7 +1007,9 @@ pub fn replace_catalog(
 
 /// Recomputes `item_count` of every category of one source and content type
 /// from `items`, leaving out channels hidden by a channel edit (C2). Called
-/// by the catalog writer and after every change to the hidden set.
+/// by the catalog writer, `channels.reset` and a backup import;
+/// `channels.setHidden` moves the stored counts by the channels it changed
+/// to the same values (R4-4).
 pub fn recount_categories(
     conn: &Connection,
     source_id: &str,
@@ -1334,12 +1414,7 @@ pub(crate) fn read_named(r: &Row<'_>) -> rusqlite::Result<NamedRow> {
         )
     })?;
     let extra: String = r.get(18)?;
-    let extra = if extra == "{}" || extra.is_empty() {
-        serde_json::Value::Object(Default::default())
-    } else {
-        serde_json::from_str(&extra)
-            .unwrap_or_else(|_| serde_json::Value::Object(Default::default()))
-    };
+    let extra = parse_extra(content_type, &extra);
     Ok(NamedRow {
         row: ItemRow {
             source_id: r.get(0)?,
@@ -1361,10 +1436,72 @@ pub(crate) fn read_named(r: &Row<'_>) -> rusqlite::Result<NamedRow> {
             is_radio: r.get(16)?,
             archive_hours: r.get(17)?,
             extra,
+            extra_json: None,
             position: r.get(19)?,
         },
         category_name: r.get(20)?,
     })
+}
+
+/// The key of an M3U series row's `extra` that holds every episode of the
+/// show (`m3u::series::StoredEpisode`).
+const EPISODES_KEY: &str = "episodes";
+
+/// A row's `extra_json` as [`read_named`] keeps it: an empty object for
+/// `{}`, empty or invalid text, and without an M3U series row's episode
+/// list. That list (170-200 bytes an episode: id, numbers, title, URL,
+/// headers) is read only by `m3u::series::stored_episodes_of`; parsed into a
+/// Value tree and dropped, a 60-row page of 20-episode shows took 0.85 ms
+/// and 14,760 allocations against 0.1 ms and 120 with the list skipped
+/// (8.6 ms against 1.35 ms at 200 episodes). The needle check is one scan:
+/// a `"` inside another value is escaped, so only a key (or a value that is
+/// exactly the word) matches, and every other row keeps the plain parse.
+fn parse_extra(content_type: ContentType, text: &str) -> serde_json::Value {
+    let empty = || serde_json::Value::Object(Default::default());
+    if text == "{}" || text.is_empty() {
+        return empty();
+    }
+    let parsed = if content_type == ContentType::Series
+        && memchr::memmem::find(text.as_bytes(), b"\"episodes\"").is_some()
+    {
+        without_episodes(text)
+    } else {
+        serde_json::from_str(text)
+    };
+    parsed.unwrap_or_else(|_| empty())
+}
+
+/// The JSON object `text` with its [`EPISODES_KEY`] value scanned
+/// ([`serde::de::IgnoredAny`]: no allocation) rather than built. Every other
+/// key gets the Value a full parse gives it, a repeated key keeps its last
+/// value, and text that is not one object fails.
+fn without_episodes(text: &str) -> serde_json::Result<serde_json::Value> {
+    struct Lean;
+    impl<'de> serde::de::Visitor<'de> for Lean {
+        type Value = serde_json::Map<String, serde_json::Value>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a JSON object")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut out = serde_json::Map::new();
+            while let Some(key) = map.next_key::<String>()? {
+                if key == EPISODES_KEY {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                } else {
+                    let value = map.next_value::<serde_json::Value>()?;
+                    out.insert(key, value);
+                }
+            }
+            Ok(out)
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(text);
+    let map = serde::Deserializer::deserialize_map(&mut de, Lean)?;
+    de.end()?;
+    Ok(serde_json::Value::Object(map))
 }
 
 /// Builds an FTS5 prefix query from free text: every word becomes a quoted
@@ -1498,22 +1635,22 @@ pub fn query_named(
         sql.push_str(&vodfilter::vod_filter_sql_on(&q.vod, year, args));
         sql
     };
-    // All movies, All series and Top rated (no category, search or filter):
-    // the stored per-category counts add up to the total, where the count
-    // walked every title of the source on every page (4-5 ms on 182k movies,
-    // about 20 ms with 60 categories hidden, as each title probes the hidden
-    // set). Every item has a category row (`CatalogWriter::finish` adds
-    // "Uncategorized" ones), and for movies and series `item_count` is the
-    // row count (channel edits apply to live and radio). Every other shape
-    // counts its rows.
-    let summed = matches!(q.content_type, ContentType::Movie | ContentType::Series)
-        && q.category_id.is_none()
+    // All movies, All series, Top rated, All channels and the guide's All
+    // list (no category, search or filter): the stored per-category counts
+    // add up to the total, where the count walked every row of the source on
+    // every page (4-5 ms on 182k movies, about 20 ms with 60 categories
+    // hidden, as each title probes the hidden set; 4.4 ms on 200k channels,
+    // 95% of a first page, and up to 12 pages per guide search hit). Every
+    // item has a category row (`CatalogWriter::finish` adds "Uncategorized"
+    // ones), and `item_count` leaves out the channels a channel edit hides
+    // (every change to the hidden set keeps it exact), the
+    // rows `edited` drops. Every other shape counts its rows.
+    let summed = q.category_id.is_none()
         && search.is_none()
         && min_rating.is_none()
         && q.vod.is_empty()
         && english.is_empty()
         && locked.is_empty()
-        && edited.is_empty()
         && quality_sql.is_empty();
     // A word-prefix search with few matches in the whole library: the
     // matched rowids drive the count and the page. Without statistics SQLite
@@ -1733,8 +1870,8 @@ fn sorted_read_index(
 }
 
 /// Items of one source and type in its visible categories (in every one
-/// with `include_hidden`), from the stored `item_count`s: the total of an
-/// unfiltered list (see [`query_named`]).
+/// with `include_hidden`), without hidden channels, from the stored
+/// `item_count`s: the total of an unfiltered list (see [`query_named`]).
 fn stored_total(
     conn: &Connection,
     source_id: &str,
@@ -1864,6 +2001,7 @@ pub fn search_named(
         english_only,
         None,
         hide,
+        true,
     )?;
     Ok(found.pop().unwrap_or_default())
 }
@@ -1873,12 +2011,15 @@ pub fn search_named(
 /// rows per group, in one ranked pass: one FTS match for every group instead
 /// of one each, ranked on the narrow `items_rank` rows with a top-`limit`
 /// per group (ties by rowid), then the full rows of the winners. When the
-/// word-prefix match finds nothing in any group, every group falls back to
-/// a substring match, again one statement for all of them, over the title
-/// index rather than the table (wide rows: URLs, JSON). A group with
-/// word-prefix hits answers exactly as a [`search_named`] call of its own
-/// would; a group without them is empty unless no group has any. `quality`
-/// (the Live TV quality filter) drops live channels only.
+/// word-prefix match finds nothing in any group and `substring` is set,
+/// every group falls back to a substring match, again one statement for all
+/// of them, over the title index rather than the table (wide rows: URLs,
+/// JSON). A group with word-prefix hits answers exactly as a
+/// [`search_named`] call of its own would; a group without them is empty
+/// unless no group has any. `quality` (the Live TV quality filter) drops
+/// live channels only. `catalog.matchTitles` ([`match_titles`]) clears
+/// `substring`: its titles are whole words, and the pass would cost it
+/// 50-120 ms for each title the source lacks.
 #[allow(clippy::too_many_arguments)]
 pub fn search_groups(
     conn: &Connection,
@@ -1889,6 +2030,7 @@ pub fn search_groups(
     english_only: bool,
     quality: Option<quality::QualityFilter>,
     hide: Option<Hide>,
+    substring: bool,
 ) -> CoreResult<Vec<Vec<NamedRow>>> {
     let mut out: Vec<Vec<NamedRow>> = vec![Vec::new(); groups.len()];
     let text = query.trim();
@@ -2048,7 +2190,7 @@ pub fn search_groups(
     // A list without word-prefix hits next to lists with some stays empty;
     // filling it scanned every title of the library (50-120 ms on 220k
     // items) for the few in-word matches.
-    let missing: Vec<usize> = if out.iter().all(Vec::is_empty) {
+    let missing: Vec<usize> = if substring && out.iter().all(Vec::is_empty) {
         (0..groups.len())
             .filter(|g| !groups[*g].is_empty())
             .collect()
@@ -2365,6 +2507,98 @@ pub fn same_title(conn: &Connection, r: &ItemRef, hide: Option<Hide>) -> CoreRes
     Ok(rows)
 }
 
+/// Most candidate rows [`match_titles`] returns per title from each of its
+/// two passes: what one `catalog.search` call of the UI's lookup read, room
+/// for a remake or two sharing the name.
+pub const MATCH_TITLE_HITS: usize = 8;
+
+/// The rows of `?3` (a source) and `?1` (a type) whose base title is `?2`
+/// (case-insensitive), under the given English-only and parental clauses
+/// and outside hidden categories, shortest full title first. The source is
+/// `+` so the index on the base title drives: several indexes start with the
+/// source and type, which would read every title of the source.
+fn exact_title_sql(english: &str, locked: &str) -> String {
+    format!(
+        "{SELECT_NAMED} WHERE i.content_type = ?1 AND i.title_base = ?2 COLLATE NOCASE AND +i.source_id = ?3 AND COALESCE(c.hidden, 0) = 0{english}{locked} ORDER BY length(i.title), i.position LIMIT {MATCH_TITLE_HITS}"
+    )
+}
+
+/// `catalog.matchTitles`: for each title (a TMDB brief of "More like this"
+/// or an actor's "Known for"), the rows of one source and type the UI picks
+/// its match from (`matchBrief`: the same TMDB id, else the same folded base
+/// title within a year). First the rows whose base title equals the title
+/// (idx_items_title_base, a fraction of a millisecond). When none of them
+/// can be it ([`may_be`]), and only then, the word-prefix ranked pass of
+/// `catalog.search` ([`search_groups`]) adds its best rows after them, so
+/// accents, punctuation the tokenizer drops, a remake under another base
+/// title with the brief's TMDB id, and the rows a ranked search would have
+/// offered are all still found. The substring pass is skipped. Every row
+/// passes the filters of `catalog.search`: hidden categories,
+/// `english_only`, parental `hide`.
+pub fn match_titles(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    titles: &[rpc::MatchTitle],
+    english_only: bool,
+    hide: Option<Hide>,
+) -> CoreResult<Vec<Vec<NamedRow>>> {
+    let locked = match hide {
+        Some(h) => parental::filter::item_row(conn, h)?,
+        None => String::new(),
+    };
+    let sql = exact_title_sql(english_clause(conn, english_only)?, &locked);
+    let mut out = Vec::with_capacity(titles.len());
+    for t in titles {
+        let title = t.title.trim();
+        if title.is_empty() {
+            out.push(Vec::new());
+            continue;
+        }
+        let mut rows = conn
+            .prepare_cached(&sql)?
+            .query_map(params![content_type.as_str(), title, source_id], read_named)?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !rows.iter().any(|n| may_be(t, &n.row)) {
+            let ranked = search_groups(
+                conn,
+                title,
+                Some(source_id),
+                &[&[content_type]],
+                MATCH_TITLE_HITS,
+                english_only,
+                None,
+                hide,
+                false,
+            )?;
+            let exact: HashSet<String> = rows.iter().map(|n| n.row.item_id.clone()).collect();
+            rows.extend(
+                ranked
+                    .into_iter()
+                    .flatten()
+                    .filter(|n| !exact.contains(&n.row.item_id)),
+            );
+        }
+        out.push(rows);
+    }
+    Ok(out)
+}
+
+/// True when `row`, whose base title equals the brief `t`'s, may be its
+/// title as the UI's matcher decides: the same TMDB id when both have one,
+/// else years at most one apart or unknown on either side. A row with
+/// another TMDB id, or a year further off, sends [`match_titles`] on to the
+/// ranked pass, which can find the right one (a remake, a renamed release).
+fn may_be(t: &rpc::MatchTitle, row: &ItemRow) -> bool {
+    match (t.tmdb_id, row.extra_i64("tmdbId")) {
+        (Some(want), Some(have)) => want == have,
+        _ => match (t.year, row.year) {
+            (Some(a), Some(b)) => (a - b).abs() <= 1,
+            _ => true,
+        },
+    }
+}
+
 /// Every visible live channel of a source in playlist order (capped at 20 000).
 /// `english_only` drops channels that are clearly in another language,
 /// `quality` the ones the quality filter drops, `hide` parentally locked ones.
@@ -2611,5 +2845,97 @@ mod tests {
             "hidden flag survives a rewrite"
         );
         assert_eq!(source_counts(&c, "s").unwrap(), (3, 0, 0));
+    }
+
+    /// `catalog.matchTitles` probes each title through the base-title index
+    /// under every filter shape, rather than walking the source's titles
+    /// through an index that starts with the source and type.
+    #[test]
+    fn exact_title_probe_reads_the_base_title_index() {
+        let (_d, pool) = conn();
+        let c = pool.get().unwrap();
+        c.execute(
+            "INSERT INTO parental_locks(source_id, content_type, kind, target_id, created_at) VALUES ('s', 'movie', 'item', 'm1', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let locked = parental::filter::item_row(&c, Hide { auto_adult: true }).unwrap();
+        assert!(locked.contains("parental_locks"), "{locked}");
+        for (english, locked) in [
+            ("", ""),
+            (language::STORED_SQL, locked.as_str()),
+            (language::ENGLISH_ONLY_SQL, ""),
+        ] {
+            let sql = exact_title_sql(english, locked);
+            let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan: Vec<String> = stmt
+                .query_map(params!["movie", "Heat", "s"], |r| r.get(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(
+                plan.iter()
+                    .any(|d| d.contains("USING INDEX idx_items_title_base")),
+                "{english:?} {locked:?}: {plan:?}"
+            );
+        }
+    }
+
+    /// R1-3: the readers leave an M3U series row's episode list out of
+    /// `extra`; every other key reads as a full parse gives it (strings with
+    /// escapes, numbers of every kind, nested objects, a repeated key), junk
+    /// still reads as an empty object, and the episode reader finds the list.
+    #[test]
+    fn readers_skip_only_the_episode_list_of_series_rows() {
+        let text = r#"{"plot":"A \"episodes\" joke é","episodes":[{"id":"e1","season":1,"episode":2,"title":"T","url":"http://h/1.mkv","headers":{"userAgent":"UA"}}],"genres":["Drama",""],"tmdbId":12,"rating":7.25,"big":18446744073709551615,"neg":-3,"catchup":{"type":"xc","days":3},"flag":true,"none":null,"tmdbId":13}"#;
+        let full: serde_json::Value = serde_json::from_str(text).unwrap();
+        let mut want = full.clone();
+        want.as_object_mut().unwrap().remove(EPISODES_KEY);
+        assert_eq!(parse_extra(ContentType::Series, text), want);
+        // Other types, and series rows without the key, keep the plain parse.
+        assert_eq!(parse_extra(ContentType::Movie, text), full);
+        for t in [r#"{"plot":"episodes","tmdbId":5}"#, r#"{"plot":"none"}"#] {
+            let plain: serde_json::Value = serde_json::from_str(t).unwrap();
+            assert_eq!(parse_extra(ContentType::Series, t), plain, "{t}");
+        }
+        for t in [
+            "",
+            "{}",
+            r#"{"episodes": [1, 2"#,
+            r#"{"episodes": []} x"#,
+            "not json",
+        ] {
+            assert_eq!(
+                parse_extra(ContentType::Series, t),
+                serde_json::json!({}),
+                "{t}"
+            );
+        }
+
+        let (_d, pool) = conn();
+        let mut c = pool.get().unwrap();
+        let mut row = item("show", "g", "Dark (2017)", 0);
+        row.content_type = ContentType::Series;
+        row.extra = full.clone();
+        replace_catalog(
+            &mut c,
+            "s",
+            ContentType::Series,
+            &[],
+            &mut std::iter::once(row),
+        )
+        .unwrap();
+        let r = ItemRef::new("s", ContentType::Series, "show");
+        let named = get_named(&c, &r).unwrap().unwrap();
+        assert_eq!(named.row.extra, want);
+        let s = named.into_series();
+        assert_eq!(s.plot.as_deref(), Some("A \"episodes\" joke é"));
+        assert_eq!(
+            (s.tmdb_id, s.genres),
+            (Some(13), Some(vec!["Drama".into()]))
+        );
+        let eps = crate::m3u::series::stored_episodes_of(&c, &r).unwrap();
+        assert_eq!(eps.len(), 1);
+        assert_eq!(eps, crate::m3u::series::stored_episodes(&full));
     }
 }

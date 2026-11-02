@@ -42,7 +42,10 @@ interface NowLinesProps {
   children(nowFor: NowFor): ReactNode;
 }
 
-/** Hands the rows a lookup of the programme on now: XMLTV first, Xtream's short guide where XMLTV has nothing. */
+/**
+ * Hands a channel list's rows a lookup of the programme on now: XMLTV first, Xtream's short guide
+ * where XMLTV has nothing. The source's rows get theirs with their pages (usePagedChannels).
+ */
 export function PanelNowLines(props: NowLinesProps) {
   return useAppContext() ? <NowLines {...props} /> : <>{props.children(nothing)}</>;
 }

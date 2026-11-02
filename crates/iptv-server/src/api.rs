@@ -4,11 +4,13 @@ use crate::Server;
 use axum::body::Bytes;
 use axum::extract::ws::{close_code, CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use iptv_core::events::AppEvent;
+use iptv_core::rpc::RawRpcResult;
 use iptv_core::{AppState, RpcError};
+use serde_json::value::RawValue;
 use std::time::Duration;
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::{Instant, MissedTickBehavior};
@@ -46,19 +48,37 @@ pub async fn not_found() -> Response {
     error_response(RpcError::not_found("unknown API route"))
 }
 
+/// Parses an RPC body into its args (empty body means `null`). It takes the
+/// body by value so the request bytes are freed before the command runs: an
+/// uploaded playlist or a backup import (up to [`crate::BODY_LIMIT`]) is
+/// otherwise held beside its parsed copy for the whole import.
+fn parse_body(body: Bytes) -> Result<serde_json::Value, RpcError> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_json::from_slice(&body)
+        .map_err(|e| RpcError::invalid(format!("request body is not valid JSON: {e}")))
+}
+
+/// A successful reply: the core's JSON text as the body, with no second
+/// serialization. Moving the String into the body does not copy it, and the
+/// compression layer sees the same content type and an exact size.
+fn json_reply(raw: Box<RawValue>) -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        Box::<str>::from(raw).into_string(),
+    )
+        .into_response()
+}
+
 /// `POST /api/rpc/{cmd}`: body is the JSON args (empty body means `null`).
 pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) -> Response {
-    let args = if body.iter().all(u8::is_ascii_whitespace) {
-        serde_json::Value::Null
-    } else {
-        match serde_json::from_slice(&body) {
-            Ok(v) => v,
-            Err(e) => {
-                return error_response(RpcError::invalid(format!(
-                    "request body is not valid JSON: {e}"
-                )))
-            }
-        }
+    let args = match parse_body(body) {
+        Ok(args) => args,
+        Err(e) => return error_response(e),
     };
     if let Err(e) = server_policy(&s.app, &cmd, &args) {
         tracing::info!(%cmd, message = %e.message, "rpc refused in server mode");
@@ -67,15 +87,15 @@ pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) 
     let started = Instant::now();
     let result = if cancels_on_disconnect(&cmd) {
         // Read-only: a superseded query the UI aborted stops its SQL.
-        iptv_core::state::cancel_on_drop(s.rpc.dispatch(s.app.clone(), &cmd, args)).await
+        iptv_core::state::cancel_on_drop(s.rpc.dispatch_raw(s.app.clone(), &cmd, args)).await
     } else {
         dispatch_detached(&s, cmd.clone(), args).await
     };
     let ms = started.elapsed().as_millis() as u64;
     match result {
-        Ok(v) => {
+        Ok(raw) => {
             tracing::debug!(%cmd, ms, "rpc ok");
-            Json(v).into_response()
+            json_reply(raw)
         }
         Err(e) => {
             // The message is safe to log; args (which may hold passwords) are not.
@@ -98,6 +118,7 @@ pub const CANCEL_ON_DISCONNECT: &[&str] = &[
     "epg.nowNext",
     "epg.channelsSearch",
     "catalog.search",
+    "catalog.matchTitles",
     "catalog.channels",
     "catalog.movies",
     "catalog.series",
@@ -117,13 +138,9 @@ pub fn cancels_on_disconnect(cmd: &str) -> bool {
 /// final progress event (L1-sources-home-3). On its own task the call
 /// finishes (and emits its events) whatever the client does, as it does on
 /// the desktop.
-async fn dispatch_detached(
-    s: &Server,
-    cmd: String,
-    args: serde_json::Value,
-) -> Result<serde_json::Value, RpcError> {
+async fn dispatch_detached(s: &Server, cmd: String, args: serde_json::Value) -> RawRpcResult {
     let (rpc, app) = (s.rpc.clone(), s.app.clone());
-    let task = tokio::spawn(async move { rpc.dispatch(app, &cmd, args).await });
+    let task = tokio::spawn(async move { rpc.dispatch_raw(app, &cmd, args).await });
     match task.await {
         Ok(result) => result,
         Err(err) => {

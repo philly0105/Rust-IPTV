@@ -1,23 +1,36 @@
 //! Catalog sync: account check, then live (+radio), movies and series are
-//! fetched and mapped one content type at a time, and all of them are written
-//! in ONE transaction ([`replace_catalogs`]), then the XMLTV link.
+//! fetched one content type at a time, the changed ones are decoded and
+//! mapped, and all of them are written in ONE transaction
+//! ([`replace_catalogs`]), then the XMLTV link.
 //!
 //! Atomicity (C8): a cancel or failure anywhere before that commit leaves the
 //! previous catalog whole. Writing type by type used to leave live new and
 //! movies old when a cancel landed between types.
 //!
-//! Memory: each type's body is fetched as bytes, decoded and mapped to
-//! `ItemRow`s on the blocking pool, and the bytes dropped before the next type
-//! is fetched. The mapped rows of every type are held until the single write.
+//! Two phases (R3-4). First every type is downloaded with no save slot
+//! held: its body is fetched as bytes and hashed on the blocking pool, and
+//! a changed body is staged in `data_dir/tmp/xtream-<id>-<kind>-<uuid>.part`
+//! and dropped before the next type is fetched, so one body at most is in
+//! memory. Then, when any type changed, the import save slot is taken once
+//! and each staged body is read back, decoded and mapped to `ItemRow`s on
+//! the blocking pool, its file deleted; the mapped rows of every type are
+//! held until the single write. A changed live list used to take the slot
+//! before the movie and series lists were even requested, so every other
+//! import's decode and write waited out those downloads too (25-130 s on a
+//! large panel).
 //!
 //! Failure policy: `Auth`, `Network` and `Timeout` (after retries) abort the
-//! whole sync and nothing is written. A type the panel does not serve
+//! whole sync and nothing is written, and so does a staged copy that cannot
+//! be written or read back (`Io`: the disk is full or failing, and the
+//! write would fail as well). A type the panel does not serve
 //! (`NotFound`, unreadable JSON) is skipped with a warning and keeps its
 //! previous rows; the sync fails only if every requested type failed. A
 //! type whose categories come back unreadable (a login page) keeps its
 //! previous rows too, or, with none yet, lands under "Uncategorized". Both
 //! are noted with `sources::note_import_warning`, so the source's
-//! `lastError` says what is stale.
+//! `lastError` says what is stale. Warnings and the error of a sync where
+//! every type failed are reported in type order ([`Issues`]), as when each
+//! type was fetched and decoded in turn.
 //!
 //! Unchanged refresh (L2-perf-core-4): each type's answers (mapped
 //! categories plus the raw list body, with [`SYNC_VERSION`]) are hashed and
@@ -31,13 +44,13 @@ use super::meta::{self, added_to_rfc3339, year_from_date, ServerMeta};
 use super::raw::{LenientVec, RawCategory, RawLive, RawSeries, RawVod};
 use super::url::{clean_extension, is_xmltv_url_for, xmltv_url};
 use crate::catalog::{self, CategoryRow, ItemRow};
-use crate::error::{CoreError, CoreResult};
+use crate::error::{CoreError, CoreResult, RpcErrorCode};
 use crate::model::{ContentType, EpgLinks, ImportSummary, XtreamSourceConfig};
 use crate::sources::{progress, progress_step, ProgressGate, SaveStep};
 use crate::state::AppState;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -139,14 +152,8 @@ pub async fn sync_source(
     // account: the reply doubles as a fresh subscription status.
     crate::account::remember_xtream(&state, source_id, super::service::info_from_raw(account))
         .await;
+    meta::remember_meta(&state, source_id, &server_meta);
     let rt = meta::runtime(&state);
-    {
-        let rt = rt.clone();
-        let sid = source_id.to_string();
-        state
-            .db_call(move |c| meta::store_meta(c, &rt, &sid, &server_meta))
-            .await?;
-    }
 
     // What the last write stored, and the rows there now (unchanged check).
     let previous = {
@@ -155,18 +162,17 @@ pub async fn sync_source(
     };
 
     let mut parts: Vec<CatalogPart> = Vec::new();
-    let mut first_err: Option<CoreError> = None;
     // Kinds whose rows stay as they are (unchanged, or kept after their
     // categories failed), and the new fingerprints of the kinds written.
     let mut untouched: Vec<Kind> = Vec::new();
     let mut written: Vec<(Kind, Option<String>)> = Vec::new();
-    // Kinds that failed without failing the sync: their rows stay too.
-    let mut failed: Vec<Kind> = Vec::new();
-    // The import save slot (ST-2), taken before the first changed answer is
-    // decoded and held until the write ends: the decoded rows of every kind
-    // stay in memory until then.
-    let mut slot: Option<tokio::sync::OwnedSemaphorePermit> = None;
+    // Warnings and kinds that failed without failing the sync (their rows
+    // stay too), reported in kind order once both phases are done.
+    let mut issues = Issues::default();
 
+    // Phase 1: download every kind, no save slot held. A changed list waits
+    // on disk (its file goes with `staged` if the sync stops early).
+    let mut staged: Vec<Staged> = Vec::new();
     let steps: [(bool, Kind); 3] = [
         (plan.live, Kind::Live),
         (plan.movies, Kind::Movies),
@@ -181,7 +187,7 @@ pub async fn sync_source(
         if crate::sources::is_import_cancelled() {
             return Err(crate::sources::import_cancelled_error());
         }
-        match fetch_kind(&state, &client, source_id, kind, &previous, &mut slot).await {
+        match fetch_kind(&state, &client, source_id, kind, &previous, &mut issues).await {
             Ok(Fetched::Unchanged) => {
                 tracing::info!(
                     source_id,
@@ -191,43 +197,37 @@ pub async fn sync_source(
                 untouched.push(kind);
             }
             Ok(Fetched::Kept) => untouched.push(kind),
-            Ok(Fetched::Parts { parts: p, hash }) => {
+            Ok(Fetched::Staged(s)) => staged.push(s),
+            Err(err) if is_fatal(&err) => return Err(err),
+            Err(err) => issues.skip(&state, source_id, kind, err),
+        }
+    }
+
+    // Phase 2: the import save slot (ST-2), taken once before the first
+    // changed list is decoded and held until the write ends, so decoded
+    // rows exist only while it is held. An unchanged refresh never waits.
+    let mut slot: Option<tokio::sync::OwnedSemaphorePermit> = None;
+    for s in staged {
+        if crate::sources::is_import_cancelled() {
+            return Err(crate::sources::import_cancelled_error());
+        }
+        let kind = s.kind;
+        progress(&state, source_id, "parsing", 0, None, Some(kind.label()));
+        if slot.is_none() {
+            slot = Some(crate::sources::save_slot(&state).await?);
+        }
+        match decode_staged(source_id, s).await {
+            Ok((p, hash)) => {
                 written.push((kind, hash));
                 parts.extend(p);
             }
-            Err(err)
-                if matches!(
-                    err,
-                    CoreError::Auth(_)
-                        | CoreError::Network(_)
-                        | CoreError::Server(_)
-                        | CoreError::Timeout(_)
-                ) || crate::sources::is_cancelled_error(&err) =>
-            {
-                return Err(err);
-            }
-            Err(err) => {
-                tracing::warn!(source_id, kind = kind.label(), error = %err, "xtream content type skipped");
-                progress(
-                    &state,
-                    source_id,
-                    "parsing",
-                    0,
-                    None,
-                    Some(&format!("{} skipped: {err}", kind.label())),
-                );
-                // A panel that does not serve a type at all is normal; any
-                // other failure leaves that type stale, so say so.
-                if !matches!(err, CoreError::NotFound(_) | CoreError::Unsupported(_)) {
-                    crate::sources::note_import_warning(&kind.kept_message(), err.code());
-                }
-                failed.push(kind);
-                first_err.get_or_insert(err);
-            }
+            Err(err) if is_fatal(&err) => return Err(err),
+            Err(err) => issues.skip(&state, source_id, kind, err),
         }
     }
+    issues.note_warnings();
     if untouched.is_empty() && parts.iter().all(|p| p.rows.is_empty()) {
-        if let Some(err) = first_err {
+        if let Some(err) = issues.take_first_error() {
             // Every requested type failed (or the rest came back empty):
             // keep the previous catalog untouched.
             return Err(err);
@@ -310,7 +310,7 @@ pub async fn sync_source(
         let kind = Kind::of(ct);
         if !enabled(kind) {
             0
-        } else if untouched.contains(&kind) || failed.contains(&kind) {
+        } else if untouched.contains(&kind) || issues.failed(kind) {
             previous.rows(ct)
         } else {
             counts.get(&ct).copied().unwrap_or(0) as i64
@@ -379,6 +379,10 @@ impl Kind {
             ContentType::Series => Kind::Series,
         }
     }
+    /// Position in the fetch order (and in [`Issues`]).
+    fn index(self) -> usize {
+        self as usize
+    }
     /// `lastError` of a sync where this kind could not be loaded and kept
     /// its previous rows.
     fn kept_message(self) -> String {
@@ -406,6 +410,73 @@ impl Kind {
         } else {
             format!("The {what} categories could not be loaded from the server, so every {what} is listed under Uncategorized for now. Refresh the source to try again.")
         }
+    }
+}
+
+/// The warnings of a sync and the kinds it skipped, held per kind and
+/// reported in kind order once both phases are done. Only the first of each
+/// reaches the user (`run_import` keeps the run's first warning as
+/// `lastError`; a sync where every kind failed returns its first error), and
+/// that should be the earliest kind's, as when each kind was fetched and
+/// decoded in turn. Noted as they came, a later kind's fetch failure
+/// (phase 1) would win over an earlier kind's decode failure (phase 2): a
+/// live list cut short on a panel without movies or series would be
+/// reported as the movie list's 404.
+#[derive(Default)]
+struct Issues {
+    /// By [`Kind::index`].
+    kinds: [KindIssues; 3],
+}
+
+#[derive(Default)]
+struct KindIssues {
+    /// `lastError` candidates, in the order this kind met them.
+    warnings: Vec<(String, RpcErrorCode)>,
+    /// Why the kind was skipped; its rows stay as they were.
+    error: Option<CoreError>,
+}
+
+impl Issues {
+    fn warn(&mut self, kind: Kind, message: String, code: RpcErrorCode) {
+        self.kinds[kind.index()].warnings.push((message, code));
+    }
+
+    /// A kind that failed without failing the sync: its rows stay.
+    fn skip(&mut self, state: &AppState, source_id: &str, kind: Kind, err: CoreError) {
+        tracing::warn!(source_id, kind = kind.label(), error = %err, "xtream content type skipped");
+        progress(
+            state,
+            source_id,
+            "parsing",
+            0,
+            None,
+            Some(&format!("{} skipped: {err}", kind.label())),
+        );
+        // A panel that does not serve a type at all is normal; any other
+        // failure leaves that type stale, so say so.
+        if !matches!(err, CoreError::NotFound(_) | CoreError::Unsupported(_)) {
+            self.warn(kind, kind.kept_message(), err.code());
+        }
+        self.kinds[kind.index()].error = Some(err);
+    }
+
+    fn failed(&self, kind: Kind) -> bool {
+        self.kinds[kind.index()].error.is_some()
+    }
+
+    /// Notes every warning in kind order (`note_import_warning` keeps the
+    /// first).
+    fn note_warnings(&mut self) {
+        for kind in &mut self.kinds {
+            for (message, code) in kind.warnings.drain(..) {
+                crate::sources::note_import_warning(&message, code);
+            }
+        }
+    }
+
+    /// The earliest kind's error, taken out: only for a sync that returns it.
+    fn take_first_error(&mut self) -> Option<CoreError> {
+        self.kinds.iter_mut().find_map(|k| k.error.take())
     }
 }
 
@@ -551,24 +622,113 @@ enum Fetched {
     /// The categories failed while the kind has rows: they are kept as they
     /// were (and a warning is noted).
     Kept,
-    /// New rows to write. `hash` is `None` when the categories were missing,
-    /// so no fingerprint is stored and the next refresh writes them again.
-    Parts {
-        parts: Vec<CatalogPart>,
-        hash: Option<String>,
-    },
+    /// A changed answer, staged on disk until it is decoded
+    /// ([`decode_staged`]).
+    Staged(Staged),
 }
 
-/// Fetches and maps one content type (live yields a live and a radio part).
-/// Nothing is written here; see [`replace_catalogs`]. An answer identical
-/// to the last write is not even decoded ([`Fetched::Unchanged`]).
+/// Errors that end the whole sync with nothing written: the panel or the
+/// network failed for every kind alike, the run was cancelled, or a staged
+/// list could not be written or read back.
+fn is_fatal(err: &CoreError) -> bool {
+    matches!(
+        err,
+        CoreError::Auth(_)
+            | CoreError::Network(_)
+            | CoreError::Server(_)
+            | CoreError::Timeout(_)
+            | CoreError::Io(_)
+    ) || crate::sources::is_cancelled_error(err)
+}
+
+/// A changed list body waiting on disk for the save slot, with what its
+/// rows need.
+struct Staged {
+    kind: Kind,
+    /// `None` when the categories were missing (the items land under
+    /// "Uncategorized").
+    categories: Option<Vec<CategoryRow>>,
+    /// The fingerprint to store with the rows; `None` without categories,
+    /// so the next refresh writes the kind again.
+    hash: Option<String>,
+    file: StagedFile,
+}
+
+/// A staged list body, deleted on drop: after it is read back, or with a
+/// sync that stops before (a cancel, a failure, a dropped task).
+/// `m3u::init` deletes the `xtream-*.part` files a crash left.
+struct StagedFile(std::path::PathBuf);
+
+impl Drop for StagedFile {
+    fn drop(&mut self) {
+        match std::fs::remove_file(&self.0) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                tracing::warn!(%err, file = %self.0.display(), "could not remove a staged xtream list");
+            }
+        }
+    }
+}
+
+/// Writes a changed list body to `data_dir/tmp` (on the blocking pool), so
+/// its memory is free while the next list downloads. Not synced: it is read
+/// back within the same sync, and a crash leaves nothing to resume.
+async fn stage(
+    state: &AppState,
+    source_id: &str,
+    kind: Kind,
+    body: bytes::Bytes,
+) -> CoreResult<StagedFile> {
+    let dir = state.data_dir.join("tmp");
+    let file = StagedFile(dir.join(format!(
+        "xtream-{source_id}-{}-{}.part",
+        kind.label(),
+        uuid::Uuid::new_v4().simple()
+    )));
+    tokio::task::spawn_blocking(move || -> CoreResult<StagedFile> {
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(&file.0, &body)?;
+        Ok(file)
+    })
+    .await?
+}
+
+/// Reads a staged list back (sized exactly, the file closed and deleted
+/// before the decode), then decodes and maps it on the blocking pool.
+/// Returns its parts and the fingerprint to store.
+async fn decode_staged(
+    source_id: &str,
+    staged: Staged,
+) -> CoreResult<(Vec<CatalogPart>, Option<String>)> {
+    let sid = source_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let Staged {
+            kind,
+            categories,
+            hash,
+            file,
+        } = staged;
+        let body = std::fs::read(&file.0)?;
+        drop(file);
+        let parts = map_kind(kind, &sid, &body, categories.unwrap_or_default())?;
+        Ok((parts, hash))
+    })
+    .await?
+}
+
+/// Fetches one content type and stages its list when it changed. Nothing
+/// is decoded or written here; see [`decode_staged`] and
+/// [`replace_catalogs`]. An answer identical to the last write is not
+/// even staged ([`Fetched::Unchanged`]). A categories warning goes to
+/// `issues`, reported with the other kinds' in kind order.
 async fn fetch_kind(
     state: &Arc<AppState>,
     client: &XtreamClient,
     source_id: &str,
     kind: Kind,
     previous: &Previous,
-    slot: &mut Option<tokio::sync::OwnedSemaphorePermit>,
+    issues: &mut Issues,
 ) -> CoreResult<Fetched> {
     let (cat_action, list_action) = kind.actions();
     progress(state, source_id, "fetching", 0, None, Some(kind.label()));
@@ -589,7 +749,7 @@ async fn fetch_kind(
             // (L1-core-15): every item would land under "Uncategorized".
             tracing::warn!(source_id, action = cat_action, error = %err, "xtream categories unavailable");
             let kept = previous.has_rows(kind);
-            crate::sources::note_import_warning(&kind.categories_message(kept), err.code());
+            issues.warn(kind, kind.categories_message(kept), err.code());
             if kept {
                 // Keep the previous rows and categories of this kind whole.
                 return Ok(Fetched::Kept);
@@ -599,8 +759,8 @@ async fn fetch_kind(
     };
     let bytes = list?;
 
-    progress(state, source_id, "parsing", 0, None, Some(kind.label()));
-    // The fingerprint needs only the bytes, so an unchanged kind never waits
+    // The fingerprint is taken from the bytes in memory, in the format the
+    // last write stored, so an unchanged kind is neither staged nor waits
     // for the save slot (ST-2).
     let (hash, categories, bytes) = tokio::task::spawn_blocking(move || {
         let hash = categories
@@ -612,65 +772,73 @@ async fn fetch_kind(
     if hash.as_deref().is_some_and(|h| previous.unchanged(kind, h)) {
         return Ok(Fetched::Unchanged);
     }
-    if slot.is_none() {
-        *slot = Some(crate::sources::save_slot(state).await?);
-    }
-    let sid = source_id.to_string();
-    let fetched = tokio::task::spawn_blocking(move || -> CoreResult<Fetched> {
-        let categories = categories.unwrap_or_default();
-        let part = |content_type, categories, rows| CatalogPart {
-            content_type,
-            categories,
-            rows,
-        };
-        let parts = match kind {
-            Kind::Live => {
-                let parsed: LenientVec<RawLive> = super::client::decode(&bytes, "live streams")?;
-                drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let (radio, live): (Vec<ItemRow>, Vec<ItemRow>) = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| live_row(&sid, i as i64, r))
-                    .partition(|r| r.is_radio);
-                let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
-                vec![
-                    part(ContentType::Live, live_cats, live),
-                    part(ContentType::Radio, radio_cats, radio),
-                ]
-            }
-            Kind::Movies => {
-                let parsed: LenientVec<RawVod> = super::client::decode(&bytes, "movies")?;
-                drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let rows = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| vod_row(&sid, i as i64, r))
-                    .map(with_title_base)
-                    .collect();
-                vec![part(ContentType::Movie, categories, rows)]
-            }
-            Kind::Series => {
-                let parsed: LenientVec<RawSeries> = super::client::decode(&bytes, "series")?;
-                drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let rows = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| series_row(&sid, i as i64, r))
-                    .map(with_title_base)
-                    .collect();
-                vec![part(ContentType::Series, categories, rows)]
-            }
-        };
-        Ok(Fetched::Parts { parts, hash })
-    })
-    .await??;
-    Ok(fetched)
+    let file = stage(state, source_id, kind, bytes).await?;
+    Ok(Fetched::Staged(Staged {
+        kind,
+        categories,
+        hash,
+        file,
+    }))
+}
+
+/// Decodes one kind's list body and maps it to the parts to write (live
+/// yields a live and a radio part). Each record is mapped to its row as soon
+/// as it is read (R3-2): no `Vec` of every decoded record sits beside the
+/// rows any more (96.5 MB of `RawVod`s plus their text at 180k movies,
+/// grown by doubling). `position` counts the records read, skipped elements
+/// excluded, as `enumerate` over that `Vec` did.
+fn map_kind(
+    kind: Kind,
+    source_id: &str,
+    body: &[u8],
+    categories: Vec<CategoryRow>,
+) -> CoreResult<Vec<CatalogPart>> {
+    let part = |content_type, categories, rows| CatalogPart {
+        content_type,
+        categories,
+        rows,
+    };
+    let mut position = 0i64;
+    let parts = match kind {
+        Kind::Live => {
+            let (mut live, mut radio) = (Vec::new(), Vec::new());
+            let skipped = super::client::decode_list(body, "live streams", |r: RawLive| {
+                if let Some(row) = live_row(source_id, position, r) {
+                    if row.is_radio {
+                        radio.push(row);
+                    } else {
+                        live.push(row);
+                    }
+                }
+                position += 1;
+            })?;
+            log_skipped(source_id, kind, skipped);
+            let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
+            vec![
+                part(ContentType::Live, live_cats, live),
+                part(ContentType::Radio, radio_cats, radio),
+            ]
+        }
+        Kind::Movies => {
+            let mut rows = Vec::new();
+            let skipped = super::client::decode_list(body, "movies", |r: RawVod| {
+                rows.extend(vod_row(source_id, position, r).map(with_title_base));
+                position += 1;
+            })?;
+            log_skipped(source_id, kind, skipped);
+            vec![part(ContentType::Movie, categories, rows)]
+        }
+        Kind::Series => {
+            let mut rows = Vec::new();
+            let skipped = super::client::decode_list(body, "series", |r: RawSeries| {
+                rows.extend(series_row(source_id, position, r).map(with_title_base));
+                position += 1;
+            })?;
+            log_skipped(source_id, kind, skipped);
+            vec![part(ContentType::Series, categories, rows)]
+        }
+    };
+    Ok(parts)
 }
 
 /// `row` with its title base worked out here, on the blocking pool, instead
@@ -874,10 +1042,55 @@ fn split_categories(
     (live_cats, radio_cats)
 }
 
-fn put(extra: &mut Map<String, Value>, key: &str, v: Option<impl Into<Value>>) {
-    if let Some(v) = v {
-        extra.insert(key.to_string(), v.into());
-    }
+// The mapped rows carry their `extra` as JSON text (`ItemRow::extra_json`),
+// serialized here on the blocking pool from these borrowing structs. Their
+// fields are declared in the key order a `serde_json::Map` (a BTreeMap)
+// writes, so the stored bytes are the same as before (IN-3 remainder, R3-1).
+// With a map (a 632-byte leaf on its first insert) a mapped row retained
+// 1,160-1,570 B, now 530-790 B: about 160 MB less at 50k channels, 180k
+// movies and 20k series, held from the decode to the write. The writer no
+// longer serializes and frees a map per row inside the write transaction.
+
+/// `extra` of a live or radio row.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveExtra<'a> {
+    /// Only when there is more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category_ids: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom_sid: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_adult: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_type: Option<&'a str>,
+    /// 0 or 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tv_archive: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tv_archive_duration: Option<i64>,
+}
+
+/// `extra` of a movie or series row.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VodExtra<'a> {
+    /// Only when there is more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category_ids: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    genres: Option<Vec<&'a str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_adult: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plot: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tmdb_id: Option<i64>,
+}
+
+/// `categoryIds` of `extra`: only for an item in more than one category.
+fn extra_category_ids(ids: &[String]) -> Option<&[String]> {
+    (ids.len() > 1).then_some(ids)
 }
 
 fn clean_url(u: Option<String>) -> Option<String> {
@@ -891,35 +1104,36 @@ fn rating(r: Option<f64>, r5: Option<f64>) -> Option<f64> {
         .map(|v| (v.min(10.0) * 10.0).round() / 10.0)
 }
 
-fn split_genres(g: Option<&str>) -> Option<Value> {
-    let v: Vec<Value> = g?
+fn split_genres(g: Option<&str>) -> Option<Vec<&str>> {
+    let v: Vec<&str> = g?
         .split([',', '/', '|'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| Value::String(s.to_string()))
         .collect();
-    (!v.is_empty()).then_some(Value::Array(v))
+    (!v.is_empty()).then_some(v)
 }
 
-pub fn live_row(source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
+// The mappers leave `source_id` empty: the writer stores its own
+// (`CatalogWriter::insert`), so a copy of the 36-byte id per row is waste.
+// The parameter stays for callers of these public functions.
+
+pub fn live_row(_source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
     let id = r.stream_id?;
     let is_radio = r.stream_type.as_deref().is_some_and(|t| {
         t.eq_ignore_ascii_case("radio_streams") || t.eq_ignore_ascii_case("radio")
     });
     let archive = r.tv_archive == Some(true);
     let days = r.tv_archive_duration.filter(|d| *d > 0);
-    let mut extra = Map::new();
-    put(&mut extra, "tvArchive", r.tv_archive.map(i64::from));
-    put(&mut extra, "tvArchiveDuration", days);
-    put(&mut extra, "isAdult", r.is_adult);
-    put(&mut extra, "customSid", r.custom_sid);
-    put(&mut extra, "streamType", r.stream_type);
-    if r.category_ids.len() > 1 {
-        extra.insert("categoryIds".into(), r.category_ids.clone().into());
-    }
+    let extra_json = catalog::extra_text(&LiveExtra {
+        category_ids: extra_category_ids(&r.category_ids),
+        custom_sid: r.custom_sid.as_deref(),
+        is_adult: r.is_adult,
+        stream_type: r.stream_type.as_deref(),
+        tv_archive: r.tv_archive.map(i64::from),
+        tv_archive_duration: days,
+    });
     let title = r.name.unwrap_or_else(|| format!("Channel {id}"));
     Some(ItemRow {
-        source_id: source_id.to_string(),
         content_type: if is_radio {
             ContentType::Radio
         } else {
@@ -938,28 +1152,27 @@ pub fn live_row(source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
         archive_hours: archive
             .then(|| super::meta::archive_days_to_hours(days.unwrap_or(1)))
             .flatten(),
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json,
         position,
         item_id: id,
         ..ItemRow::default()
     })
 }
 
-pub fn vod_row(source_id: &str, position: i64, r: RawVod) -> Option<ItemRow> {
+pub fn vod_row(_source_id: &str, position: i64, r: RawVod) -> Option<ItemRow> {
     let tmdb_id = r.tmdb_id();
     let id = r.stream_id?;
     let title = r.name.or(r.title).unwrap_or_else(|| format!("Movie {id}"));
-    let mut extra = Map::new();
-    put(&mut extra, "tmdbId", tmdb_id);
-    put(&mut extra, "plot", r.plot);
-    put(&mut extra, "genres", split_genres(r.genre.as_deref()));
-    put(&mut extra, "isAdult", r.is_adult);
-    if r.category_ids.len() > 1 {
-        extra.insert("categoryIds".into(), r.category_ids.clone().into());
-    }
+    let extra_json = catalog::extra_text(&VodExtra {
+        category_ids: extra_category_ids(&r.category_ids),
+        genres: split_genres(r.genre.as_deref()),
+        is_adult: r.is_adult,
+        plot: r.plot.as_deref(),
+        tmdb_id,
+    });
     let poster = clean_url(r.stream_icon).or(clean_url(r.cover));
     Some(ItemRow {
-        source_id: source_id.to_string(),
         content_type: ContentType::Movie,
         category_id: item_category(r.category_id, &r.category_ids),
         title,
@@ -969,32 +1182,31 @@ pub fn vod_row(source_id: &str, position: i64, r: RawVod) -> Option<ItemRow> {
         added: added_to_rfc3339(r.added.as_deref()),
         year: r.year.filter(|y| (1900..=2100).contains(y)),
         container_extension: clean_extension(r.container_extension.as_deref()),
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json,
         position,
         item_id: id,
         ..ItemRow::default()
     })
 }
 
-pub fn series_row(source_id: &str, position: i64, r: RawSeries) -> Option<ItemRow> {
+pub fn series_row(_source_id: &str, position: i64, r: RawSeries) -> Option<ItemRow> {
     let tmdb_id = r.tmdb_id();
     let release = r.release().map(str::to_owned);
     let id = r.series_id?;
     let title = r.name.or(r.title).unwrap_or_else(|| format!("Series {id}"));
-    let mut extra = Map::new();
-    put(&mut extra, "tmdbId", tmdb_id);
-    put(&mut extra, "plot", r.plot);
-    put(&mut extra, "genres", split_genres(r.genre.as_deref()));
-    put(&mut extra, "isAdult", r.is_adult);
-    if r.category_ids.len() > 1 {
-        extra.insert("categoryIds".into(), r.category_ids.clone().into());
-    }
+    let extra_json = catalog::extra_text(&VodExtra {
+        category_ids: extra_category_ids(&r.category_ids),
+        genres: split_genres(r.genre.as_deref()),
+        is_adult: r.is_adult,
+        plot: r.plot.as_deref(),
+        tmdb_id,
+    });
     let year = r
         .year
         .filter(|y| (1900..=2100).contains(y))
         .or_else(|| year_from_date(release.as_deref()));
     Some(ItemRow {
-        source_id: source_id.to_string(),
         content_type: ContentType::Series,
         category_id: item_category(r.category_id, &r.category_ids),
         title,
@@ -1004,7 +1216,8 @@ pub fn series_row(source_id: &str, position: i64, r: RawSeries) -> Option<ItemRo
         rating: rating(r.rating, r.rating_5based),
         added: added_to_rfc3339(r.last_modified.as_deref()),
         year,
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json,
         position,
         item_id: id,
         ..ItemRow::default()
@@ -1018,6 +1231,301 @@ mod tests {
 
     fn parse<T: serde::de::DeserializeOwned>(v: Value) -> T {
         serde_json::from_value(v).unwrap()
+    }
+
+    /// A mapped row's `extra`, parsed from the text it carries.
+    fn extra_value(row: &ItemRow) -> Value {
+        assert!(row.extra.is_null(), "mapped rows carry text only");
+        serde_json::from_str(row.extra_json.as_deref().unwrap_or("{}")).unwrap()
+    }
+
+    /// The text the writer stores for a mapped row.
+    fn stored_extra(row: &ItemRow) -> &str {
+        row.extra_json.as_deref().unwrap_or("{}")
+    }
+
+    // The extras as the mappers built them before R3-1, through a
+    // `serde_json::Map`, for the equivalence test below.
+
+    fn put(extra: &mut serde_json::Map<String, Value>, key: &str, v: Option<impl Into<Value>>) {
+        if let Some(v) = v {
+            extra.insert(key.to_string(), v.into());
+        }
+    }
+
+    fn old_genres(g: Option<&str>) -> Option<Value> {
+        split_genres(g).map(|v| v.into_iter().map(|s| Value::String(s.into())).collect())
+    }
+
+    fn old_live_extra(r: &RawLive) -> String {
+        let days = r.tv_archive_duration.filter(|d| *d > 0);
+        let mut extra = serde_json::Map::new();
+        put(&mut extra, "tvArchive", r.tv_archive.map(i64::from));
+        put(&mut extra, "tvArchiveDuration", days);
+        put(&mut extra, "isAdult", r.is_adult);
+        put(&mut extra, "customSid", r.custom_sid.clone());
+        put(&mut extra, "streamType", r.stream_type.clone());
+        if r.category_ids.len() > 1 {
+            extra.insert("categoryIds".into(), r.category_ids.clone().into());
+        }
+        old_text(extra)
+    }
+
+    fn old_vod_extra(
+        tmdb_id: Option<i64>,
+        plot: &Option<String>,
+        genre: &Option<String>,
+        is_adult: Option<bool>,
+        category_ids: &[String],
+    ) -> String {
+        let mut extra = serde_json::Map::new();
+        put(&mut extra, "tmdbId", tmdb_id);
+        put(&mut extra, "plot", plot.clone());
+        put(&mut extra, "genres", old_genres(genre.as_deref()));
+        put(&mut extra, "isAdult", is_adult);
+        if category_ids.len() > 1 {
+            extra.insert("categoryIds".into(), category_ids.to_vec().into());
+        }
+        old_text(extra)
+    }
+
+    /// What `CatalogWriter::insert` stored for an `extra` map.
+    fn old_text(extra: serde_json::Map<String, Value>) -> String {
+        if extra.is_empty() {
+            "{}".into()
+        } else {
+            Value::Object(extra).to_string()
+        }
+    }
+
+    /// R3-1: the mappers serialize `extra` through borrowing structs; the
+    /// stored text is byte for byte what the `serde_json::Map` path wrote,
+    /// for every combination of present and missing keys, escapes and
+    /// non-ASCII text included.
+    #[test]
+    fn mapped_extra_text_matches_the_map_it_replaced() {
+        let plots = [
+            json!(null),
+            json!("A \"quoted\" plot\nwith a newline, a tab\t, a \\ and ünïcødé 映画 🎬"),
+            json!(""),
+        ];
+        let genres = [
+            json!(null),
+            json!("Drama, Crime / Thriller|  "),
+            json!(" , / "),
+        ];
+        let cats = [json!(null), json!(["7"]), json!([3, "4", "x\"y"])];
+        let mut checked = 0;
+        for plot in &plots {
+            for genre in &genres {
+                for (i, cat) in cats.iter().enumerate() {
+                    for adult in [json!(null), json!(0), json!("1")] {
+                        let flag = i % 2 == 0;
+                        let live = json!({
+                            "stream_id": 1, "category_ids": cat, "is_adult": adult,
+                            "tv_archive": if flag { json!(1) } else { json!(null) },
+                            "tv_archive_duration": if flag { json!("5") } else { json!(-1) },
+                            "custom_sid": if flag { json!("sid:1") } else { json!(null) },
+                            "stream_type": if flag { json!("live") } else { json!(null) },
+                        });
+                        let r: RawLive = parse(live.clone());
+                        let want = old_live_extra(&r);
+                        let row = live_row("s", 0, parse(live)).unwrap();
+                        assert_eq!(stored_extra(&row), want);
+
+                        let vod = json!({
+                            "stream_id": 2, "category_ids": cat, "is_adult": adult,
+                            "plot": plot, "genre": genre,
+                            "tmdb": if flag { json!("550") } else { json!(null) },
+                        });
+                        let r: RawVod = parse(vod.clone());
+                        let want = old_vod_extra(
+                            r.tmdb_id(),
+                            &r.plot,
+                            &r.genre,
+                            r.is_adult,
+                            &r.category_ids,
+                        );
+                        let row = vod_row("s", 0, parse(vod)).unwrap();
+                        assert_eq!(stored_extra(&row), want);
+
+                        let series = json!({
+                            "series_id": 3, "category_ids": cat, "is_adult": adult,
+                            "plot": plot, "genre": genre,
+                            "tmdb_id": if flag { json!(77) } else { json!(null) },
+                        });
+                        let r: RawSeries = parse(series.clone());
+                        let want = old_vod_extra(
+                            r.tmdb_id(),
+                            &r.plot,
+                            &r.genre,
+                            r.is_adult,
+                            &r.category_ids,
+                        );
+                        let row = series_row("s", 0, parse(series)).unwrap();
+                        assert_eq!(stored_extra(&row), want);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 81);
+    }
+
+    /// R3-1: mapped rows leave `source_id` to the writer, which stores its own.
+    #[test]
+    fn mapped_rows_are_written_with_the_writers_source_id_and_extra() {
+        let sid = "s-x";
+        let mut conn = catalog_db(sid);
+        let live = live_row(
+            sid,
+            0,
+            parse(json!({"stream_id": 1, "name": "One", "is_adult": 1, "category_ids": [1, 2]})),
+        )
+        .unwrap();
+        let movie = vod_row(
+            sid,
+            0,
+            parse(json!({"stream_id": 2, "name": "Two", "plot": "P", "tmdb": 9})),
+        )
+        .unwrap();
+        assert!(live.source_id.is_empty() && movie.source_id.is_empty());
+        replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(ContentType::Live, vec![live]),
+                part(ContentType::Movie, vec![movie]),
+            ],
+            None,
+            &mut |_| {},
+        )
+        .unwrap();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT source_id, extra_json FROM items ORDER BY content_type")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            [
+                (
+                    sid.into(),
+                    r#"{"categoryIds":["1","2"],"isAdult":true}"#.into()
+                ),
+                (sid.into(), r#"{"plot":"P","tmdbId":9}"#.into()),
+            ]
+        );
+    }
+
+    /// The rows of one part, comparable.
+    fn part_rows(p: &CatalogPart) -> (ContentType, &[CategoryRow], &[ItemRow]) {
+        (p.content_type, &p.categories, &p.rows)
+    }
+
+    /// R3-2: `map_kind` maps each record as it is read. Its rows, their
+    /// positions (records read, skipped elements excluded, records without
+    /// an id included), the live/radio split and the categories are those of
+    /// the pipeline it replaced: every record decoded into a `LenientVec`,
+    /// then enumerated and mapped. Errors are `decode`'s.
+    #[test]
+    fn streamed_mapping_matches_the_collected_pipeline() {
+        use super::super::client::decode;
+        let cats = map_categories(parse(json!([
+            {"category_id": 1, "category_name": "News"},
+            {"category_id": "2", "category_name": "Radio"},
+            {"category_id": "3", "category_name": "Unused"}
+        ])));
+        let live = br#"["junk", {"stream_id": 101, "name": "One", "category_id": "1", "num": 3},
+            null, {"name": "no id"}, {"stream_id": "9", "stream_type": "radio_streams",
+            "category_ids": [2, 1]}, [1, "Pos", "live", 102], {"stream_id": 101, "name": "Dup"},
+            {"stream_id": 103, "tv_archive": "1", "tv_archive_duration": "3"}]"#;
+        let movies = br#"{"0": {"stream_id": 201, "name": "Film (2019)", "rating": "7,5"},
+            "1": 5, "2": {"name": "no id"}, "3": {"stream_id": "202", "title": "The Film",
+            "tmdb": "0", "tmdb_id": 550, "genre": "Drama, Crime"}}"#;
+        let series = br#"[{"series_id": 301, "name": "Show", "releaseDate": "2018-03-01",
+            "backdrop_path": ["", "http://x/b.jpg"]}, true, {"series_id": 302, "title": "S2",
+            "last_modified": "1700000000", "rating_5based": 4}]"#;
+
+        // Live and radio.
+        let parsed: LenientVec<RawLive> = decode(live, "live streams").unwrap();
+        assert_eq!(parsed.skipped, 2);
+        let (radio, live_rows): (Vec<ItemRow>, Vec<ItemRow>) = parsed
+            .items
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, r)| live_row("s", i as i64, r))
+            .partition(|r| r.is_radio);
+        let (live_cats, radio_cats) = split_categories(&cats, &live_rows, &radio);
+        let parts = map_kind(Kind::Live, "s", live, cats.clone()).unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(
+            part_rows(&parts[0]),
+            (ContentType::Live, &live_cats[..], &live_rows[..])
+        );
+        assert_eq!(
+            part_rows(&parts[1]),
+            (ContentType::Radio, &radio_cats[..], &radio[..])
+        );
+        let positions: Vec<i64> = parts[0].rows.iter().map(|r| r.position).collect();
+        assert_eq!(
+            positions,
+            [0, 3, 4, 5],
+            "junk is not counted, a row without id is"
+        );
+        assert_eq!(parts[1].rows[0].position, 2);
+
+        // Movies, from an object keyed by index.
+        let parsed: LenientVec<RawVod> = decode(movies, "movies").unwrap();
+        let rows: Vec<ItemRow> = parsed
+            .items
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, r)| vod_row("s", i as i64, r))
+            .map(with_title_base)
+            .collect();
+        let parts = map_kind(Kind::Movies, "s", movies, cats.clone()).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(
+            part_rows(&parts[0]),
+            (ContentType::Movie, &cats[..], &rows[..])
+        );
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r.title_base.is_some()));
+
+        // Series.
+        let parsed: LenientVec<RawSeries> = decode(series, "series").unwrap();
+        let rows: Vec<ItemRow> = parsed
+            .items
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, r)| series_row("s", i as i64, r))
+            .map(with_title_base)
+            .collect();
+        let parts = map_kind(Kind::Series, "s", series, Vec::new()).unwrap();
+        assert_eq!(
+            part_rows(&parts[0]),
+            (ContentType::Series, &[][..], &rows[..])
+        );
+        assert_eq!(rows[1].position, 1);
+
+        // No list at all, and unreadable answers.
+        for empty in [&b""[..], b"null", b"false", b"{}"] {
+            let parts = map_kind(Kind::Movies, "s", empty, Vec::new()).unwrap();
+            assert!(parts[0].rows.is_empty());
+        }
+        for (bad, label) in [
+            (&b"<html>Please log in</html>"[..], "movies"),
+            (b"[{\"stream_id\": 1}, {", "movies"),
+            (b"1.5", "movies"),
+        ] {
+            let old = decode::<LenientVec<RawVod>>(bad, label).unwrap_err();
+            let new = map_kind(Kind::Movies, "s", bad, Vec::new()).err().unwrap();
+            assert!(matches!(new, CoreError::Invalid(_)), "{new:?}");
+            assert_eq!(new.to_string(), old.to_string());
+        }
     }
 
     #[test]
@@ -1041,7 +1549,7 @@ mod tests {
         assert_eq!(row.number, Some(7));
         assert_eq!(row.archive_hours, Some(72));
         assert_eq!(row.added.as_deref(), Some("2023-11-14T22:13:20Z"));
-        assert_eq!(row.extra["isAdult"], false);
+        assert_eq!(extra_value(&row)["isAdult"], false);
         assert!(
             row.url.is_none(),
             "credentials must not be stored in items.url"
@@ -1085,7 +1593,7 @@ mod tests {
         let row = vod_row("s", 0, v).unwrap();
         assert_eq!(row.rating, Some(7.0));
         assert_eq!(row.container_extension.as_deref(), Some("mkv"));
-        assert_eq!(row.extra["tmdbId"], 550);
+        assert_eq!(extra_value(&row)["tmdbId"], 550);
         assert_eq!(row.category_id, "10");
 
         let s: RawSeries = parse(json!({
@@ -1097,7 +1605,7 @@ mod tests {
         assert_eq!(row.year, Some(2018));
         assert_eq!(row.backdrop_url.as_deref(), Some("http://x/b.jpg"));
         assert_eq!(row.rating, Some(8.3));
-        assert_eq!(row.extra["genres"], json!(["Drama", "Crime"]));
+        assert_eq!(extra_value(&row)["genres"], json!(["Drama", "Crime"]));
         assert_eq!(row.category_id, "5");
     }
 

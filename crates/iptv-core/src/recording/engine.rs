@@ -515,6 +515,10 @@ async fn quit_mpv(child: &mut tokio::process::Child, pipe: Option<&str>) {
 
 /// Longest wait for the first or next chunk of a direct stream.
 const HTTP_IDLE: Duration = Duration::from_secs(20);
+/// Bytes the HTTP copy buffers before writing (about 2-4 s of a 4-8 Mbit/s
+/// stream; the same as a download's `.part`). Progress and a crash lose at
+/// most this much.
+const HTTP_WRITE_BUFFER: usize = 256 * 1024;
 
 async fn run_http(
     state: &Arc<AppState>,
@@ -575,7 +579,7 @@ async fn run_http(
     if ct.contains("mpegurl") || ct.starts_with("text/") || ct.contains("dash+xml") {
         return fail(ENGINE_MISSING_MESSAGE.to_string());
     }
-    let mut file = match tokio::fs::OpenOptions::new()
+    let file = match tokio::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
         .open(path)
@@ -585,6 +589,12 @@ async fn run_http(
         Err(e) if disk_full(&e) => return fail(super::DISK_FULL_MESSAGE.to_string()),
         Err(e) => return fail(format!("could not write {}: {e}", path.display())),
     };
+    // A bare tokio file hands every write to the blocking pool and waits for
+    // the one before: one round trip per network chunk (tens to hundreds a
+    // second) for the whole recording. Buffered like a download's `.part`
+    // (`downloads::transfer`), it writes 2-4 times a second at 4-8 Mbit/s
+    // (R6-6).
+    let mut file = tokio::io::BufWriter::with_capacity(HTTP_WRITE_BUFFER, file);
     let mut body = resp.bytes_stream();
     use tokio::io::AsyncWriteExt;
     let end = loop {
@@ -596,19 +606,34 @@ async fn run_http(
         match chunk {
             Ok(Some(bytes)) => {
                 if let Err(e) = file.write_all(&bytes).await {
-                    break fail(if disk_full(&e) {
-                        super::DISK_FULL_MESSAGE.to_string()
-                    } else {
-                        format!("could not write {}: {e}", path.display())
-                    });
+                    break fail(write_error(&e, path));
                 }
             }
             Ok(None) => break fail("the stream ended".to_string()),
             Err(e) => break fail(crate::error::RpcError::from(e).message),
         }
     };
-    let _ = file.flush().await;
-    end
+    // The last buffer reaches the disk here, so a full disk may show first
+    // now; it is reported unless the part already failed for another reason.
+    match file.flush().await {
+        Err(e) if end.error.is_none() => {
+            tracing::warn!(error = %e, "the end of a recording part could not be written");
+            PartEnd {
+                stopped: end.stopped,
+                error: Some(write_error(&e, path)),
+            }
+        }
+        _ => end,
+    }
+}
+
+/// The message of a failed write to the part file `path`.
+fn write_error(e: &std::io::Error, path: &Path) -> String {
+    if disk_full(e) {
+        super::DISK_FULL_MESSAGE.to_string()
+    } else {
+        format!("could not write {}: {e}", path.display())
+    }
 }
 
 #[cfg(test)]
@@ -721,6 +746,67 @@ mod tests {
         assert!(!disk_full(&std::io::Error::from(
             std::io::ErrorKind::PermissionDenied
         )));
+    }
+
+    /// R6-6: the copy writes through a 256 KiB buffer, and what is still in
+    /// it when the stop time comes reaches the part file.
+    #[tokio::test]
+    async fn the_http_copy_writes_its_buffered_tail_when_it_stops() {
+        use futures::StreamExt;
+        const CHUNK: usize = 1024;
+        // One full buffer and a 44 KiB tail.
+        const CHUNKS: usize = 300;
+        let app = axum::Router::new().route(
+            "/live.ts",
+            axum::routing::get(|| async {
+                let chunks = futures::stream::iter((0..CHUNKS).map(|i| {
+                    Ok::<_, std::io::Error>(bytes::Bytes::from(vec![(i % 251) as u8; CHUNK]))
+                }))
+                .chain(futures::stream::pending());
+                (
+                    [(axum::http::header::CONTENT_TYPE, "video/mp2t")],
+                    axum::body::Body::from_stream(chunks),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let path = dir.path().join("part.ts");
+        std::fs::write(&path, b"").unwrap();
+        let (_tx, mut stop) = watch::channel(false);
+        let source = src(
+            &format!("http://127.0.0.1:{port}/live.ts"),
+            PlayerKind::Direct,
+        );
+        let until = Instant::now() + Duration::from_millis(1500);
+        let end = run_http(&state, &source, "s1", &path, until, &mut stop).await;
+        assert!(end.stopped && end.error.is_none(), "{:?}", end.error);
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(written.len(), CHUNK * CHUNKS);
+        for (i, chunk) in written.chunks(CHUNK).enumerate() {
+            assert!(chunk.iter().all(|b| *b == (i % 251) as u8), "chunk {i}");
+        }
+    }
+
+    #[test]
+    fn a_full_disk_reads_as_disk_full_and_other_write_errors_name_the_file() {
+        let path = Path::new("rec/a.ts");
+        let full = std::io::Error::from(std::io::ErrorKind::StorageFull);
+        assert_eq!(write_error(&full, path), super::super::DISK_FULL_MESSAGE);
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let msg = write_error(&denied, path);
+        assert!(msg.starts_with("could not write "), "{msg}");
+        assert!(msg.contains("a.ts"), "{msg}");
     }
 
     #[test]

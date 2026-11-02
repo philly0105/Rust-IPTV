@@ -1,6 +1,7 @@
 //! Catalog (B1): replace_catalog, paging, sort, search (FTS and LIKE
 //! fallback), hidden categories, channelByNumber, neighbors, sameTitle,
-//! recentlyAdded, allLiveChannels, and the `catalog.*` rpc names.
+//! matchTitles, recentlyAdded, allLiveChannels, and the `catalog.*` rpc
+//! names.
 
 #[path = "m3u_support.rs"]
 mod support;
@@ -471,6 +472,138 @@ async fn unfiltered_vod_totals_match_a_count_of_their_titles() {
     assert_eq!(expected(ContentType::Movie, false).await.unwrap(), 14);
 }
 
+/// All channels (live and radio) take their total from the stored category
+/// counts too, which leave out channels hidden by a channel edit. It must
+/// equal an independent count of the rows the list shows: visible
+/// categories (every one with `includeHidden`), no hidden channel, through
+/// hidden groups, hidden channels inside and outside a hidden group, a
+/// re-import that keeps the edits, and `channels.reset`.
+#[tokio::test]
+async fn unfiltered_channel_totals_match_a_count_without_hidden_channels() {
+    let env = env().await;
+    bare_source(&env.state, "s1").await;
+    bare_source(&env.state, "s2").await;
+    let mut r = router();
+    iptv_core::channeledit::rpc::register(&mut r);
+    // Declared a, b, c; `x` is undeclared and becomes Uncategorized.
+    let write = |source: &'static str, ct: ContentType, cats: &'static [&'static str], n: usize| {
+        env.state.db_call(move |c| {
+            catalog::replace_catalog(
+                c,
+                source,
+                ct,
+                &[
+                    cat("a", "News", 0),
+                    cat("b", "Sport", 1),
+                    cat("c", "Kids", 2),
+                ],
+                &mut vod_rows(source, ct, cats, n).into_iter(),
+            )
+        })
+    };
+    write("s1", ContentType::Live, &["a", "b", "c", "x"], 57)
+        .await
+        .unwrap();
+    write("s1", ContentType::Radio, &["a", "b", "x"], 23)
+        .await
+        .unwrap();
+    // Another source's channels never count.
+    write("s2", ContentType::Live, &["a"], 9).await.unwrap();
+
+    // The count every case must match, independent of `query_named`.
+    let expected = |ct: ContentType, include_hidden: bool| {
+        env.state.db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE i.source_id = 's1' AND i.content_type = ?1 AND (?2 OR COALESCE(c.hidden, 0) = 0) AND NOT EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = i.source_id AND e.content_type = i.content_type AND e.item_id = i.item_id AND e.hidden = 1)",
+                rusqlite::params![ct.as_str(), include_hidden],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+    };
+    let check = |label: &'static str| {
+        let (r, env) = (&r, &env);
+        async move {
+            let mut totals = Vec::new();
+            for (ct, radio) in [(ContentType::Live, false), (ContentType::Radio, true)] {
+                for include_hidden in [false, true] {
+                    let want = expected(ct, include_hidden).await.unwrap();
+                    for sort in [json!(null), json!("number"), json!("name")] {
+                        let page = r
+                            .dispatch(
+                                env.state.clone(),
+                                "catalog.channels",
+                                json!({"sourceId": "s1", "radio": radio, "includeHidden": include_hidden, "query": {"sort": sort, "limit": 10}}),
+                            )
+                            .await
+                            .unwrap();
+                        assert_eq!(
+                            page["total"], want,
+                            "{label}: {ct} by {sort}, includeHidden {include_hidden}"
+                        );
+                        assert_eq!(
+                            page["items"].as_array().unwrap().len() as i64,
+                            want.min(10),
+                            "{label}: {ct} page"
+                        );
+                    }
+                    totals.push(want);
+                }
+            }
+            totals
+        }
+    };
+    assert_eq!(check("nothing hidden").await, [57, 57, 23, 23]);
+
+    for (ct, hidden) in [("live", "b"), ("radio", "a")] {
+        r.dispatch(
+            env.state.clone(),
+            "catalog.setCategoriesHidden",
+            json!({"sourceId": "s1", "contentType": ct, "hiddenIds": [hidden]}),
+        )
+        .await
+        .unwrap();
+    }
+    // 14 live channels in b (1, 5, ..., 53), 8 radio stations in a.
+    assert_eq!(check("one group hidden").await, [43, 57, 15, 23]);
+
+    // live1 and radio0 sit in the hidden groups, live2 and radio1 outside.
+    let refs: Vec<_> = [
+        ("live", "live1"),
+        ("live", "live2"),
+        ("radio", "radio0"),
+        ("radio", "radio1"),
+    ]
+    .into_iter()
+    .map(|(ct, id)| json!({"sourceId": "s1", "contentType": ct, "itemId": id}))
+    .collect();
+    r.dispatch(
+        env.state.clone(),
+        "channels.setHidden",
+        json!({"refs": refs, "hidden": true}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(check("channels hidden").await, [42, 55, 14, 21]);
+
+    // A smaller re-import keeps the edits and the hidden groups.
+    write("s1", ContentType::Live, &["a", "b", "c", "x"], 30)
+        .await
+        .unwrap();
+    write("s1", ContentType::Radio, &["a", "b", "x"], 12)
+        .await
+        .unwrap();
+    assert_eq!(check("after a smaller re-import").await, [21, 28, 7, 10]);
+
+    r.dispatch(
+        env.state.clone(),
+        "channels.reset",
+        json!({"sourceId": "s1"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(check("after channels.reset").await, [22, 30, 8, 12]);
+}
+
 #[tokio::test]
 async fn number_neighbors_all_live() {
     let env = env().await;
@@ -632,6 +765,7 @@ fn all_catalog_commands_registered() {
         "catalog.search",
         "catalog.recentlyAdded",
         "catalog.sameTitle",
+        "catalog.matchTitles",
         "catalog.allLiveChannels",
         "sources.list",
         "sources.get",
@@ -1096,4 +1230,294 @@ async fn live_quality_filter_applies_to_every_live_reader() {
         let movies = call("catalog.movies", json!({"sourceId": "s1", "query": {}})).await;
         assert_eq!(movies["total"], 3, "{label}");
     }
+}
+
+/// A TMDB brief of the "More like this" / "Known for" lookup.
+#[derive(Clone, Copy, Debug)]
+struct Brief {
+    title: &'static str,
+    year: Option<i64>,
+    tmdb: Option<i64>,
+}
+
+fn brief(title: &'static str, year: Option<i64>, tmdb: Option<i64>) -> Brief {
+    Brief { title, year, tmdb }
+}
+
+/// The UI's `fold` (src/features/vod/hooks/useCatalogMatches.ts): lower
+/// case, no accents, letters and digits only.
+fn fold(s: &str) -> String {
+    iptv_core::tmdb::normalize::strip_diacritics(&s.to_lowercase())
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
+/// The UI's `matchBrief`, ported: the hit with the brief's TMDB id, else the
+/// first whose folded base title equals the brief's, years at most one apart
+/// (or unknown on a side). Answers the hit's item id.
+fn match_brief(b: &Brief, hits: &[serde_json::Value]) -> Option<String> {
+    let id = |h: &serde_json::Value| h["ref"]["itemId"].as_str().unwrap().to_string();
+    if let Some(h) = hits
+        .iter()
+        .find(|h| h["tmdbId"].as_i64().is_some() && h["tmdbId"].as_i64() == b.tmdb)
+    {
+        return Some(id(h));
+    }
+    let want = fold(b.title);
+    if want.is_empty() {
+        return None;
+    }
+    hits.iter()
+        .find(|h| {
+            let base = h["titleBase"]
+                .as_str()
+                .filter(|t| !t.is_empty())
+                .or(h["title"].as_str())
+                .unwrap_or("");
+            fold(base) == want
+                && match (b.year, h["year"].as_i64()) {
+                    (Some(a), Some(y)) => (a - y).abs() <= 1,
+                    _ => true,
+                }
+        })
+        .map(id)
+}
+
+fn ids_of(hits: &[serde_json::Value]) -> Vec<String> {
+    hits.iter()
+        .map(|h| h["ref"]["itemId"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// F4-3: `catalog.matchTitles` replaces one `catalog.search` per TMDB title
+/// (limit 8, the source, the one type) for the "More like this" and "Known
+/// for" rails. For every brief the UI's matcher must pick the same title
+/// from its lists as from the searches: base titles the source has, accents
+/// and punctuation (through the word-prefix pass), a remake under another
+/// base title found by its TMDB id, a year too far off, titles the source
+/// lacks, and the filters (hidden groups, parental locks, English-only).
+/// Without base-title rows a list is exactly the search's word-prefix
+/// hits; the substring pass is gone, and only ever found in-word matches,
+/// which the matcher rejects.
+#[tokio::test]
+async fn match_titles_picks_what_the_search_lookup_picked() {
+    let env = env().await;
+    bare_source(&env.state, "s1").await;
+    bare_source(&env.state, "s2").await;
+    env.state
+        .db_call(|c| {
+            let film = |id: &str, cat: &str, title: &str, tmdb: Option<i64>| ItemRow {
+                category_id: cat.into(),
+                extra: tmdb.map_or(json!({}), |t| json!({ "tmdbId": t })),
+                ..movie("s1", id, title, None, None)
+            };
+            let mut films = vec![
+                film("heat95", "m", "EN - Heat (1995)", None),
+                film("heat86", "m", "Heat (1986)", None),
+                film("heated", "m", "Heated (2010)", None),
+                film("amelie", "m", "Amelie (2001)", None),
+                film("spidey", "m", "Spider-Man: Homecoming (2017)", None),
+                film("dune84", "m", "Dune (1984)", Some(841)),
+                film("dune21", "m", "Dune: Part One (2021)", Some(438631)),
+                film("matrix", "m", "The Matrix (1999)", None),
+                film("thing", "m", "The Thing (1982)", None),
+                film("others", "m", "The Others (2001)", None),
+                film("ronin", "h", "Ronin (1998)", None),
+                film("up", "m", "Up (2009)", None),
+                film("lemans", "fr", "FR - Le Mans 66 (2019)", None),
+            ]
+            .into_iter();
+            catalog::replace_catalog(
+                c,
+                "s1",
+                ContentType::Movie,
+                &[
+                    cat("m", "Movies", 0),
+                    cat("h", "Hidden", 1),
+                    cat("fr", "FRANCE | FILMS", 2),
+                ],
+                &mut films,
+            )?;
+            let mut shows = std::iter::once(ItemRow {
+                content_type: ContentType::Series,
+                ..movie("s1", "dark", "Dark (2017)", None, None)
+            });
+            catalog::replace_catalog(
+                c,
+                "s1",
+                ContentType::Series,
+                &[cat("m", "Shows", 0)],
+                &mut shows,
+            )?;
+            // Another source's titles never answer.
+            let mut other = std::iter::once(movie("s2", "x", "Heat (1995)", None, None));
+            catalog::replace_catalog(
+                c,
+                "s2",
+                ContentType::Movie,
+                &[cat("m", "Films", 0)],
+                &mut other,
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let r = iptv_core::rpc::build_router();
+    let call = |cmd: &'static str, args: serde_json::Value| {
+        let (r, env) = (&r, &env);
+        async move {
+            r.dispatch(env.state.clone(), cmd, args)
+                .await
+                .unwrap_or_else(|e| panic!("{cmd}: {}", e.message))
+        }
+    };
+    call(
+        "catalog.setCategoriesHidden",
+        json!({"sourceId": "s1", "contentType": "movie", "hiddenIds": ["h"]}),
+    )
+    .await;
+
+    let movies = [
+        brief("Heat", Some(1995), Some(949)),
+        brief("Heat", Some(1986), None),
+        brief("heat", None, None),
+        brief("Amélie", Some(2001), Some(194)),
+        brief("Spider-Man Homecoming", Some(2017), Some(315635)),
+        brief("Dune", Some(2021), Some(438631)),
+        brief("Dune", Some(1984), Some(841)),
+        brief("The Matrix", Some(1999), Some(603)),
+        brief("Ronin", Some(1998), Some(8195)),
+        brief("Up", Some(2009), Some(14160)),
+        brief("Le Mans 66", Some(2019), Some(359724)),
+        brief("Nothing Like It", Some(2020), Some(1)),
+        brief("atrix", None, None),
+        brief("  ", None, None),
+    ];
+    let shows = [
+        brief("Dark", Some(2017), Some(70523)),
+        brief("Dark", Some(2010), None),
+    ];
+    // Runs both lookups for every brief: the old one (a search per title)
+    // and the new one (one matchTitles per kind). Answers the new lists and
+    // the matcher's pick from them, which must be the old pick.
+    let lookups = |label: &'static str| {
+        let call = &call;
+        let (movies, shows) = (&movies, &shows);
+        async move {
+            let mut lists = Vec::new();
+            let mut picks = Vec::new();
+            for (kind, key, briefs) in [
+                ("movie", "movies", &movies[..]),
+                ("series", "series", &shows[..]),
+            ] {
+                let titles: Vec<_> = briefs
+                    .iter()
+                    .map(|b| json!({"title": b.title, "year": b.year, "tmdbId": b.tmdb}))
+                    .collect();
+                let new = call(
+                    "catalog.matchTitles",
+                    json!({"sourceId": "s1", "contentType": kind, "titles": titles}),
+                )
+                .await;
+                let new = new.as_array().unwrap();
+                assert_eq!(new.len(), briefs.len(), "{label}: one list per title");
+                for (b, list) in briefs.iter().zip(new) {
+                    let list = list.as_array().unwrap().clone();
+                    for h in &list {
+                        assert_eq!(h["ref"]["sourceId"], "s1", "{label}: {b:?}");
+                        assert_eq!(h["ref"]["contentType"], kind, "{label}: {b:?}");
+                    }
+                    let old = call(
+                        "catalog.search",
+                        json!({"query": b.title, "sourceId": "s1", "contentTypes": [kind], "limit": 8}),
+                    )
+                    .await;
+                    let old = old[key].as_array().unwrap().clone();
+                    let pick = match_brief(b, &list);
+                    assert_eq!(pick, match_brief(b, &old), "{label}: {b:?}");
+                    picks.push(pick);
+                    lists.push((ids_of(&list), ids_of(&old)));
+                }
+            }
+            (lists, picks)
+        }
+    };
+    let some = |id: &str| Some(id.to_string());
+
+    let (lists, picks) = lookups("nothing locked").await;
+    assert_eq!(
+        picks,
+        [
+            some("heat95"),
+            some("heat86"),
+            some("heat86"),
+            some("amelie"),
+            some("spidey"),
+            some("dune21"),
+            some("dune84"),
+            some("matrix"),
+            None,
+            some("up"),
+            some("lemans"),
+            None,
+            None,
+            None,
+            some("dark"),
+            None,
+        ]
+    );
+    // Base-title rows first, shortest title first; enough to settle Heat.
+    assert_eq!(lists[0].0, ["heat86", "heat95"]);
+    // No base-title row: exactly the search's word-prefix hits.
+    assert_eq!(lists[3].0, lists[3].1, "Amélie");
+    assert_eq!(lists[4].0, lists[4].1, "Spider-Man Homecoming");
+    // Dune (1984) has another TMDB id than Dune 2021: the ranked hits follow.
+    assert_eq!(lists[5].0[0], "dune84");
+    assert!(lists[5].0.contains(&"dune21".to_string()), "{:?}", lists[5]);
+    // A title the source lacks, an in-word fragment, a blank title.
+    assert!(lists[11].0.is_empty() && lists[11].1.is_empty());
+    assert!(lists[12].0.is_empty(), "no substring pass: {:?}", lists[12]);
+    assert_eq!(lists[12].1, ["matrix"], "the search's substring hit");
+    assert!(lists[13].0.is_empty());
+
+    // Parental Hide mode and English-only drop the same titles from both.
+    call("parental.setPin", json!({"newPin": "2580"})).await;
+    call(
+        "parental.setLocked",
+        json!({"target": {"sourceId": "s1", "contentType": "movie", "kind": "item", "targetId": "up", "name": "Up"}, "locked": true}),
+    )
+    .await;
+    call("settings.update", json!({"patch": {"englishOnly": true}})).await;
+    let (_, picks) = lookups("locked, English only").await;
+    assert_eq!((&picks[9], &picks[10]), (&None, &None), "{picks:?}");
+    assert_eq!(picks[0], some("heat95"));
+
+    // Arguments.
+    let fail = |args: serde_json::Value| {
+        let (r, env) = (&r, &env);
+        async move {
+            r.dispatch(env.state.clone(), "catalog.matchTitles", args)
+                .await
+                .unwrap_err()
+                .code
+        }
+    };
+    assert_eq!(
+        fail(json!({"sourceId": "s1", "contentType": "live", "titles": []})).await,
+        iptv_core::RpcErrorCode::Invalid
+    );
+    let many: Vec<_> = (0..=iptv_core::catalog::rpc::MAX_MATCH_TITLES)
+        .map(|i| json!({ "title": format!("Title {i}") }))
+        .collect();
+    assert_eq!(
+        fail(json!({"sourceId": "s1", "contentType": "movie", "titles": many})).await,
+        iptv_core::RpcErrorCode::Invalid
+    );
+    let lists = call(
+        "catalog.matchTitles",
+        json!({"sourceId": "s1", "contentType": "movie", "titles": many[1..]}),
+    )
+    .await;
+    assert_eq!(lists.as_array().unwrap().len(), 40);
 }

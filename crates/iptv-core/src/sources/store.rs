@@ -201,34 +201,69 @@ pub fn find_same(
     Ok(None)
 }
 
-/// Inserts a new source at the end of the list. `raw_text` is pasted m3u
-/// text with the data dir: it is stored in `m3u_raw` in the same transaction,
-/// inline up to `m3u::RAW_INLINE_MAX` and otherwise in the playlist cache
-/// (`raw = ''`, see `m3u::place_raw_text`), with its sha256 either way.
+/// Pasted m3u text made ready for [`insert`]: hashed, and written to the
+/// playlist cache when it is larger than `m3u::RAW_INLINE_MAX` (see
+/// `m3u::place_raw_text`). `sources.add` does this before it takes the
+/// write gate and the write lock, so neither is held while a paste of
+/// hundreds of MB is hashed and written (RB-D review: 0.3-2 s on a slow
+/// disk, which every user write queued behind).
+pub struct PlacedRaw {
+    /// What `m3u_raw.raw` stores: the text, or `""` when it went to disk.
+    raw: String,
+    sha: String,
+    /// The cache file written, if any.
+    file: Option<std::path::PathBuf>,
+}
+
+impl PlacedRaw {
+    /// Hashes `text` and writes it to the playlist cache of source `id`
+    /// when it is too large to store inline.
+    pub fn place(data_dir: &std::path::Path, id: &str, text: String) -> CoreResult<Self> {
+        let sha = crate::m3u::importer::playlist_sha(text.as_bytes());
+        let on_disk = crate::m3u::place_raw_text(data_dir, id, &text)?.is_empty();
+        Ok(if on_disk {
+            Self {
+                raw: String::new(),
+                sha,
+                file: Some(crate::m3u::cached_playlist_path(data_dir, id)),
+            }
+        } else {
+            Self {
+                raw: text,
+                sha,
+                file: None,
+            }
+        })
+    }
+
+    /// The cache file written, if any.
+    pub fn file(&self) -> Option<&std::path::Path> {
+        self.file.as_deref()
+    }
+
+    /// Removes the cache file of text whose source was never inserted.
+    fn discard(&self) {
+        if let Some(file) = &self.file {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+}
+
+/// Inserts a new source at the end of the list. `raw` is pasted m3u text
+/// ([`PlacedRaw::place`]): it is stored in `m3u_raw` in the same transaction,
+/// inline or as `raw = ''` with the text in the playlist cache, with its
+/// sha256 either way. The cache file is removed again if the insert fails.
 pub fn insert(
     conn: &mut Connection,
     id: &str,
     name: &str,
     auto_refresh: bool,
     config: &SourceConfig,
-    raw_text: Option<(&std::path::Path, &str)>,
+    raw: Option<&PlacedRaw>,
 ) -> CoreResult<()> {
-    // The cache file is written before the transaction so the write lock is
-    // not held during a large write; it is removed again if the insert fails.
-    let raw = match raw_text {
-        Some((data_dir, text)) => {
-            let sha = crate::m3u::importer::playlist_sha(text.as_bytes());
-            Some((
-                crate::m3u::place_raw_text(data_dir, id, text)?,
-                sha,
-                data_dir,
-            ))
-        }
-        None => None,
-    };
-    let result = insert_rows(conn, id, name, auto_refresh, config, raw.as_ref());
-    if let (Err(_), Some(("", _, data_dir))) = (&result, &raw) {
-        let _ = std::fs::remove_file(crate::m3u::cached_playlist_path(data_dir, id));
+    let result = insert_rows(conn, id, name, auto_refresh, config, raw);
+    if let (Err(_), Some(raw)) = (&result, raw) {
+        raw.discard();
     }
     result
 }
@@ -239,7 +274,7 @@ fn insert_rows(
     name: &str,
     auto_refresh: bool,
     config: &SourceConfig,
-    raw: Option<&(&str, String, &std::path::Path)>,
+    raw: Option<&PlacedRaw>,
 ) -> CoreResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let position: i64 = tx.query_row(
@@ -251,10 +286,10 @@ fn insert_rows(
         "INSERT INTO sources (id, kind, name, position, auto_refresh, created_at, config_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![id, config.kind().as_str(), name, position, auto_refresh, now_rfc3339(), config.to_json()?],
     )?;
-    if let Some((text, sha, _)) = raw {
+    if let Some(raw) = raw {
         tx.execute(
             "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, text, sha, now_rfc3339()],
+            params![id, raw.raw, raw.sha, now_rfc3339()],
         )?;
     }
     tx.execute(
@@ -365,23 +400,59 @@ fn renumber(conn: &Connection, ids: &[String]) -> CoreResult<()> {
 /// The search index and `items_rank` rows go in bulk, as
 /// `catalog::CatalogWriter::begin` deletes them: the per-row triggers are
 /// suspended for the source (`fts_suspend`) while its items cascade (DB-2).
+///
+/// A source of at least `catalog::BULK_MIN_ROWS` rows and at least as many as
+/// the other sources keep is removed the way a large rewrite replaces its
+/// rows: the secondary indexes of `items` are dropped before the cascade and
+/// built again after it, and when it outnumbers the kept rows the search
+/// index is rebuilt from them instead of deleting its entries one by one.
+/// Removing a 250k-row source next to 40k kept rows held the write lock
+/// 3.0-3.7 s before the commit (per-row FTS deletes 0.85-1.5 s, cascade
+/// through twelve indexes 2.0-2.2 s), now 1.1-1.4 s with it (dev profile).
+/// Readers keep the old snapshot and a rollback restores the indexes, as
+/// with the writer.
 pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "INSERT OR IGNORE INTO fts_suspend (source_id) VALUES (?1)",
         [id],
     )?;
-    tx.execute(
-        "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1",
+    let (own, all): (i64, i64) = tx.query_row(
+        "SELECT (SELECT count(*) FROM items WHERE source_id = ?1), (SELECT count(*) FROM items)",
         [id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
+    let (own, kept) = (own as u64, all.saturating_sub(own) as u64);
+    // The writer's rules (`CatalogWriter::maybe_go_bulk` and `begin`): drop
+    // the indexes when the removal touches at least as many rows as the
+    // rebuild sorts, rebuild the search index when it outnumbers them.
+    let bulk = own >= catalog::BULK_MIN_ROWS && own >= kept;
+    let rebuild_fts = bulk && own > kept;
+    if !rebuild_fts {
+        tx.execute(
+            "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1",
+            [id],
+        )?;
+    }
     tx.execute(
         "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1)",
         [id],
     )?;
+    let dropped = if bulk {
+        Some(catalog::drop_item_indexes(&tx)?)
+    } else {
+        None
+    };
     let n = tx.execute("DELETE FROM sources WHERE id = ?1", [id])?;
     if n == 0 {
         return Err(CoreError::NotFound(format!("source {id} not found")));
+    }
+    if let Some(indexes) = &dropped {
+        catalog::create_item_indexes(&tx, indexes)?;
+    }
+    // After the cascade `items` holds only the kept rows.
+    if rebuild_fts {
+        catalog::rebuild_search_index(&tx)?;
     }
     tx.execute("DELETE FROM fts_suspend WHERE source_id = ?1", [id])?;
     forget_session(&tx, id)?;

@@ -2119,3 +2119,104 @@ async fn categories_flag_the_groups_emptied_by_hidden_channels() {
     .await;
     assert_eq!(flags(&cats(true).await)[2], flag("solo", false));
 }
+
+/// Every stored count of both sources: category `item_count`s and
+/// `source_counts`, in a fixed order.
+async fn stored_counts(a: &App) -> Vec<String> {
+    a.state
+        .db_call(|c| {
+            let mut out: Vec<String> = c
+                .prepare(
+                    "SELECT source_id || '/' || content_type || '/' || category_id || '=' || item_count
+                     FROM categories ORDER BY source_id, content_type, category_id",
+                )?
+                .query_map([], |r| r.get(0))?
+                .collect::<Result<_, _>>()?;
+            out.extend(
+                c.prepare(
+                    "SELECT source_id || ' channels=' || channel_count || ' movies=' || movie_count || ' series=' || series_count
+                     FROM source_counts ORDER BY source_id",
+                )?
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?,
+            );
+            Ok(out)
+        })
+        .await
+        .unwrap()
+}
+
+/// What a full recount of both sources stores (the path imports and
+/// `channels.reset` take); the database is left recounted.
+async fn recounted(a: &App) -> Vec<String> {
+    a.state
+        .db_call(|c| {
+            for sid in ["s1", "s2"] {
+                for ct in [ContentType::Live, ContentType::Radio, ContentType::Movie] {
+                    iptv_core::catalog::recount_categories(c, sid, ct)?;
+                }
+                iptv_core::catalog::update_counts(c, sid)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    stored_counts(a).await
+}
+
+/// R4-4: `channels.setHidden` moves the stored counts by the channels it
+/// changed instead of recounting the source, and lands where a full
+/// recount does: hides and unhides across categories, sources and radio,
+/// repeats (no-ops), a ref the catalog never had, and an unhide of a
+/// hidden channel the provider dropped.
+#[tokio::test]
+async fn hiding_moves_the_counts_where_a_full_recount_puts_them() {
+    let a = app().await;
+    let steps: Vec<(Value, bool)> = vec![
+        (
+            json!([live("s1", "102"), live("s1", "104"), live("s2", "7")]),
+            true,
+        ),
+        (json!([live("s1", "102"), live("s1", "103")]), true),
+        (json!([rf("s1", "radio", "501")]), true),
+        (json!([live("s1", "104"), live("s1", "999")]), false),
+        (json!([live("s1", "104")]), false),
+        (json!([live("s1", "105"), live("s2", "7")]), true),
+        (json!([live("s2", "7"), rf("s1", "radio", "501")]), false),
+    ];
+    for (n, (refs, hidden)) in steps.into_iter().enumerate() {
+        a.call(
+            "channels.setHidden",
+            json!({"refs": refs, "hidden": hidden}),
+        )
+        .await;
+        let stored = stored_counts(&a).await;
+        assert_eq!(stored, recounted(&a).await, "after step {n}");
+    }
+    assert_eq!(a.channel_count("s1").await, 2, "101 and 104 are left");
+    assert_eq!(
+        a.category_counts(true).await,
+        counts(&[("news", 1), ("sport", 1), ("solo", 0)])
+    );
+
+    // The provider drops hidden 103; the import recounts. Unhiding it then
+    // changes no count, since a dropped channel was never subtracted.
+    a.state
+        .db_call(|c| {
+            c.execute(
+                "DELETE FROM items WHERE source_id = 's1' AND content_type = 'live' AND item_id = '103'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let before = recounted(&a).await;
+    a.call(
+        "channels.setHidden",
+        json!({"refs": [live("s1", "103")], "hidden": false}),
+    )
+    .await;
+    assert_eq!(stored_counts(&a).await, before);
+    assert_eq!(recounted(&a).await, before);
+}

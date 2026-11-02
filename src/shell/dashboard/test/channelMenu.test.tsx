@@ -36,6 +36,8 @@ vi.mock('@/features/player', () => ({
   // A list rail's play sets the list's zapping on the store once the channel plays.
   usePlayerStore: { setState: () => undefined },
 }));
+// The shell loads the dock from its own module (F1-1), with the same stand-ins.
+vi.mock('@/features/player/dock', () => import('@/features/player'));
 
 const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');

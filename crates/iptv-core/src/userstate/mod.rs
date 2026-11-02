@@ -219,13 +219,17 @@ pub fn favorites_list_filtered(
     favorites_read(conn, source_id, hide, quality, true)
 }
 
-fn favorites_read(
+/// Order of every favorites reader.
+const FAVORITES_ORDER: &str = "ORDER BY f.position ASC, f.added_at ASC, f.rowid ASC";
+
+/// The ` AND` clauses over alias `f` that drop the favorites hide mode
+/// (`hide`), a channel edit (`edits`) or the quality filter hides.
+fn favorites_shown(
     conn: &Connection,
-    source_id: Option<&str>,
     hide: Option<Hide>,
     quality: Option<QualityFilter>,
     edits: bool,
-) -> CoreResult<Vec<FavoriteEntry>> {
+) -> CoreResult<String> {
     let locked = match hide {
         Some(h) => crate::parental::filter::by_ref(conn, "f", h)?,
         None => String::new(),
@@ -236,10 +240,42 @@ fn favorites_read(
         String::new()
     };
     let shown = quality_by_ref(quality, "f");
+    Ok(format!("{locked}{edited}{shown}"))
+}
+
+/// Refs and stored positions of [`favorites_read`]'s rows, in its order,
+/// without reading the snapshots (reorder).
+fn favorites_refs(
+    conn: &Connection,
+    source_id: Option<&str>,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+    edits: bool,
+) -> CoreResult<Vec<(ItemRef, i64)>> {
+    let shown = favorites_shown(conn, hide, quality, edits)?;
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT f.source_id, f.content_type, f.item_id, f.position
+         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){shown}
+         {FAVORITES_ORDER}"
+    ))?;
+    let rows = stmt.query_map(params![source_id], |row| {
+        Ok((parse_ref(row, 0)?, row.get(3)?))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+fn favorites_read(
+    conn: &Connection,
+    source_id: Option<&str>,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+    edits: bool,
+) -> CoreResult<Vec<FavoriteEntry>> {
+    let shown = favorites_shown(conn, hide, quality, edits)?;
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT f.source_id, f.content_type, f.item_id, f.added_at, f.position, f.snapshot_json
-         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){locked}{edited}{shown}
-         ORDER BY f.position ASC, f.added_at ASC, f.rowid ASC"
+         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){shown}
+         {FAVORITES_ORDER}"
     ))?;
     let rows = stmt.query_map(params![source_id], |row| {
         let r = parse_ref(row, 0)?;
@@ -400,15 +436,17 @@ pub fn favorites_reorder(
     // fails with SQLITE_BUSY when another write commits in between.
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     {
-        let stored: Vec<ItemRef> = favorites_list(&tx, source_id)?
+        // Refs and positions only: the snapshots of both reads were parsed
+        // and dropped (R4-5).
+        let stored_rows = favorites_refs(&tx, source_id, None, None, false)?;
+        let position: std::collections::HashMap<&ItemRef, i64> =
+            stored_rows.iter().map(|(r, p)| (r, *p)).collect();
+        let stored: Vec<&ItemRef> = stored_rows.iter().map(|(r, _)| r).collect();
+        let shown: HashSet<ItemRef> = favorites_refs(&tx, source_id, hide, quality, true)?
             .into_iter()
-            .map(|f| f.item_ref)
+            .map(|(r, _)| r)
             .collect();
-        let shown: HashSet<ItemRef> = favorites_list_filtered(&tx, source_id, hide, quality)?
-            .into_iter()
-            .map(|f| f.item_ref)
-            .collect();
-        let present: HashSet<&ItemRef> = stored.iter().collect();
+        let present: HashSet<&ItemRef> = stored.iter().copied().collect();
         // A ref listed twice keeps its first place; refs that are not
         // favorites (or of another source) are ignored.
         let mut seen = HashSet::new();
@@ -423,17 +461,22 @@ pub fn favorites_reorder(
         let mut order = listed.iter().copied().chain(
             stored
                 .iter()
+                .copied()
                 .filter(|r| !seen.contains(*r) && shown.contains(*r)),
         );
         let mut set = tx.prepare_cached(
             "UPDATE favorites SET position = ?4 WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
         )?;
-        for (i, slot) in stored.iter().enumerate() {
+        for (i, slot) in stored.iter().copied().enumerate() {
             let r = if moves(slot) {
                 order.next().unwrap_or(slot)
             } else {
                 slot
             };
+            // Rows already at their index are not rewritten (R4-5).
+            if position.get(r) == Some(&(i as i64)) {
+                continue;
+            }
             set.execute(params![
                 r.source_id,
                 r.content_type.as_str(),
@@ -905,40 +948,53 @@ pub fn continue_watching_filtered(
         Some(h) => crate::parental::filter::by_ref(conn, "k", h)?,
         None => String::new(),
     };
-    let mut stmt = conn.prepare_cached(&format!(
-        "WITH ranked AS (
-           SELECT p.*, p.rowid AS rid, ROW_NUMBER() OVER (
-             PARTITION BY p.source_id, p.content_type, p.item_id
-             ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
-           FROM playback_positions p
-         )
-         SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
+    let mut stmt = conn.prepare_cached(&continue_watching_sql(&locked))?;
+    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The continue-watching statement, with the parental clause `locked`
+/// (empty, or `AND ...` on alias `k`); `?1` is the limit and `?2` the
+/// shortest resumable position. Unwatched rows newest first through
+/// idx_positions_resume (0027), each kept only when it is its item's newest
+/// row (the primary key finds the item's rows), stopping at the limit. It
+/// replaced a ROW_NUMBER() rank of every row, watched history included:
+/// 4.7 ms at 4,283 rows against 0.13 ms, with the same rows and tie-breaks
+/// (R4-3). A test explains this exact statement.
+fn continue_watching_sql(locked: &str) -> String {
+    format!(
+        "SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
                 k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
                 i.title, COALESCE(i.poster_url, i.logo_url)
-         FROM ranked k
+         FROM playback_positions k
          LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
-         WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2{locked}
-         ORDER BY k.updated_at DESC, k.rid DESC
+         WHERE k.watched = 0 AND k.position_seconds > ?2
+           AND k.rowid = (SELECT n.rowid FROM playback_positions n
+                          WHERE n.source_id = k.source_id AND n.content_type = k.content_type AND n.item_id = k.item_id
+                          ORDER BY n.updated_at DESC, n.rowid DESC LIMIT 1){locked}
+         ORDER BY k.updated_at DESC, k.rowid DESC
          LIMIT ?1"
-    ))?;
-    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], |row| {
-        let mut p = position_from_row(row)?;
-        if p.snapshot.is_none() {
-            let title: Option<String> = row.get(9)?;
-            let poster: Option<String> = row.get(10)?;
-            p.snapshot = Some(match title {
-                Some(title) => ItemSnapshot {
-                    title,
-                    subtitle: None,
-                    poster_url: poster,
-                    content_type: p.item_ref.content_type,
-                },
-                None => fallback_snapshot(&p.item_ref),
-            });
-        }
-        Ok(p)
-    })?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    )
+}
+
+/// A continue-watching row: the position columns, then the catalog title
+/// and artwork that fill a missing snapshot.
+fn continue_from_row(row: &Row<'_>) -> rusqlite::Result<PlaybackPosition> {
+    let mut p = position_from_row(row)?;
+    if p.snapshot.is_none() {
+        let title: Option<String> = row.get(9)?;
+        let poster: Option<String> = row.get(10)?;
+        p.snapshot = Some(match title {
+            Some(title) => ItemSnapshot {
+                title,
+                subtitle: None,
+                poster_url: poster,
+                content_type: p.item_ref.content_type,
+            },
+            None => fallback_snapshot(&p.item_ref),
+        });
+    }
+    Ok(p)
 }
 
 /// Removes one position (`episode_id = None` targets the item-level row).
@@ -1056,6 +1112,39 @@ mod tests {
         assert!(matches!(err, CoreError::NotFound(_)));
     }
 
+    /// R4-5: a favorites reorder writes only the rows whose position
+    /// changes; the stored order is what rewriting every row gave.
+    #[test]
+    fn favorites_reorder_writes_only_the_rows_that_move() {
+        let mut c = conn();
+        for id in ["a", "b", "c", "d"] {
+            favorite_toggle(&mut c, &r("s1", id), &snap(id)).unwrap();
+        }
+        let writes = |c: &mut Connection, ids: &[&str]| {
+            let refs: Vec<ItemRef> = ids.iter().map(|id| r("s1", id)).collect();
+            let before = c.total_changes();
+            favorites_reorder(c, None, &refs, None, None).unwrap();
+            c.total_changes() - before
+        };
+        let stored = |c: &Connection| -> Vec<(String, i64)> {
+            favorites_list(c, None)
+                .unwrap()
+                .into_iter()
+                .map(|f| (f.item_ref.item_id, f.position))
+                .collect()
+        };
+        writes(&mut c, &["a", "b", "c", "d"]);
+        assert_eq!(writes(&mut c, &["a", "c", "b", "d"]), 2);
+        assert_eq!(writes(&mut c, &["d"]), 4, "d first, the rest move down");
+        assert_eq!(
+            stored(&c),
+            [("d", 0), ("a", 1), ("c", 2), ("b", 3)]
+                .map(|(id, p)| (id.to_string(), p))
+                .to_vec()
+        );
+        assert_eq!(writes(&mut c, &["d", "a", "c", "b"]), 0);
+    }
+
     #[test]
     fn recent_caps_per_source() {
         let c = conn();
@@ -1138,5 +1227,168 @@ mod tests {
         assert_eq!(done.duration_seconds, Some(1000));
         assert!(continue_watching(&c, Some(10)).unwrap().is_empty());
         assert!(position_set(&c, &p("show", Some("e1"), -1, None)).is_err());
+    }
+
+    /// The window-function statement continue watching ran before R4-3.
+    fn continue_watching_ranked(
+        conn: &Connection,
+        limit: i64,
+        hide: Option<Hide>,
+    ) -> Vec<PlaybackPosition> {
+        let locked = match hide {
+            Some(h) => crate::parental::filter::by_ref(conn, "k", h).unwrap(),
+            None => String::new(),
+        };
+        let mut stmt = conn
+            .prepare(&format!(
+                "WITH ranked AS (
+                   SELECT p.*, p.rowid AS rid, ROW_NUMBER() OVER (
+                     PARTITION BY p.source_id, p.content_type, p.item_id
+                     ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
+                   FROM playback_positions p
+                 )
+                 SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
+                        k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
+                        i.title, COALESCE(i.poster_url, i.logo_url)
+                 FROM ranked k
+                 LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
+                 WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2{locked}
+                 ORDER BY k.updated_at DESC, k.rid DESC
+                 LIMIT ?1"
+            ))
+            .unwrap();
+        stmt.query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// The newest-row statement returns what the ranked one did (R4-3):
+    /// ties on `updated_at` broken by rowid, a series whose newest episode
+    /// is watched or at most 5 s in left out (C13) even with older
+    /// half-watched episodes, movies with replay rows, and hide mode with a
+    /// locked item, a locked category and an adult category.
+    #[test]
+    fn continue_watching_matches_the_ranked_statement() {
+        let mut c = conn();
+        crate::db::configure(&mut c).unwrap();
+        c.execute_batch(
+            "INSERT INTO categories (source_id, content_type, category_id, name) VALUES
+               ('s2', 'movie', 'c1', 'Action'), ('s2', 'movie', 'c2', 'Locked'),
+               ('s2', 'movie', 'c3', 'XXX Adult'), ('s2', 'series', 'c1', 'Drama');
+             INSERT INTO items (source_id, content_type, item_id, category_id, title, poster_url) VALUES
+               ('s2', 'movie', 'm1', 'c1', 'One', 'http://p/1'),
+               ('s2', 'movie', 'm2', 'c2', 'Two', NULL),
+               ('s2', 'movie', 'm3', 'c1', 'Three', NULL),
+               ('s2', 'movie', 'm4', 'c3', 'Four', NULL),
+               ('s2', 'series', 'sh1', 'c1', 'Show one', NULL),
+               ('s2', 'series', 'sh2', 'c1', 'Show two', NULL);
+             INSERT INTO parental_locks (source_id, content_type, kind, target_id, created_at) VALUES
+               ('s2', 'movie', 'category', 'c2', '2026-01-01'),
+               ('s2', 'movie', 'item', 'm3', '2026-01-01');",
+        )
+        .unwrap();
+        let rows: &[(&str, &str, &str, &str, i64, &str, i64)] = &[
+            // Ties: same second, so rowid decides between items too.
+            ("s2", "movie", "m1", "", 300, "2026-10-01 10:00:00", 0),
+            ("s2", "movie", "m2", "", 300, "2026-10-01 10:00:00", 0),
+            ("s2", "movie", "m3", "", 300, "2026-10-01 10:00:00", 0),
+            ("s2", "movie", "m4", "", 300, "2026-10-02 09:00:00", 0),
+            // Not in the catalog: fallback snapshot.
+            ("s1", "movie", "gone", "", 120, "2026-10-03 09:00:00", 0),
+            // At or below 5 s: never shown.
+            ("s1", "movie", "short", "", 5, "2026-10-04 09:00:00", 0),
+            // Series 1: newest episode watched hides the older half-watched one.
+            ("s2", "series", "sh1", "e1", 600, "2026-10-01 08:00:00", 0),
+            ("s2", "series", "sh1", "e2", 1000, "2026-10-05 08:00:00", 1),
+            // Series 2: newest episode barely started hides it too; then a
+            // tie between two episodes on the same second.
+            ("s2", "series", "sh2", "e1", 700, "2026-10-01 07:00:00", 0),
+            ("s2", "series", "sh2", "e2", 3, "2026-10-06 07:00:00", 0),
+            ("s1", "series", "sh3", "e1", 400, "2026-10-07 07:00:00", 0),
+            ("s1", "series", "sh3", "e2", 500, "2026-10-07 07:00:00", 0),
+            // A series whose newest episode is the half-watched one.
+            ("s1", "series", "sh4", "e1", 900, "2026-09-01 07:00:00", 1),
+            ("s1", "series", "sh4", "e2", 200, "2026-09-02 07:00:00", 0),
+        ];
+        for (src, ty, id, ep, pos, at, watched) in rows {
+            c.execute(
+                "INSERT INTO playback_positions (source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, watched)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1000, ?6, ?7)",
+                params![src, ty, id, ep, pos, at, watched],
+            )
+            .unwrap();
+        }
+        // A replayed movie: its row was rewritten later than its first save.
+        c.execute(
+            "UPDATE playback_positions SET position_seconds = 50, updated_at = '2026-10-08 09:00:00' WHERE item_id = 'm1'",
+            [],
+        )
+        .unwrap();
+        let hides = [
+            None,
+            Some(Hide { auto_adult: false }),
+            Some(Hide { auto_adult: true }),
+        ];
+        for hide in hides {
+            for limit in [1, 2, 3, 20, 200] {
+                let new = continue_watching_filtered(&c, Some(limit), hide).unwrap();
+                assert_eq!(
+                    new,
+                    continue_watching_ranked(&c, limit, hide),
+                    "limit {limit}, hide {hide:?}"
+                );
+            }
+        }
+        let all: Vec<String> = continue_watching_filtered(&c, Some(20), None)
+            .unwrap()
+            .into_iter()
+            .map(|p| format!("{}{}", p.item_ref.item_id, p.episode_id.unwrap_or_default()))
+            .collect();
+        assert_eq!(all, ["m1", "sh3e2", "gone", "m4", "m3", "m2", "sh4e2"]);
+        let hidden: Vec<String> =
+            continue_watching_filtered(&c, Some(20), Some(Hide { auto_adult: true }))
+                .unwrap()
+                .into_iter()
+                .map(|p| p.item_ref.item_id)
+                .collect();
+        assert_eq!(hidden, ["m1", "sh3", "gone", "sh4"]);
+        // The outer scan reads unwatched rows newest first, so it stops at
+        // the limit instead of sorting the whole history. Explained on the
+        // statement continue_watching_filtered prepares (RB-D review: a
+        // hand-copied one would not notice an edit that loses the index),
+        // with and without the parental clause.
+        for hide in [None, Some(Hide { auto_adult: true })] {
+            let locked = match hide {
+                Some(h) => crate::parental::filter::by_ref(&c, "k", h).unwrap(),
+                None => String::new(),
+            };
+            let sql = format!("EXPLAIN QUERY PLAN {}", continue_watching_sql(&locked));
+            // (parent, detail): the outer query's steps have parent 0.
+            let plan: Vec<(i64, String)> = c
+                .prepare(&sql)
+                .unwrap()
+                .query_map(params![20, MIN_RESUME_SECONDS], |r| {
+                    Ok((r.get(1)?, r.get(3)?))
+                })
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let outer: Vec<&str> = plan
+                .iter()
+                .filter(|(parent, _)| *parent == 0)
+                .map(|(_, d)| d.as_str())
+                .collect();
+            assert!(
+                outer.contains(&"SCAN k USING INDEX idx_positions_resume"),
+                "hide {hide:?}: {plan:?}"
+            );
+            // Only ties on updated_at are sorted (by rowid), never the
+            // whole history.
+            assert!(
+                !outer.contains(&"USE TEMP B-TREE FOR ORDER BY"),
+                "hide {hide:?}: {plan:?}"
+            );
+        }
     }
 }

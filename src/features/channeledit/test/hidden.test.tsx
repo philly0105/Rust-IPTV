@@ -139,7 +139,7 @@ describe('HiddenChannelsDialog', () => {
     await waitFor(() => expect(rows()).toHaveLength(3));
     const [tveRow, cnnRow] = rows();
     await waitFor(() => expect(tveRow!.textContent).toContain('No longer in the source'));
-    await waitFor(() => expect(core.callsOf('catalog.item')).toHaveLength(3));
+    await waitFor(() => expect(core.itemRefsAsked()).toHaveLength(3));
     expect(cnnRow!.textContent).not.toContain('No longer in the source');
 
     fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
@@ -158,7 +158,7 @@ describe('HiddenChannelsDialog', () => {
     core.lock(cnn.ref);
     open();
     await waitFor(() => expect(rows()).toHaveLength(1));
-    await waitFor(() => expect(core.callsOf('catalog.item')).toHaveLength(1));
+    await waitFor(() => expect(core.itemRefsAsked()).toHaveLength(1));
     fireEvent.click(within(rows()[0]!).getByTestId('hidden-channel-unhide'));
     await waitFor(() => expect(lastToast()?.title).toBe('CNN International is back'));
     expect(lastToast()?.action?.label).toBe('Undo');
@@ -311,6 +311,31 @@ describe('HiddenChannelsDialog', () => {
     expect(core.isHidden(bbc.ref)).toBe(false);
     expect(core.isHidden(cnn.ref)).toBe(false);
     await waitFor(() => expect(rowNames()).toEqual(['TVE España']));
+  });
+
+  it('asks the rows’ channels in one catalog.items call, and Unhide all over 1,000 in two (F5-4)', async () => {
+    const many = Array.from({ length: 1000 }, (_, i) => makeChannel(`m${i}`, `Channel ${i}`));
+    core.add(...many);
+    hide(...many);
+    open();
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    const shown = rows().length;
+    await waitFor(() => expect(core.itemRefsAsked()).toHaveLength(shown));
+    // Before F5-4: one catalog.item call per mounted row.
+    expect(core.callsOf('catalog.item')).toEqual([]);
+    expect(core.callsOf('catalog.items')).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
+    await waitFor(() => expect(toastTitles()).toContain('1,000 channels are back'));
+    expect(core.callsOf('channels.setHidden')).toHaveLength(2);
+    // The rows' answers are reused; the rest go 500 refs a call, one call after the other (before:
+    // a catalog.item call per ref, six at a time). The edit's own refresh may then refetch the rows
+    // still mounted (here the core answers within one task, before the list re-renders empty).
+    const sizes = (core.callsOf('catalog.items') as { refs: unknown[] }[]).map((a) => a.refs.length);
+    expect(sizes.slice(0, 3)).toEqual([shown, 500 - shown, 500]);
+    expect(sizes.length).toBeLessThanOrEqual(4);
+    expect(new Set(core.itemRefsAsked().map((r) => r.itemId)).size).toBe(1000);
+    expect(core.callsOf('catalog.item')).toEqual([]);
   });
 
   it('sizes the list to its rows, up to a cap', async () => {

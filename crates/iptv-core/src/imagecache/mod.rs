@@ -8,14 +8,17 @@
 //! Request flow ([`fetch`], wrapped by [`get`]):
 //! 1. The URL is normalised (absolute http(s), no user info, no fragment) and
 //!    hashed into the cache key.
-//! 2. In server mode the SSRF guard checks it first, trusting only the
-//!    requesting source's own `host:port`. This check needs no DNS: it
-//!    refuses private and loopback IP literals and `localhost` names, and
-//!    those stay refused even when the cache holds the image. A host name
-//!    that resolves to a private address is refused by the guarded client's
-//!    resolver only when it is fetched, so a copy cached through a trusted
-//!    source is also served to a request that names no source. That reveals
-//!    nothing new: any caller may name any `sourceId`.
+//! 2. In server mode the SSRF guard checks it first, trusting no source.
+//!    This check needs no DNS and no source row: it refuses private and
+//!    loopback IP literals and `localhost` names. Only a URL it refuses
+//!    makes it read the requesting source and check again, trusting the
+//!    source's own `host:port`; what that refuses stays refused even when
+//!    the cache holds the image. A host name that resolves to a private
+//!    address is refused by the guarded client's resolver only when it is
+//!    fetched, so a copy cached through a trusted source is also served to
+//!    a request that names no source. That reveals nothing new: any caller
+//!    may name any `sourceId`. A miss reads the source (its headers go with
+//!    the fetch) and checks the URL trusting it before fetching.
 //! 3. A row whose file is on disk with the recorded size is a hit (read-only;
 //!    `last_access` is written at most once a minute per key).
 //! 4. Otherwise one fetch per URL and scope ([`flight_scope`]: the trusted
@@ -39,12 +42,18 @@
 //! are reused this way, then age out by LRU since the UI stops asking for
 //! them), else from one upstream fetch whose original is not kept. An image
 //! the resizer leaves alone (SVG, GIF, WebP, animated PNG, already narrow
-//! enough, see [`resize`]) is stored and served as the original, and the
-//! decision is remembered in memory so later hints skip the decode.
+//! enough, see [`resize`]) is stored and served as the original. A small one
+//! (up to [`MAX_KEPT_COPY`], logos and most posters) is stored again under
+//! the variant key, so later hints find it with one lookup, after a restart
+//! too; a larger one's decision is remembered in memory only, so later hints
+//! in the session skip the decode.
 //!
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
 //! import hold one pooled connection waiting on the write lock, not fifty.
+//! Lookups read the index on the read-only pool (`AppState::db_read`), so
+//! a poster or logo request never waits for a connection that writers
+//! waiting out an import's save have taken (R1-1).
 //! The writer owns the running byte total and evicts down to 90 % of the cap
 //! after an insert takes it over. It re-reads the table's total on every
 //! `images.stats` and at least once a minute while inserting, so several
@@ -103,10 +112,38 @@ pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
 pub const HEAD_TIMEOUT: Duration = Duration::from_secs(8);
 /// [`set_head_timeout_for_tests`]'s value in ms; 0 means [`HEAD_TIMEOUT`].
 static HEAD_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
+/// A clean start skips the reconcile when the last one finished less than
+/// this ago. It ran at every launch: every index row read into a map and
+/// every file of the 256 shards walked and stat'ed, about 30-60k files and
+/// 0.2-2 s of cold-start I/O on N100-class storage at the 500 MB default,
+/// several seconds and some 100 MB at the 5000 MB cap (R6-3). A lookup
+/// already drops a row whose file is gone, so after clean shutdowns the
+/// weekly pass only bounds orphan files (a failed index batch, a clear
+/// while a fetch held its file); a crash still runs it at the next start.
+const RECONCILE_EVERY: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// `app_state` key: unix seconds of the last reconcile that ran to the end.
+const RECONCILED_KEY: &str = "image_cache_reconciled_at";
+/// The reconcile starts once no database call has run for this long, or
+/// [`RECONCILE_MAX_WAIT`] after init, so it keeps out of the way of the
+/// first screen and the startup refresh.
+const RECONCILE_IDLE: Duration = Duration::from_secs(5);
+/// Latest start of the reconcile after init, quiet database or not.
+const RECONCILE_MAX_WAIT: Duration = Duration::from_secs(60);
+/// [`set_reconcile_wait_for_tests`]'s value in ms; 0 means
+/// [`RECONCILE_MAX_WAIT`].
+static RECONCILE_MAX_WAIT_MS: AtomicU64 = AtomicU64::new(0);
 /// Remembered failures kept at most (expired ones are pruned first).
 const MAX_FAILURES: usize = 4096;
 /// Variant keys remembered as "serve the original" at most.
 const MAX_KEPT: usize = 65_536;
+/// Largest original stored again under a variant key when the resizer
+/// leaves it alone. Kept only in memory, the decision was lost at every
+/// restart: each kept logo then cost three index lookups, a source row
+/// read, a whole-file read and a resize slot again, and a flat palette PNG
+/// wider than the bucket a full decode, resize and encode (1-3 ms on an
+/// N100) whose result was thrown away (R6-2). The copy counts against the
+/// cap a second time, which is small at logo sizes.
+const MAX_KEPT_COPY: u64 = 256 * 1024;
 /// Extension key of the runtime singleton.
 const EXT_KEY: &str = "imagecache";
 
@@ -371,13 +408,15 @@ struct SourceAccess {
 
 /// A source's headers and authority (empty when `id` is unknown, so a stale
 /// `sourceId` still loads the image, just without the source's trust).
+/// Read on the read-only pool like [`ImageCache::lookup`]: for a miss, and in
+/// server mode also for a URL the guard refuses without the source's trust.
 async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess, ImageError> {
     let Some(id) = id.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(SourceAccess::default());
     };
     let id = id.to_owned();
     let row = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             Ok(c.query_row(
                 "SELECT kind, config_json FROM sources WHERE id = ?1",
                 [&id],
@@ -388,17 +427,17 @@ async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess,
         .await
         .map_err(ImageError::local)?;
     Ok(match row {
-        Some((kind, json)) => {
-            let headers = serde_json::from_str::<serde_json::Value>(&json)
-                .ok()
-                .and_then(|v| v.get("headers").cloned())
-                .and_then(|h| serde_json::from_value(h).ok())
-                .unwrap_or_default();
-            SourceAccess {
-                headers,
-                trusted: http::source_config_authority(&kind, &json),
-            }
-        }
+        // Parsed once for both the headers and the authority.
+        Some((kind, json)) => match serde_json::from_str::<serde_json::Value>(&json) {
+            Ok(config) => SourceAccess {
+                headers: config
+                    .get("headers")
+                    .and_then(|h| RequestHeaders::deserialize(h).ok())
+                    .unwrap_or_default(),
+                trusted: http::source_config_authority_value(&kind, &config),
+            },
+            Err(_) => SourceAccess::default(),
+        },
         None => SourceAccess::default(),
     })
 }
@@ -485,6 +524,8 @@ struct Job {
 /// drops the writer's sender, and the writer exits once its queue drains.
 struct ImageCache {
     pool: DbPool,
+    /// `AppState::db_read`, for [`Self::lookup`].
+    read_pool: DbPool,
     /// `AppState::db_background`'s gate, for the writer's batches.
     background_gate: Arc<Semaphore>,
     db_path: PathBuf,
@@ -525,6 +566,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
         let (tx, rx) = mpsc::unbounded_channel();
         Arc::new(ImageCache {
             pool: state.db.clone(),
+            read_pool: state.db_read.clone(),
             background_gate: state.background_gate(),
             db_path: state.db_path(),
             dir: state.data_dir.join(DIR_NAME),
@@ -609,7 +651,7 @@ impl ImageCache {
         }
         let dir = self.dir.clone();
         let k = key.to_owned();
-        let found = blocking(&self.pool, &self.db_path, move |c| {
+        let found = blocking(&self.read_pool, &self.db_path, move |c| {
             store::lookup(c, &dir, &k)
         })
         .await
@@ -818,8 +860,8 @@ impl ImageCache {
     /// Fetches, validates and stores one image for flight `id`, and queues
     /// its index row (pending until the writer's batch is done). A variant
     /// job resizes the cached original when there is one, else the fetched
-    /// body, and stores only the result (or only the original, when the
-    /// resizer leaves it alone).
+    /// body, and stores only the result; when the resizer leaves the image
+    /// alone it serves the original, see [`Self::keep_original`].
     async fn download(&self, job: &Job, id: u64) -> Result<Done, ImageError> {
         // An earlier flight may have stored it after the caller looked.
         if let Some(image) = self.lookup(&job.key).await? {
@@ -833,13 +875,12 @@ impl ImageCache {
             if let Some(original) = self.lookup(&base_key).await? {
                 // Evicted between the lookup and the read: fetch it below.
                 if let Ok(body) = tokio::fs::read(&original.path).await {
-                    if let Some(done) = self.store_variant(job, id, width, body).await? {
+                    if let Some(done) = self.store_variant(job, id, width, body, &original).await? {
                         return Ok(Done {
                             fetched: false,
                             ..done
                         });
                     }
-                    self.keep(&job.key);
                     return Ok(Done {
                         image: original,
                         fetched: false,
@@ -897,10 +938,46 @@ impl ImageCache {
                     .await
             }
             resize::Shrunk::Keep => {
-                self.keep(&job.key);
-                self.store(&base_key, &label, id, content_type, body).await
+                // The original first: plain requests and every other
+                // bucket find it under its own key.
+                let copy = (body.len() as u64 <= MAX_KEPT_COPY).then(|| body.clone());
+                let done = self
+                    .store(&base_key, &label, id, content_type.clone(), body)
+                    .await?;
+                self.keep_original(job, id, width, &content_type, copy)
+                    .await;
+                Ok(done)
             }
         }
+    }
+
+    /// Records that the variant `job.key` is served by its original. A
+    /// small original (`copy`, at most [`MAX_KEPT_COPY`]) is stored again
+    /// under the variant key, an ordinary entry that outlives the process;
+    /// a larger one, or a copy that could not be written, is remembered in
+    /// memory ([`Self::keep`]).
+    async fn keep_original(
+        &self,
+        job: &Job,
+        id: u64,
+        width: u32,
+        content_type: &str,
+        copy: Option<Vec<u8>>,
+    ) {
+        if let Some(body) = copy {
+            let label = variant_label(&job.url, width);
+            match self
+                .store(&job.key, &label, id, content_type.to_owned(), body)
+                .await
+            {
+                Ok(_) => return,
+                Err(err) => tracing::debug!(
+                    error = %err,
+                    "could not store a kept image under its variant key"
+                ),
+            }
+        }
+        self.keep(&job.key);
     }
 
     /// Tells the breaker of `host` how a fetch it let through at `started`
@@ -931,18 +1008,25 @@ impl ImageCache {
         }
     }
 
-    /// Resizes a cached original for the variant job and stores the copy;
-    /// `None` when the resizer leaves the image alone.
+    /// Resizes the cached `original` (read as `body`) for the variant job and
+    /// stores the copy; `None` when the resizer leaves the image alone (then
+    /// recorded with [`Self::keep_original`]).
     async fn store_variant(
         &self,
         job: &Job,
         id: u64,
         width: u32,
         body: Vec<u8>,
+        original: &CachedImage,
     ) -> Result<Option<Done>, ImageError> {
-        let (shrunk, _) = self.shrink(body, width).await?;
+        let (shrunk, body) = self.shrink(body, width).await?;
         match shrunk {
-            resize::Shrunk::Keep => Ok(None),
+            resize::Shrunk::Keep => {
+                let copy = (body.len() as u64 <= MAX_KEPT_COPY).then_some(body);
+                self.keep_original(job, id, width, &original.content_type, copy)
+                    .await;
+                Ok(None)
+            }
             resize::Shrunk::Resized {
                 content_type, body, ..
             } => {
@@ -1037,33 +1121,138 @@ impl ImageCache {
     }
 
     /// Startup reconcile: drops rows whose file is gone (or has the wrong
-    /// size), deletes files without a row and stale temp files.
-    async fn reconcile(&self) {
+    /// size), deletes files without a row and stale temp files. Returns true
+    /// when the scan ran to the end.
+    async fn reconcile(&self) -> bool {
         let rows = match blocking(&self.pool, &self.db_path, store::all_rows).await {
             Ok(rows) => rows,
             Err(err) => {
                 tracing::warn!(error = %err, "image cache reconcile could not read the index");
-                return;
+                return false;
             }
         };
         let dir = self.dir.clone();
-        match tokio::task::spawn_blocking(move || store::scan(&dir, &rows)).await {
+        let started = Instant::now();
+        match tokio::task::spawn_blocking(move || store::scan(&dir, rows)).await {
             Ok(report) => {
                 if !report.stale.is_empty() {
                     self.send(Op::Forget {
                         keys: report.stale.clone(),
                     });
                 }
+                let ms = started.elapsed().as_millis() as u64;
                 if report.stale.len() + report.removed > 0 {
                     tracing::info!(
                         stale_rows = report.stale.len(),
                         removed_files = report.removed,
+                        ms,
                         "image cache reconciled"
                     );
+                } else {
+                    tracing::debug!(ms, "image cache reconciled; nothing to repair");
                 }
+                true
             }
-            Err(err) => tracing::warn!(%err, "image cache reconcile failed"),
+            Err(err) => {
+                tracing::warn!(%err, "image cache reconcile failed");
+                false
+            }
         }
+    }
+
+    /// True when a reconcile finished less than [`RECONCILE_EVERY`] ago
+    /// (the `app_state` stamp [`RECONCILED_KEY`]; a stamp in the future, after
+    /// the clock was set back, does not count).
+    async fn reconciled_recently(&self) -> bool {
+        let stamp = blocking(&self.read_pool, &self.db_path, |c| {
+            Ok(c.query_row(
+                "SELECT value FROM app_state WHERE key = ?1",
+                [RECONCILED_KEY],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+        })
+        .await;
+        let Some(at) = stamp.ok().flatten().and_then(|v| v.parse::<i64>().ok()) else {
+            return false;
+        };
+        let every = i64::try_from(RECONCILE_EVERY.as_secs()).unwrap_or(i64::MAX);
+        (0..every).contains(&(unix_now() - at))
+    }
+
+    /// Records that a reconcile finished now.
+    async fn note_reconciled(&self) {
+        // A background write: while an import holds the write lock it waits
+        // at the gate, not on a pooled connection.
+        let _permit = self.background_gate.acquire().await.ok();
+        let at = unix_now().to_string();
+        let written = blocking(&self.pool, &self.db_path, move |c| {
+            c.execute(
+                "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                rusqlite::params![RECONCILED_KEY, at],
+            )?;
+            Ok(())
+        })
+        .await;
+        if let Err(err) = written {
+            tracing::debug!(error = %err, "could not record the image cache reconcile");
+        }
+    }
+
+    /// Drops the stamp of the last pass ([`RECONCILED_KEY`]), so the pass an
+    /// unclean shutdown owes stays owed until one runs to the end: a run
+    /// closed while the pass waits for a quiet database, or a pass that
+    /// fails, would otherwise leave the earlier stamp, and the next clean
+    /// start would skip the crash's orphans for up to a week.
+    async fn forget_reconciled(&self) {
+        let _permit = self.background_gate.acquire().await.ok();
+        let dropped = blocking(&self.pool, &self.db_path, |c| {
+            c.execute("DELETE FROM app_state WHERE key = ?1", [RECONCILED_KEY])?;
+            Ok(())
+        })
+        .await;
+        if let Err(err) = dropped {
+            tracing::debug!(error = %err, "could not drop the image cache reconcile stamp");
+        }
+    }
+}
+
+/// Sleeps until the startup reconcile may start: once no database call has
+/// run for [`RECONCILE_IDLE`], or [`reconcile_max_wait`] after the call.
+async fn wait_for_quiet_database() {
+    let started = Instant::now();
+    let max_wait = reconcile_max_wait();
+    loop {
+        let quiet = db::quiet_for();
+        let waited = started.elapsed();
+        if quiet >= RECONCILE_IDLE || waited >= max_wait {
+            return;
+        }
+        let rest = RECONCILE_IDLE
+            .saturating_sub(quiet)
+            .max(Duration::from_millis(50))
+            .min(max_wait - waited);
+        tokio::time::sleep(rest).await;
+    }
+}
+
+/// Starts the startup reconcile at most `max_wait` after [`init`], quiet
+/// database or not, for the whole process. Test hook, like
+/// [`set_head_timeout_for_tests`]: integration tests share the process with
+/// others that keep the database busy.
+#[doc(hidden)]
+pub fn set_reconcile_wait_for_tests(max_wait: Duration) {
+    let ms = u64::try_from(max_wait.as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    RECONCILE_MAX_WAIT_MS.store(ms, Ordering::Relaxed);
+}
+
+fn reconcile_max_wait() -> Duration {
+    match RECONCILE_MAX_WAIT_MS.load(Ordering::Relaxed) {
+        0 => RECONCILE_MAX_WAIT,
+        ms => Duration::from_millis(ms),
     }
 }
 
@@ -1142,28 +1331,49 @@ pub async fn fetch_sized_within(
     let cache = cache(state);
     cache.ready().await?;
     let mode = http::server_mode(state);
-    // Server mode checks the URL against the source's authority first, hit
-    // or not. The desktop needs the source row only to fetch, so a hit
-    // skips reading it.
-    let checked = match &mode {
-        Some(mode) => {
+    // Server mode checks the URL with the guard first, hit or not. Trusting
+    // no source, the check needs neither DNS nor the source row, and it
+    // passes every public host, so a hit is served as to a request without
+    // a source, which may read any copy cached through one (step 2 of the
+    // module docs). Reading the row for every hit cost a blocking-pool hop,
+    // a pooled connection and two JSON parses per poster (R6-5). A URL the
+    // check refuses (a private or loopback literal, `localhost`) loads the
+    // source and is checked again trusting its authority; `checked` then
+    // holds the source, already checked with its trust.
+    let mut checked = None;
+    if let Some(mode) = &mode {
+        if let Err(refused) = mode.guard.check(&url, None).await {
             let source = load_source(state, source_id).await?;
+            if source.trusted.is_none() {
+                return Err(refused.into());
+            }
             mode.guard.check(&url, source.trusted.as_ref()).await?;
-            Some(source)
+            checked = Some(source);
         }
-        None => None,
-    };
-    if let Some(image) = cache.lookup(&key).await? {
-        return Ok(image);
     }
+    // A variant known to be served by its original goes there first: one
+    // lookup instead of a miss on the variant before it (R6-2). A miss falls
+    // through, since a later fetch may give the variant an entry of its own.
     if width.is_some() && cache.is_kept(&key) {
         if let Some(image) = cache.lookup(&cache_key(&url)).await? {
             return Ok(image);
         }
     }
+    if let Some(image) = cache.lookup(&key).await? {
+        return Ok(image);
+    }
     let source = match checked {
         Some(source) => source,
-        None => load_source(state, source_id).await?,
+        None => {
+            let source = load_source(state, source_id).await?;
+            // A fetch keeps the trusted check: it can be stricter than the
+            // one above, since the source's host name on another port is
+            // resolved and refused when it points at a private address.
+            if let (Some(mode), Some(trusted)) = (&mode, source.trusted.as_ref()) {
+                mode.guard.check(&url, Some(trusted)).await?;
+            }
+            source
+        }
     };
     // The source-trusting client only for a logo on the source's own
     // host:port; its resolver cannot tell ports apart.
@@ -1230,11 +1440,30 @@ pub async fn clear(state: &Arc<AppState>) -> CoreResult<ImageCacheStats> {
 }
 
 /// Module init: loads the running byte total from `SUM(bytes)` and starts the
-/// background reconcile (rows without a file, files without a row).
+/// background reconcile (rows without a file, files without a row) when the
+/// previous run did not shut down cleanly (`AppState::unclean_start`) or the
+/// last reconcile finished [`RECONCILE_EVERY`] ago or longer. It waits for a
+/// quiet database first ([`wait_for_quiet_database`]). After an unclean
+/// shutdown the last pass's stamp is dropped before that wait, so a pass that
+/// does not run to the end runs again at the next start, clean or not.
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     let cache = cache(&state);
     cache.ready().await?;
-    tokio::spawn(async move { cache.reconcile().await });
+    let unclean = state.unclean_start;
+    tokio::spawn(async move {
+        if unclean {
+            // In the task, not awaited by init: boot never waits on the
+            // background gate or an import's write lock for this row.
+            cache.forget_reconciled().await;
+        } else if cache.reconciled_recently().await {
+            tracing::debug!("image cache reconcile skipped: clean shutdown and a recent pass");
+            return;
+        }
+        wait_for_quiet_database().await;
+        if cache.reconcile().await {
+            cache.note_reconciled().await;
+        }
+    });
     Ok(())
 }
 

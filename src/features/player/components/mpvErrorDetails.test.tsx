@@ -14,13 +14,16 @@ vi.mock('@/api/transport', () => ({
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 vi.mock('@/api/window', () => ({
-  cursorInViewport: async () => ({ x: 10, y: 10 }),
+  cursorPosition: async () => ({ x: 10, y: 10 }),
+  screenToViewport: async (p: { x: number; y: number }) => p,
+  QUIT_FLUSH_EVENT: 'tsrust:flush',
+}));
+vi.mock('@/api/pipWindow', () => ({
   enterPipWindow: async () => true,
   exitPipWindow: async () => undefined,
   recoverPipWindow: async () => false,
   setPipWindowAspect: async () => true,
   PIP_DEFAULT_ASPECT: 16 / 9,
-  QUIT_FLUSH_EVENT: 'tsrust:flush',
 }));
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');

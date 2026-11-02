@@ -1,7 +1,8 @@
 //! `lists.*` RPC commands (Run 2 contract C3).
 //!
 //! Each handler runs the synchronous function of the same name in the parent
-//! module through [`AppState::db_call`]. Every write that changed something
+//! module: readers through [`AppState::db_read_call`], writes through
+//! [`AppState::db_write`]. Every write that changed something
 //! emits [`super::CHANGED_EVENT`] with `{}` once it has committed; calls
 //! that change nothing (removing an absent list or channel, adding only
 //! channels already there, an update to the current values) emit nothing.
@@ -119,7 +120,9 @@ pub fn register(r: &mut RpcRouter) {
     r.add("lists.list", |s: S, _: ()| async move {
         let hide = crate::parental::hide_filter(&s).await?;
         let quality = crate::catalog::rpc::quality_filter(&s);
-        let v = s.db_call(move |c| super::list(c, hide, quality)).await?;
+        let v = s
+            .db_read_call(move |c| super::list(c, hide, quality))
+            .await?;
         Ok::<Vec<CustomList>, RpcError>(v)
     });
     r.add("lists.create", |s: S, a: CreateArgs| async move {
@@ -160,7 +163,7 @@ pub fn register(r: &mut RpcRouter) {
         let hide = crate::parental::hide_filter(&s).await?;
         let quality = crate::catalog::rpc::quality_filter(&s);
         let v = s
-            .db_call(move |c| super::items(c, &a.id, hide, quality))
+            .db_read_call(move |c| super::items(c, &a.id, hide, quality))
             .await?;
         Ok::<Vec<CustomListEntry>, RpcError>(v)
     });
@@ -190,7 +193,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("lists.containing", |s: S, a: RefArgs| async move {
         let v = s
-            .db_call(move |c| super::containing(c, &a.item_ref))
+            .db_read_call(move |c| super::containing(c, &a.item_ref))
             .await?;
         Ok::<Vec<String>, RpcError>(v)
     });
@@ -198,7 +201,7 @@ pub fn register(r: &mut RpcRouter) {
         let hide = crate::parental::hide_filter(&s).await?;
         let quality = crate::catalog::rpc::quality_filter(&s);
         let (prev, next) = s
-            .db_call(move |c| super::neighbors(c, &a.id, &a.item_ref, hide, quality))
+            .db_read_call(move |c| super::neighbors(c, &a.id, &a.item_ref, hide, quality))
             .await?;
         Ok::<_, RpcError>(NeighborsResult { prev, next })
     });

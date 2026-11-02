@@ -653,6 +653,80 @@ describe('playItem resolution by kind', () => {
   });
 });
 
+describe('a tune does not wait for the guide (F2-4)', () => {
+  beforeEach(() => {
+    handlers['parental.status'] = () => ({ enabled: false });
+  });
+  const airing = (ref: ItemRef, title: string) => ({ [itemKey(ref)]: { now: { title, start: new Date(Date.now() - 60_000).toISOString(), end: new Date(Date.now() + 3_600_000).toISOString() } } });
+  const recents = () => calls('recent.add') as { ref: ItemRef; snapshot: { subtitle?: string } }[];
+
+  it('an M3U channel starts its stream before the guide answers; the programme then lands on it', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    handlers['epg.nowNext'] = () => new Promise((r) => (answer = r));
+    const ch = channel(31, { url: 'http://m3u/31.ts' });
+    const tuned = playChannel(ch, 'm3u');
+    // Before, nothing played until epg.nowNext answered: the row in hand needs no other lookup.
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://m3u/31.ts'));
+    const generation = usePlayerStore.getState().playGeneration;
+    expect(usePlayerStore.getState().source?.subtitle).toBeUndefined();
+    // The Recently watched entry waits for the title.
+    expect(recents()).toEqual([]);
+    answer(airing(ch.ref, 'Late Show'));
+    await expect(tuned).resolves.toBeUndefined();
+    expect(usePlayerStore.getState().source?.subtitle).toBe('Late Show');
+    // The same play: nothing reloads.
+    expect(usePlayerStore.getState().playGeneration).toBe(generation);
+    expect(recents()).toEqual([{ ref: ch.ref, snapshot: expect.objectContaining({ subtitle: 'Late Show' }) }]);
+  });
+
+  it('a newer play keeps its own source, and Recently watched keeps the order the channels played in', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    const a = channel(32, { url: 'http://m3u/32.ts' });
+    const b = channel(33, { url: 'http://m3u/33.ts' });
+    handlers['epg.nowNext'] = (args) => ((args as { refs: ItemRef[] }).refs[0]?.itemId === a.ref.itemId ? new Promise((r) => (answer = r)) : {});
+    const first = playChannel(a, 'm3u');
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://m3u/32.ts'));
+    await playChannel(b, 'm3u');
+    answer(airing(a.ref, 'Late Show'));
+    await first;
+    expect(usePlayerStore.getState().source?.ref).toEqual(b.ref);
+    expect(usePlayerStore.getState().source?.subtitle).toBeUndefined();
+    // The first entry went out, without its title, as soon as the second play began.
+    expect(recents().map((r) => [r.ref.itemId, r.snapshot.subtitle])).toEqual([
+      [a.ref.itemId, undefined],
+      [b.ref.itemId, undefined],
+    ]);
+  });
+
+  it('sends recent.add writes one after another, so a slow first write cannot land after the next', async () => {
+    const answers: { ok: () => void; fail: () => void }[] = [];
+    handlers['recent.add'] = () => new Promise<void>((ok, no) => answers.push({ ok, fail: () => no(new Error('busy')) }));
+    await usePlayerStore.getState().play(vod('1'));
+    await usePlayerStore.getState().play(vod('2'));
+    await usePlayerStore.getState().play(vod('3'));
+    await flush();
+    // Before, all three were in flight at once and the core could stamp them in any order.
+    expect(recents().map((r) => r.ref.itemId)).toEqual(['1']);
+    answers[0]?.ok();
+    await flush();
+    expect(recents().map((r) => r.ref.itemId)).toEqual(['1', '2']);
+    // A failed write does not hold up the ones after it.
+    answers[1]?.fail();
+    await flush();
+    expect(recents().map((r) => r.ref.itemId)).toEqual(['1', '2', '3']);
+    answers[2]?.ok();
+  });
+
+  it("a list click's row answers the zap banner, with no catalog.item lookup of its own", async () => {
+    const { fetchChannelInfo } = await import('./zapBanner');
+    const ch = channel(34, { url: 'http://m3u/34.ts', logoUrl: 'http://logo/34.png' });
+    await playItem({ ref: ch.ref, title: ch.name, isLive: true, isRadio: false, sourceKind: 'm3u', channel: ch });
+    expect(await fetchChannelInfo(ch.ref)).toEqual({ number: 34, name: 'Channel 34', logoUrl: 'http://logo/34.png' });
+    expect(calls('catalog.item')).toEqual([]);
+    expect(queryClient.getQueryData(rpcKey('catalog.item', { ref: ch.ref }))).toEqual(ch);
+  });
+});
+
 describe('zap', () => {
   beforeEach(() => {
     handlers['parental.status'] = () => ({ enabled: false });
@@ -853,6 +927,46 @@ describe('zap', () => {
     expect(calls('catalog.neighbors')[0]).toEqual({ ref: channel(6).ref });
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('107');
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
+  });
+
+  it('steps over a dropped favorite after a click on its snapshot row (F2-4 review)', async () => {
+    // Favorites 21, gone (128), 25. The catalog no longer has 128: Live's Favorites view draws it from
+    // its snapshot, a row with no number and no URL.
+    const fav = (ch: Channel, position: number) => ({ ref: ch.ref, position, addedAt: '2026-01-01T00:00:00Z', snapshot: { title: ch.name, contentType: ch.ref.contentType } });
+    const gone = channel(28);
+    const stub: Channel = { ref: gone.ref, name: gone.name, logoUrl: 'http://logo/28.png', categoryId: '', categoryName: '', isRadio: false };
+    handlers['favorites.list'] = () => [fav(channel(21), 0), fav(gone, 1), fav(channel(25), 2)];
+    handlers['catalog.item'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      if (id === '121') return channel(21);
+      if (id === '125') return channel(25);
+      throw Object.assign(new Error(`item ${id} not found`), { code: 'not_found' });
+    };
+    queryClient.removeQueries({ queryKey: ['catalog.item'] });
+    queryClient.removeQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('favorites.') });
+    const favorites = { sourceId: 's1', favorites: { sourceId: 's1' } };
+
+    // The click on the snapshot row: an Xtream panel still builds a stream URL without the catalog.
+    await playItem({ ref: stub.ref, title: stub.name, isLive: true, isRadio: false, sourceKind: 'xtream', channel: stub });
+    expect(store.knownChannel(gone.ref)).toBeUndefined();
+    // A row whose stream lookup fails is not remembered either (a Stalker channel the portal dropped
+    // after its page loaded).
+    const dropped = channel(29, { ref: { sourceId: 's3', contentType: 'live', itemId: '129' } });
+    handlers['stalker.streamUrl'] = () => {
+      throw Object.assign(new Error('item 129 not found'), { code: 'not_found' });
+    };
+    await expect(playItem({ ref: dropped.ref, title: dropped.name, isLive: true, isRadio: false, sourceKind: 'stalker', channel: dropped })).rejects.toThrow('not found');
+    expect(store.knownChannel(dropped.ref)).toBeUndefined();
+
+    // Channel 21 from Favorites, then channel down: 128 is stepped over.
+    const ch21 = channel(21);
+    await playItem({ ref: ch21.ref, title: ch21.name, isLive: true, isRadio: false, sourceKind: 'xtream', channel: ch21 });
+    expect(store.knownChannel(ch21.ref)).toEqual(ch21);
+    usePlayerStore.setState({ zapContext: favorites });
+    const played = await zap('down');
+    expect(played?.ref.itemId).toBe('125');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('125');
+    expect(usePlayerStore.getState().status).not.toBe('error');
   });
 
   it('keeps walking the favorites from a playing favorite the quality filter then hides', async () => {

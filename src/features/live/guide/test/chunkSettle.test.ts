@@ -8,12 +8,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CHUNK_REFS_KEEP,
+  CHUNK_REFS_MARGIN,
   chunkSettleWait,
   GRID_CHUNK,
   GRID_CHUNK_SETTLE_MS,
   GRID_ROW,
   GRID_SCROLL_IDLE_MS,
   GRID_SLOW_PX_PER_MS,
+  keepEntries,
+  pruneChunkRefs,
   shownChunks,
 } from '../../components/EpgGridPage';
 
@@ -74,5 +78,36 @@ describe('shownChunks', () => {
     expect(shownChunks({ a: 6, b: 7 }, { a: 2, b: 3 }, false, only(7))).toEqual({ a: 2, b: 7 });
     expect(shownChunks({ a: 6, b: 7 }, { a: 2, b: 3 }, false, only(6))).toEqual({ a: 6, b: 3 });
     expect(shownChunks({ a: 6, b: 6 }, { a: 2, b: 3 }, false, only(6))).toEqual({ a: 6, b: 6 });
+  });
+});
+
+describe('page-local guide caches (F3-5)', () => {
+  it('chunk refs stay until there are many, then only the chunks near the view keep their arrays', () => {
+    const map = new Map<number, string[]>();
+    for (let c = 0; c < CHUNK_REFS_KEEP; c++) map.set(c, [`chunk ${c}`]);
+    pruneChunkRefs(map, [500, 501]);
+    expect(map.size).toBe(CHUNK_REFS_KEEP);
+
+    // A scrollbar drag reached chunk 500; the shown chunks lag at 20 and 21 until it settles.
+    const near = map.get(20);
+    for (let c = 490; c <= 510; c++) map.set(c, [`chunk ${c}`]);
+    pruneChunkRefs(map, [500, 501, 20, 21]);
+    const kept = [...map.keys()].sort((a, b) => a - b);
+    expect(kept).toEqual([
+      ...Array.from({ length: 2 * CHUNK_REFS_MARGIN + 2 }, (_, i) => 20 - CHUNK_REFS_MARGIN + i),
+      ...Array.from({ length: 2 * CHUNK_REFS_MARGIN + 2 }, (_, i) => 500 - CHUNK_REFS_MARGIN + i),
+    ]);
+    // The same array, so its grid key hash and key set are not worked out again.
+    expect(map.get(20)).toBe(near);
+  });
+
+  it('a programme cache prune keeps the rows near the screen as the same arrays', () => {
+    const cache = new Map(Array.from({ length: 600 }, (_, i) => [`row ${i}`, { out: [i] }] as const));
+    const visible = cache.get('row 300');
+    keepEntries(cache, new Set(Array.from({ length: 401 }, (_, i) => `row ${100 + i}`)));
+    expect(cache.size).toBe(401);
+    expect(cache.has('row 99')).toBe(false);
+    expect(cache.has('row 501')).toBe(false);
+    expect(cache.get('row 300')).toBe(visible);
   });
 });

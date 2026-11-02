@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { Source, WatchlistEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
-import { joinList } from '@/shell/dashboard/cards';
+import { joinList } from '@/lib/intl';
 
 import { IconButton, Poster, PosterCellWidthContext, ProgressBar, cn, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
 

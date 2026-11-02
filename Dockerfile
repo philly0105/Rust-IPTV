@@ -31,14 +31,17 @@ RUN pnpm build
 
 # ---- 2. Server binary ------------------------------------------------------
 # rust-toolchain.toml is not copied: the image's toolchain is used as-is.
+# The release-server profile is the release profile at opt-level 3 (see
+# Cargo.toml): the image has no installer to keep small, and every RPC reply's
+# serialization and brotli run about 2-2.7x faster than at the desktop's "s".
 FROM rust:1.96-bookworm AS server
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=tsrust-target,target=/src/target \
-    cargo build --release --locked -p iptv-server \
- && install -m 0755 target/release/iptv-server /usr/local/bin/iptv-server
+    cargo build --profile release-server --locked -p iptv-server \
+ && install -m 0755 target/release-server/iptv-server /usr/local/bin/iptv-server
 
 # ---- 3. Runtime ------------------------------------------------------------
 # mpv is the server's recording engine (headless, found on PATH): without it

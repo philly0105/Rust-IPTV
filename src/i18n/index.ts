@@ -113,6 +113,68 @@ function pinIntlFormats(): void {
   pinnedFormatters.add(formatter);
 }
 
+type FixedT = ((key: unknown, ...rest: unknown[]) => unknown) & { lng?: unknown; lngs?: unknown; ns?: unknown; keyPrefix?: unknown };
+type GetFixedT = (lng?: unknown, ns?: unknown, keyPrefix?: unknown, fixedOpts?: unknown) => FixedT;
+/** Marks a wrapped instance on the instance itself, so a reloaded copy of this module (HMR) sees it. */
+const FIXED_T_CACHED = Symbol.for('tsrust.i18n.fixedTCache');
+
+/**
+ * Remembers what each `t(key)` with no options returned, in one Map for every `t` (F1-2). Each
+ * call otherwise ran i18next's whole pipeline (an options merge, the translator, resolve,
+ * interpolation and nesting) for a static label: 1.9 µs per call against 0.02 µs from a Map, 431
+ * calls in 230 modules, every row and card on every render. react-i18next builds one `t` per hook
+ * instance, so the cache is shared: a row that mounts finds the strings its neighbours drew.
+ *
+ * Calls with options (counts, interpolation, defaults) and selector keys go straight through. The
+ * cache empties on a language change and whenever the store gains or loses strings (every
+ * `addResource*` and `removeResourceBundle` emits `added` or `removed` unless `silent`, which src
+ * never passes). A missing key is cached as the key, which is what i18next returns for it.
+ * Once per instance (HMR and tests import this module again).
+ */
+function cacheFixedT(): void {
+  const flagged = i18next as unknown as Record<symbol, boolean>;
+  if (flagged[FIXED_T_CACHED]) return;
+  const cache = new Map<string, string>();
+  const clear = () => cache.clear();
+  let store: typeof i18next.store | undefined;
+  const watchStore = () => {
+    if (store === i18next.store) return;
+    store?.off('added', clear);
+    store?.off('removed', clear);
+    store = i18next.store;
+    store?.on('added', clear);
+    store?.on('removed', clear);
+    clear();
+  };
+  watchStore();
+  i18next.on('languageChanged', clear);
+  const original = i18next.getFixedT.bind(i18next) as unknown as GetFixedT;
+  const wrapped: GetFixedT = (lng, ns, keyPrefix, fixedOpts) => {
+    const base = original(lng, ns, keyPrefix, fixedOpts);
+    if (typeof keyPrefix === 'function') return base;
+    const part = (v: unknown) => (Array.isArray(v) ? v.join(',') : String(v ?? ''));
+    const prefix = `${part(lng)}\u0001${part(ns)}\u0001${part(keyPrefix)}\u0001`;
+    const t: FixedT = (key, ...rest) => {
+      if (rest.length > 0 || typeof key !== 'string') return base(key, ...rest);
+      watchStore(); // a later init() replaces the store
+      const k = prefix + key;
+      let v: unknown = cache.get(k);
+      if (v === undefined) {
+        v = base(key);
+        if (typeof v === 'string') cache.set(k, v);
+      }
+      return v;
+    };
+    t.lng = base.lng;
+    t.lngs = base.lngs;
+    t.ns = base.ns;
+    t.keyPrefix = base.keyPrefix;
+    return t;
+  };
+  (i18next as unknown as { getFixedT: GetFixedT }).getFixedT = wrapped;
+  flagged[FIXED_T_CACHED] = true;
+}
+
 /** Builds `{ [bcp47]: { [ns]: json } }` from glob results keyed `./<folder>/<ns>.json`. */
 export function buildResources(modules: Record<string, unknown>): Resource {
   const out: Resource = {};
@@ -256,6 +318,7 @@ if (!i18next.isInitialized) {
 // Also when another import initialised i18next first (tests, HMR).
 pinPluralRules();
 pinIntlFormats();
+cacheFixedT();
 
 /**
  * Resolves when i18next is ready to render: the remembered language (or

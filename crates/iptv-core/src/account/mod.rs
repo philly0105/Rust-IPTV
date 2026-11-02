@@ -13,7 +13,8 @@
 //!   [`RETRY_FAILED_AFTER`]);
 //! - on demand by `account.status {refresh: true}`, which the player sends
 //!   right after a playback failure. Calls within [`FORCE_MIN_AGE`] of the
-//!   last check reuse it, so a burst of failures costs one request. Only
+//!   last check reuse it, also while its row still waits to be stored, so a
+//!   burst of failures costs one request and never waits for a save. Only
 //!   Xtream is asked: Stalker portals report no connection counts, so a
 //!   forced Stalker check returns the cached status without portal traffic.
 //!
@@ -31,8 +32,9 @@ use chrono::{DateTime, Utc};
 use dashmap::{DashMap, DashSet};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// `app_state` key prefix of a source's cached status.
 pub const KEY_PREFIX: &str = "account_status:";
@@ -47,6 +49,7 @@ pub const CHANGED_EVENT: &str = "account.changed";
 
 const LOCKS_KEY: &str = "account.locks";
 const INFLIGHT_KEY: &str = "account.inflight";
+const UNSTORED_KEY: &str = "account.unstored";
 
 /// Subscription status of one source (TS `AccountStatus`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,10 +177,64 @@ pub fn save(conn: &Connection, status: &AccountStatus) -> CoreResult<bool> {
 /// Stores `status` and emits [`CHANGED_EVENT`]. Failures are logged only:
 /// the status is a convenience and never fails the caller.
 pub async fn record(state: &AppState, status: AccountStatus) {
-    let id = status.source_id.clone();
     // Downloads follow the source's connection limit.
     crate::downloads::manager::account_changed(state, &status);
-    match state.db_call(move |c| save(c, &status)).await {
+    store(state, status).await;
+}
+
+/// A status whose row is not stored yet: while another source's import save
+/// holds the write lock, its save waits for the commit. [`refresh`] reads it
+/// before the row, so a check that queues behind the one that fetched it
+/// answers at once instead of waiting for that commit.
+struct Unstored {
+    /// Tells this save's entry from a newer one of the same source.
+    seq: u64,
+    /// When the status was obtained.
+    at: Instant,
+    status: AccountStatus,
+}
+
+type UnstoredMap = DashMap<String, Unstored>;
+
+fn unstored(state: &AppState) -> Arc<UnstoredMap> {
+    state.ext_or_insert_with::<UnstoredMap>(UNSTORED_KEY, || Arc::new(DashMap::new()))
+}
+
+/// Notes `status` as its source's newest, until [`store_staged`] has saved
+/// it. Returns the entry's sequence number.
+fn stage(state: &AppState, status: &AccountStatus) -> u64 {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    unstored(state).insert(
+        status.source_id.clone(),
+        Unstored {
+            seq,
+            at: Instant::now(),
+            status: status.clone(),
+        },
+    );
+    seq
+}
+
+/// Saves `status` and emits [`CHANGED_EVENT`] once the row is stored. The
+/// save passes the gate of the periodic writes ([`AppState::db_background`]):
+/// on a plain pooled connection, a sync start or a forced check during
+/// another source's import save parked one connection each for the rest of
+/// that save (R4-1).
+async fn store(state: &AppState, status: AccountStatus) {
+    let seq = stage(state, &status);
+    store_staged(state, status, seq).await;
+}
+
+/// [`store`] for a status [`stage`] noted as `seq`. The gate lets saves in
+/// one at a time, in the order they reach it. The entry is dropped after
+/// the save (stored or not) unless a newer status of the source replaced it
+/// meanwhile.
+async fn store_staged(state: &AppState, status: AccountStatus, seq: u64) {
+    let id = status.source_id.clone();
+    let saved = state.db_background(move |c| save(c, &status)).await;
+    unstored(state).remove_if(&id, |_, e| e.seq == seq);
+    match saved {
         Ok(true) => state.emit(CHANGED_EVENT, serde_json::json!({ "sourceId": id })),
         Ok(false) => {}
         Err(err) => tracing::warn!(source_id = %id, %err, "could not store account status"),
@@ -232,22 +289,32 @@ async fn refresh(
     source: &Source,
     min_age: Duration,
 ) -> CoreResult<AccountStatus> {
-    let lock = lock_for(state, &source.id);
-    let _guard = lock.lock().await;
-    let sid = source.id.clone();
-    let cached = state.db_call(move |c| load(c, &sid)).await?;
-    if let Some(c) = &cached {
-        let fresh = parse_time(&c.checked_at).is_some_and(|at| {
-            Utc::now()
-                .signed_duration_since(at)
-                .to_std()
-                .unwrap_or_default()
-                < min_age
-        });
-        if fresh {
-            return Ok(c.clone());
+    let guard = lock_for(state, &source.id).lock_owned().await;
+    // A status whose row is still waiting for its save is newer than the row.
+    let pending = unstored(state)
+        .get(&source.id)
+        .map(|e| (e.at.elapsed() < min_age, e.status.clone()));
+    let cached = match pending {
+        Some((true, s)) => return Ok(s),
+        Some((false, s)) => Some(s),
+        None => {
+            let sid = source.id.clone();
+            let cached = state.db_call(move |c| load(c, &sid)).await?;
+            if let Some(c) = &cached {
+                let fresh = parse_time(&c.checked_at).is_some_and(|at| {
+                    Utc::now()
+                        .signed_duration_since(at)
+                        .to_std()
+                        .unwrap_or_default()
+                        < min_age
+                });
+                if fresh {
+                    return Ok(c.clone());
+                }
+            }
+            cached
         }
-    }
+    };
     let status = match fetch(state, source).await {
         Ok(s) => s,
         Err(err) => {
@@ -269,7 +336,19 @@ async fn refresh(
             s
         }
     };
-    record(state, status.clone()).await;
+    // Downloads follow the new limit at once. The row is stored after the
+    // answer: the player's check after a failed tune does not wait for an
+    // import save's commit (R4-1). The status is staged before the source's
+    // lock is let go, so a check queued behind this one reuses it within
+    // FORCE_MIN_AGE without waiting for that commit either (the reconnect
+    // check and the error screen's check of one failure);
+    // `account.changed` still follows the stored row.
+    crate::downloads::manager::account_changed(state, &status);
+    let seq = stage(state, &status);
+    drop(guard);
+    let state = Arc::clone(state);
+    let row = status.clone();
+    tokio::spawn(async move { store_staged(&state, row, seq).await });
     Ok(status)
 }
 

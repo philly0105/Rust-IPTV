@@ -2,7 +2,7 @@ import { AlertTriangle, ChevronRight, Lock, PictureInPicture2, Play, RotateCcw, 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cursorInViewport } from '@/api/window';
+import { cursorPosition, screenToViewport } from '@/api/window';
 import { intlLocale } from '@/lib/intl';
 
 import { cn } from '../cn';
@@ -29,7 +29,7 @@ import { ErrorActions } from './ErrorActions';
 import { glassButton } from './glassButton';
 import { InlinePlayer } from './InlinePlayer';
 import { FullscreenChannelPanel, LiveProgrammeLine, RadioPlayer, SleepPrompt, StreamInfoPanel, TitleLogo, VideoContextMenu, ZapBanner } from './lazyParts';
-import { MpvSurface } from './MpvSurface';
+import { MAC_DOM_VIDEO_EVENTS, MpvSurface } from './MpvSurface';
 import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
 import { SHORT_PLAYER_PX, useNarrow, useSmallPlayer } from './useNarrow';
 import { useZapBannerShown, useZapHover } from './zapHooks';
@@ -346,7 +346,8 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   const source = usePlayerStore((s) => s.source);
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
-  const mpv = useMediaStore((s) => s.mpv);
+  // Only whether mpv is attached: the whole state object is new with every mpv.state event (up to 4 a second).
+  const mpvAttached = useMediaStore((s) => !!s.mpv?.attached);
   const retryRef = useRef<HTMLButtonElement>(null);
   const buffering = useMpvBuffering();
   const reconnecting = useReconnectLabel(); // failover:
@@ -427,7 +428,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
     );
   }
   // Also right after Retry, while mpv still reports the failed load as loaded.
-  if (mpv?.attached && status === 'loading') {
+  if (mpvAttached && status === 'loading') {
     return (
       <div role="status" aria-live="polite" data-mpv-reserved="" className={cn(strip, 'text-on-glass-muted')}>
         {t(source?.catchupProgramStart ? 'buffering' : 'mpvLoading')}
@@ -516,25 +517,31 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   }, []);
 
   // Windows' native video window swallows DOM mouse moves, so poll the desktop cursor there.
-  // macOS passes moves through to the webview; the root's pointer handler reacts at once.
-  // The poll only counts movement inside the player, not on another monitor or app.
+  // macOS passes moves through to the webview: the root's pointer handler reacts at once, and
+  // nothing polls. A tick asks only for the cursor, one IPC call; the window's origin and scale
+  // are read only once it moved, to place it (before, every tick sent all three: 15 calls a
+  // second for the whole fullscreen session, F2-3). The poll only counts movement inside the
+  // player, not on another monitor or app.
   useEffect(() => {
     if (!overlay) return;
     poke();
     let last: string | undefined;
     let stopped = false;
-    const id = setInterval(() => {
-      void cursorInViewport().then((p) => {
-        const root = rootRef.current;
-        if (stopped || !p || !root) return;
-        const key = `${p.x},${p.y}`;
+    const tick = (): void => {
+      void cursorPosition().then(async (screen) => {
+        if (stopped || !screen) return;
+        const key = `${screen.x},${screen.y}`;
         const moved = last !== undefined && key !== last;
         last = key;
         if (!moved) return;
+        const p = await screenToViewport(screen);
+        const root = rootRef.current;
+        if (stopped || !p || !root) return;
         const r = root.getBoundingClientRect();
         if (p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom) poke();
       });
-    }, CURSOR_POLL_MS);
+    };
+    const id = MAC_DOM_VIDEO_EVENTS ? undefined : setInterval(tick, CURSOR_POLL_MS);
     window.addEventListener('keydown', poke);
     return () => {
       stopped = true;

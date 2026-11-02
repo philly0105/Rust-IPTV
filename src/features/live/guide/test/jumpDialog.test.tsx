@@ -162,4 +162,36 @@ describe('JumpToDialog', () => {
     expect(chips()[1]!.getAttribute('aria-checked')).toBe('true');
     expect(document.activeElement).toBe(chips()[1]);
   });
+
+  it('re-renders with the cached relative-day formatter instead of building four (F3-4)', () => {
+    const now = new Date(2026, 9, 21, 10, 10).getTime();
+    const control: { move?(start: number): void } = {};
+    function Host() {
+      const [start, setStart] = useState(defaultStart(now));
+      control.move = setStart;
+      return <JumpToDialog open onClose={() => undefined} start={start} now={now} onJump={() => undefined} onNow={() => undefined} />;
+    }
+    renderGuide(<Host />);
+    const chips = () => within(screen.getByTestId('guide-jump')).getAllByTestId('guide-jump-day');
+    expect(chips()[2]!.textContent?.toLowerCase()).toContain('today');
+    // The guide re-renders the dialog on its toolbar publishes and clock ticks.
+    const Original = Intl.RelativeTimeFormat;
+    const intl = Intl as { RelativeTimeFormat: typeof Original };
+    let made = 0;
+    intl.RelativeTimeFormat = class extends Original {
+      constructor(...args: ConstructorParameters<typeof Original>) {
+        super(...args);
+        made++;
+      }
+    };
+    try {
+      act(() => control.move!(defaultStart(now) + 30 * MINUTE));
+      act(() => control.move!(defaultStart(now) + 60 * MINUTE));
+    } finally {
+      intl.RelativeTimeFormat = Original;
+    }
+    expect(made).toBe(0);
+    expect(chips()[1]!.textContent?.toLowerCase()).toContain('yesterday');
+    expect(chips()[3]!.textContent?.toLowerCase()).toContain('tomorrow');
+  });
 });

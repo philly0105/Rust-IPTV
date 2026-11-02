@@ -82,20 +82,30 @@ fn meta_key(source_id: &str) -> String {
     format!("xtream_meta:{source_id}")
 }
 
-/// Remembers `meta` for `source_id` (memory + `app_state`).
-pub fn store_meta(
-    conn: &Connection,
-    rt: &Runtime,
-    source_id: &str,
-    meta: &ServerMeta,
-) -> CoreResult<()> {
-    rt.meta.insert(source_id.to_string(), meta.clone());
-    conn.execute(
-        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        rusqlite::params![meta_key(source_id), serde_json::to_string(meta)?],
-    )?;
-    Ok(())
+/// Remembers `meta` for `source_id`: in memory at once, where every reader
+/// looks first, and in `app_state` in the background through the write gate
+/// ([`AppState::writer`]). Awaited on an ungated connection, the row made a
+/// sync start, `xtream.accountInfo` and a first catch-up wait out another
+/// source's import save and park a pooled connection for it (R1-1, R4-1).
+/// A failed write is logged and only costs a refetch after a restart. The
+/// row is skipped once the source is gone.
+pub fn remember_meta(state: &AppState, source_id: &str, meta: &ServerMeta) {
+    runtime(state)
+        .meta
+        .insert(source_id.to_string(), meta.clone());
+    let Ok(json) = serde_json::to_string(meta) else {
+        return;
+    };
+    let sid = source_id.to_string();
+    state.writer().spawn("xtream server meta", move |conn| {
+        conn.execute(
+            "INSERT INTO app_state(key, value, updated_at)
+             SELECT ?1, ?2, CURRENT_TIMESTAMP WHERE EXISTS (SELECT 1 FROM sources WHERE id = ?3)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            rusqlite::params![meta_key(&sid), json, sid],
+        )?;
+        Ok(())
+    });
 }
 
 /// Memory, then `app_state`; `None` if the source was never contacted.

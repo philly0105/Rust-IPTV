@@ -31,6 +31,8 @@ export interface PreviewQueueOptions {
   sourceId?: string;
   /** What this queue asks for beyond the channel (e.g. `limit|from`); part of its cache keys. */
   scope?: string;
+  /** Answers kept per source (MAX_CACHED by default); the oldest go first beyond this. */
+  maxCached?: number;
 }
 
 interface Entry {
@@ -64,6 +66,17 @@ function sourceState(sourceId: string): SourceState {
     sources.set(sourceId, st);
   }
   return st;
+}
+
+/**
+ * Forgets a shared source's answers once no queue of it is syncing (each was reset), so a page
+ * whose answers are large and of no use elsewhere does not keep them after it unmounts (F3-1).
+ * The backoff stays: a page opened again within a silent provider's pause still waits it out. A
+ * source with a queue still syncing is left alone.
+ */
+export function releaseStalkerPreviewAnswers(sourceId: string): void {
+  const st = sources.get(sourceId);
+  if (st && st.queues.size === 0) st.cache.clear();
 }
 
 /** Forgets every source's backoff and answers (a fresh render tree in tests). */
@@ -126,6 +139,7 @@ export class StalkerPreviewQueue {
       backoffMs: 30_000,
       maxBackoffMs: 5 * 60_000,
       clock: Date.now,
+      maxCached: MAX_CACHED,
       ...options,
     };
   }
@@ -135,6 +149,16 @@ export class StalkerPreviewQueue {
     const e = this.shared.cache.get(this.cacheKey(itemKey(ref)));
     if (!e) return undefined;
     return this.opts.staleWhileRevalidate || this.usable(e) ? e.programs : undefined;
+  }
+
+  /**
+   * True when the source holds any answer of this queue's scope, fresh or not. A scan of the
+   * source's cache, for a caller deciding once whether an old scope is worth keeping.
+   */
+  holdsAnswers(): boolean {
+    const prefix = this.cacheKey('' as ItemKey);
+    for (const k of this.shared.cache.keys()) if (k.startsWith(prefix)) return true;
+    return false;
   }
 
   /**
@@ -246,7 +270,7 @@ export class StalkerPreviewQueue {
     cache.set(k, { programs, at: this.opts.clock() });
     // A Map iterates in insertion order: the first keys are the oldest answers.
     for (const old of cache.keys()) {
-      if (cache.size <= MAX_CACHED) break;
+      if (cache.size <= this.opts.maxCached) break;
       cache.delete(old);
     }
   }

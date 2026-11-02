@@ -24,11 +24,17 @@ async function openDenseGuide(page: Page, request: APIRequestContext, step = 15 
   });
   if (archive) {
     // A provider table spanning weeks reproduces the archive/XMLTV merge used by the desktop guide.
+    // The guide asks for whole UTC days of it (`catchup.programs`); answer as the core does, with
+    // the programmes overlapping [from, to).
     const base = (at ?? Date.now()) - 7 * 24 * 60 * 60_000;
-    await page.route('**/api/rpc/catchup.table', (route) => route.fulfill({ json: Array.from({ length: 14 * 24 * 60 * 60_000 / step }, (_, i) => ({
+    const table = Array.from({ length: 14 * 24 * 60 * 60_000 / step }, (_, i) => ({
       channelId: 'dense', title: `Archive ${i}`, category: 'News',
       start: new Date(base + i * step).toISOString(), end: new Date(base + (i + 1) * step).toISOString(),
-    })) }));
+    }));
+    await page.route('**/api/rpc/catchup.programs', async (route) => {
+      const { from, to } = route.request().postDataJSON();
+      await route.fulfill({ json: table.filter((p) => Date.parse(p.end) > Date.parse(from) && Date.parse(p.start) < Date.parse(to)) });
+    });
   }
   await page.route('**/api/rpc/epg.grid', async (route) => {
     calls++;

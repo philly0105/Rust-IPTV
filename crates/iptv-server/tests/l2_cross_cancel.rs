@@ -28,6 +28,7 @@ fn only_registered_read_only_queries_cancel_on_disconnect() {
         "epg.programs",
         "epg.search",
         "catalog.search",
+        "catalog.matchTitles",
         "catalog.channels",
         "catalog.movies",
         "catalog.series",

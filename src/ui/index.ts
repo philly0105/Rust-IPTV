@@ -6,14 +6,16 @@
 export { cn } from './cn';
 export { Button, IconButton, TOUCH_TARGET, buttonClass } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant, IconButtonProps } from './Button';
-export { Checkbox, Input, Radio, RadioGroup, SearchInput, Select, Slider, Switch, Textarea, Toggle, fieldClass } from './Field';
+export { Checkbox, Input, Radio, RadioGroup, Select, Slider, Switch, Textarea, Toggle } from './Field';
+// Its own module (F1-7): the header's search field is in the entry, the other fields are not.
+export { SearchInput, fieldClass } from './SearchInput';
+export type { SearchInputProps } from './SearchInput';
 export type {
   CheckboxProps,
   InputProps,
   RadioGroupOption,
   RadioGroupProps,
   RadioProps,
-  SearchInputProps,
   SelectOption,
   SelectProps,
   SliderProps,

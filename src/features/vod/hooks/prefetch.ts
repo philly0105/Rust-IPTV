@@ -11,17 +11,17 @@
  */
 
 import { QueryClientContext, type QueryClient } from '@tanstack/react-query';
-import { useContext, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 
 import { preloadImage } from '@/api/images';
-import { queryClient as appQueryClient, rpcKey } from '@/api/query';
+import { batchedItemQuery, queryClient as appQueryClient, rpcKey } from '@/api/query';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcRaw } from '@/api/transport';
-import type { ItemRef, SourceKind } from '@/api/types';
+import type { ItemRef, Source, SourceKind } from '@/api/types';
 
 import { normalizeQuery, SEARCH_LIMIT, searchRequestLimit } from '../lib/search';
 import { loadMovieDetailPage, loadSearchPage, loadSeriesDetailPage } from '../routes';
-import { movieDetailQuery, prefetchTmdb, seriesDetailQuery } from './queries';
+import { cachedCatalogRow, DETAIL_STALE_MS, movieDetailQuery, plainRef, prefetchTmdb, seriesDetailQuery } from './queries';
 
 export interface PrefetchTarget {
   ref: ItemRef;
@@ -135,36 +135,65 @@ export function preloadDetailChunk(kind: 'movie' | 'series'): void {
  * the image cache (`preloadImage`, the same URL the page's <img> asks for,
  * at most once per session). When the target has no backdrop, the one the detail page shows
  * first (the item's, then the provider's first) is preloaded once the data
- * arrives, and so is the TMDB lookup the page sends next (VD-8). Live and
- * other non-VOD refs are ignored.
+ * arrives, and so is the TMDB lookup the page sends next (VD-8). An Xtream
+ * title no cached list holds (a continue-watching card, My List) also gets
+ * its local catalog row, which the page shows as its hero while the provider
+ * answers (F4-1). Live and other non-VOD refs are ignored.
+ *
+ * `speculative` (a hover or focus rest, the default) asks the provider's detail once, without
+ * retries. A click that opens the page passes false: the page mounts while that fetch is still out
+ * and joins it, retry policy and all (TanStack fixes `retry` when a fetch starts), so the click's
+ * fetch keeps the client's retries the page's own fetch would have had.
  */
-export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget): void {
+export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget, { speculative = true }: { speculative?: boolean } = {}): void {
   const { ref } = t;
   if (ref.contentType !== 'movie' && ref.contentType !== 'series') return;
   preloadImage(t.posterUrl, ref.sourceId);
   preloadImage(t.backdropUrl, ref.sourceId);
+  if (t.sourceKind === 'xtream' && !cachedCatalogRow(qc, ref)) void qc.prefetchQuery(batchedItemQuery(plainRef(ref), DETAIL_STALE_MS));
   // A provider detail, or for m3u the bare catalog row the detail query caches (queries.ts).
   const afterData = (data: { item?: { backdropUrl?: string }; backdrops?: string[]; backdropUrl?: string } | undefined) => {
     if (t.backdropUrl || !data) return;
     preloadImage(data.item ? (data.item.backdropUrl ?? data.backdrops?.[0]) : data.backdropUrl, ref.sourceId);
   };
   preloadDetailChunk(ref.contentType);
-  // retry: false: a failed prefetch costs nothing; the page asks again (with retries) on open.
+  // retry: false for a hover: a failed prefetch costs nothing, and the page asks again (with
+  // retries) once it has settled. A click's page joins the fetch in flight, so that one retries.
   if (ref.contentType === 'movie') {
     const q = movieDetailQuery(t.sourceKind, ref);
-    void qc.prefetchQuery({ ...q, retry: false }).then(() => {
+    void qc.prefetchQuery(speculative ? { ...q, retry: false } : q).then(() => {
       const data = qc.getQueryData(q.queryKey);
       afterData(data);
       prefetchTmdb(qc, 'movie', data && ('item' in data ? data.item : data));
     });
   } else {
     const q = seriesDetailQuery(t.sourceKind, ref);
-    void qc.prefetchQuery({ ...q, retry: false }).then(() => {
+    void qc.prefetchQuery(speculative ? { ...q, retry: false } : q).then(() => {
       const data = qc.getQueryData(q.queryKey);
       afterData(data);
       prefetchTmdb(qc, 'series', data && ('item' in data ? data.item : data));
     });
   }
+}
+
+/**
+ * Starts a movie or series page's data, chunk and artwork with the click that opens it (F4-1): My
+ * List, Recently watched, Favorites and Stats have no hover prefetch, so the provider's detail went
+ * out only after the route chunk had loaded and the page had rendered once. Not speculative, so
+ * neither Data Saver nor a coarse pointer skips it. The source kind comes from the cached
+ * `sources.list` (the rail loads it at start-up); a source it does not hold prefetches nothing.
+ */
+export function prefetchOnOpen(qc: QueryClient, ref: ItemRef, posterUrl?: string): void {
+  if (ref.contentType !== 'movie' && ref.contentType !== 'series') return;
+  const sourceKind = qc.getQueryData<Source[]>(rpcKey('sources.list', undefined))?.find((s) => s.id === ref.sourceId)?.kind;
+  if (!sourceKind) return;
+  prefetchVodDetail(qc, posterUrl ? { ref, sourceKind, posterUrl } : { ref, sourceKind }, { speculative: false });
+}
+
+/** {@link prefetchOnOpen} with the page's query client, for click handlers. Stable. */
+export function useOpenPrefetch(): (ref: ItemRef, posterUrl?: string) => void {
+  const qc = useClient();
+  return useCallback((ref: ItemRef, posterUrl?: string) => prefetchOnOpen(qc, ref, posterUrl), [qc]);
 }
 
 /** A title search to warm (TMDB rails link into search, not to a catalog item). */

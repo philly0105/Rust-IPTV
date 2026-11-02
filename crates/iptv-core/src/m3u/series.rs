@@ -191,7 +191,8 @@ struct Show {
     category_id: String,
     poster_url: Option<String>,
     position: i64,
-    /// Ids are set by [`SeriesGrouper::into_rows`] ([`episode_ids`]).
+    /// Ids are set when the show's row is taken ([`SeriesRows`],
+    /// [`episode_ids`]).
     episodes: Vec<StoredEpisode>,
     /// `(id seed, entry name)` of each episode, in episode order.
     id_seeds: Vec<(String, String)>,
@@ -204,7 +205,15 @@ struct Show {
 /// Collects the episodes of one import, one show per group and title.
 #[derive(Default)]
 pub struct SeriesGrouper {
+    /// [`show_key`] -> index in `shows`.
     index: HashMap<String, usize>,
+    /// Group id -> show title as the playlist writes it -> index in `shows`.
+    /// The key is a function of those two strings alone (`title_base`'s
+    /// year bound is fixed for an import), so only the first episode of each
+    /// spelling pays for `title_base` (about ten regex passes) and
+    /// `show_key`: 0.8 µs an episode, about 0.2 s of write lock per 120k
+    /// episodes on an N100, most of it repeating work (R3-5).
+    raw_index: HashMap<String, HashMap<String, usize>>,
     shows: Vec<Show>,
 }
 
@@ -291,28 +300,21 @@ impl SeriesGrouper {
         e: M3uEntry,
         legacy_id: Option<String>,
     ) -> (bool, EpisodeAt) {
-        let (base, year) = catalog::title_base(&found.show);
-        let key = show_key(&category_id, &found.show, &base, year);
-        let existing = self.index.get(&key).copied();
-        let started = existing.is_none();
-        let at = match existing {
-            Some(i) => i,
+        let seen = self
+            .raw_index
+            .get(category_id.as_str())
+            .and_then(|by_title| by_title.get(found.show.as_str()))
+            .copied();
+        let (started, at) = match seen {
+            Some(i) => (false, i),
             None => {
-                self.shows.push(Show {
-                    id: hash16(&format!("series\n{key}")),
-                    title: found.show.clone(),
-                    title_base: base,
-                    year,
-                    category_id,
-                    poster_url: None,
-                    position,
-                    episodes: Vec::new(),
-                    id_seeds: Vec::new(),
-                    legacy: Vec::new(),
-                    unnumbered: 0,
-                });
-                self.index.insert(key, self.shows.len() - 1);
-                self.shows.len() - 1
+                // The first episode with this spelling in this group.
+                let (started, i) = self.find_or_start(category_id.clone(), position, &found.show);
+                self.raw_index
+                    .entry(category_id)
+                    .or_default()
+                    .insert(found.show.clone(), i);
+                (started, i)
             }
         };
         let show = &mut self.shows[at];
@@ -363,6 +365,31 @@ impl SeriesGrouper {
         (started, added)
     }
 
+    /// The show `show` of group `category_id` belongs to by [`show_key`], or
+    /// a new one at playlist position `position`; true when it is new.
+    fn find_or_start(&mut self, category_id: String, position: i64, show: &str) -> (bool, usize) {
+        let (base, year) = catalog::title_base(show);
+        let key = show_key(&category_id, show, &base, year);
+        if let Some(i) = self.index.get(&key) {
+            return (false, *i);
+        }
+        self.shows.push(Show {
+            id: hash16(&format!("series\n{key}")),
+            title: show.to_string(),
+            title_base: base,
+            year,
+            category_id,
+            poster_url: None,
+            position,
+            episodes: Vec::new(),
+            id_seeds: Vec::new(),
+            legacy: Vec::new(),
+            unnumbered: 0,
+        });
+        self.index.insert(key, self.shows.len() - 1);
+        (true, self.shows.len() - 1)
+    }
+
     /// Gives the episode at `at` the state saved on old movie row `movie_id`
     /// (an episode matched to that row once the whole playlist is known).
     pub fn adopt(&mut self, at: EpisodeAt, movie_id: String) {
@@ -371,46 +398,105 @@ impl SeriesGrouper {
         }
     }
 
-    /// One series row per show, in first-seen order, and the movie ids whose
-    /// state moves to an episode.
-    pub fn into_rows(self, source_id: &str) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
-        let mut rows = Vec::with_capacity(self.shows.len());
-        let mut legacy = Vec::new();
-        for mut show in self.shows {
-            let ids = episode_ids(&show.id_seeds);
-            for (ep, id) in show.episodes.iter_mut().zip(ids) {
-                ep.id = id;
-            }
-            for (movie_id, i) in &show.legacy {
-                let ep = &show.episodes[*i];
-                legacy.push(LegacyEpisode {
-                    movie_id: movie_id.clone(),
-                    series_id: show.id.clone(),
-                    episode_id: ep.id.clone(),
-                    series_title: show.title.clone(),
-                    subtitle: episode_subtitle(ep.season, ep.episode, &ep.title),
-                });
-            }
-            let mut extra = serde_json::Map::new();
-            extra.insert(
-                "episodes".into(),
-                serde_json::to_value(&show.episodes).unwrap_or_default(),
-            );
-            rows.push(ItemRow {
-                source_id: source_id.to_string(),
-                content_type: ContentType::Series,
-                item_id: show.id,
-                category_id: show.category_id,
-                title: show.title,
-                title_base: Some(show.title_base),
-                year: show.year,
-                poster_url: show.poster_url,
-                extra: serde_json::Value::Object(extra),
-                position: show.position,
-                ..ItemRow::default()
+    /// One series row per show, in first-seen order, built as the iterator
+    /// is advanced ([`SeriesRows`]).
+    pub fn rows(self) -> SeriesRows {
+        SeriesRows {
+            shows: self.shows.into_iter(),
+            legacy: Vec::new(),
+        }
+    }
+
+    /// Every series row at once, and the movie ids whose state moves to an
+    /// episode ([`SeriesRows::collect_all`]).
+    pub fn into_rows(self) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
+        self.rows().collect_all()
+    }
+}
+
+/// The series rows of one import, one show at a time, in first-seen order.
+///
+/// A row carries its episode list as the text it is stored as
+/// (`ItemRow::extra_json`, `{"episodes":[...]}`), built when the row is
+/// taken, and the importer writes each row before it takes the next. As a
+/// `serde_json::Value` tree an episode took about 0.9 KB where its text
+/// takes 200 B, and every show's tree used to exist at once from the end of
+/// the playlist through the index rebuild: about 105 MB at 120k episodes,
+/// 350 MB at 400k. Now one show's text at a time.
+pub struct SeriesRows {
+    shows: std::vec::IntoIter<Show>,
+    legacy: Vec<LegacyEpisode>,
+}
+
+/// The stored `extra` of a series row.
+#[derive(Serialize)]
+struct EpisodesExtra<'a> {
+    episodes: &'a [StoredEpisode],
+}
+
+impl SeriesRows {
+    /// Gives the episodes of `show` their ids and records the ones whose
+    /// movie state moves to them.
+    fn number(show: &mut Show, legacy: &mut Vec<LegacyEpisode>) {
+        let ids = episode_ids(&show.id_seeds);
+        for (ep, id) in show.episodes.iter_mut().zip(ids) {
+            ep.id = id;
+        }
+        for (movie_id, i) in &show.legacy {
+            let ep = &show.episodes[*i];
+            legacy.push(LegacyEpisode {
+                movie_id: movie_id.clone(),
+                series_id: show.id.clone(),
+                episode_id: ep.id.clone(),
+                series_title: show.title.clone(),
+                subtitle: episode_subtitle(ep.season, ep.episode, &ep.title),
             });
         }
-        (rows, legacy)
+    }
+
+    /// The movie ids whose state moves to an episode. Complete however many
+    /// rows were taken: the shows not taken yet are numbered here.
+    pub fn legacy(self) -> Vec<LegacyEpisode> {
+        let mut legacy = self.legacy;
+        for mut show in self.shows {
+            Self::number(&mut show, &mut legacy);
+        }
+        legacy
+    }
+
+    /// The rows not taken yet, and [`SeriesRows::legacy`].
+    pub fn collect_all(mut self) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
+        let rows = self.by_ref().collect();
+        (rows, self.legacy())
+    }
+}
+
+impl Iterator for SeriesRows {
+    type Item = ItemRow;
+
+    /// The writer stores its own `source_id`, so the row leaves it empty.
+    fn next(&mut self) -> Option<ItemRow> {
+        let mut show = self.shows.next()?;
+        Self::number(&mut show, &mut self.legacy);
+        Some(ItemRow {
+            content_type: ContentType::Series,
+            extra: serde_json::Value::Null,
+            extra_json: catalog::extra_text(&EpisodesExtra {
+                episodes: &show.episodes,
+            }),
+            item_id: show.id,
+            category_id: show.category_id,
+            title: show.title,
+            title_base: Some(show.title_base),
+            year: show.year,
+            poster_url: show.poster_url,
+            position: show.position,
+            ..ItemRow::default()
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.shows.size_hint()
     }
 }
 
@@ -421,6 +507,46 @@ pub fn stored_episodes(extra: &serde_json::Value) -> Vec<StoredEpisode> {
         .get("episodes")
         .and_then(|v| Vec::<StoredEpisode>::deserialize(v).ok())
         .unwrap_or_default()
+}
+
+/// The episodes of a series row as [`SeriesRows`] builds it (its
+/// `extra_json` text), or of a row whose `extra` holds them.
+pub fn row_episodes(row: &ItemRow) -> Vec<StoredEpisode> {
+    match row.extra_json.as_deref() {
+        Some(text) => episodes_in(text),
+        None => stored_episodes(&row.extra),
+    }
+}
+
+/// The episode list of `extra_json` text, every other key skipped; empty
+/// when the text has no list or does not parse.
+fn episodes_in(text: &str) -> Vec<StoredEpisode> {
+    #[derive(Deserialize)]
+    struct EpisodesOnly {
+        #[serde(default)]
+        episodes: Vec<StoredEpisode>,
+    }
+    serde_json::from_str::<EpisodesOnly>(text)
+        .map(|e| e.episodes)
+        .unwrap_or_default()
+}
+
+/// [`stored_episodes`] of the catalog row `r`, deserialized straight from
+/// its `extra_json` text: no Value tree, and every other key skipped. The
+/// catalog readers leave the list out of the rows they return
+/// (`catalog::read_named`), so whatever needs the episodes reads them here.
+/// Empty when the row is missing, has no list, or the list does not parse.
+pub fn stored_episodes_of(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<StoredEpisode>> {
+    let extra: Option<String> = conn
+        .prepare_cached(
+            "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
+            params![r.source_id, r.content_type.as_str(), r.item_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(extra.as_deref().map(episodes_in).unwrap_or_default())
 }
 
 /// Seasons in number order, episodes in episode order (playlist order on a
@@ -466,10 +592,20 @@ fn expect_series(r: &ItemRef, what: &str) -> CoreResult<()> {
     }
 }
 
-async fn series_row(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<catalog::NamedRow> {
+/// The catalog row of series `r` and its stored episodes, in one `db_call`
+/// (the row as `catalog::get_named` reads it carries no episode list).
+async fn series_row(
+    state: &Arc<AppState>,
+    r: &ItemRef,
+) -> CoreResult<(catalog::NamedRow, Vec<StoredEpisode>)> {
     let key = r.clone();
     state
-        .db_call(move |c| catalog::get_named(c, &key))
+        .db_call(move |c| {
+            let Some(named) = catalog::get_named(c, &key)? else {
+                return Ok(None);
+            };
+            Ok(Some((named, stored_episodes_of(c, &key)?)))
+        })
         .await?
         .ok_or_else(|| {
             CoreError::not_found(
@@ -482,8 +618,7 @@ async fn series_row(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<catalog::N
 /// importer. Playlists carry no cast, plot or trailer.
 pub async fn series_detail(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<SeriesDetail> {
     expect_series(r, "m3u.seriesDetail")?;
-    let named = series_row(state, r).await?;
-    let episodes = stored_episodes(&named.row.extra);
+    let (named, episodes) = series_row(state, r).await?;
     Ok(SeriesDetail {
         seasons: seasons(r, &episodes),
         item: named.into_series(),
@@ -523,11 +658,8 @@ pub async fn stream_url(
     let Some(ep_id) = episode_id.map(str::trim).filter(|e| !e.is_empty()) else {
         return Err(CoreError::invalid("Choose an episode to play."));
     };
-    let named = series_row(state, r).await?;
-    let Some(ep) = stored_episodes(&named.row.extra)
-        .into_iter()
-        .find(|e| e.id == ep_id)
-    else {
+    let (named, episodes) = series_row(state, r).await?;
+    let Some(ep) = episodes.into_iter().find(|e| e.id == ep_id) else {
         return Err(CoreError::not_found(
             "This episode is no longer in the playlist. Refresh the source and try again.",
         ));
@@ -722,17 +854,7 @@ fn mark_if_complete(conn: &Connection, source_id: &str, series_id: &str) -> Core
     if !marked.is_empty() {
         return Ok(());
     }
-    let extra: Option<String> = conn
-        .query_row(
-            "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = 'series' AND item_id = ?2",
-            params![source_id, series_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let episodes = extra
-        .and_then(|x| serde_json::from_str::<serde_json::Value>(&x).ok())
-        .map(|x| stored_episodes(&x))
-        .unwrap_or_default();
+    let episodes = stored_episodes_of(conn, &r)?;
     if episodes.is_empty() {
         return Ok(());
     }
@@ -929,7 +1051,137 @@ mod tests {
             let legacy = (i == 1).then(|| format!("movie{i}"));
             g.add(cat, i as i64, d, e, legacy);
         }
-        g.into_rows("s")
+        g.into_rows()
+    }
+
+    /// R3-5: the lookup by group and raw show title puts every episode in
+    /// the show its key alone picks (the per-episode `title_base` and
+    /// `show_key` it replaces), starts shows on the same episodes, and runs
+    /// the key once per spelling and group.
+    #[test]
+    fn cached_show_lookup_groups_like_the_key() {
+        let spellings = [
+            "Dark (2017)",
+            "EN - Dark (2017)",
+            "Dark (2017) [4K]",
+            "dark  (2017)",
+            "Dark",
+            "The Office [US]",
+            "The Office (US)",
+            "EN - The Office [US] [4K]",
+            "The Office [UK]",
+        ];
+        let groups = ["Drama", "4K Drama", "Comedy"];
+        let mut text = String::from("#EXTM3U\n");
+        for n in 1..5 {
+            for (gi, group) in groups.iter().enumerate() {
+                for (si, show) in spellings.iter().enumerate() {
+                    if (gi + si + n) % 4 != 0 {
+                        text.push_str(&format!(
+                            "#EXTINF:-1 group-title=\"{group}\",{show} S01E{n:02}\nhttp://h/series/{gi}/{si}/{n}.mkv\n"
+                        ));
+                    }
+                }
+            }
+        }
+        let (entries, _, _) = parse_str(&text);
+        let total = entries.len();
+        let mut g = SeriesGrouper::default();
+        let mut keys: Vec<String> = Vec::new();
+        let mut pairs: HashSet<(String, String)> = HashSet::new();
+        for (i, e) in entries.into_iter().enumerate() {
+            let d = detect(&e).unwrap();
+            let cat = crate::m3u::group_id(e.group.as_deref().unwrap_or(""));
+            let (base, year) = catalog::title_base(&d.show);
+            let key = show_key(&cat, &d.show, &base, year);
+            let new = !keys.contains(&key);
+            if new {
+                keys.push(key.clone());
+            }
+            let want = keys.iter().position(|k| *k == key).unwrap();
+            pairs.insert((cat.clone(), d.show.clone()));
+            let (started, at) = g.add(cat, i as i64, d, e, None);
+            assert_eq!((started, at.show), (new, want), "entry {i}");
+        }
+        let cached: usize = g.raw_index.values().map(HashMap::len).sum();
+        assert_eq!(cached, pairs.len());
+        assert!(
+            cached * 2 < total,
+            "{cached} spellings for {total} episodes"
+        );
+        let (rows, _) = g.into_rows();
+        let ids: Vec<String> = keys
+            .iter()
+            .map(|k| hash16(&format!("series\n{k}")))
+            .collect();
+        assert_eq!(
+            rows.iter().map(|r| &r.item_id).collect::<Vec<_>>(),
+            ids.iter().collect::<Vec<_>>()
+        );
+        assert!(
+            rows.len() < spellings.len() * groups.len(),
+            "spellings merged"
+        );
+    }
+
+    /// R3-3: a series row carries its episodes as text, which parses to the
+    /// Value the row used to hold (`{"episodes": to_value(episodes)}`);
+    /// only the key order of the text differs, and every reader parses it.
+    #[test]
+    fn series_rows_store_the_episode_list_as_text() {
+        let text = "#EXTM3U\n\
+             #EXTINF:-1 tvg-logo=\"http://i/dark.jpg\" group-title=\"Drama\",Dark (2017) S01E02 - \"Lies\" é\nhttp://h/series/u/p/2.mkv|User-Agent=UA&Referer=http://r/\n\
+             #EXTINF:-1 tvg-logo=\"http://i/e1.jpg\" group-title=\"Drama\",Dark (2017) S01E01\nhttp://h/series/u/p/1.mkv\n\
+             #EXTINF:90 group-title=\"Kids\",Talk Show\nhttp://h/series/u/p/3.mp4\n";
+        let (rows, _) = group(text);
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert!(row.extra.is_null() && row.source_id.is_empty());
+            let eps = row_episodes(row);
+            assert!(!eps.is_empty());
+            let old = serde_json::json!({ "episodes": serde_json::to_value(&eps).unwrap() });
+            let stored: serde_json::Value =
+                serde_json::from_str(row.extra_json.as_deref().unwrap()).unwrap();
+            assert_eq!(stored, old);
+        }
+        let eps = row_episodes(&rows[0]);
+        assert_eq!(eps[0].title, "\"Lies\" é");
+        assert_eq!(
+            eps[0]
+                .headers
+                .as_ref()
+                .and_then(|h| h.user_agent.as_deref()),
+            Some("UA")
+        );
+        assert_eq!(row_episodes(&rows[1])[0].duration_seconds, Some(90));
+    }
+
+    /// R3-3: rows are built one show at a time, and the legacy list is
+    /// complete however many rows were taken.
+    #[test]
+    fn series_rows_are_lazy_and_their_legacy_list_complete() {
+        let text = "#EXTM3U\n\
+             #EXTINF:-1 group-title=\"A\",Alpha S01E01\nhttp://h/series/1.mkv\n\
+             #EXTINF:-1 group-title=\"B\",Beta S01E01\nhttp://h/series/2.mkv\n\
+             #EXTINF:-1 group-title=\"C\",Gamma S01E01\nhttp://h/series/3.mkv\n";
+        let build = || {
+            let (entries, _, _) = parse_str(text);
+            let mut g = SeriesGrouper::default();
+            for (i, e) in entries.into_iter().enumerate() {
+                let d = detect(&e).unwrap();
+                let cat = crate::m3u::group_id(e.group.as_deref().unwrap_or(""));
+                g.add(cat, i as i64, d, e, Some(format!("movie{i}")));
+            }
+            g
+        };
+        let (all, want) = build().into_rows();
+        let mut rows = build().rows();
+        assert_eq!(rows.size_hint(), (3, Some(3)));
+        assert_eq!(rows.next().as_ref(), all.first());
+        assert_eq!(rows.size_hint(), (2, Some(2)), "one show built");
+        let legacy = rows.legacy();
+        assert_eq!(legacy, want);
+        assert_eq!(legacy.len(), 3);
     }
 
     #[test]
@@ -951,7 +1203,7 @@ mod tests {
         assert_eq!(dark.poster_url.as_deref(), Some("http://i/dark.jpg"));
         assert_eq!(dark.position, 0);
         assert_eq!(rows[1].position, 3);
-        let eps = stored_episodes(&dark.extra);
+        let eps = row_episodes(dark);
         assert_eq!(eps.len(), 4);
         assert_eq!(eps[0].poster_url, None, "same as the series poster");
         assert_eq!(eps[2].poster_url.as_deref(), Some("http://i/e3.jpg"));
@@ -965,7 +1217,7 @@ mod tests {
             "#EXTM3U\n#EXTINF:-1 group-title=\"Drama\",Dark (2017) S01E02\nhttp://h/series/u/NEW/2.mkv\n",
         );
         assert_eq!(again[0].item_id, dark.item_id);
-        assert_eq!(stored_episodes(&again[0].extra)[0].id, eps[0].id);
+        assert_eq!(row_episodes(&again[0])[0].id, eps[0].id);
 
         let r = ItemRef::new("s", ContentType::Series, dark.item_id.clone());
         let s = seasons(&r, &eps);
@@ -989,7 +1241,7 @@ mod tests {
              #EXTINF:-1 group-title=\"G\",Talk Show\nhttp://h/series/u/p/2.mp4\n",
         );
         assert_eq!(rows.len(), 1);
-        let eps = stored_episodes(&rows[0].extra);
+        let eps = row_episodes(&rows[0]);
         assert_eq!(
             eps.iter()
                 .map(|e| (e.season, e.episode))
@@ -1012,8 +1264,8 @@ mod tests {
         );
         let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
         assert_eq!(titles, ["The Office [US]", "The Office [UK]"]);
-        assert_eq!(stored_episodes(&rows[0].extra).len(), 3);
-        assert_eq!(stored_episodes(&rows[1].extra).len(), 1);
+        assert_eq!(row_episodes(&rows[0]).len(), 3);
+        assert_eq!(row_episodes(&rows[1]).len(), 1);
         assert_eq!(rows[0].title_base.as_deref(), Some("The Office"));
     }
 
@@ -1021,7 +1273,7 @@ mod tests {
     fn ids_of(text: &str) -> HashMap<(i64, i64, String), String> {
         let (rows, _) = group(text);
         assert_eq!(rows.len(), 1);
-        stored_episodes(&rows[0].extra)
+        row_episodes(&rows[0])
             .into_iter()
             .map(|e| ((e.season, e.episode, e.title), e.id))
             .collect()
@@ -1071,5 +1323,57 @@ mod tests {
         assert!(stored_episodes(&serde_json::json!({ "episodes": "x" })).is_empty());
         assert_eq!(kind_of("http://h/a.m3u8?t=1"), PlayerKind::Hls);
         assert_eq!(kind_of("http://h/a.mkv"), PlayerKind::Direct);
+    }
+
+    /// The episode reader on stored text answers what `stored_episodes`
+    /// answers on the parsed row, junk included: never an error.
+    #[test]
+    fn stored_episodes_of_reads_the_text_and_tolerates_junk() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE items (source_id TEXT, content_type TEXT, item_id TEXT, extra_json TEXT)",
+        )
+        .unwrap();
+        let ep = |id: &str| StoredEpisode {
+            id: id.into(),
+            season: 1,
+            episode: 1,
+            title: "T".into(),
+            url: format!("http://h/{id}.mkv"),
+            poster_url: Some("http://i/p.jpg".into()),
+            container_extension: None,
+            duration_seconds: Some(60),
+            headers: None,
+        };
+        let good =
+            serde_json::json!({ "plot": "p", "episodes": [ep("a"), ep("b")], "x": {"y": [1]} });
+        let rows = [
+            ("good", good.to_string()),
+            ("none", "{}".to_string()),
+            ("text", r#"{"episodes": "x"}"#.to_string()),
+            ("null", r#"{"episodes": null}"#.to_string()),
+            ("bad_ep", r#"{"episodes": [{"id": "a"}]}"#.to_string()),
+            ("broken", r#"{"episodes": [{"#.to_string()),
+        ];
+        for (id, extra) in &rows {
+            c.execute(
+                "INSERT INTO items VALUES ('s', 'series', ?1, ?2)",
+                params![id, extra],
+            )
+            .unwrap();
+        }
+        for (id, extra) in &rows {
+            let parsed = serde_json::from_str(extra).unwrap_or(serde_json::json!({}));
+            let r = ItemRef::new("s", ContentType::Series, *id);
+            assert_eq!(
+                stored_episodes_of(&c, &r).unwrap(),
+                stored_episodes(&parsed),
+                "{id}"
+            );
+        }
+        let r = ItemRef::new("s", ContentType::Series, "good");
+        assert_eq!(stored_episodes_of(&c, &r).unwrap(), vec![ep("a"), ep("b")]);
+        let missing = ItemRef::new("s", ContentType::Series, "gone");
+        assert!(stored_episodes_of(&c, &missing).unwrap().is_empty());
     }
 }

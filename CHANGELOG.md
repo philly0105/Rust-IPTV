@@ -6,6 +6,24 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 
 ## [Unreleased]
 
+### Changed
+
+- Pages keep answering while a large source saves its import: catalog, guide, favorites and image reads use database connections of their own, and the writes that wait for the save no longer take the connections reads need.
+- Large libraries are faster in many places: the first page of All channels and of radio, series lists of big playlists, Continue watching, hiding and unhiding channels, reordering lists, My List and favorites, and "More like this" and an actor's Known for, which now make one lookup per row instead of up to 40 searches.
+- The TV guide: Xtream catch-up rows download a few days of listings instead of each channel's whole archive, and let them go when you leave the guide; past days on a Stalker portal read only the days on screen; a typed channel number jumps as soon as it is complete; scrolling redraws less and keeps less in memory.
+- Stalker portals: the guide, the archive and catch-up share cached day tables, the portal's full guide refreshes in the background instead of holding up every row, a sync asks for its sections at once instead of one after another, and the first movie or series page after a sync takes one round of requests.
+- Guide refreshes do less work: now and next reads fewer guide feeds, programme search is kept up to date during the refresh instead of being rebuilt after it, and compressed guides and playlists unpack faster.
+- Playback: MPEG-TS channels, multi-view tiles, reconnects and seeks start about 15 ms sooner in the built-in player; a live channel starts without waiting for its programme title; the fullscreen channel list shares Live TV's pages, so it opens at once and a fast scroll asks only for where it stops; embedded mpv in fullscreen makes a third of the calls it made to follow the mouse on Windows, and none on macOS.
+- Movies and series: a title opened from My List, Recently watched, Favorites or Watch stats shows its poster and Play at once while the provider answers, and starts loading with the click; adding a title to My List redraws only its own poster; search keeps its programme results on screen while you type.
+- Sports: switching league no longer reads the whole guide again (about 2 s on a big account, now a few milliseconds), and a game card redraws only when its own game or its Watch time changes.
+- Startup: the main script is 18 kB smaller and Live TV and the guide load about 110 kB less before they show; the command palette and the shortcut list load when first opened; typing in a page's search no longer redraws the side rail. In the browser the app no longer waits for its offline copy to be written, and in the desktop app the built-in engines are not preloaded when every player is mpv or VLC.
+- Removing or replacing a large source takes about a third of the time it did, and importing large playlists and Xtream accounts uses less memory.
+- Xtream accounts read their channel, movie and series lists faster, and a refreshing account no longer holds up other sources' imports while it downloads its lists; it keeps the changed lists on disk until it reads them.
+- Pages get their data with less work, in the desktop app and in the browser: the core prepares each reply once instead of twice. In the browser the server also spends less time compressing replies, and the Docker image is built for speed instead of size.
+- Restoring a backup with large playlists in it uses about a third of the memory it did.
+- Logos and posters the app shows at their own size are no longer checked again at every launch, and the image cache looks over its folder only after the app did not close cleanly, or once a week, instead of at every start.
+- Downloads split over several connections save their resume point every 15 seconds instead of every 2, so they hold up a recording or the app less on a USB disk or eMMC, and recordings write to disk in larger blocks.
+
 ## [0.3.0] - 2026-10-29
 
 The first public release: the redesign, Sports, more catch-up and guide work, fixes that followed the October 2026 audits, and what a public release needs, including a macOS app and a licence.

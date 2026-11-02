@@ -18,10 +18,11 @@ export interface StalkerPreviews {
  * Row previews from a Stalker portal's own guide (`stalker.epg`) for the channels in `refs`
  * (the visible window, in display order). `get` re-renders as answers arrive; a silent portal
  * (timeout / network error) sets `unavailable` and pauses the source with a growing backoff.
- * With `from` (epoch ms), the portal also returns the archived programmes since then. Answers are
- * cached per source by channel, `limit` and `from`, so a guide window moved back to where it was
- * reuses them; the backoff is per source too, so a new window or page keeps waiting out a silent
- * portal instead of asking it again at once.
+ * With `from` (epoch ms), the portal also returns the archived programmes since then, and with
+ * `to` as well only those starting before it, from the day tables up to it. Answers are cached per
+ * source by channel, `limit`, `from` and `to`, so a guide window moved back to where it was reuses
+ * them; the backoff is per source too, so a new window or page keeps waiting out a silent portal
+ * instead of asking it again at once.
  */
 export function useStalkerPreviews(
   sourceId: string,
@@ -32,6 +33,8 @@ export function useStalkerPreviews(
   limit = PREVIEW_FETCH_SIZE,
   /** Archive channels only: the start of the time window shown (epoch ms). */
   from?: number,
+  /** With `from`, a window wholly over: its end (epoch ms). */
+  to?: number,
 ): StalkerPreviews {
   const [version, bump] = useReducer((x: number) => x + 1, 0);
   const bumpRef = useRef(bump);
@@ -39,10 +42,13 @@ export function useStalkerPreviews(
   // Answers that land in one frame re-render the list once, not once each (LV-3, as useShortEpg).
   const frame = useRef(0);
 
+  // `to` only goes with `from`, as the core reads it.
+  const until = from === undefined ? undefined : to;
   const queue = useMemo(
-    () =>
-      new StalkerPreviewQueue(
-        (ref) => rpc('stalker.epg', from === undefined ? { ref, limit } : { ref, limit, from: new Date(from).toISOString() }),
+    () => {
+      const archive = from === undefined ? {} : { from: new Date(from).toISOString(), ...(until === undefined ? {} : { to: new Date(until).toISOString() }) };
+      return new StalkerPreviewQueue(
+        (ref) => rpc('stalker.epg', { ref, limit, ...archive }),
         () => {
           if (frame.current) return;
           frame.current = requestAnimationFrame(() => {
@@ -50,11 +56,13 @@ export function useStalkerPreviews(
             bumpRef.current();
           });
         },
-        { sourceId, scope: `${limit}|${from ?? ''}` },
-      ),
-    // One queue per source, size and window start; backoff and answers live with the source.
+        // An open-ended window keeps its `limit|from` key.
+        { sourceId, scope: `${limit}|${from ?? ''}${until === undefined ? '' : `|${until}`}` },
+      );
+    },
+    // One queue per source, size and window; backoff and answers live with the source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sourceId, limit, from],
+    [sourceId, limit, from, until],
   );
   // reset, not destroy: StrictMode re-runs effects on the same memoized queue.
   useEffect(

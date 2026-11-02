@@ -4,14 +4,14 @@ const enterPipWindow = vi.fn(async (_aspect?: number) => true);
 const exitPipWindow = vi.fn(async () => undefined);
 const recoverPipWindow = vi.fn(async () => false);
 const setPipWindowAspect = vi.fn(async (_aspect: number) => true);
-vi.mock('@/api/window', () => ({
+vi.mock('@/api/pipWindow', () => ({
   enterPipWindow,
   exitPipWindow,
   recoverPipWindow,
   setPipWindowAspect,
   PIP_DEFAULT_ASPECT: 16 / 9,
-  QUIT_FLUSH_EVENT: 'tsrust:flush',
 }));
+vi.mock('@/api/window', () => ({ QUIT_FLUSH_EVENT: 'tsrust:flush' }));
 vi.mock('@/api/transport', () => ({
   rpc: vi.fn(() => Promise.reject(new Error('offline'))),
   isDesktop: true,

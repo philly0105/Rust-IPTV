@@ -12,7 +12,7 @@
 import i18next from 'i18next';
 import { create } from 'zustand';
 
-import { enterPipWindow, exitPipWindow, PIP_DEFAULT_ASPECT, recoverPipWindow, setPipWindowAspect } from '@/api/window';
+import { enterPipWindow, exitPipWindow, PIP_DEFAULT_ASPECT, recoverPipWindow, setPipWindowAspect } from '@/api/pipWindow';
 import { shortcutRegistry } from '@/shell/shortcuts';
 import { usePlayerStore } from './store';
 

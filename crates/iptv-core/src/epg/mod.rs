@@ -53,7 +53,7 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
 pub async fn sources(state: &AppState) -> CoreResult<Vec<EpgSourceStatus>> {
     let settings = state.settings_snapshot().epg_urls;
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let configured = store::configured_urls(c, &settings)?;
             store::list_status(c, &configured)
         })
@@ -90,7 +90,8 @@ fn check_refs(refs: &[ItemRef]) -> CoreResult<()> {
 }
 
 /// Resolves each ref once, sharing the directory snapshot: its XMLTV
-/// channel id and guide shift in seconds ([`query::item_shift`]).
+/// channel id and guide shift in seconds ([`query::item_shift`]), read
+/// with one statement per ref ([`resolve::resolve_item`]).
 fn resolve_many(
     conn: &rusqlite::Connection,
     rt: &EpgRuntime,
@@ -99,12 +100,17 @@ fn resolve_many(
     let dir = resolve::directory(conn, rt)?;
     let mut source_shifts = HashMap::new();
     refs.iter()
-        .map(|r| match resolve::resolve(conn, &dir, r)?.epg_channel_id {
-            Some(id) => {
-                let source = query::cached_source_shift(conn, &mut source_shifts, &r.source_id)?;
-                Ok(Some((id, query::item_shift_with(conn, r, source)?)))
+        .map(|r| {
+            let item = resolve::resolve_item(conn, &dir, r)?;
+            let shift = item.shift();
+            match item.resolution.epg_channel_id {
+                Some(id) => {
+                    let source =
+                        query::cached_source_shift(conn, &mut source_shifts, &r.source_id)?;
+                    Ok(Some((id, shift + source)))
+                }
+                None => Ok(None),
             }
-            None => Ok(None),
         })
         .collect()
 }
@@ -114,7 +120,7 @@ fn resolve_many(
 /// portal guide move by it ([`shifted`]) like the XMLTV reads do.
 pub async fn channel_shift(state: &AppState, r: &ItemRef) -> CoreResult<i64> {
     let r = r.clone();
-    state.db_call(move |c| query::item_shift(c, &r)).await
+    state.db_read_call(move |c| query::item_shift(c, &r)).await
 }
 
 /// `p` moved by `shift` seconds ([`channel_shift`]). A provider guide is
@@ -176,7 +182,7 @@ pub async fn now_next_opts(
     let rt = runtime(state);
     let now = chrono::Utc::now().timestamp() - i64::from(offset_minutes) * 60;
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let ids = resolve_many(c, &rt, &refs)?;
             let mut cache: HashMap<(String, i64), EpgNowNext> = HashMap::new();
             let mut out = HashMap::with_capacity(refs.len());
@@ -209,7 +215,7 @@ pub async fn programs(
     let (f, t) = query::parse_range(from, to)?;
     let rt = runtime(state);
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let id = resolve_many(c, &rt, std::slice::from_ref(&r))?
                 .pop()
                 .flatten();
@@ -245,7 +251,7 @@ pub async fn grid_opts(
     let (f, t) = query::parse_range(from, to)?;
     let rt = runtime(state);
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let ids = resolve_many(c, &rt, &refs)?;
             let mut cache: HashMap<(String, i64), Vec<EpgProgram>> = HashMap::new();
             let mut out = HashMap::with_capacity(refs.len());
@@ -278,7 +284,7 @@ pub async fn channels_search(
         .unwrap_or(SEARCH_DEFAULT_LIMIT)
         .clamp(1, SEARCH_MAX_LIMIT);
     state
-        .db_call(move |c| query::channels_search(c, &query, limit))
+        .db_read_call(move |c| query::channels_search(c, &query, limit))
         .await
 }
 
@@ -370,11 +376,13 @@ pub async fn set_channel_shift(
 pub async fn resolve_ref(state: &AppState, r: ItemRef) -> CoreResult<Resolution> {
     let rt = runtime(state);
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let dir = resolve::directory(c, &rt)?;
-            let mut res = resolve::resolve(c, &dir, &r)?;
-            res.shift_minutes = query::channel_shift_minutes(c, &r)?;
-            Ok(res)
+            let item = resolve::resolve_item(c, &dir, &r)?;
+            Ok(Resolution {
+                shift_minutes: item.channel_shift_minutes,
+                ..item.resolution
+            })
         })
         .await
 }
@@ -394,7 +402,7 @@ pub async fn set_enabled(state: Arc<AppState>, url: String, enabled: bool) -> Co
                 .is_none_or(|r| r.program_count == 0 && r.status != "fetching"))
         })
         .await?;
-    runtime(&state).bump();
+    ingest::bump_and_prewarm(&state, &runtime(&state)).await;
     state.emit("epg.changed", serde_json::json!({}));
     if enabled && needs_data {
         ingest::spawn_refresh(state, &url);

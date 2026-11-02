@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const menu = vi.hoisted(() => ({ justClosed: false }));
 
 vi.mock('@/features/player', () => ({ usePlayerStore: () => undefined }));
-vi.mock('@/features/player/components/Controls', () => ({
+vi.mock('@/features/player/menuClose', () => ({
   playerMenuJustClosed: () => menu.justClosed,
 }));
 

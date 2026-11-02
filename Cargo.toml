@@ -48,9 +48,15 @@ percent-encoding = "2"
 
 # Serialization / parsing
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# raw_value: RPC replies leave the core as JSON text (RpcRouter::dispatch_raw)
+# that both hosts send without building or serializing a Value again.
+serde_json = { version = "1", features = ["raw_value"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
-flate2 = "1"
+# zlib-rs takes precedence over the default miniz_oxide backend for every flate2
+# user in the graph (.xml.gz guides, gzip playlists, PNG variants, server gzip);
+# its inflate is about 1.3-2x faster. Keep the default features: their
+# runtime_detection turns on zlib-rs/std, which enables the SSE4.2/AVX2 paths.
+flate2 = { version = "1", features = ["zlib-rs"] }
 memchr = "2"
 regex = "1"
 base64 = "0.22"
@@ -95,9 +101,21 @@ strip = true
 
 # The bundled SQLite is C code built by the cc crate, which follows the
 # profile's opt-level: "s" compiles it for size (/O1 with MSVC). Every catalog
-# query runs in it, so it gets full optimization. The rest of the binary stays
-# at "s" until opt-level 3 is measured against the installer size.
+# query runs in it, so it gets full optimization. The rest of the desktop
+# binary stays at "s" until opt-level 2 and 3 are measured against the
+# installer size (per-crate overrides recover little under fat LTO: the
+# merged post-link pass runs at the binary's level).
 [profile.release.package.libsqlite3-sys]
+opt-level = 3
+
+# The server image (Dockerfile): release at opt-level 3 for the whole binary,
+# LTO post-link pass included. Nothing there needs a small binary, and "s"
+# turns off loop and SLP vectorization. Measured without LTO on one Xeon
+# core, at "s" against 3: serializing a 120-row Channel page 79-92 against
+# 34 us, brotli quality 4 of a 165 KB reply 2.7 against 1.6 ms, quick-xml
+# tokenizing 590 against 775 MB/s (HO-6, R7-1).
+[profile.release-server]
+inherits = "release"
 opt-level = 3
 
 # Debug builds keep line tables for our crates (readable backtraces) and no

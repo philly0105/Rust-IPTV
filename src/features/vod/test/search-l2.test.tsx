@@ -398,4 +398,47 @@ describe('guide programmes in search (F-SEARCH-PROGRAMMES)', () => {
     expect(await screen.findByTestId('search-programmes')).toBeTruthy();
     expect(screen.queryByText(/No results/)).toBeNull();
   });
+
+  // F4-2: useQueries keeps nothing across keys, so the hits dropped to none while a new query's
+  // guide searches ran, and Top results gave way to the movie grid until they answered.
+  const programmeTitles = () => within(screen.getByTestId('search-programmes')).getAllByTestId('search-programme').map((r) => r.textContent ?? '');
+  const searchedFor = (q: string) => waitFor(() => expect(callsOf('epg.search').some((c) => (c.args as { query: string }).query === q)).toBe(true));
+  const onlyAlpha = (answer: () => unknown) => (a: unknown) => ((a as { query: string }).query === 'alpha' ? answer() : never());
+
+  it('keeps Top results and its programmes while the next query’s guide searches run', async () => {
+    const answer = rpcMock.handlers['epg.search']!;
+    rpcMock.handlers['epg.search'] = (a) => onlyAlpha(() => answer(a))(a);
+    renderApp('/search?q=alpha');
+    await screen.findByTestId('search-top');
+    expect(programmeTitles()).toHaveLength(2);
+    fireEvent.change(field(), { target: { value: 'alpha m' } });
+    await searchedFor('alpha m');
+    expect(screen.getByRole('tab', { name: /Top results/ })).toBeTruthy();
+    expect(screen.getByTestId('search-top')).toBeTruthy();
+    expect(screen.queryByTestId('vod-search-movies')).toBeNull();
+    // None of the kept hits match "alpha m": they all stay rather than leave the section empty.
+    expect(programmeTitles()).toHaveLength(2);
+  });
+
+  it('narrows the kept programmes to a longer query until its answer arrives', async () => {
+    const answer = rpcMock.handlers['epg.search']!;
+    rpcMock.handlers['epg.search'] = (a) => onlyAlpha(() => answer(a))(a);
+    renderApp('/search?q=alpha');
+    await screen.findByTestId('search-top');
+    fireEvent.change(field(), { target: { value: 'alpha h' } });
+    await searchedFor('alpha h');
+    expect(programmeTitles()).toEqual([expect.stringContaining('Alpha Hour')]);
+  });
+
+  it('with programmes alone, a new query never flashes "No results"', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    const answer = rpcMock.handlers['epg.search']!;
+    rpcMock.handlers['epg.search'] = (a) => onlyAlpha(() => answer(a))(a);
+    renderApp('/search?q=alpha');
+    await screen.findByTestId('search-programmes');
+    fireEvent.change(field(), { target: { value: 'alphas' } });
+    await searchedFor('alphas');
+    expect(screen.queryByText(/No results/)).toBeNull();
+    expect(programmeTitles()).toHaveLength(2);
+  });
 });

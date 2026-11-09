@@ -499,6 +499,9 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks, wa
  */
 let hlsBandwidth: number | undefined;
 
+/** How long a destroyed hls.js engine keeps its instance (and with it the shared worker) for the next one. */
+export const HLS_WORKER_LINGER_MS = 3000;
+
 /** Test hook: forget the carried bandwidth estimate. */
 export function resetHlsBandwidth(): void {
   hlsBandwidth = undefined;
@@ -568,6 +571,8 @@ async function hlsEngine(
   let mediaRecoveries = 0;
   let destroyed = false;
   const emit = (): void => {
+    // A destroyed engine's instance lingers (HLS_WORKER_LINGER_MS): what it reports is no longer about the element.
+    if (destroyed) return;
     const levels = hls.levels ?? [];
     const labels = qualityLabels(levels.map((l) => ({ height: l.height, width: l.width, bitrate: l.bitrate })));
     const qualities: TrackOption[] =
@@ -710,8 +715,14 @@ async function hlsEngine(
       // Tiles share the link four ways: only the main player's estimate is carried.
       const bw = hls.bandwidthEstimate;
       if (!tile && Number.isFinite(bw) && bw > 0) hlsBandwidth = bw;
-      hls.destroy();
+      // hls.js terminates its shared transmuxing worker with the last instance that uses it, and
+      // a zap destroys the old engine before the next one starts: the next stream then waits for
+      // a new worker to load and boot. The instance stops loading and lets go of the element now,
+      // and is destroyed once the next engine has had time to take the worker over.
+      hls.stopLoad();
+      hls.detachMedia();
       el.removeAttribute('src');
+      setTimeout(() => hls.destroy(), HLS_WORKER_LINGER_MS);
     },
   };
 }

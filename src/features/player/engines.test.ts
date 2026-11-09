@@ -86,10 +86,22 @@ class FakeHls {
   emit(evt: string, data: unknown): void {
     for (const l of this.listeners.get(evt) ?? []) l(evt, data);
   }
+  loading = true;
+  media: HTMLMediaElement | null = null;
   loadSource(): void {}
-  attachMedia(): void {}
+  attachMedia(el: HTMLMediaElement): void {
+    this.media = el;
+  }
+  stopLoad(): void {
+    this.loading = false;
+  }
+  detachMedia(): void {
+    this.media = null;
+  }
   destroy(): void {
     this.destroyed = true;
+    this.loading = false;
+    this.media = null;
   }
 }
 vi.mock('hls.js', () => ({ default: FakeHls }));
@@ -134,7 +146,7 @@ vi.mock('shaka-player', () => ({
 }));
 
 const engines = await import('./engines');
-const { createEngine, looksLikeMpegTs, worthSniffingAsMpegTs, tsRestartDelay, TS_MAX_RESTARTS, TS_CLEANUP_CHECK_MS } = engines;
+const { createEngine, looksLikeMpegTs, worthSniffingAsMpegTs, tsRestartDelay, TS_MAX_RESTARTS, TS_CLEANUP_CHECK_MS, HLS_WORKER_LINGER_MS } = engines;
 
 function src(url: string, extra: Partial<PlayerSource> = {}): PlayerSource {
   return { url, kind: 'direct', title: 't', isLive: true, isRadio: false, ...extra };
@@ -313,6 +325,41 @@ describe('hls.js setup', () => {
     const config = FakeHls.created[0]!.config;
     expect(config['enableWorker']).toBe(true);
     expect(config['workerPath']).toEqual(expect.stringContaining('hls.worker'));
+  });
+
+  it('lets go of the stream and the element at once, and keeps the instance for the next engine to take its worker over', async () => {
+    vi.useFakeTimers();
+    try {
+      const el = video();
+      const engine = await createEngine(el, hls(), 'http://h/live/1.m3u8', cb(), { captions: false });
+      const first = FakeHls.created[0]!;
+      expect(first.media).toBe(el);
+      el.setAttribute('src', 'blob:mse');
+      engine.destroy();
+      expect(first.loading).toBe(false);
+      expect(first.media).toBeNull();
+      expect(el.hasAttribute('src')).toBe(false);
+      // Still alive while the next engine starts, so hls.js does not terminate the shared worker.
+      await createEngine(el, hls(), 'http://h/live/2.m3u8', cb(), { captions: false });
+      expect(first.destroyed).toBe(false);
+      vi.advanceTimersByTime(HLS_WORKER_LINGER_MS);
+      expect(first.destroyed).toBe(true);
+      expect(FakeHls.created[1]!.destroyed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports nothing from an engine once destroyed', async () => {
+    const onError = vi.fn();
+    const onTracks = vi.fn();
+    const engine = await createEngine(video(), hls(), 'http://h/live/1.m3u8', { onError, onTracks }, { captions: false });
+    engine.destroy();
+    onTracks.mockClear();
+    FakeHls.created[0]!.emit('hlsError', { fatal: true, type: 'networkError', details: 'fragLoadError' });
+    FakeHls.created[0]!.emit('levelSwitched', {});
+    expect(onError).not.toHaveBeenCalled();
+    expect(onTracks).not.toHaveBeenCalled();
   });
 
   it("starts the next stream from the main player's last bandwidth estimate (PB-6)", async () => {

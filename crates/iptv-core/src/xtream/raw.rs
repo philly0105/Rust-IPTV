@@ -9,6 +9,7 @@
 
 use serde::de::{self, DeserializeOwned, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::Value;
 use std::fmt;
 use std::marker::PhantomData;
@@ -17,59 +18,244 @@ use std::marker::PhantomData;
 // Scalar helpers
 // ---------------------------------------------------------------------------
 
+/// One JSON value as the lenient helpers see it: a scalar, or `Compound`
+/// for an array or object (whose contents are skipped, never built).
+///
+/// The `de_*` helpers read fields through this instead of a
+/// [`serde_json::Value`]: a 170k-title list used to build a `Value` per
+/// field (plus one per element, see [`LenientVec`]) only to throw it away.
+/// `value_to_*` map a `Value` onto the same type, so both paths share one set
+/// of rules.
+#[derive(Debug, Clone, PartialEq)]
+enum Scalar<'a> {
+    Null,
+    Bool(bool),
+    I64(i64),
+    U64(u64),
+    F64(f64),
+    Str(std::borrow::Cow<'a, str>),
+    Compound,
+}
+
+impl<'a> Scalar<'a> {
+    fn of(v: &'a Value) -> Self {
+        match v {
+            Value::Null => Scalar::Null,
+            Value::Bool(b) => Scalar::Bool(*b),
+            Value::Number(n) => {
+                if let Some(u) = n.as_u64() {
+                    Scalar::U64(u)
+                } else if let Some(i) = n.as_i64() {
+                    Scalar::I64(i)
+                } else {
+                    Scalar::F64(n.as_f64().unwrap_or(f64::NAN))
+                }
+            }
+            Value::String(s) => Scalar::Str(s.as_str().into()),
+            Value::Array(_) | Value::Object(_) => Scalar::Compound,
+        }
+    }
+
+    /// The number as serde_json's `Number` prints and converts it.
+    fn number(&self) -> Option<serde_json::Number> {
+        match self {
+            Scalar::I64(i) => Some((*i).into()),
+            Scalar::U64(u) => Some((*u).into()),
+            Scalar::F64(f) => serde_json::Number::from_f64(*f),
+            _ => None,
+        }
+    }
+
+    fn to_string_opt(&self) -> Option<String> {
+        match self {
+            Scalar::Str(s) => {
+                let t = s.trim();
+                (!t.is_empty()).then(|| t.to_string())
+            }
+            Scalar::Bool(b) => Some(if *b { "1" } else { "0" }.to_string()),
+            Scalar::I64(_) | Scalar::U64(_) | Scalar::F64(_) => {
+                self.number().map(|n| n.to_string())
+            }
+            Scalar::Null | Scalar::Compound => None,
+        }
+    }
+
+    fn to_f64(&self) -> Option<f64> {
+        let f = match self {
+            Scalar::I64(_) | Scalar::U64(_) | Scalar::F64(_) => self.number()?.as_f64()?,
+            Scalar::Str(s) => s.trim().replace(',', ".").parse::<f64>().ok()?,
+            Scalar::Bool(b) => f64::from(u8::from(*b)),
+            Scalar::Null | Scalar::Compound => return None,
+        };
+        f.is_finite().then_some(f)
+    }
+
+    fn to_i64(&self) -> Option<i64> {
+        match self {
+            Scalar::I64(_) | Scalar::U64(_) | Scalar::F64(_) => {
+                let n = self.number()?;
+                n.as_i64().or_else(|| n.as_f64().map(|f| f as i64))
+            }
+            Scalar::Str(s) => {
+                let t = s.trim();
+                t.parse::<i64>().ok().or_else(|| {
+                    t.parse::<f64>()
+                        .ok()
+                        .filter(|f| f.is_finite())
+                        .map(|f| f as i64)
+                })
+            }
+            Scalar::Bool(b) => Some(i64::from(*b)),
+            Scalar::Null | Scalar::Compound => None,
+        }
+    }
+
+    fn to_bool(&self) -> Option<bool> {
+        match self {
+            Scalar::Bool(b) => Some(*b),
+            Scalar::Null => None,
+            other => match other.to_string_opt()?.to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" => Some(true),
+                "0" | "false" | "no" => Some(false),
+                s => s.parse::<f64>().ok().map(|f| f != 0.0),
+            },
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Scalar<'de> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(ScalarVisitor)
+    }
+}
+
+struct ScalarVisitor;
+
+impl<'de> Visitor<'de> for ScalarVisitor {
+    type Value = Scalar<'de>;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("any JSON value")
+    }
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+        Ok(Scalar::Bool(v))
+    }
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+        // serde_json keeps a non-negative integer as unsigned.
+        Ok(u64::try_from(v).map_or(Scalar::I64(v), Scalar::U64))
+    }
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+        Ok(Scalar::U64(v))
+    }
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+        Ok(Scalar::F64(v))
+    }
+    fn visit_borrowed_str<E: de::Error>(self, v: &'de str) -> Result<Self::Value, E> {
+        Ok(Scalar::Str(v.into()))
+    }
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+        Ok(Scalar::Str(v.to_owned().into()))
+    }
+    fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+        Ok(Scalar::Str(v.into()))
+    }
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Scalar::Null)
+    }
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Scalar::Null)
+    }
+    fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        d.deserialize_any(self)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        while seq.next_element::<de::IgnoredAny>()?.is_some() {}
+        Ok(Scalar::Compound)
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        while map
+            .next_entry::<de::IgnoredAny, de::IgnoredAny>()?
+            .is_some()
+        {}
+        Ok(Scalar::Compound)
+    }
+}
+
+/// The strings of a string, a number, or an array of either (nested arrays
+/// and objects inside it are skipped).
+struct Strings(Vec<String>);
+
+impl<'de> Deserialize<'de> for Strings {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Strings;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("any JSON value")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Strings, A::Error> {
+                let mut out = Vec::new();
+                while let Some(s) = seq.next_element::<Scalar<'de>>()? {
+                    out.extend(s.to_string_opt());
+                }
+                Ok(Strings(out))
+            }
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Strings, E> {
+                Ok(Strings::one(ScalarVisitor.visit_bool(v)?))
+            }
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Strings, E> {
+                Ok(Strings::one(ScalarVisitor.visit_i64(v)?))
+            }
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Strings, E> {
+                Ok(Strings::one(ScalarVisitor.visit_u64(v)?))
+            }
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Strings, E> {
+                Ok(Strings::one(ScalarVisitor.visit_f64(v)?))
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Strings, E> {
+                Ok(Strings::one(Scalar::Str(v.into())))
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Strings, E> {
+                Ok(Strings(Vec::new()))
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Strings, E> {
+                Ok(Strings(Vec::new()))
+            }
+            fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Strings, D::Error> {
+                d.deserialize_any(self)
+            }
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Strings, A::Error> {
+                ScalarVisitor.visit_map(map)?;
+                Ok(Strings(Vec::new()))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+impl Strings {
+    fn one(s: Scalar<'_>) -> Self {
+        Strings(s.to_string_opt().into_iter().collect())
+    }
+}
+
 /// Text from a string, number or bool; `None` for null, empty, objects, arrays.
 pub fn value_to_string(v: &Value) -> Option<String> {
-    match v {
-        Value::String(s) => {
-            let t = s.trim();
-            (!t.is_empty()).then(|| t.to_string())
-        }
-        Value::Number(n) => Some(n.to_string()),
-        Value::Bool(b) => Some(if *b { "1" } else { "0" }.to_string()),
-        _ => None,
-    }
+    Scalar::of(v).to_string_opt()
 }
 
 /// Float from a number or numeric string (`"7.5"`, `"7,5"`); `None` for `"N/A"`, NaN, etc.
 pub fn value_to_f64(v: &Value) -> Option<f64> {
-    let f = match v {
-        Value::Number(n) => n.as_f64()?,
-        Value::String(s) => s.trim().replace(',', ".").parse::<f64>().ok()?,
-        Value::Bool(b) => f64::from(u8::from(*b)),
-        _ => return None,
-    };
-    f.is_finite().then_some(f)
+    Scalar::of(v).to_f64()
 }
 
 /// Integer from a number or numeric string (`"12"`, `"12.0"`).
 pub fn value_to_i64(v: &Value) -> Option<i64> {
-    match v {
-        Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
-        Value::String(s) => {
-            let t = s.trim();
-            t.parse::<i64>().ok().or_else(|| {
-                t.parse::<f64>()
-                    .ok()
-                    .filter(|f| f.is_finite())
-                    .map(|f| f as i64)
-            })
-        }
-        Value::Bool(b) => Some(i64::from(*b)),
-        _ => None,
-    }
+    Scalar::of(v).to_i64()
 }
 
 /// Truthiness of Xtream flags (`1`, `"1"`, `true`, `"true"`).
 pub fn value_to_bool(v: &Value) -> Option<bool> {
-    match v {
-        Value::Bool(b) => Some(*b),
-        Value::Null => None,
-        other => match value_to_string(other)?.to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" => Some(true),
-            "0" | "false" | "no" => Some(false),
-            s => s.parse::<f64>().ok().map(|f| f != 0.0),
-        },
-    }
+    Scalar::of(v).to_bool()
 }
 
 /// Strings from a string, a number, or an array of either.
@@ -81,23 +267,23 @@ pub fn value_to_strings(v: &Value) -> Vec<String> {
 }
 
 pub fn de_opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
-    Ok(value_to_string(&Value::deserialize(d)?))
+    Ok(Scalar::deserialize(d)?.to_string_opt())
 }
 
 pub fn de_opt_i64<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
-    Ok(value_to_i64(&Value::deserialize(d)?))
+    Ok(Scalar::deserialize(d)?.to_i64())
 }
 
 pub fn de_opt_f64<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    Ok(value_to_f64(&Value::deserialize(d)?))
+    Ok(Scalar::deserialize(d)?.to_f64())
 }
 
 pub fn de_opt_bool<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
-    Ok(value_to_bool(&Value::deserialize(d)?))
+    Ok(Scalar::deserialize(d)?.to_bool())
 }
 
 pub fn de_strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
-    Ok(value_to_strings(&Value::deserialize(d)?))
+    Ok(Strings::deserialize(d)?.0)
 }
 
 /// An object, or `None` for `[]`, `null`, strings and other junk.
@@ -133,6 +319,26 @@ impl<T> Default for LenientVec<T> {
     }
 }
 
+impl<T: DeserializeOwned> LenientVec<T> {
+    /// Adds one element of the list, or counts it as skipped when it does
+    /// not read as a `T`.
+    ///
+    /// The element's text is decoded straight into `T` (no `Value` tree:
+    /// about 20 allocations per title fewer). A JSON object that repeats a
+    /// key fails that way, while a `Value` keeps the last copy of the key, so
+    /// only then the element is read through a `Value` as before: both paths
+    /// give the same items.
+    fn push(&mut self, raw: &RawValue) {
+        let parsed = serde_json::from_str::<T>(raw.get()).or_else(|_| {
+            serde_json::from_str::<Value>(raw.get()).and_then(serde_json::from_value::<T>)
+        });
+        match parsed {
+            Ok(t) => self.items.push(t),
+            Err(_) => self.skipped += 1,
+        }
+    }
+}
+
 impl<'de, T: DeserializeOwned> Deserialize<'de> for LenientVec<T> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         struct V<T>(PhantomData<T>);
@@ -146,21 +352,15 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for LenientVec<T> {
                     items: Vec::with_capacity(seq.size_hint().unwrap_or(0).min(1 << 16)),
                     skipped: 0,
                 };
-                while let Some(v) = seq.next_element::<Value>()? {
-                    match serde_json::from_value::<T>(v) {
-                        Ok(t) => out.items.push(t),
-                        Err(_) => out.skipped += 1,
-                    }
+                while let Some(raw) = seq.next_element::<Box<RawValue>>()? {
+                    out.push(&raw);
                 }
                 Ok(out)
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut out = LenientVec::default();
-                while let Some((_k, v)) = map.next_entry::<de::IgnoredAny, Value>()? {
-                    match serde_json::from_value::<T>(v) {
-                        Ok(t) => out.items.push(t),
-                        Err(_) => out.skipped += 1,
-                    }
+                while let Some((_k, raw)) = map.next_entry::<de::IgnoredAny, Box<RawValue>>()? {
+                    out.push(&raw);
                 }
                 Ok(out)
             }
@@ -774,5 +974,125 @@ mod tests {
             serde_json::from_value(json!({"stop_timestamp": "", "end_timestamp": "1700000000"}))
                 .unwrap();
         assert_eq!(l.stop(), Some(1_700_000_000));
+    }
+
+    /// Wire values the panels send, scalar and not.
+    const ODD_VALUES: &[&str] = &[
+        "null",
+        "true",
+        "false",
+        "0",
+        "1",
+        "-7",
+        "18446744073709551615",
+        "9223372036854775808",
+        "-9223372036854775808",
+        "7.5",
+        "7.0",
+        "1e3",
+        "-0.0",
+        "1.7976931348623157e308",
+        "123456789012345678901234567890",
+        r#""""#,
+        r#""  ""#,
+        r#"" 42 ""#,
+        r#""7,5""#,
+        r#""N/A""#,
+        r#""12.9""#,
+        r#""1e400""#,
+        r#""true""#,
+        r#""Yes""#,
+        r#""no""#,
+        r#""0.0""#,
+        r#""café \"x\"""#,
+        "[]",
+        r#"["a", 2, null, [1], {"k": 1}, " b ", 1.5, true]"#,
+        "{}",
+        r#"{"a": [1, {"b": 2}]}"#,
+    ];
+
+    #[test]
+    fn streamed_fields_read_like_values() {
+        // The field helpers read the wire directly; `value_to_*` read a
+        // `Value`. Every value must come out the same both ways.
+        for text in ODD_VALUES {
+            let value: Value = serde_json::from_str(text).unwrap();
+            let streamed: Scalar<'_> = serde_json::from_str(text).unwrap();
+            let owned = match &streamed {
+                Scalar::Str(s) => Scalar::Str(s.to_string().into()),
+                other => other.clone(),
+            };
+            let of_value = Scalar::of(&value);
+            assert_eq!(owned.to_string_opt(), of_value.to_string_opt(), "{text}");
+            assert_eq!(owned.to_i64(), of_value.to_i64(), "{text}");
+            assert_eq!(
+                owned.to_f64().map(f64::to_bits),
+                of_value.to_f64().map(f64::to_bits),
+                "{text}"
+            );
+            assert_eq!(owned.to_bool(), of_value.to_bool(), "{text}");
+            let Strings(strings) = serde_json::from_str(text).unwrap();
+            assert_eq!(strings, value_to_strings(&value), "{text}");
+            // Through a `Value` (de_opt_object, tests) as well.
+            let Strings(from_value) = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(from_value, strings, "{text}");
+        }
+    }
+
+    #[test]
+    fn list_elements_read_like_values() {
+        // Each element as the old decoder read it: a `Value`, then the struct.
+        fn via_value(text: &str) -> (Vec<String>, usize) {
+            let mut items = Vec::new();
+            let mut skipped = 0;
+            for v in serde_json::from_str::<Vec<Value>>(text).unwrap() {
+                match serde_json::from_value::<RawVod>(v) {
+                    Ok(t) => items.push(format!("{t:?}")),
+                    Err(_) => skipped += 1,
+                }
+            }
+            (items, skipped)
+        }
+        let mut list = vec![
+            r#""garbage""#.to_string(),
+            "42".to_string(),
+            "null".to_string(),
+            "[1, 2]".to_string(),
+            // A repeated key: a `Value` keeps the last one.
+            r#"{"stream_id": 1, "name": "First", "name": "Second", "rating": "8"}"#.to_string(),
+            r#"{"stream_id": "2", "category_ids": [3, "4"], "tmdb": 0, "tmdb_id": "77", "unknown": {"deep": [1]}}"#.to_string(),
+        ];
+        for v in ODD_VALUES {
+            list.push(format!(
+                r#"{{"stream_id": {v}, "name": {v}, "rating": {v}, "year": {v}, "is_adult": {v}, "category_ids": {v}}}"#
+            ));
+        }
+        let text = format!("[{}]", list.join(","));
+        let (want, want_skipped) = via_value(&text);
+        let got: LenientVec<RawVod> = decode_list(&text);
+        let got_items: Vec<String> = got.items.iter().map(|t| format!("{t:?}")).collect();
+        assert_eq!(got_items, want);
+        assert_eq!(got.skipped, want_skipped);
+        assert!(got_items.iter().any(|t| t.contains("\"Second\"")));
+        // Objects keyed by index too, and through a `Value`.
+        let keyed = format!(
+            "{{{}}}",
+            list.iter()
+                .enumerate()
+                .map(|(i, e)| format!("\"{i}\": {e}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let got: LenientVec<RawVod> = decode_list(&keyed);
+        assert_eq!(got.items.len(), want.len());
+        assert_eq!(got.skipped, want_skipped);
+        let from_value: LenientVec<RawVod> =
+            serde_json::from_value(serde_json::from_str::<Value>(&text).unwrap()).unwrap();
+        let from_value: Vec<String> = from_value.items.iter().map(|t| format!("{t:?}")).collect();
+        assert_eq!(from_value, want);
+    }
+
+    fn decode_list<T: DeserializeOwned>(text: &str) -> LenientVec<T> {
+        crate::xtream::client::decode(text.as_bytes(), "test").unwrap()
     }
 }

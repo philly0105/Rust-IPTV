@@ -26,7 +26,7 @@ async-trait = { workspace = true }
 url = { workspace = true }
 percent-encoding = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 quick-xml = { workspace = true }
 flate2 = { workspace = true }
 memchr = { workspace = true }

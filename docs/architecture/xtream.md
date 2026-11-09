@@ -69,7 +69,9 @@ Mapping notes: the category is `category_id`, else the first of `category_ids`, 
 
 ## Lenient JSON
 
-`raw.rs` accepts numbers as strings and strings as numbers, booleans as `0`/`1`/`"true"`, `null` or missing for any field, `category_ids` as an array or a scalar, `backdrop_path` as a string or an array, objects where panels send `[]` (`info: []`), and lists sent as objects keyed by index. A bad element in a list is skipped and counted (`LenientVec`) instead of failing the whole list. Series `episodes` may be an object keyed by season, an array of arrays, or null. An HTML body (a login or error page) gives an `Invalid` error asking the user to check the server URL.
+`raw.rs` accepts numbers as strings and strings as numbers, booleans as `0`/`1`/`"true"`, `null` or missing for any field, `category_ids` as an array or a scalar, `backdrop_path` as a string or an array, objects where panels send `[]` (`info: []`), and lists sent as objects keyed by index. A bad element in a list is skipped and counted (`LenientVec`) instead of failing the whole list.
+
+Lists decode without a `serde_json::Value` per element or per field (IN-7): `LenientVec` takes each element's text (`RawValue`) and decodes it straight into the struct, and the field helpers read the wire value through a small `Scalar` visitor that skips arrays and objects instead of building them. An element whose object repeats a key fails that way (serde rejects a duplicate field), so only such an element is read through a `Value` as before, where the last copy of the key wins; `value_to_*` and the helpers share one set of rules (`Scalar`), and the unit tests `streamed_fields_read_like_values` and `list_elements_read_like_values` check both paths give the same items. On a generated 120k-title `get_vod_streams` answer (62 MB) decoding took 436-467 ms of CPU before and 224-233 ms after; 60k live channels 145-150 ms before and 82 ms after (release build, thread CPU time, three runs each). Series `episodes` may be an object keyed by season, an array of arrays, or null. An HTML body (a login or error page) gives an `Invalid` error asking the user to check the server URL.
 
 ## Playback URLs
 

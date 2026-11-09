@@ -1,5 +1,5 @@
 import { EllipsisVertical, EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -8,6 +8,7 @@ import { useRouteIntent } from '@/shell/routeIntent';
 
 import { Button, cn, ErrorState, IconButton, SearchInput, Select, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+import { useStable } from '../guide/useStable';
 import { useLongPress } from '../hooks/useLongPress';
 import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
 import { documentIsRtl } from '../lib/rtl';
@@ -220,6 +221,13 @@ export function CategorySidebar(props: CategorySidebarProps) {
   // Read once for every row (P2-LIVE-3): a `useTranslation` per row subscribed each to i18next.
   const lockedLabel = t('locked');
   const menuLabel = t('groupMenu');
+  // One handler for every row, so the memoized rows re-render only when their own props change: new
+  // closures per row re-rendered every group on screen (with its link and route intent) whenever
+  // the sidebar did, as on each group switch.
+  const groupMenu = useStable((pos: { x: number; y: number }, c: Category, index: number) => {
+    setCursor(index);
+    props.onGroupMenu?.(pos, c);
+  });
   const allHidden = !props.isLoading && !props.error && (props.categories?.length ?? 0) === 0 && props.hiddenCount > 0;
   const allActive = !props.activeId;
 
@@ -358,15 +366,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
                     lockedLabel={lockedLabel}
                     menuLabel={menuLabel}
                     onNavigate={props.onNavigate}
-                    onFocus={() => setCursor(v.index)}
-                    onMenu={
-                      props.onGroupMenu
-                        ? (pos) => {
-                            setCursor(v.index);
-                            props.onGroupMenu?.(pos, c);
-                          }
-                        : undefined
-                    }
+                    onFocus={setCursor}
+                    onMenu={props.onGroupMenu ? groupMenu : undefined}
                   />
                 </div>
               );
@@ -406,7 +407,7 @@ const GROUP_MENU_ICON = <EllipsisVertical size={16} />;
  * a long press, so "Add all to list…" and "Open in TV guide" were out of reach on an iPhone or
  * iPad. The button, not the link, says it opens a menu: the link navigates.
  */
-function GroupLink({
+const GroupLink = memo(function GroupLink({
   category: c,
   index,
   to,
@@ -431,10 +432,11 @@ function GroupLink({
   lockedLabel: string;
   menuLabel: string;
   onNavigate?(): void;
-  onFocus(): void;
-  onMenu?(pos: { x: number; y: number }): void;
+  /** Told the row's index (the list's roving cursor). */
+  onFocus(index: number): void;
+  onMenu?(pos: { x: number; y: number }, category: Category, index: number): void;
 }) {
-  const longPress = useLongPress((x, y) => onMenu?.({ x, y }));
+  const longPress = useLongPress((x, y) => onMenu?.({ x, y }, c, index));
   // A rest on the link asks for the group's first page with its now/next and favourite flags, so
   // a click shows complete rows at once. Rows that scroll under a still pointer do not count.
   const intent = useRouteIntent(to);
@@ -446,7 +448,7 @@ function GroupLink({
         to={to}
         onClick={onNavigate}
         onFocus={(e) => {
-          onFocus();
+          onFocus(index);
           intent.onFocus(e);
         }}
         data-cat-index={index}
@@ -456,7 +458,7 @@ function GroupLink({
           onMenu
             ? (e) => {
                 e.preventDefault();
-                onMenu({ x: e.clientX, y: e.clientY });
+                onMenu({ x: e.clientX, y: e.clientY }, c, index);
               }
             : undefined
         }
@@ -479,7 +481,7 @@ function GroupLink({
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             // Under the button from its inline start, as a channel row's ⋮ opens.
-            onMenu({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 });
+            onMenu({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 }, c, index);
           }}
           // Touch only, as tall as the row (a mouse has the right click). 44 px wide; the row's own
           // height, so it never reaches into the next row.
@@ -489,4 +491,4 @@ function GroupLink({
       ) : null}
     </>
   );
-}
+});

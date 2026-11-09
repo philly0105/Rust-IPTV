@@ -43,8 +43,9 @@ import { playCatchup } from '../lib/playback';
 import { markFromProvider } from '../lib/shortEpg';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 // recording:
-import { RibbonActions, ScheduleMark } from '@/features/recording';
+import { RibbonActions, ScheduleMark, ScheduleMarkView, useScheduleIndex, type ScheduleIndex } from '@/features/recording';
 import { listSeparator } from '@/lib/intl';
+import { useStable } from '../guide/useStable';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 import { UpNext } from './UpNext';
 
@@ -190,26 +191,25 @@ export function EpgRibbon(props: EpgRibbonProps) {
     }
   };
 
-  const activate = useCallback(
-    async (p: EpgProgram) => {
-      if (!channel) return;
-      const when = programWhen(p, now);
-      if (when === 'now' && !props.watchingLive) {
-        props.onPlayLive(channel);
-        return;
+  // Stable (an event handler that reads the latest render): it depended on `props`, a new object
+  // on every parent render, so each Live render re-rendered every memoized timeline block.
+  const activate = useStable(async (p: EpgProgram) => {
+    if (!channel) return;
+    const when = programWhen(p, now);
+    if (when === 'now' && !props.watchingLive) {
+      props.onPlayLive(channel);
+      return;
+    }
+    if (when !== 'future' && canCatchUp(p, channel, sourceKind, now) && (when === 'past' || props.watchingLive)) {
+      try {
+        await playCatchup(channel, sourceKind!, p, undefined, channelName);
+      } catch (err) {
+        toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' });
       }
-      if (when !== 'future' && canCatchUp(p, channel, sourceKind, now) && (when === 'past' || props.watchingLive)) {
-        try {
-          await playCatchup(channel, sourceKind!, p, undefined, channelName);
-        } catch (err) {
-          toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' });
-        }
-        return;
-      }
-      pick(p);
-    },
-    [channel, channelName, now, props, sourceKind, t, toast, pick],
-  );
+      return;
+    }
+    pick(p);
+  });
 
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
   // With nothing of this channel playing, the button names the channel it starts: something else
@@ -632,6 +632,9 @@ function Timeline(
   const rtl = useIsRtl();
   // `view.left` is the distance from the track's inline start (time `from`), in both directions.
   const [view, setView] = useState({ left: 0, width: 1200 });
+  // One subscription to reminders and recordings for every block, as the guide's rows have:
+  // a ScheduleMark per block added two query observers each.
+  const schedule = useScheduleIndex();
   const blocks = useMemo(() => layoutBlocks(programs, from, to, RIBBON_PX_PER_MIN, now), [programs, from, to, now]);
   const width = ((to - from) / MINUTE) * RIBBON_PX_PER_MIN;
   const nowX = ((now - from) / MINUTE) * RIBBON_PX_PER_MIN;
@@ -748,6 +751,7 @@ function Timeline(
               rtl={rtl}
               tabbable={b === tabStop}
               pinned={!!props.pinned && props.pinned.start === b.program.start && props.pinned.title === b.program.title}
+              schedule={schedule}
               onActivate={props.onActivate}
               onFocusProgram={props.onFocusProgram}
               onPreview={props.onPreview}
@@ -785,6 +789,7 @@ const TimelineBlock = memo(function TimelineBlock({
   rtl,
   tabbable,
   pinned,
+  schedule,
   onActivate,
   onFocusProgram,
   onPreview,
@@ -800,6 +805,8 @@ const TimelineBlock = memo(function TimelineBlock({
   rtl: boolean;
   tabbable: boolean;
   pinned: boolean;
+  /** The timeline's reminders and recordings (one subscription for every block). */
+  schedule: ScheduleIndex;
   onActivate(p: EpgProgram): void;
   onFocusProgram(p: EpgProgram | undefined): void;
   onPreview(p: EpgProgram | undefined): void;
@@ -870,7 +877,7 @@ const TimelineBlock = memo(function TimelineBlock({
             {p.title}
           </span>
           {/* recording: */}
-          <ScheduleMark channelRef={channel.ref} program={p} />
+          <ScheduleMarkView index={schedule} channelRef={channel.ref} program={p} />
         </span>
         {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
         <span className={`relative block truncate text-[calc(11rem/15)] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>

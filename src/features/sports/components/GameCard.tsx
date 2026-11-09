@@ -8,6 +8,7 @@
  */
 
 import { ExternalLink, Star } from 'lucide-react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Badge, LivePill, Menu, MetaLine, cn, displayChannelName, formatClock, formatDay, openExternalUrl, useMultiviewMenuItem } from '../deps';
@@ -116,7 +117,12 @@ export interface GameCardProps {
   ctx: StreamContext;
 }
 
-export function GameCard({ game, streams, streamsLoading, showStreams, showLeague, ctx }: GameCardProps) {
+/**
+ * Memoized: the page renders again for every key of the team search, every filter and every scores
+ * poll, and a card whose game (kept by the query's structural sharing), streams and context did not
+ * change keeps its render. The context changes with the page's clock, which each card reads.
+ */
+export const GameCard = memo(function GameCard({ game, streams, streamsLoading, showStreams, showLeague, ctx }: GameCardProps) {
   const { t } = useTranslation('sports');
   const title = t('matchup', { away: game.away.displayName, home: game.home.displayName });
   const networks = [...new Set(game.broadcasts.map((b) => b.name))];
@@ -229,4 +235,4 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
       ) : null}
     </li>
   );
-}
+});

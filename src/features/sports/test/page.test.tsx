@@ -59,6 +59,19 @@ vi.mock('../hooks/useGameStreams', () => ({
   },
 }));
 
+/** Calls of useFollowedTeams: the page reads it once per render, and so does every game card. */
+const followedReads = vi.hoisted(() => ({ n: 0 }));
+vi.mock('../hooks/useFollowedTeams', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../hooks/useFollowedTeams')>();
+  return {
+    ...real,
+    useFollowedTeams: () => {
+      followedReads.n++;
+      return real.useFollowedTeams();
+    },
+  };
+});
+
 const player = vi.hoisted(() => ({
   played: [] as { channel: unknown; kind: string; nowTitle?: string; displayName?: string }[],
   catchups: [] as { channel: unknown; kind: string; program: { start: string; end: string; title: string }; displayName?: string }[],
@@ -558,6 +571,20 @@ describe('sports page', () => {
     fireEvent.click(screen.getByTestId('sports-clear-filters'));
     await waitFor(() => expect(screen.getAllByTestId('sports-game')).toHaveLength(2));
     expect(useShellStore.getState().header?.search?.value).toBe('');
+  });
+
+  it('keeps the cards a search key leaves as they were without rendering them again', async () => {
+    const games = [h.liveGame('1'), h.game('2'), h.game('3'), h.game('4'), h.game('5')];
+    setDay(games);
+    await openReady();
+    await waitFor(() => expect(screen.getAllByTestId('sports-game')).toHaveLength(5));
+    const before = followedReads.n;
+    // A space filters nothing: the page renders again, with the same games, streams and context.
+    act(() => useShellStore.getState().header!.search!.onChange(' '));
+    await waitFor(() => expect(useShellStore.getState().header?.search?.value).toBe(' '));
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(5);
+    // The page's own reads only; with every card rendered again it was 5 more.
+    expect(followedReads.n - before).toBeLessThanOrEqual(2);
   });
 
   it('says the filters hide every game of the day even while Live now shows another day\'s game', async () => {

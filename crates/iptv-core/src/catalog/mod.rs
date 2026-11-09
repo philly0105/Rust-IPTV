@@ -1503,11 +1503,13 @@ pub fn query_named(
     // walked every title of the source on every page (4-5 ms on 182k movies,
     // about 20 ms with 60 categories hidden, as each title probes the hidden
     // set). Every item has a category row (`CatalogWriter::finish` adds
-    // "Uncategorized" ones), and for movies and series `item_count` is the
-    // row count (channel edits apply to live and radio). Every other shape
-    // counts its rows.
-    let summed = matches!(q.content_type, ContentType::Movie | ContentType::Series)
-        && q.category_id.is_none()
+    // "Uncategorized" ones), and `item_count` is the row count less the
+    // channels hidden by a channel edit, so it is the row count whenever
+    // `edited` is empty (always for movies and series). All channels of a
+    // live source takes it too: its count read every entry of the source's
+    // key index (about 30 ms a page at 200k channels, under 0.1 ms now).
+    // Every other shape counts its rows.
+    let summed = q.category_id.is_none()
         && search.is_none()
         && min_rating.is_none()
         && q.vod.is_empty()
@@ -2611,5 +2613,86 @@ mod tests {
             "hidden flag survives a rewrite"
         );
         assert_eq!(source_counts(&c, "s").unwrap(), (3, 0, 0));
+    }
+
+    /// All channels and All radio take their total from the stored counts
+    /// while no channel is hidden by an edit; it must equal the rows a
+    /// count reads, with hidden categories, `include_hidden`, a hidden
+    /// channel (the count path) and after unhiding it.
+    #[test]
+    fn channel_totals_from_stored_counts_match_the_rows() {
+        let (_d, pool) = conn();
+        let mut c = pool.get().unwrap();
+        let cats: Vec<CategoryRow> = ["a", "b", "c"]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| CategoryRow {
+                category_id: (*id).into(),
+                name: format!("Group {id}"),
+                position: i as i64,
+            })
+            .collect();
+        for ct in [ContentType::Live, ContentType::Radio] {
+            // "zz" has no category row: the writer adds Uncategorized.
+            let mut rows: Vec<ItemRow> = (0..40)
+                .map(|i| {
+                    let cat = ["a", "b", "c", "zz"][i % 4];
+                    let mut r = item(&format!("{i}"), cat, &format!("Channel {i}"), i as i64);
+                    r.content_type = ct;
+                    r
+                })
+                .collect();
+            // A duplicate id is dropped by the writer and must not count.
+            rows.push(item("3", "a", "Duplicate", 99));
+            rows.last_mut().unwrap().content_type = ct;
+            replace_catalog(&mut c, "s", ct, &cats, &mut rows.into_iter()).unwrap();
+        }
+        let page = |c: &Connection, ct: ContentType, include_hidden: bool| -> (i64, usize) {
+            let q = CatalogQuery {
+                source_id: "s".into(),
+                content_type: ct,
+                category_id: None,
+                page: PageQuery {
+                    offset: 0,
+                    limit: 1000,
+                    search: None,
+                    sort: None,
+                    dir: None,
+                },
+                include_hidden,
+                min_rating: None,
+                english_only: false,
+                quality: None,
+                vod: VodFilter::default(),
+            };
+            let p = query_named(c, &q, None).unwrap();
+            (p.total, p.items.len())
+        };
+        let check = |c: &Connection, want: [i64; 2]| {
+            for (ct, include_hidden) in [
+                (ContentType::Live, false),
+                (ContentType::Live, true),
+                (ContentType::Radio, false),
+                (ContentType::Radio, true),
+            ] {
+                let (total, rows) = page(c, ct, include_hidden);
+                assert_eq!(total, rows as i64, "{ct:?} include_hidden {include_hidden}");
+                let expect = if include_hidden { want[1] } else { want[0] };
+                assert_eq!(total, expect, "{ct:?} include_hidden {include_hidden}");
+            }
+        };
+        check(&c, [40, 40]);
+        set_category_hidden(&c, "s", ContentType::Live, "b", true).unwrap();
+        set_category_hidden(&c, "s", ContentType::Radio, "b", true).unwrap();
+        check(&c, [30, 40]);
+        let hidden = [ContentType::Live, ContentType::Radio].map(|ct| ItemRef {
+            source_id: "s".into(),
+            content_type: ct,
+            item_id: "0".into(),
+        });
+        crate::channeledit::set_hidden(&mut c, &hidden, true).unwrap();
+        check(&c, [29, 39]);
+        crate::channeledit::set_hidden(&mut c, &hidden, false).unwrap();
+        check(&c, [30, 40]);
     }
 }

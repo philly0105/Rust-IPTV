@@ -1,7 +1,7 @@
 import { useQueries } from '@tanstack/react-query';
 import type { Virtualizer } from '@tanstack/react-virtual';
 import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, X } from 'lucide-react';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
@@ -257,7 +257,9 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // once, from the frame of the key, and the full answer replaces them when it arrives.
   const [answered, setAnswered] = useState(query);
   if (catalog.data && !catalog.isPlaceholderData && !catalog.isFetching && answered !== query) setAnswered(query);
-  const draftQuery = normalizeQuery(draft);
+  // The key's own render only echoes it in the field: narrowing the results follows as a deferred
+  // render, which the next key interrupts, so a burst of typing never waits on the result grids.
+  const draftQuery = normalizeQuery(useDeferredValue(draft));
   const previewTerms = useMemo(
     () => (draftQuery && narrowsQuery(draftQuery, answered) ? searchTerms(draftQuery) : undefined),
     [draftQuery, answered],
@@ -372,12 +374,15 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const topAvailable = groups.length + (programmeHits.length > 0 ? 1 : 0) > 1;
   const showTop = topAvailable && (typeParam === 'top' || typeParam === null || (!groups.some((g) => g.kind === typeParam) && typeParam !== 'programmes'));
   const showProgrammes = !showTop && programmeHits.length > 0 && (typeParam === 'programmes' || groups.length === 0);
-  /** The URL of one type's tab, for a Top results section's "See all". */
-  const typeHref = (kind: string) => {
-    const next = new URLSearchParams(params);
-    next.set('type', kind);
-    return `${location.pathname}?${next.toString()}`;
-  };
+  /** The URL of one type's tab, for a Top results section's "See all". Stable between URL changes, so typing keeps Top results' memo. */
+  const typeHref = useCallback(
+    (kind: string) => {
+      const next = new URLSearchParams(params);
+      next.set('type', kind);
+      return `${location.pathname}?${next.toString()}`;
+    },
+    [params, location.pathname],
+  );
   const anyResults = groups.length > 0 || programmeHits.length > 0;
   const showBadges = !scoped && allSources.length > 1;
   const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
@@ -1357,7 +1362,7 @@ interface TopSection {
  * Each section's "See all" opens its tab. Each section numbers its results from 0, so it carries
  * its kind (`data-search-section`), and Back from a result finds it again in its own section.
  */
-function TopResults({
+const TopResults = memo(function TopResults({
   groups,
   more,
   programmes,
@@ -1468,7 +1473,7 @@ function TopResults({
       )}
     </div>
   );
-}
+});
 
 /**
  * One Top results rail of posters, duplicates folded (one film from two sources is one card that

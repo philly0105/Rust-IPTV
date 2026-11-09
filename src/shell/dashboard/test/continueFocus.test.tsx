@@ -37,6 +37,9 @@ vi.mock('@/features/player', () => ({
 
 const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');
+// The card menus load in their own chunk (ChannelCardMenu.tsx) on the first open; import the
+// module here so that first open does not wait for its transform inside a test.
+await import('../ChannelMenuBody');
 const { queryClient } = await import('@/api/query');
 const { useConnectionStore } = await import('../../connection');
 const { DashboardRail } = await import('../DashboardRail');

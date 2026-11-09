@@ -7,21 +7,20 @@
  * passing `channel` to its ChannelCard.
  */
 
-import { Play } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { useRpcQuery } from '@/api/query';
 import type { Channel, ItemRef, ItemSnapshot } from '@/api/types';
-import { useChannelEditMenuItems } from '@/features/channeledit';
-import { useAddToListMenuItem } from '@/features/lists/hooks/useAddToList';
-import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMenu';
-import { channelInput } from '@/features/multiview/addChannel';
-import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
-import { useLockMenuItems } from '@/features/parental/lockMenu';
-import { useParentalStatus } from '@/features/parental/status';
+import { scheduleIdleLoad } from '@/shell/idleLoad';
 
 import { CardMenuContext, ChannelMenuContext, type CardMenuRequest, type ChannelMenuRequest } from './cards';
+
+/**
+ * The menus themselves, with the multi-view, list, channel-edit, parental and Live menu code they
+ * draw, in a chunk of their own: on a cold start Home rendered only after nine more chunks (about
+ * 60 kB) that nothing needs before a menu opens.
+ */
+const loadMenuBody = () => import('./ChannelMenuBody');
+const ChannelMenuBody = lazy(() => loadMenuBody().then((m) => ({ default: m.ChannelMenuBody })));
 
 /**
  * The channel a favorite or recent entry stands for, from its saved snapshot:
@@ -41,17 +40,12 @@ export function snapshotChannel(ref: ItemRef, snapshot: ItemSnapshot): Channel {
   return channel;
 }
 
-const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
-/** A channel's group rarely changes; the lookup below is kept this long. */
-const GROUP_STALE_MS = 5 * 60_000;
-
 /**
  * Provides the card menus to the cards below it and draws them: the channel menu, and the plain
  * action menu of a Continue watching card (CardMenuContext). One menu shows at a time. Mount once
  * around the rails.
  */
 export function ChannelMenuHost({ children }: { children: ReactNode }) {
-  const { t } = useTranslation('shell');
   const [menu, setMenuState] = useState<ChannelMenuRequest | null>(null);
   const [actions, setActionsState] = useState<CardMenuRequest | null>(null);
   // The open action menu, so whatever replaces or closes it tells its opener (the hero pauses for it).
@@ -83,46 +77,24 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
   // A host that goes (leaving Home) closes its menu for good.
   useEffect(() => () => openRequest.current?.onClose?.(), []);
 
-  const channel = menu?.channel ?? null;
-  // C4: radio has no picture, so a station gets no multi-view entry.
-  const multiviewItem = useMultiviewMenuItem(channel && channel.ref.contentType === 'live' ? channelInput(channel) : null);
-  const addToListItem = useAddToListMenuItem(channel);
-  const editItems = useChannelEditMenuItems(channel);
-  // Snapshot channels (favourites, recents) carry no category id. With parental controls on, the
-  // open menu looks the channel up so its lock items can say 'Locked with its group'; the plain
-  // lock shows until the answer comes (cached, so the next open has it at once). Off, no lookup.
-  const parental = useParentalStatus();
-  const lookUp = !!channel && !channel.categoryId && parental.data?.enabled === true;
-  const row = useRpcQuery('catalog.item', { ref: channel?.ref ?? NO_REF }, { enabled: lookUp, staleTime: GROUP_STALE_MS });
-  const categoryId = channel?.categoryId || (lookUp ? row.data?.categoryId : undefined) || undefined;
-  const lockItems = useLockMenuItems(
-    channel
-      ? { sourceId: channel.ref.sourceId, contentType: channel.ref.contentType, kind: 'item', targetId: channel.ref.itemId, name: channel.name }
-      : null,
-    { categoryId },
-  );
-
-  const items = useMemo((): MenuItem[] => {
-    if (!menu) return [];
-    return [
-      { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: menu.onPlay },
-      ...(menu.channel.ref.contentType === 'live' ? [multiviewItem] : []),
-      ...(addToListItem ? [addToListItem] : []),
-      ...editItems,
-      ...lockItems,
-    ];
-  }, [menu, t, multiviewItem, addToListItem, editItems, lockItems]);
+  // The menus mount with the first request and stay mounted (their closing pop-out); their chunk
+  // loads ahead on the player's schedule, or at the first press, so a first menu rarely waits.
+  const [bodyMounted, setBodyMounted] = useState(false);
+  if (!bodyMounted && (menu || actions)) setBodyMounted(true);
+  useEffect(() => {
+    if (bodyMounted) return;
+    return scheduleIdleLoad(() => void loadMenuBody().catch(() => undefined));
+  }, [bodyMounted]);
 
   return (
     <ChannelMenuContext.Provider value={setMenu}>
       <CardMenuContext.Provider value={openActions}>
         {children}
-        <ContextMenu
-          pos={menu?.pos ?? actions?.pos ?? null}
-          items={menu ? items : (actions?.items ?? [])}
-          label={menu?.channel.name ?? actions?.label ?? ''}
-          onClose={close}
-        />
+        {bodyMounted && (
+          <Suspense fallback={null}>
+            <ChannelMenuBody menu={menu} actions={actions} onClose={close} />
+          </Suspense>
+        )}
       </CardMenuContext.Provider>
     </ChannelMenuContext.Provider>
   );

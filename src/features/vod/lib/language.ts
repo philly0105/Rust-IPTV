@@ -286,8 +286,26 @@ function namesFor(locale: string): Intl.DisplayNames | null {
 export function languageName(lang: ItemLanguage, locale: string, groupName: (group: LanguageGroup) => string): string {
   if (lang.group) return groupName(lang.group);
   if (lang.tag) {
-    const name = namesFor(locale)?.of(lang.tag);
-    if (name) return name.charAt(0).toLocaleUpperCase(locale) + name.slice(1);
+    const name = tagName(lang.tag, locale);
+    if (name) return name;
   }
   return lang.code;
+}
+
+/**
+ * Display names by locale and tag. Every poster's caption and name ask for one on each render, and
+ * `Intl.DisplayNames.of` with the capitalizing after it was most of `languageName`'s time on a grid
+ * scroll; a catalog has only a few tags.
+ */
+const tagNames = new Map<string, string | null>();
+
+function tagName(tag: string, locale: string): string | null {
+  const key = `${locale}\u0000${tag}`;
+  let name = tagNames.get(key);
+  if (name === undefined) {
+    const raw = namesFor(locale)?.of(tag);
+    name = raw ? raw.charAt(0).toLocaleUpperCase(locale) + raw.slice(1) : null;
+    tagNames.set(key, name);
+  }
+  return name;
 }

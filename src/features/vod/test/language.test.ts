@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { isNonEnglish, itemLanguage, languageName, type LanguageGroup } from '../lib/language';
 
@@ -92,5 +92,24 @@ describe('isNonEnglish', () => {
     expect(isNonEnglish('It: Chapter Two', 'HORROR')).toBe(false);
     expect(isNonEnglish('Pokémon: Amélie')).toBe(false);
     expect(isNonEnglish('')).toBe(false);
+  });
+});
+
+describe('languageName', () => {
+  it('asks Intl for a tag once per locale and keeps the capitalized name', () => {
+    const of = vi.spyOn(Intl.DisplayNames.prototype, 'of');
+    try {
+      // A tag and locales no other test here asks for, so nothing is cached yet.
+      const pl = itemLanguage('PL - Film (2020)')!;
+      const first = languageName(pl, 'nl', group);
+      for (let i = 0; i < 50; i++) expect(languageName(pl, 'nl', group)).toBe(first);
+      expect(first).toBe('Pools');
+      expect(of).toHaveBeenCalledTimes(1);
+      // Another locale has names of its own.
+      expect(languageName(pl, 'it', group)).toBe('Polacco');
+      expect(of).toHaveBeenCalledTimes(2);
+    } finally {
+      of.mockRestore();
+    }
   });
 });

@@ -21,7 +21,11 @@ const trimmed = (draft: string) => draft.trim();
  * A value the hook wrote itself is never copied back into the draft. The router commits a write
  * a render or more after it is made; by then the user may have typed more, and copying the
  * committed value back dropped those letters ('northbound' became 'notbond'), or the space typed
- * just before a pause. Returns the draft and its setter (for the input, Clear and Enter).
+ * just before a pause. On a slow machine the router can commit a write after the hook has made the
+ * next one (its navigation renders as a transition, which keys keep interrupting), so every write
+ * still on its way counts as the hook's own, not only the last: following the older one dropped the
+ * letter typed in between ('dark river' became 'dark rver' at 8 keys a second under a 4x CPU
+ * slowdown). Returns the draft and its setter (for the input, Clear and Enter).
  */
 export function useUrlSearchDraft({ delayMs, param = 'q', toParam = trimmed }: UrlSearchDraftOptions): [string, (draft: string) => void] {
   const [params, setParams] = useSearchParams();
@@ -29,13 +33,22 @@ export function useUrlSearchDraft({ delayMs, param = 'q', toParam = trimmed }: U
   const [draft, setDraft] = useState(urlValue);
   /** The last value this hook wrote, or the URL value it last followed. */
   const written = useRef(urlValue);
+  /** Values this hook wrote that the URL has not shown yet, oldest first. */
+  const inFlight = useRef<string[]>([]);
   const toParamRef = useRef(toParam);
   toParamRef.current = toParam;
 
   // Follow the URL only when something else moved it.
   useEffect(() => {
+    const own = inFlight.current.indexOf(urlValue);
+    if (own >= 0) {
+      // One of this hook's writes arrived (perhaps after a newer one was made): it and the older ones are done.
+      inFlight.current.splice(0, own + 1);
+      return;
+    }
     if (urlValue === written.current) return;
     written.current = urlValue;
+    inFlight.current = [];
     setDraft(urlValue);
   }, [urlValue]);
 
@@ -45,6 +58,7 @@ export function useUrlSearchDraft({ delayMs, param = 'q', toParam = trimmed }: U
     if (next === urlValue || next === written.current) return;
     const h = setTimeout(() => {
       written.current = next;
+      inFlight.current.push(next);
       setParams(
         (prev) => {
           const out = new URLSearchParams(prev);

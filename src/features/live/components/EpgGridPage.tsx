@@ -21,8 +21,10 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -1651,6 +1653,12 @@ export function EpgGridPage() {
 
   // ---- guide search and jump (Run 2 C5) ----------------------------------------
   const [jumpOpen, setJumpOpen] = useState(false);
+  // The dialog reads the window's start only as it opens: closed, it gets a fixed value, so a
+  // scroll or a drag does not re-render it on every frame.
+  const [jumpIdleStart] = useState(() => shownTime[0]);
+  // The toolbar's window label reads the visible span from context (GuideWindowContext), so the
+  // rest of the toolbar (pickers, genre chips, buttons) does not re-render on every scroll frame.
+  const guideWindow = useMemo(() => ({ start: shownTime[0], end: shownTime[1] }), [shownTime]);
   const openJump = useCallback(() => setJumpOpen(true), []);
   const closeJump = useCallback(() => setJumpOpen(false), []);
   // The guide's search field, in the header's search slot (GuideHeaderSearch).
@@ -1998,6 +2006,7 @@ export function EpgGridPage() {
       <span role="status" className="sr-only" data-testid="guide-genre-note">
         {genreNote}
       </span>
+      <GuideWindowContext.Provider value={guideWindow}>
       <GuideToolbar
         sources={liveSources && source && !liveSources.includes(source) ? [...liveSources, source] : liveSources}
         sourceId={sourceId}
@@ -2006,8 +2015,6 @@ export function EpgGridPage() {
         view={view}
         lists={lists.data}
         bar={bar}
-        start={shownTime[0]}
-        end={shownTime[1]}
         nowInWindow={nowInViewport}
         now={now}
         onQuery={setQuery}
@@ -2021,8 +2028,9 @@ export function EpgGridPage() {
         onGenre={setGenreFilter}
         previewOpen={bandFits ? previewOpen : undefined}
         onTogglePreview={togglePreview}
-        onGoToPlaying={goToPlaying}
+        onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined}
       />
+      </GuideWindowContext.Provider>
       {showPreview && sourceId ? (
         <GuidePreview
           channel={previewSubject?.channel}
@@ -2038,7 +2046,7 @@ export function EpgGridPage() {
           onPointerLeave={releaseHover}
         />
       ) : null}
-      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={shownTime[0]} now={now} onJump={goTo} onNow={toNow} />
+      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={jumpOpen ? shownTime[0] : jumpIdleStart} now={now} onJump={goTo} onNow={toNow} />
 
       {gridError ? (
         <div role="alert" className="border-b border-divider bg-surface-2 px-3 py-2 text-sm text-danger">
@@ -2420,8 +2428,6 @@ const GuideToolbar = memo(function GuideToolbar({
   view,
   lists,
   bar,
-  start,
-  end,
   nowInWindow,
   now,
   onQuery,
@@ -2444,8 +2450,6 @@ const GuideToolbar = memo(function GuideToolbar({
   view: GuideView | undefined;
   lists: readonly { id: string; name: string }[] | undefined;
   bar: 'full' | 'stacked' | 'phone';
-  start: number;
-  end: number;
   nowInWindow: boolean;
   /** For the phone's day label ("Today"). */
   now: number;
@@ -2509,7 +2513,6 @@ const GuideToolbar = memo(function GuideToolbar({
   // Wider pages: a picker starts at 9rem and grows to 12rem with the room the time controls leave.
   // At a fixed 12rem the 44 px touch controls of a 1024 px tablet wrapped onto a row of their own.
   const pickerWidth = 'min-w-0 max-w-48 grow basis-36';
-  const range = formatTimeRange(start, end, lang);
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
       {/* A phone with a source to choose puts the two pickers side by side on a row of their own,
@@ -2560,29 +2563,7 @@ const GuideToolbar = memo(function GuideToolbar({
         <IconButton size="sm" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => onShift(-3 * HOUR)} label={t('earlier')} />
         {/* The window's span; pressing it opens Jump to date and time (`t`). The text is the same in
             wide and stacked layouts (day, space, times; stacked, the day sits small over the times). */}
-        {oneRow ? (
-          <GuideWindowDay start={start} end={end} now={now} lang={lang} onJump={onJump} />
-        ) : (
-          <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
-            <button
-              type="button"
-              aria-haspopup="dialog"
-              onClick={onJump}
-              data-testid="guide-window"
-              className={cn(
-                'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-                stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
-              )}
-            >
-              {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-              <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
-                <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
-                <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
-              </span>
-              <span className="sr-only">, {tg('jumpTitle')}</span>
-            </button>
-          </Tooltip>
-        )}
+        {oneRow ? <GuideWindowDay now={now} lang={lang} onJump={onJump} /> : <GuideWindowButton stacked={stacked} lang={lang} onJump={onJump} />}
         <IconButton size="sm" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => onShift(3 * HOUR)} label={t('later')} />
         {bar !== 'phone' ? (
           <IconButton size="sm" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(1)} label={t('nextDay')} />
@@ -2643,6 +2624,40 @@ const GuideToolbar = memo(function GuideToolbar({
 
 
 /**
+ * The visible span for the toolbar's window label. Only the label reads it, so a scroll frame
+ * re-renders the label and not the toolbar around it.
+ */
+const GuideWindowContext = createContext<{ start: number; end: number }>({ start: 0, end: 0 });
+
+/** The window's span in the toolbar (wide and stacked layouts); pressing it opens Jump to date and time. */
+const GuideWindowButton = memo(function GuideWindowButton({ stacked, lang, onJump }: { stacked: boolean; lang: string; onJump(): void }) {
+  const { t: tg } = useTranslation('guide');
+  const { start, end } = useContext(GuideWindowContext);
+  const range = formatTimeRange(start, end, lang);
+  return (
+    <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        onClick={onJump}
+        data-testid="guide-window"
+        className={cn(
+          'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
+          stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+        )}
+      >
+        {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
+        <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
+          <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
+          <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
+        </span>
+        <span className="sr-only">, {tg('jumpTitle')}</span>
+      </button>
+    </Tooltip>
+  );
+});
+
+/**
  * The window label on a phone's one-row toolbar; pressing it opens Jump to date and time (`t`).
  * Its narrowest width is the widest of "Yesterday", "Today", "Tomorrow" and the day it shows
  * (hidden copies under it), and that is what the toolbar counts when it decides whether the time
@@ -2653,19 +2668,16 @@ const GuideToolbar = memo(function GuideToolbar({
  * times, as the stacked layout shows them.
  */
 const GuideWindowDay = memo(function GuideWindowDay({
-  start,
-  end,
   now,
   lang,
   onJump,
 }: {
-  start: number;
-  end: number;
   now: number;
   lang: string;
   onJump(): void;
 }) {
   const { t: tg } = useTranslation('guide');
+  const { start, end } = useContext(GuideWindowContext);
   const day = shortDay(start, now, lang);
   const date = formatDay(start, lang);
   const range = formatTimeRange(start, end, lang);

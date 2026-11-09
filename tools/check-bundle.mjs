@@ -2,7 +2,7 @@
 //
 // Prints every JavaScript chunk in dist/assets, largest first, and exits 1 when the entry chunk
 // (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when
-// Home's route chunk statically loads player code (performance audit SH-2), when the Search,
+// Home's route chunk statically loads player code (performance audit SH-2) or its card menus, when the Search,
 // Settings, category-grid or Sports route chunks statically load the player's UI, or when there is
 // no build to check. The Live and Guide route chunks are measured too and noted while they still
 // load the player's controls (see ROUTES). Plain Node, no dependencies.
@@ -57,6 +57,8 @@ const ROUTES = [
   { name: 'Live', chunk: /^LivePage-[\w-]+\.js$/, page: 'src/features/live/components/LivePage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
   { name: 'Guide', chunk: /^EpgGridPage-[\w-]+\.js$/, page: 'src/features/live/components/EpgGridPage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
 ];
+/** The chunk of Home's card menus (`src/shell/dashboard/ChannelMenuBody.tsx`), which Home loads with import(). */
+const MENU_BODY = /^ChannelMenuBody-[\w-]+\.js$/;
 /** A static `import`/`export ... from "./chunk.js"` in Rollup's output; `import("./x.js")` is not one. */
 const STATIC_IMPORT = /\b(?:import|export)\s*(?:\{[^}]*\}\s*from\s*|\*\s*as\s*[\w$]+\s*from\s*|[\w$]+\s*from\s*)?["']\.\/([\w.-]+\.js)["']/g;
 
@@ -160,8 +162,18 @@ for (const route of ROUTES) {
     leaks.push(`The ${route.name} route chunk statically loads ${route.what} (${player.join(', ')}).`);
   }
 }
+// Home's card menus (multi-view, lists, channel edits, parental items, Live's ContextMenu) load
+// with import() on the first menu request (ChannelCardMenu.tsx). In Home's static imports they were
+// 13 of the 27 chunks a cold Home waited for.
+const menuBody = chunks.find((c) => MENU_BODY.test(c.file));
+if (!menuBody) fail(`no Home card menu chunk (ChannelMenuBody-*.js) in ${shown}; update MENU_BODY in tools/check-bundle.mjs if the module moved.`);
+const homePage = chunks.find((c) => ROUTES[0].chunk.test(c.file));
+if (staticClosure(homePage.file).has(menuBody.file)) {
+  fail(`the Home route chunk statically loads its card menus (${menuBody.file}); load ChannelMenuBody with import() (ChannelCardMenu.tsx).`);
+}
 for (const note of notes) console.log(`size:check: note: ${note}`);
 if (leaks.length > 0) {
   fail(`${leaks.join(' ')} Load the player inside the click handler with import('@/features/player'), and import the store from '@/features/player/store' where a page reads it; see docs/architecture/performance.md.`);
 }
 console.log("size:check: no player code in the Home or Settings route chunks' static imports, and none of the player's UI in Search's, the category grid's or Sports'.");
+console.log("size:check: Home's card menus stay out of its route chunk's static imports.");

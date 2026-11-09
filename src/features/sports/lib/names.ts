@@ -21,7 +21,10 @@ const NOISE = new Set([
   'uhd', '4k', '8k', '2160p', '4320p', 'uhd4k', 'ʜᴅ', 'ꜰʜᴅ', 'ᴜʜᴅ', 'hevc', 'h265', 'h264', 'x264', 'x265',
   'avc', 'hdr', 'sdr', 'fps', '25fps', '30fps', '50fps', '60fps', 'raw',
 ]);
+const NOISE_LONGEST = Math.max(...[...NOISE].map((w) => w.length));
 const BACKUP = /^(?:backup|bkp|bk|alt|reserve|mirror)\d*$/;
+/** The first letters of the `BACKUP` words, so most words skip the regex. */
+const BACKUP_FIRST = new Set([...'bamr'].map((c) => c.charCodeAt(0)));
 const APOSTROPHES = /['’‘ʻʼ`´]/g;
 /** "A&M" and "A & M" are one word, so a school reads the same however the provider spaces it. */
 const LETTER_AMP = /(?<![\p{L}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{N}])/gu;
@@ -29,6 +32,13 @@ const LETTER_AMP = /(?<![\p{L}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{N}])/gu;
 const SPACED_DASH = /\s[-–—]\s/;
 /** The token a spaced dash reads as; no word is one, since words are letters and digits. */
 const DASH = '-';
+const ASCII_ONLY = /^[\x00-\x7f]*$/;
+const MARKS = /\p{M}+/gu;
+/** Splits words: anything that is not a letter or digit. */
+const WORD_SPLIT = /[^\p{L}\p{N}]+/u;
+/** `WORD_SPLIT` for lower-case ASCII text, whose only letters and digits are these. */
+const ASCII_SPLIT = /[^a-z0-9]+/;
+const DIGITS = /^\d+$/;
 
 /**
  * The words of any text: NFKD-folded (accents, superscript "ᴴᴰ", full-width letters), lower case, split at
@@ -38,28 +48,34 @@ const DASH = '-';
  * "SD" goes only at the end, since it is also San Diego's abbreviation.
  */
 export function textTokens(text: string): string[] {
-  const parts = text
-    .normalize('NFKD')
-    .replace(/\p{M}+/gu, '')
-    .toLowerCase()
-    .replace(APOSTROPHES, '')
-    .replace(LETTER_AMP, '$1$2')
-    .split(SPACED_DASH);
+  // Plain ASCII, most guide text, is its own NFKD form, has no marks, and has letters and digits only in
+  // a-z and 0-9 once lower case: it skips the Unicode passes, which took most of `prepareMatch`'s time on
+  // a big guide's descriptions. The words are the same either way (names.test.ts compares the two).
+  const ascii = ASCII_ONLY.test(text);
+  let folded = ascii ? text.toLowerCase() : text.normalize('NFKD').replace(MARKS, '').toLowerCase();
+  folded = folded.replace(APOSTROPHES, '');
+  if (folded.includes('&')) folded = folded.replace(LETTER_AMP, '$1$2');
+  const split = ascii ? ASCII_SPLIT : WORD_SPLIT;
+  const parts = folded.split(SPACED_DASH);
   const words: string[] = [];
   let afterBackup = false;
-  parts.forEach((part, i) => {
+  for (let i = 0; i < parts.length; i++) {
     if (i > 0) {
       words.push(DASH);
       afterBackup = false;
     }
-    for (const w of part.replace(/@/g, ' at ').replace(/\+/g, ' plus ').split(/[^\p{L}\p{N}]+/u)) {
+    let part = parts[i]!;
+    if (part.includes('@')) part = part.replace(/@/g, ' at ');
+    if (part.includes('+')) part = part.replace(/\+/g, ' plus ');
+    for (const w of part.split(split)) {
       if (!w) continue;
       // "Backup 2" goes whole: a bare 2 left behind would make "ESPN Backup 2" read as ESPN 2.
-      const skip = NOISE.has(w) || BACKUP.test(w) || (afterBackup && /^\d+$/.test(w));
-      afterBackup = BACKUP.test(w);
+      const backup = BACKUP_FIRST.has(w.charCodeAt(0)) && BACKUP.test(w);
+      const skip = backup || (w.length <= NOISE_LONGEST && NOISE.has(w)) || (afterBackup && DIGITS.test(w));
+      afterBackup = backup;
       if (!skip) words.push(w);
     }
-  });
+  }
   if (words[words.length - 1] === 'sd') words.pop();
   return words;
 }

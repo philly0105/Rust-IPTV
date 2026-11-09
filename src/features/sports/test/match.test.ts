@@ -2,12 +2,13 @@
 // date agreement rule, team channels, network matches with their avoid lists and package services, regional
 // flags (NFL Sunday CBS/FOX, RSNs, local stations), guide matches by title and by description, the order and
 // dedup of the result, and the candidate filter, which must find what a scan over every channel finds.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { itemKey, type Channel, type EpgProgram, type ItemKey } from '@/api/types';
 
 import { toIndexed, type IndexedChannel } from '../hooks/useChannelIndex';
 import {
+  PREPARE_BUDGET_MS,
   PREPARE_SLICE,
   isEventChannel,
   isTeamChannel,
@@ -1056,6 +1057,25 @@ describe('candidates', () => {
     expect(ticked).toBe(true);
     expect(names(matchGame(NBA_GAME, big, bigPrograms))).toEqual(['Sports 7', 'Knicks at Celtics']);
     expect(matchGame(NBA_GAME, big, bigPrograms)).toEqual(matchGameScanForTests(NBA_GAME, big, bigPrograms));
+  });
+
+  it('yields once a slice has used its time budget, before it reaches the slice size', async () => {
+    const big = Array.from({ length: 100 }, (_, i) => indexed(`Sports ${i}`));
+    // Every look at the clock finds a third of the budget gone: a slice ends after three steps.
+    let clock = 0;
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += PREPARE_BUDGET_MS / 3));
+    let yields = 0;
+    const scheduler = { yield: () => (yields++, Promise.resolve()) };
+    vi.stubGlobal('scheduler', scheduler);
+    try {
+      await expect(prepareMatch(big, NONE)).resolves.toBe(true);
+    } finally {
+      now.mockRestore();
+      vi.unstubAllGlobals();
+    }
+    expect(yields).toBeGreaterThan(1);
+    expect(yields).toBeLessThan(big.length);
+    expect(matchGame(NBA_GAME, big, NONE)).toEqual(matchGameScanForTests(NBA_GAME, big, NONE));
   });
 
   it('stops preparing when its signal aborts', async () => {

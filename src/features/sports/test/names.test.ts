@@ -147,6 +147,59 @@ describe('nameTokens', () => {
     }
   });
 
+  it('reads ASCII text on its fast path exactly as the full Unicode fold reads it', () => {
+    // The tokenizer before the ASCII fast path, kept here as the reference.
+    const noise = new Set(['lq', '480p', '576p', '576i', '480i', 'hd', '720p', '720', 'fhd', 'fullhd', '1080p', '1080i', '1080', 'uhd', '4k', '8k', '2160p', '4320p', 'uhd4k', 'ʜᴅ', 'ꜰʜᴅ', 'ᴜʜᴅ', 'hevc', 'h265', 'h264', 'x264', 'x265', 'avc', 'hdr', 'sdr', 'fps', '25fps', '30fps', '50fps', '60fps', 'raw']);
+    const backup = /^(?:backup|bkp|bk|alt|reserve|mirror)\d*$/;
+    const reference = (text: string): string[] => {
+      const parts = text
+        .normalize('NFKD')
+        .replace(/\p{M}+/gu, '')
+        .toLowerCase()
+        .replace(/['’‘ʻʼ`´]/g, '')
+        .replace(/(?<![\p{L}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{N}])/gu, '$1$2')
+        .split(/\s[-–—]\s/);
+      const words: string[] = [];
+      let afterBackup = false;
+      parts.forEach((part, i) => {
+        if (i > 0) {
+          words.push('-');
+          afterBackup = false;
+        }
+        for (const w of part.replace(/@/g, ' at ').replace(/\+/g, ' plus ').split(/[^\p{L}\p{N}]+/u)) {
+          if (!w) continue;
+          const skip = noise.has(w) || backup.test(w) || (afterBackup && /^\d+$/.test(w));
+          afterBackup = backup.test(w);
+          if (!skip) words.push(w);
+        }
+      });
+      if (words[words.length - 1] === 'sd') words.pop();
+      return words;
+    };
+    const texts = [
+      'US| ESPN HD',
+      'ESPN Backup 2 - East',
+      'ESPN BKP2 4 ALT Mirror 7 reserve',
+      'Texas A&M vs. LSU @ Kyle Field',
+      'A & M - B&C; x&y 1&2',
+      "Hawai'i at San Diego St. `Rainbow` Warriors ´",
+      'NBA League Pass 05: Boston Celtics vs New York Knicks (1080p HEVC 60FPS)',
+      'MLB 07: SD @ LAD SD',
+      'ESPN+ 12 | Texas vs Georgia',
+      'Live coverage of the Saturday matchup. The Boston Celtics host the New York Knicks at TD Garden; tip-off 7:30.',
+      '\tTabs\nand\r\nnewlines\u0000and control\u007f chars',
+      'Nothing',
+      '',
+      ' - ',
+      'San José State – Boise State',
+      'NBA: BOSTON CELTICS ᴴᴰ',
+      'Ｆｕｌｌ ｗｉｄｔｈ ＥＳＰＮ',
+      'Hawaiʻi Rainbow Warriors',
+      'Mötley Crüe ½ ²',
+    ];
+    for (const text of texts) expect(textTokens(text), JSON.stringify(text)).toEqual(reference(text));
+  });
+
   it('keeps tags inside the name when stripping would cut a real word', () => {
     expect(textTokens('NBA League Pass 05: Boston Celtics vs New York Knicks')).toEqual([
       'nba', 'league', 'pass', '05', 'boston', 'celtics', 'vs', 'new', 'york', 'knicks',

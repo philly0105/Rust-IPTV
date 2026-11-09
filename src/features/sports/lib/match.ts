@@ -640,8 +640,16 @@ function candidatesOf(index: readonly IndexedChannel[], programs: ReadonlyMap<It
   return c;
 }
 
-/** Channels `prepareMatch` adds between two yields to the page. */
+/** The most channels `prepareMatch` adds between two yields to the page. */
 export const PREPARE_SLICE = 250;
+/**
+ * How long `prepareMatch` holds the main thread at most before it yields, checked every {@link PREPARE_STEP}
+ * channels. A slice of 250 channels with full guides took about 120 ms, a long task that delayed input
+ * and frames while the page loaded; the time check keeps each slice near one frame.
+ */
+export const PREPARE_BUDGET_MS = 12;
+/** Channels added between two looks at the clock. */
+const PREPARE_STEP = 10;
 
 /** Hands the main thread back to the page (input, paint, timers) between two slices. */
 function yieldToPage(): Promise<void> {
@@ -650,10 +658,10 @@ function yieldToPage(): Promise<void> {
 }
 
 /**
- * Builds what `matchGame` needs for `index` and `programs` ahead, {@link PREPARE_SLICE} channels at a time
- * with a yield to the page between slices: tokenizing the guide text of a big index (8,000 channels with 12
- * programmes each) takes about a second, which in one go would freeze the window. Resolves false when
- * `signal` aborted first.
+ * Builds what `matchGame` needs for `index` and `programs` ahead, in slices of at most {@link PREPARE_SLICE}
+ * channels or {@link PREPARE_BUDGET_MS}, whichever ends first, with a yield to the page between slices:
+ * tokenizing the guide text of a big index (8,000 channels with 12 programmes each) takes a few seconds on
+ * a slow machine, which in one go would freeze the window. Resolves false when `signal` aborted first.
  */
 export async function prepareMatch(
   index: readonly IndexedChannel[],
@@ -663,10 +671,16 @@ export async function prepareMatch(
   if (candidateMaps.get(index)?.get(programs)) return !signal?.aborted;
   const c: Candidates = { byWord: new Map(), byNetwork: new Map(), byTeamName: new Map() };
   const { keys } = indexMeta(index);
-  for (let from = 0; from < index.length; from += PREPARE_SLICE) {
-    if (from > 0) await yieldToPage();
+  let sliceFrom = 0;
+  let sliceStart = performance.now();
+  for (let from = 0; from < index.length; from += PREPARE_STEP) {
+    if (from > 0 && (from - sliceFrom >= PREPARE_SLICE || performance.now() - sliceStart >= PREPARE_BUDGET_MS)) {
+      await yieldToPage();
+      sliceFrom = from;
+      sliceStart = performance.now();
+    }
     if (signal?.aborted) return false;
-    addChannels(c, index, programs, keys, from, Math.min(from + PREPARE_SLICE, index.length));
+    addChannels(c, index, programs, keys, from, Math.min(from + PREPARE_STEP, index.length));
   }
   storeCandidates(index, programs, c);
   return true;

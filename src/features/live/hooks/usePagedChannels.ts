@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, keepPreviousData, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { CHANNEL_PAGE_SIZE, channelPageArgs, favoritesContainsArgs, nowNextArgs } from '@/api/bootPrefetch';
@@ -108,11 +108,41 @@ function inPage(page: Page<Channel> | undefined, index: number): Channel | undef
   return i >= 0 && i < page.items.length ? page.items[i] : undefined;
 }
 
+/** Per refs array, the hash of each key made from it (by command and the other arguments). */
+const refsKeyHashes = new WeakMap<readonly ItemRef[], Map<string, string>>();
+
+/**
+ * TanStack's own hash of a `[command, { refs, ... }]` key, worked out once per refs array and
+ * the other arguments, so prefetches (bootPrefetch) and readers still share the entry. TanStack
+ * hashes a query's key on every render of its observer: the now/next and favourite keys of a
+ * page hold 120 refs each, and a list or guide renders on every range change of a scroll, with
+ * four of them (two pages) even while they are disabled, as on the guide.
+ */
+export function refsKeyHash(key: QueryKey): string {
+  const args = key[1] as { refs?: readonly ItemRef[] } | null | undefined;
+  if (!args || !Array.isArray(args.refs)) return hashKey(key);
+  const { refs, ...rest } = args;
+  const sub = `${String(key[0])}|${JSON.stringify(rest)}`;
+  let byArgs = refsKeyHashes.get(refs);
+  if (!byArgs) {
+    byArgs = new Map();
+    refsKeyHashes.set(refs, byArgs);
+  }
+  let hash = byArgs.get(sub);
+  if (hash === undefined) {
+    hash = hashKey(key);
+    byArgs.set(sub, hash);
+  }
+  return hash;
+}
+
+const NO_REFS: ItemRef[] = [];
+
 function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offsetMinutes: number) {
-  const refs = useMemo(() => page?.items.map((c) => c.ref) ?? [], [page]);
+  const refs = useMemo(() => page?.items.map((c) => c.ref) ?? NO_REFS, [page]);
   const has = enabled && refs.length > 0;
-  const nowNext = useRpcQuery('epg.nowNext', nowNextArgs(refs, offsetMinutes), { enabled: has, staleTime: NOW_NEXT_STALE_MS });
-  const favs = useRpcQuery('favorites.contains', favoritesContainsArgs(refs), { enabled: has });
+  const nowNext = useRpcQuery('epg.nowNext', nowNextArgs(refs, offsetMinutes), { enabled: has, staleTime: NOW_NEXT_STALE_MS, queryKeyHashFn: refsKeyHash });
+  const favs = useRpcQuery('favorites.contains', favoritesContainsArgs(refs), { enabled: has, queryKeyHashFn: refsKeyHash });
   const favSet = useMemo(() => new Set<ItemKey>((favs.data ?? []).map(itemKey)), [favs.data]);
   return { nowNext: nowNext.data, favSet };
 }

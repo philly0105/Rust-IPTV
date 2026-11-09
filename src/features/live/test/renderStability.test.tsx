@@ -1,8 +1,9 @@
 /**
  * Render stability of the Live sidebar and the guide ribbon: a parent render with nothing new for
- * a row leaves the row alone. Group rows count their renders through `useRouteIntent` (one call
+ * a row leaves the row alone, and a page's now/next and favourite keys are hashed once. Group rows count their renders through `useRouteIntent` (one call
  * per render), timeline blocks through `canCatchUp` (one call per render).
  */
+import { hashKey } from '@tanstack/react-query';
 import { act, cleanup, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Category } from '@/api/types';
 
 import { CategorySidebar } from '../components/CategorySidebar';
+import { refsKeyHash } from '../hooks/usePagedChannels';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { MINUTE } from '../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
@@ -140,5 +142,25 @@ describe('the guide ribbon timeline', () => {
     act(() => bump());
     // Each block rendered again on every page render before (its click handler changed identity).
     expect(counts.catchUps).toBe(0);
+  });
+});
+
+describe('the keys of a page of refs', () => {
+  it('hash as TanStack hashes them, once per refs array and arguments', () => {
+    const refs = Array.from({ length: 120 }, (_, i) => makeChannel(i).ref);
+    const nowNext = ['epg.nowNext', { refs, withDescription: false }] as const;
+    const shifted = ['epg.nowNext', { refs, offsetMinutes: 60, withDescription: false }] as const;
+    const favs = ['favorites.contains', { refs }] as const;
+    // The same entry as the boot prefetch and setQueryData, which hash with TanStack's own function.
+    expect(refsKeyHash(nowNext)).toBe(hashKey(nowNext));
+    expect(refsKeyHash(shifted)).toBe(hashKey(shifted));
+    expect(refsKeyHash(favs)).toBe(hashKey(favs));
+    expect(new Set([refsKeyHash(nowNext), refsKeyHash(shifted), refsKeyHash(favs)]).size).toBe(3);
+    // A render with the same page asks again: the answer is the one worked out before, not a new
+    // walk over the refs (refs arrays are never changed in place; this one is, to show it).
+    const before = refsKeyHash(nowNext);
+    (refs as { itemId: string }[])[0]!.itemId = 'changed';
+    expect(refsKeyHash(nowNext)).toBe(before);
+    expect(refsKeyHash(['epg.nowNext', { refs: [...refs], withDescription: false }])).not.toBe(before);
   });
 });

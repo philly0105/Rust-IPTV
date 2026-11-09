@@ -430,6 +430,22 @@ function gridKeyHash(key: QueryKey): string {
   return hash;
 }
 
+const refSignatures = new WeakMap<readonly ItemRef[], string>();
+/**
+ * A chunk's refs as one string, made once per refs array. While a fast scroll outruns its slice,
+ * each render compares the chunks on screen with every cached grid answer's refs; building the
+ * string for each cached answer anew (40 item keys each) was the largest part of the page's own
+ * render during a scrollbar drag.
+ */
+export function refsSignature(refs: readonly ItemRef[]): string {
+  let sig = refSignatures.get(refs);
+  if (sig === undefined) {
+    sig = refs.map(itemKey).join('|');
+    refSignatures.set(refs, sig);
+  }
+  return sig;
+}
+
 const refKeySets = new WeakMap<readonly ItemRef[], ReadonlySet<ItemKey>>();
 /** The item keys of a chunk's refs, made once per refs array. */
 function refKeys(refs: readonly ItemRef[]): ReadonlySet<ItemKey> {
@@ -811,11 +827,11 @@ export function EpgGridPage() {
   // cached slice for these exact channel chunks that covers the visible viewport can supply
   // the cells meanwhile. The cache search runs once per render, not once per row.
   const outerShift = dataWindowMs - GRID_DATA_STEP;
-  const refSignatures = new Set([refsA, refsB].filter((refs) => refs.length > 0).map((refs) => refs.map(itemKey).join('|')));
+  const shownSignatures = new Set([refsA, refsB].filter((refs) => refs.length > 0).map(refsSignature));
   const cachedAnswers = (gridsLoaded ? [] : queryClient.getQueriesData<Record<ItemKey, EpgProgram[]>>({ queryKey: ['epg.grid'] }))
     .flatMap(([key, data]) => {
       const args = key[1] as ReturnType<typeof gridArgs> | undefined;
-      if (!data || !args || !refSignatures.has(args.refs.map(itemKey).join('|')) || args.withDescription !== false) return [];
+      if (!data || !args || !shownSignatures.has(refsSignature(args.refs)) || args.withDescription !== false) return [];
       const span = [Date.parse(args.from) + offsetMs, Date.parse(args.to) + offsetMs] as Span;
       // Different EPG offsets can leave answers for the same refs in the cache. Only a slice
       // aligned with this view's six-hour grid belongs to its current offset.

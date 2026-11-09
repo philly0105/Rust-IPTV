@@ -2,13 +2,14 @@
  * The guide toolbar during a scroll: only the window label follows the visible time. The pickers,
  * genre chips and buttons around it stay as they are, so a pan or a Shift+wheel does not render
  * the whole toolbar on every frame. Genre chip renders are counted through a wrapped FilterChip.
+ * Also the refs signature the page compares cached grid answers by during a fast scroll.
  */
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
 
-import { defaultStart, EpgGridPage } from '../../components/EpgGridPage';
+import { defaultStart, EpgGridPage, refsSignature } from '../../components/EpgGridPage';
 import { HOUR } from '../../lib/epgTime';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, settings } from './harness';
 
@@ -110,5 +111,17 @@ describe('the guide toolbar during a scroll', () => {
     }
     await waitFor(() => expect(screen.getByTestId('guide-window').textContent).not.toBe(before));
     expect(chipRenders.n).toBe(0);
+  });
+});
+
+describe('cached grid answers during a fast scroll', () => {
+  it("compare a chunk's refs by a signature made once per refs array", () => {
+    const refs = channels.map((c) => ({ ...c.ref }));
+    const sig = refsSignature(refs);
+    expect(sig).toBe(refs.map(key).join('|'));
+    // Refs arrays are never changed in place; this one is, to show the signature is not rebuilt.
+    refs[0]!.itemId = 'changed';
+    expect(refsSignature(refs)).toBe(sig);
+    expect(refsSignature([...refs])).not.toBe(sig);
   });
 });

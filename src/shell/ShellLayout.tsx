@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
@@ -23,7 +23,7 @@ import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
 import { modalOpen, useShortcut } from './shortcuts';
-import { useShellStore } from './store';
+import { useShellStore, type ShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
 import { useSettings, useSettingsValue } from './useSettings';
@@ -176,9 +176,36 @@ function useWatchStats(enabled: boolean): void {
 const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
 // parental: the PIN dialogs (C2) load with the shell, outside the main chunk.
 const ParentalGateHost = lazy(() => import('@/features/parental/GateHost').then((m) => ({ default: m.ParentalGateHost })));
-// The palette and the `?` overlay only show on demand; they load right after the shell, outside the main chunk.
-const CommandPalette = lazy(() => import('./CommandPalette').then((m) => ({ default: m.CommandPalette })));
-const ShortcutOverlay = lazy(() => import('./ShortcutOverlay').then((m) => ({ default: m.ShortcutOverlay })));
+// The palette and the `?` overlay only show on demand, from their own chunks (outside the main
+// one). Each mounts on its first open (`OnFirstOpen`) and its chunk loads ahead on the player's
+// schedule, so neither competes with the first page.
+const loadCommandPalette = () => import('./CommandPalette');
+const loadShortcutOverlay = () => import('./ShortcutOverlay');
+const CommandPalette = lazy(() => loadCommandPalette().then((m) => ({ default: m.CommandPalette })));
+const ShortcutOverlay = lazy(() => loadShortcutOverlay().then((m) => ({ default: m.ShortcutOverlay })));
+const selectPaletteOpen = (s: ShellStore) => s.paletteOpen;
+const selectHelpOpen = (s: ShellStore) => s.helpOpen;
+
+/**
+ * Renders `children` from the first time `isOpen` reads true from the shell store, and keeps them mounted after that, so a
+ * closing animation and the palette's own reset on the next open still run. Before, the command
+ * palette mounted closed with the shell: on a cold start its chunk (with cmdk) downloaded among
+ * Home's chunks, and its render built every command, about 100 ms of a 4x-throttled cold boot
+ * spent on a palette nobody had opened. `preload` starts the chunk download when the first route
+ * has had the browser to itself for a while (`schedulePlayerLoad`), or at the first key or
+ * pointer press, so the first open usually finds it loaded.
+ */
+export function OnFirstOpen({ isOpen, preload, children }: { isOpen: (s: ShellStore) => boolean; preload: () => Promise<unknown>; children: ReactNode }) {
+  // Read here, not in ShellLayout: opening the palette re-renders this leaf, not the shell.
+  const opened = useShellStore(isOpen);
+  const [mounted, setMounted] = useState(opened);
+  if (opened && !mounted) setMounted(true);
+  useEffect(() => {
+    if (mounted) return;
+    return schedulePlayerLoad(() => void preload().catch(() => undefined), false, window, PLAYER_PREFETCH_DELAY_MS);
+  }, [mounted, preload]);
+  return mounted ? <Suspense fallback={null}>{children}</Suspense> : null;
+}
 // Run 3 C7: the first-run tour and What's new. The host (decision, store) loads right after the
 // shell; the overlays and release notes are its own lazy chunks. Imported from `host`, not the
 // barrel, so RELEASE_NOTES and its icons stay out of this chunk.
@@ -559,10 +586,12 @@ export function ShellLayout() {
           {phone && <TabBar />}
         </div>
         {player && <player.PlayerDock />}
-        <Suspense fallback={null}>
+        <OnFirstOpen isOpen={selectPaletteOpen} preload={loadCommandPalette}>
           <CommandPalette />
+        </OnFirstOpen>
+        <OnFirstOpen isOpen={selectHelpOpen} preload={loadShortcutOverlay}>
           <ShortcutOverlay />
-        </Suspense>
+        </OnFirstOpen>
         <ToastViewport />
         <SecureContextNotice />
         <Suspense fallback={null}>

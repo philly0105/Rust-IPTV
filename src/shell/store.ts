@@ -58,7 +58,7 @@ export interface HeaderState {
   section?: string;
 }
 
-interface ShellStore {
+export interface ShellStore {
   header: HeaderState | null;
   headerOwner: string | null;
   /** The element marked with useHeaderTitleAnchor has scrolled out of view above. */

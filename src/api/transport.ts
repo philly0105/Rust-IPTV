@@ -142,21 +142,45 @@ export interface CallOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Requests `public/boot-rpc.js` sent before the app's modules loaded (web only): `settings.get`
+ * and `sources.list` with no arguments, each a `fetch` promise that resolves to null when the
+ * request failed.
+ */
+type EarlyRpc = Partial<Record<string, Promise<Response | null>>>;
+
+/**
+ * The early request for `cmd`, taken once: by the first call of the command with no arguments,
+ * no abort signal and no keepalive (main.tsx's boot prefetch). Later calls send their own.
+ */
+export function takeEarlyRpc(cmd: string, args: unknown, opts?: CallOptions): Promise<Response | null> | undefined {
+  if (args != null || opts?.signal || opts?.keepalive || typeof window === 'undefined') return undefined;
+  const early = (window as { __tsrustEarlyRpc?: EarlyRpc }).__tsrustEarlyRpc;
+  const pending = early?.[cmd];
+  if (!early || !pending) return undefined;
+  delete early[cmd];
+  return pending;
+}
+
 async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}/rpc/${encodeURIComponent(cmd)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(args ?? null),
-      ...(opts?.keepalive ? { keepalive: true } : {}),
-      ...(opts?.signal ? { signal: opts.signal } : {}),
-    });
-  } catch (err) {
-    if (opts?.signal?.aborted) throw abortReason(opts.signal);
-    const message = err instanceof Error ? err.message : 'Network request failed';
-    // `details.transport` tells the UI the app's own server is unreachable (not a provider error).
-    throw new RpcError('network', `Cannot reach the server: ${message}`, true, { transport: 'unreachable' });
+  // Awaited only when there is one, so every other call starts its request synchronously.
+  const early = takeEarlyRpc(cmd, args, opts);
+  let res = early ? await early : null;
+  if (!res) {
+    try {
+      res = await fetch(`${API_BASE}/rpc/${encodeURIComponent(cmd)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args ?? null),
+        ...(opts?.keepalive ? { keepalive: true } : {}),
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+      });
+    } catch (err) {
+      if (opts?.signal?.aborted) throw abortReason(opts.signal);
+      const message = err instanceof Error ? err.message : 'Network request failed';
+      // `details.transport` tells the UI the app's own server is unreachable (not a provider error).
+      throw new RpcError('network', `Cannot reach the server: ${message}`, true, { transport: 'unreachable' });
+    }
   }
 
   const text = await res.text();

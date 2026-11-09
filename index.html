@@ -16,6 +16,8 @@
     <meta name="theme-color" content="#edf0f5" media="(prefers-color-scheme: light)" />
     <!-- Blocking on purpose: sets the saved theme before the first paint (after the theme-color metas it updates). -->
     <script src="/theme-boot.js"></script>
+    <!-- Web: asks for the settings and the sources while the app's modules load. Blocking like theme-boot.js, so it loads with the first requests and runs first. -->
+    <script src="/boot-rpc.js"></script>
     <title>Tsrust IPTV</title>
   </head>
   <body>

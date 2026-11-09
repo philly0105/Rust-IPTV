@@ -294,7 +294,8 @@ the client accepts it and a file has a `.br` or `.gz` copy beside it (a web
 with its `Content-Encoding`.
 
 - `/assets/*-<hash>.*` (Vite output): `Cache-Control: public, max-age=31536000, immutable`.
-- `index.html` and other root files (service worker, manifest): `no-cache`.
+- `index.html` and other root files (service worker, manifest, `theme-boot.js`, `boot-rpc.js`): `no-cache`.
+- `boot-rpc.js` (web only, a blocking script after `theme-boot.js`) sends `POST /api/rpc/settings.get` and `sources.list` while the browser is still fetching and compiling the app's modules; the app's boot prefetch in `main.tsx` takes those answers instead of asking again (`takeEarlyRpc` in `src/api/transport.ts`), so the first screen's route chunks and data start one round trip sooner.
 - A miss on a path whose last segment has no extension and is outside
   `/assets/` returns `index.html` (client-side routes deep-link). Missing
   assets stay 404, so a stale tab never gets HTML for a script. This

@@ -180,3 +180,50 @@ describe('proxiedUrl (web)', () => {
     expect(proxiedUrl({ ...base, url: '/api/files/3', kind: 'file', headers: { userAgent: 'UA' } })).toBe('/api/files/3');
   });
 });
+
+describe('early boot requests (public/boot-rpc.js)', () => {
+  type EarlyWindow = { __tsrustEarlyRpc?: Record<string, Promise<Response | null>> };
+  const early = () => window as unknown as EarlyWindow;
+  afterEach(() => {
+    delete early().__tsrustEarlyRpc;
+  });
+
+  it('the first argument-free call takes the early answer once; later calls ask again', async () => {
+    early().__tsrustEarlyRpc = { 'settings.get': Promise.resolve(new Response('{"language":"de"}', { status: 200 })) };
+    const fetchMock = vi.fn(async () => new Response('{"language":"fr"}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(rpcRaw('settings.get')).resolves.toEqual({ language: 'de' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(rpcRaw('settings.get')).resolves.toEqual({ language: 'fr' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('is left alone by calls with arguments, a signal or keepalive, and by other commands', async () => {
+    const answer = Promise.resolve(new Response('[]', { status: 200 }));
+    early().__tsrustEarlyRpc = { 'sources.list': answer };
+    const fetchMock = vi.fn(async () => new Response('null', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await rpcRaw('sources.list', { id: 'x' });
+    await rpcRaw('sources.list', undefined, { signal: new AbortController().signal });
+    await rpcRaw('sources.list', undefined, { keepalive: true });
+    await rpcRaw('settings.get');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(early().__tsrustEarlyRpc?.['sources.list']).toBe(answer);
+  });
+
+  it('a failed early request falls back to a request of its own', async () => {
+    early().__tsrustEarlyRpc = { 'settings.get': Promise.resolve(null) };
+    const fetchMock = vi.fn(async () => new Response('{"ok":1}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(rpcRaw('settings.get')).resolves.toEqual({ ok: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('an early error answer is read like any other', async () => {
+    early().__tsrustEarlyRpc = {
+      'settings.get': Promise.resolve(new Response('{"code":"db","message":"locked","retryable":true}', { status: 500 })),
+    };
+    vi.stubGlobal('fetch', vi.fn());
+    await expect(rpcRaw('settings.get')).rejects.toMatchObject({ code: 'db', message: 'locked' });
+  });
+});

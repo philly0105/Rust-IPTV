@@ -6,6 +6,20 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 
 ## [Unreleased]
 
+### Changed
+
+- Faster channel changes in the built-in player: MPEG-TS and HLS streams reuse a ready worker instead of starting a new one on each zap.
+- The All channels list of a large source opens faster: its total comes from the stored group counts instead of counting every channel on each page.
+- Guide search and the now/next lookups read less per request.
+- Xtream syncs decode their lists in one pass and use less memory, and a large catalog refresh rebuilds the title search index in one go.
+- The web UI shows Home sooner on a cold load: the command palette, the shortcut overlay and Home's card menus load on first use, and the settings and sources are requested while the app's code downloads.
+- Typing in search stays responsive while results narrow, and Live's group list, the guide toolbar and Sports cards no longer redraw when nothing in them changed.
+- Release builds compile the core and its parsing, compression and image code for speed; the server binary grows from about 18.4 MB to 21.1 MB.
+
+### Fixed
+
+- The search box no longer drops letters typed quickly on a slow machine.
+
 ## [0.3.0] - 2026-10-29
 
 The first public release: the redesign, Sports, more catch-up and guide work, fixes that followed the October 2026 audits, and what a public release needs, including a macOS app and a licence.

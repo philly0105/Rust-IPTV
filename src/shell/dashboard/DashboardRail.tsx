@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -8,6 +8,7 @@ import { ErrorState, PosterWidthContext, SEE_ALL_LINK, SectionHeader, Skeleton, 
 
 import { PHONE_QUERY } from '../navigation';
 import { useMediaQuery } from '../useMediaQuery';
+import { RailDeferContext, firstScreenCards, settleFirstScreen, useFirstScreenSettled } from './firstScreen';
 import { readRailEmpty, writeRailEmpty } from './railEmpty';
 
 /** Arrow scrolls jump instantly under prefers-reduced-motion, like the CSS animations. */
@@ -174,7 +175,12 @@ export function DashboardRail<T>({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const fromCards = useMemo(() => dashRailButtonsFromCards(count, width, window.innerWidth), [count]);
   const { canPrev, canNext } = read?.count === count ? read : fromCards;
-  const trackShown = !error && count > 0;
+  // Until Home has painted once, only the cards that fit across the window, and none at all in a
+  // rail below the window's foot, which shows its loading skeleton meanwhile (firstScreen.ts).
+  const settled = useFirstScreenSettled(!error && count > 0);
+  const deferred = useContext(RailDeferContext) && !settled;
+  const drawn = settled ? count : deferred ? 0 : Math.min(count, firstScreenCards(width));
+  const trackShown = !error && drawn > 0;
   // Whether the track sat at its inline start before the last render.
   const atStartRef = useRef(true);
   // The track element and item order the last commit showed.
@@ -274,6 +280,8 @@ export function DashboardRail<T>({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
+    // The whole row before a move: End, or a step past the last card drawn so far, needs it.
+    if (!settled) flushSync(() => settleFirstScreen(true));
     const cards = Array.from(trackRef.current?.querySelectorAll<HTMLElement>('[data-rail-card]') ?? []);
     const cur = cards.indexOf(document.activeElement as HTMLElement);
     if (cur < 0) return;
@@ -357,7 +365,7 @@ export function DashboardRail<T>({
             className="col-start-1 row-start-1 flex-row flex-wrap justify-start gap-x-4 gap-y-2 px-5 py-4 text-start sm:flex-nowrap"
           />
         </div>
-      ) : loading && count === 0 ? (
+      ) : (loading && count === 0) || drawn === 0 ? (
         <div className={cn('flex gap-4 overflow-hidden px-(--page-gutter)', TRACK_PAD)} aria-busy="true" aria-label={t('loadingRail', { title })}>
           {Array.from({ length: 8 }, (_, i) => (
             <SkeletonCard key={i} width={width} aspect={skeletonAspect} />
@@ -391,7 +399,7 @@ export function DashboardRail<T>({
           >
             {/* The cards' artwork fills the card, so it loads at this width without measuring (SH-6). */}
             <PosterWidthContext.Provider value={width}>
-              {items!.map((item, i) => (
+              {(drawn < count ? items!.slice(0, drawn) : items!).map((item, i) => (
                 <li key={getKey(item)} data-rail-key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
                   <RailCardSlot item={item} tabIndex={i === focusIndex ? 0 : -1} renderCard={renderCard} />
                 </li>

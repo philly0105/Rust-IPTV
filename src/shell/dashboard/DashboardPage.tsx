@@ -31,7 +31,7 @@ import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { formatRating } from '@/features/vod/lib/rating';
 import { isDesktop, RpcError, type RpcResult } from '@/api/transport';
 import { snapshotTitle } from '@/lib/title';
-import { Badge, EmptyState, ErrorState, useToast, errorDescription, whenIdle } from '@/ui';
+import { Badge, EmptyState, ErrorState, scalePx, useDensity, useToast, useUiScale, errorDescription, whenIdle } from '@/ui';
 
 import { useOffline } from '../connection';
 import { PHONE_QUERY } from '../navigation';
@@ -46,6 +46,7 @@ import { AccountAlerts } from './AccountAlerts';
 import { ChannelCard, ContinueCard, OnNowCard, PosterCard, RailMyListProvider, SourceCard, SourceKindContext, itemPath, joinList, type CardMenuItem } from './cards';
 import { ChannelMenuHost, snapshotChannel } from './ChannelCardMenu';
 import { DashboardRail, type RailCardProps } from './DashboardRail';
+import { RailDeferContext, railLeastHeight, sectionsBelowFold, useFirstScreenSettled, type FoldSection } from './firstScreen';
 import { HeroCarousel } from './HeroCarousel';
 import { HeroSkeleton } from './HeroSkeleton';
 import { buildHeroSlides, titleEndsWithYear, type HeroSlide } from './heroSlides';
@@ -444,6 +445,10 @@ function DashboardBody() {
   // while the hero is drawn: the shared error takes its place, and the rail still shows the
   // titles it has kept from before (a refetch that failed), so they must not go with the hero.
   const phone = useMediaQuery(PHONE_QUERY);
+  const uiScale = useUiScale();
+  const density = useDensity();
+  const firstScreenDone = useFirstScreenSettled(false);
+  const drawnSections = useRef(new Set<string>());
   const heroOn = show('hero');
   const railContinueRows = useMemo(() => {
     if (!heroOn || showSharedError || !phone) return continueRows;
@@ -583,6 +588,49 @@ function DashboardBody() {
 
   const heroShown = show('hero') && !showSharedError && ((heroLoading && !heroWasEmpty) || heroSlides.length > 0);
 
+  // Until Home has painted once, the rails below the window's foot draw their skeletons
+  // (firstScreen.ts). Their tops are worked out from the least height of each section above them
+  // that is sure to draw, so a rail on screen is never one of them. A rail drawn once stays drawn.
+  const fold = (() => {
+    if (firstScreenDone || typeof window === 'undefined') return undefined;
+    const px = (n: number) => scalePx(n, uiScale, density, true);
+    const rail = (on: boolean, base: number, phoneBase: number, aspect: number) => (on ? railLeastHeight(px(phone ? phoneBase : base), aspect) : 0);
+    const wide = (on: boolean) => rail(on, WIDE_CARD, WIDE_CARD_PHONE, 16 / 9);
+    const channel = (on: boolean) => rail(on, 232, Math.round(232 * 0.7), 16 / 9);
+    const poster = (on: boolean) => rail(on, 168, Math.round(168 * 0.7), 2 / 3);
+    // A rail still loading draws its skeleton, as tall as its cards, unless it came back empty last time.
+    const skeleton = (id: string) => !readRailEmpty(id);
+    const sections: FoldSection[] = [
+      {
+        key: 'continueWatching',
+        height: wide(visible('continueWatching') && (continueWatching.isPending ? skeleton('continue-watching') : railContinueRows.length > 0)),
+      },
+      { key: 'onNow', height: wide(visible('onNow') && (onNowPending ? skeleton('on-now') : onNow.length > 0)) },
+      { key: 'myList', height: poster(visible('myList') && myListCount > 0) },
+      // Unknown here (their own queries): counted as drawing nothing, a lower bound.
+      { key: 'customLists', height: 0 },
+      { key: 'liveFavorites', height: channel(visible('liveFavorites') && (liveFavorites.length > 0 || showChannels)) },
+      { key: 'recentlyWatchedLive', height: channel(visible('recentlyWatchedLive') && recentLive.length > 0) },
+      { key: 'favoriteMoviesAndSeries', height: poster(visible('favoriteMoviesAndSeries') && vodFavorites.length > 0) },
+      { key: 'recentSources', height: channel(visible('recentSources') && rankedSources.length > 0) },
+      { key: 'recentlyAdded', height: poster(visible('recentlyAdded') && recentlyAdded.length > 0) },
+      { key: 'tmdbTrending', height: 0 },
+    ];
+    // The hero's least height is its content box's min-height (HERO_BODY), in rem and viewport units.
+    const rem = 16 * uiScale;
+    const vh = window.innerHeight / 100;
+    const heroMin = phone
+      ? Math.min(Math.max(16 * rem, 38 * vh), 20 * rem)
+      : Math.min(Math.max(18 * rem, Math.min(40 * vh, (32 * window.innerWidth) / 100)), 30 * rem);
+    const gap = px(40);
+    return { below: sectionsBelowFold(sections, heroShown ? heroMin + gap : 0, gap, window.innerHeight), sections };
+  })();
+  // A section that has drawn its cards keeps them (a later answer above it must not turn it back
+  // into a skeleton).
+  for (const { key, height } of fold?.sections ?? []) if (height > 0 && !fold?.below.has(key)) drawnSections.current.add(key);
+  /** The section waits for Home's first paint (RailDeferContext). */
+  const deferred = (k: string) => !!fold?.below.has(k) && !drawnSections.current.has(k);
+
   return (
     // gap-10 follows density through --spacing. The hero runs flush under the header; with no
     // hero on top the first rail keeps the page's top padding.
@@ -642,78 +690,96 @@ function DashboardBody() {
         )}
 
         {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
-        {visible('myList') && <HomeMyListRail hideError={showSharedError} />}
+        {visible('myList') && (
+          <RailDeferContext.Provider value={deferred('myList')}>
+            <HomeMyListRail hideError={showSharedError} />
+          </RailDeferContext.Provider>
+        )}
         {/* Run 2 C3: one rail per custom list with "Show on Home" on, in list order. */}
-        <HomeCustomListRails />
+        <RailDeferContext.Provider value={deferred('customLists')}>
+          <HomeCustomListRails />
+        </RailDeferContext.Provider>
 
-        {visible('liveFavorites') && (
-          <LiveFavoritesRail
-            items={liveFavorites}
-            loading={favorites.isPending}
-            loaded={favorites.isSuccess}
-            error={railError(favorites.error)}
-            refetch={favorites.refetch}
-            nowNext={favoriteNowNext}
-            epgOffset={epgOffset}
-            sourceById={sourceById}
-            manySources={manySources}
-            play={play}
-          />
-        )}
+        <RailDeferContext.Provider value={deferred('liveFavorites')}>
+          {visible('liveFavorites') && (
+            <LiveFavoritesRail
+              items={liveFavorites}
+              loading={favorites.isPending}
+              loaded={favorites.isSuccess}
+              error={railError(favorites.error)}
+              refetch={favorites.refetch}
+              nowNext={favoriteNowNext}
+              epgOffset={epgOffset}
+              sourceById={sourceById}
+              manySources={manySources}
+              play={play}
+            />
+          )}
 
-        {visible('liveFavorites') && showChannels && topLiveSource && (
-          <SourceChannelsRail source={topLiveSource} items={fillChannels} play={play} />
-        )}
+          {visible('liveFavorites') && showChannels && topLiveSource && (
+            <SourceChannelsRail source={topLiveSource} items={fillChannels} play={play} />
+          )}
+        </RailDeferContext.Provider>
 
-        {visible('recentlyWatchedLive') && (
-          <RecentLiveRail
-            items={recentLive}
-            loading={recent.isPending}
-            loaded={recent.isSuccess}
-            error={railError(recent.error)}
-            refetch={recent.refetch}
-            nowNext={recentNowNext}
-            epgOffset={epgOffset}
-            sourceById={sourceById}
-            manySources={manySources}
-            play={play}
-          />
-        )}
+        <RailDeferContext.Provider value={deferred('recentlyWatchedLive')}>
+          {visible('recentlyWatchedLive') && (
+            <RecentLiveRail
+              items={recentLive}
+              loading={recent.isPending}
+              loaded={recent.isSuccess}
+              error={railError(recent.error)}
+              refetch={recent.refetch}
+              nowNext={recentNowNext}
+              epgOffset={epgOffset}
+              sourceById={sourceById}
+              manySources={manySources}
+              play={play}
+            />
+          )}
+        </RailDeferContext.Provider>
 
-        {visible('favoriteMoviesAndSeries') && (
-          <FavoriteVodRail
-            items={vodFavorites}
-            loading={favorites.isPending}
-            loaded={favorites.isSuccess}
-            // Both favorites rails read one query: only one of them shows its error.
-            error={show('liveFavorites') ? undefined : railError(favorites.error)}
-            refetch={favorites.refetch}
-          />
-        )}
+        <RailDeferContext.Provider value={deferred('favoriteMoviesAndSeries')}>
+          {visible('favoriteMoviesAndSeries') && (
+            <FavoriteVodRail
+              items={vodFavorites}
+              loading={favorites.isPending}
+              loaded={favorites.isSuccess}
+              // Both favorites rails read one query: only one of them shows its error.
+              error={show('liveFavorites') ? undefined : railError(favorites.error)}
+              refetch={favorites.refetch}
+            />
+          )}
+        </RailDeferContext.Provider>
 
-        {visible('recentSources') && <RecentSourcesRail items={rankedSources} loading={sources.isPending} />}
+        <RailDeferContext.Provider value={deferred('recentSources')}>
+          {visible('recentSources') && <RecentSourcesRail items={rankedSources} loading={sources.isPending} />}
+        </RailDeferContext.Provider>
 
-        {visible('recentlyAdded') && (
-          <RecentlyAddedRail
-            items={recentlyAdded}
-            loading={addedMovies.isPending || addedSeries.isPending}
-            loaded={addedMovies.isSuccess && addedSeries.isSuccess}
-            error={railError(addedMovies.error ?? addedSeries.error)}
-            refetch={retryAdded}
-            sourceById={sourceById}
-          />
-        )}
+        <RailDeferContext.Provider value={deferred('recentlyAdded')}>
+          {visible('recentlyAdded') && (
+            <RecentlyAddedRail
+              items={recentlyAdded}
+              loading={addedMovies.isPending || addedSeries.isPending}
+              loaded={addedMovies.isSuccess && addedSeries.isSuccess}
+              error={railError(addedMovies.error ?? addedSeries.error)}
+              refetch={retryAdded}
+              sourceById={sourceById}
+            />
+          )}
+        </RailDeferContext.Provider>
 
-        {visible('tmdbTrending') && tmdbEnabled && (
-          <TrendingRail
-            items={trending.data}
-            loading={trending.isPending}
-            loaded={trending.isSuccess}
-            error={railError(trending.error)}
-            refetch={trending.refetch}
-            sourceById={sourceById}
-          />
-        )}
+        <RailDeferContext.Provider value={deferred('tmdbTrending')}>
+          {visible('tmdbTrending') && tmdbEnabled && (
+            <TrendingRail
+              items={trending.data}
+              loading={trending.isPending}
+              loaded={trending.isSuccess}
+              error={railError(trending.error)}
+              refetch={trending.refetch}
+              sourceById={sourceById}
+            />
+          )}
+        </RailDeferContext.Provider>
 
         {hasSources && !anyRailVisible && !anyRailError && !anyRailPending && <GetStarted source={rankedSources[0]} hasLive={rankedSources.some((s) => s.channelCount > 0)} />}
       </div>

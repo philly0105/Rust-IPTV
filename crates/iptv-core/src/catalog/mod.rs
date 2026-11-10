@@ -502,6 +502,9 @@ pub struct CatalogWriter<'c> {
     /// [`CatalogWriter::begin`]; checked every [`WRITE_BATCH`] rows and in
     /// [`CatalogWriter::finish`], so a cancelled run rolls back.
     cancel: Option<tokio_util::sync::CancellationToken>,
+    /// `begin` emptied the whole search index (`items_fts`), and `finish`
+    /// builds it again from every row of `items`.
+    fts_rebuild: bool,
 }
 
 /// `Err` with the cancelled-import error when `token` fired.
@@ -578,14 +581,28 @@ impl<'c> CatalogWriter<'c> {
             total: 0,
             duplicates: 0,
             cancel: cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id)),
+            fts_rebuild: false,
         };
         // A large refresh drops the indexes before its deletes too.
         w.maybe_go_bulk()?;
-        for ct in types {
+        // A rewrite that goes bulk here replaces at least as many rows as it
+        // leaves in `items`: emptying the search index and building it again
+        // from every row in `finish` is cheaper than deleting the replaced
+        // titles from it one by one.
+        w.fts_rebuild = w.dropped_indexes.is_some() && replaced > 0;
+        if w.fts_rebuild {
             conn.execute(
-                "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
-                params![source_id, ct.as_str()],
+                "INSERT INTO items_fts (items_fts) VALUES ('delete-all')",
+                [],
             )?;
+        }
+        for ct in types {
+            if !w.fts_rebuild {
+                conn.execute(
+                    "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
+                    params![source_id, ct.as_str()],
+                )?;
+            }
             conn.execute(
                 "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1 AND content_type = ?2)",
                 params![source_id, ct.as_str()],
@@ -881,11 +898,17 @@ impl<'c> CatalogWriter<'c> {
         }
         // The search index and the ranking rows of the rewritten types, after
         // the verdict updates above (items_rank copies non_english and quality).
+        if self.fts_rebuild {
+            self.conn
+                .execute("INSERT INTO items_fts (items_fts) VALUES ('rebuild')", [])?;
+        }
         for ct in &self.types {
-            self.conn.execute(
-                "INSERT INTO items_fts (rowid, title) SELECT rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
-                params![self.source_id, ct.as_str()],
-            )?;
+            if !self.fts_rebuild {
+                self.conn.execute(
+                    "INSERT INTO items_fts (rowid, title) SELECT rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
+                    params![self.source_id, ct.as_str()],
+                )?;
+            }
             self.conn.execute(
                 "INSERT INTO items_rank (id, source_id, content_type, category_id, non_english, title_len, position, quality) SELECT rowid, source_id, content_type, category_id, non_english, length(title), position, quality FROM items WHERE source_id = ?1 AND content_type = ?2",
                 params![self.source_id, ct.as_str()],
@@ -2564,6 +2587,93 @@ mod tests {
         assert_eq!(fts_query("+1 \"x").as_deref(), Some("\"1\"* \"x\"*"));
         assert_eq!(fts_query("  -- "), None);
         assert_eq!(like_pattern("50%_a"), "%50\\%\\_a%");
+    }
+
+    #[test]
+    fn bulk_rewrite_rebuilds_the_search_index_of_every_source() {
+        let (_d, pool) = conn();
+        let mut c = pool.get().unwrap();
+        c.execute(
+            "INSERT INTO sources(id, kind, name, config_json) VALUES ('o', 'm3u', 'O', '{}')",
+            [],
+        )
+        .unwrap();
+        let rows = |prefix: &str, n: usize| -> Vec<ItemRow> {
+            (0..n)
+                .map(|i| {
+                    item(
+                        &format!("{prefix}{i}"),
+                        "a",
+                        &format!("{prefix} {i}"),
+                        i as i64,
+                    )
+                })
+                .collect()
+        };
+        let other: Vec<ItemRow> = rows("Other", 50)
+            .into_iter()
+            .map(|r| ItemRow {
+                source_id: "o".into(),
+                ..r
+            })
+            .collect();
+        replace_catalog(&mut c, "o", ContentType::Live, &[], &mut other.into_iter()).unwrap();
+        let big = BULK_MIN_ROWS as usize + 500;
+        // A first import goes bulk while inserting; the refresh goes bulk
+        // before its deletes and rebuilds the whole search index.
+        replace_catalog(
+            &mut c,
+            "s",
+            ContentType::Live,
+            &[],
+            &mut rows("Alpha", big).into_iter(),
+        )
+        .unwrap();
+        replace_catalog(
+            &mut c,
+            "s",
+            ContentType::Live,
+            &[],
+            &mut rows("Beta", big).into_iter(),
+        )
+        .unwrap();
+        let check = |c: &Connection| {
+            c.execute(
+                "INSERT INTO items_fts (items_fts) VALUES ('integrity-check')",
+                [],
+            )
+            .unwrap();
+            let hits = |word: &str| -> i64 {
+                c.query_row(
+                    "SELECT count(*) FROM items_fts WHERE items_fts MATCH ?1",
+                    [word],
+                    |r| r.get(0),
+                )
+                .unwrap()
+            };
+            let rank: i64 = c
+                .query_row("SELECT count(*) FROM items_rank", [], |r| r.get(0))
+                .unwrap();
+            let items: i64 = c
+                .query_row("SELECT count(*) FROM items", [], |r| r.get(0))
+                .unwrap();
+            let suspended: i64 = c
+                .query_row("SELECT count(*) FROM fts_suspend", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!((rank, suspended), (items, 0));
+            (hits("alpha"), hits("beta"), hits("other"))
+        };
+        assert_eq!(check(&c), (0, big as i64, 50));
+        // A small rewrite next to it keeps deleting row by row.
+        let fewer: Vec<ItemRow> = rows("Other", 10)
+            .into_iter()
+            .map(|r| ItemRow {
+                source_id: "o".into(),
+                ..r
+            })
+            .collect();
+        replace_catalog(&mut c, "o", ContentType::Live, &[], &mut fewer.into_iter()).unwrap();
+        assert_eq!(check(&c), (0, big as i64, 10));
     }
 
     #[test]

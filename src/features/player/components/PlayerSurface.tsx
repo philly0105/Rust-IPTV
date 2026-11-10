@@ -1,5 +1,5 @@
 import { AlertTriangle, ChevronRight, Lock, PictureInPicture2, Play, RotateCcw, RotateCw, VolumeX, X } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
@@ -899,6 +899,45 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source?.url]);
 
+  // Chrome that follows the stores itself, made once per change of what it is given: the surface
+  // re-renders for each step of a zap (the next channel's title, the loading and playing status),
+  // and these rendered again with it every time.
+  const reconnectNotice = useMemo(() => <ReconnectNotice compact={compact} />, [compact]);
+  const overlays = useMemo(
+    () => (
+      <>
+        <Osd />
+        <UnmutePrompt compact={compact} />
+        <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
+        {/*
+          Zap banner (C5): the title's corner, or the far one while the channel list or stream info
+          holds it. The mini player says it in its header instead; a short player gets the
+          one-line chip.
+        */}
+        {!compact && (
+          <ZapBanner
+            compact={pip}
+            chip={shortPlayer && !pip}
+            className={
+              pip || smallPlayer
+                ? 'inset-x-2 top-2'
+                : cn(shortPlayer ? SHORT_CHIP : 'top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+            }
+          />
+        )}
+        {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
+        {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : isFullscreen ? 'bottom-44' : 'bottom-32'} />}
+        <EndedOverlay compact={compact} short={shortPlayer} />
+        <UpNextCard compact={compact} short={shortPlayer} />
+      </>
+    ),
+    [compact, pip, shortPlayer, smallPlayer, panelOpen, statsOpen, isFullscreen],
+  );
+  const channelPanel = useMemo(
+    () => <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} />,
+    [channelPanelAvailable, isFullscreen, compact],
+  );
+
   if (!source) return null;
 
   if (mode === 'radio') {
@@ -1037,7 +1076,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
           {ripple && <TapSeekRipple key={ripple.key} side={ripple.side} seconds={ripple.seconds} onDone={endRipple} />}
           <LoadingDial status={status} />
           {/* failover: smart reconnect / failover progress under the dial. */}
-          <ReconnectNotice compact={compact} />
+          {reconnectNotice}
 
           {!compact && (
             <div
@@ -1095,29 +1134,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
             </div>
           )}
 
-          <Osd />
-          <UnmutePrompt compact={compact} />
-          <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
-          {/*
-            Zap banner (C5): the title's corner, or the far one while the channel list or stream info
-            holds it. The mini player says it in its header instead; a short player gets the
-            one-line chip.
-          */}
-          {!compact && (
-            <ZapBanner
-              compact={pip}
-              chip={shortPlayer && !pip}
-              className={
-                pip || smallPlayer
-                  ? 'inset-x-2 top-2'
-                  : cn(shortPlayer ? SHORT_CHIP : 'top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
-              }
-            />
-          )}
-          {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
-          {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : isFullscreen ? 'bottom-44' : 'bottom-32'} />}
-          <EndedOverlay compact={compact} short={shortPlayer} />
-          <UpNextCard compact={compact} short={shortPlayer} />
+          {overlays}
 
           <div
             data-testid="overlay-chrome"
@@ -1138,7 +1155,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
             />
           </div>
 
-          <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} />
+          {channelPanel}
           {menuAt && <VideoContextMenu at={menuAt} onClose={closeMenu} />}
         </>
       )}

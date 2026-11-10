@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type P
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useInRouterContext, useNavigate } from 'react-router';
+import { useShallow } from 'zustand/react/shallow';
 
 import '../player.css';
 
@@ -22,13 +23,16 @@ import { bindParentalGuard } from '../parentalGuard';
 import { lockLandscapeForVideo, unlockOrientation } from '../fullscreen';
 import { exitPip, usePipStore } from '../pip';
 import { expandPath, noteStageShown, setRehome, useStageTarget } from '../stage';
-import { flushProgress, replay, reportFullscreen, selectEnded, usePlayerStore } from '../store';
+import { flushProgress, replay, reportFullscreen, selectEnded, usePlayerStore, type PlayerState } from '../store';
 import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
 import { bindSettingsEvents, usePlayerSettings } from '../useSettings';
 import { retryPlayback } from './Controls';
 import { PlayerSurface } from './PlayerSurface';
 import { SleepTimerHost, ZapHeaderLine } from './lazyParts';
 import { useZapBannerShown, useZapHover } from './zapHooks';
+
+/** The surface follows the stores itself: a dock render (a move, the mini frame) passes it by. */
+const MemoSurface = memo(PlayerSurface);
 
 const POS_KEY = 'player.mini.pos';
 const MARGIN = 16;
@@ -181,9 +185,40 @@ function BarPlayButton() {
   );
 }
 
+/** The item as the dock places it (see `PlayerDock`): primitives, compared one by one. */
+function selectDockItem(s: PlayerState): { present: boolean; isLive: boolean; hasRef: boolean } {
+  const src = s.source;
+  return { present: !!src, isLive: !!src?.isLive, hasRef: !!src?.ref };
+}
+
+const selectTitle = (s: PlayerState): string | undefined => s.source?.title;
+
+/** The mini frame's header line: the title, or during a zap its number and what airs (ZapHeaderLine). */
+function MiniTitle({ miniZap, onPointerEnter, onPointerLeave }: { miniZap: boolean; onPointerEnter(): void; onPointerLeave(): void }) {
+  const title = usePlayerStore(selectTitle);
+  return (
+    <span className="flex min-w-0 flex-1 text-body-sm font-medium text-fg" title={title} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+      {miniZap && title !== undefined ? <ZapHeaderLine title={title} /> : <span className="min-w-0 truncate">{title}</span>}
+    </span>
+  );
+}
+
+/** The phone bar's first line, after the live dot. */
+function BarTitle({ miniZap }: { miniZap: boolean }) {
+  const title = usePlayerStore(selectTitle);
+  return miniZap && title !== undefined ? (
+    <ZapHeaderLine title={title} />
+  ) : (
+    <span dir="auto" className="min-w-0 truncate">
+      {title}
+    </span>
+  );
+}
+
 /** The phone bar's second line: what airs or the episode, or what the player is doing when that matters more. */
-function BarStatusLine({ subtitle }: { subtitle: string | undefined }) {
+function BarStatusLine() {
   const { t } = useTranslation('player');
+  const subtitle = usePlayerStore((s) => s.source?.subtitle);
   const status = usePlayerStore((s) => s.status);
   const ended = usePlayerStore(selectEnded);
   const text = status === 'error' ? t('errorTitle') : status === 'loading' ? t('loading') : ended ? t('playbackFinished') : subtitle;
@@ -208,7 +243,10 @@ function BarStatusLine({ subtitle }: { subtitle: string | undefined }) {
  */
 export const PlayerDock = memo(function PlayerDock() {
   const { t } = useTranslation('player');
-  const source = usePlayerStore((s) => s.source);
+  // What the dock itself places and offers, not the item: a zap's placeholder (a new title over the
+  // same stream) re-rendered the dock and the whole surface under it. The mini frame's title and
+  // the phone bar's lines follow the item on their own (MiniTitle, BarStatusLine).
+  const source = usePlayerStore(useShallow(selectDockItem));
   const mode = usePlayerStore((s) => s.mode);
   const dock = usePlayerStore((s) => s.dock);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
@@ -229,7 +267,7 @@ export const PlayerDock = memo(function PlayerDock() {
   const miniRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MiniPos>(readPos);
 
-  const visible = !!source && mode !== 'external';
+  const visible = source.present && mode !== 'external';
   const inStage = visible && dock === 'stage' && !!stageTarget;
   const inMini = visible && !inStage && !isWindowFilled && dock !== 'hidden';
   // Below sm (the shell's tab bar shows) the mini player is a full-width bar docked above the tab
@@ -244,7 +282,7 @@ export const PlayerDock = memo(function PlayerDock() {
   // small picture, which would repeat the name the header already shows).
   const zapShown = useZapBannerShown();
   const miniZap = inMini && zapShown && mode !== 'radio';
-  const channelPanelAvailable = !!source?.isLive && (settings?.fullscreenChannelPanel ?? true) && !!(zapContext ?? source?.ref);
+  const channelPanelAvailable = source.isLive && (settings?.fullscreenChannelPanel ?? true) && (!!zapContext || source.hasRef);
 
   usePlaybackShortcuts({ channelPanelAvailable });
   // Subtitle look (C6): player.css reads these variables in `video::cue`. The mapping loads
@@ -303,10 +341,17 @@ export const PlayerDock = memo(function PlayerDock() {
     if (target && host.parentNode !== target) moveKeepingFocus(host, target);
   }, [inPip, inWindowFill, inStage, stageTarget, host]);
   // The page showing this stream in its stage: Expand comes back to it for a stream with no page of its own.
-  const sourceUrl = source?.url;
+  // Followed from the store, so a new stream (each zap) does not re-render the dock.
   useLayoutEffect(() => {
-    if (inStage && sourceUrl) noteStageShown(sourceUrl);
-  }, [inStage, stageTarget, sourceUrl]);
+    if (!inStage) return;
+    const note = (url: string | undefined): void => {
+      if (url) noteStageShown(url);
+    };
+    note(usePlayerStore.getState().source?.url);
+    return usePlayerStore.subscribe((s, prev) => {
+      if (s.source?.url !== prev.source?.url) note(s.source?.url);
+    });
+  }, [inStage, stageTarget]);
 
   // Nothing left to show in the small window: give the app its window back.
   useEffect(() => {
@@ -450,7 +495,7 @@ export const PlayerDock = memo(function PlayerDock() {
     <>
       {/* Fullscreen from the mini frame fills the screen: full controls, not the mini bar. */}
       {createPortal(
-        <PlayerSurface compact={inMini && !isFullscreen && !inWindowFill && !inPip} thumb={barShown && !isFullscreen && !inWindowFill && !inPip} channelPanelAvailable={channelPanelAvailable} />,
+        <MemoSurface compact={inMini && !isFullscreen && !inWindowFill && !inPip} thumb={barShown && !isFullscreen && !inWindowFill && !inPip} channelPanelAvailable={channelPanelAvailable} />,
         host,
       )}
       {/* Sleep timer (C5): the one-minute warning toast. */}
@@ -527,15 +572,8 @@ export const PlayerDock = memo(function PlayerDock() {
                 <GripHorizontal className="size-4" aria-hidden />
               </button>
             </Tooltip>
-            {source?.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
-            <span
-              className="flex min-w-0 flex-1 text-body-sm font-medium text-fg"
-              title={source?.title}
-              onPointerEnter={titleHover.onPointerEnter}
-              onPointerLeave={titleHover.onPointerLeave}
-            >
-              {miniZap && source ? <ZapHeaderLine title={source.title} /> : <span className="min-w-0 truncate">{source?.title}</span>}
-            </span>
+            {source.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
+            <MiniTitle miniZap={miniZap} onPointerEnter={titleHover.onPointerEnter} onPointerLeave={titleHover.onPointerLeave} />
             <ExpandButton label={t('expand')} />
             <Tooltip content={t('close')} describe={false}>
               <button
@@ -570,16 +608,10 @@ export const PlayerDock = memo(function PlayerDock() {
             <ExpandButton label={t('expand')} stretched />
             <div className="min-w-0 flex-1">
               <p className="flex min-w-0 items-center gap-1.5 text-body-sm font-medium text-fg">
-                {source?.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
-                {miniZap && source ? (
-                  <ZapHeaderLine title={source.title} />
-                ) : (
-                  <span dir="auto" className="min-w-0 truncate">
-                    {source?.title}
-                  </span>
-                )}
+                {source.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
+                <BarTitle miniZap={miniZap} />
               </p>
-              <BarStatusLine subtitle={source?.subtitle} />
+              <BarStatusLine />
             </div>
             <div className="flex shrink-0 items-center">
               <BarPlayButton />

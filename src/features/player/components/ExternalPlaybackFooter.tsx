@@ -21,7 +21,9 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
   const { t } = useTranslation('player');
   const runs = useMediaStore((s) => s.externalRuns);
   const mode = usePlayerStore((s) => s.mode);
-  const status = usePlayerStore((s) => s.status);
+  // Only an external player's status shows here: the built-in player's steps (a zap's loading and
+  // playing) do not re-render the shell's footer.
+  const status = usePlayerStore((s) => (s.mode === 'external' ? s.status : undefined));
   const pending = usePlayerStore((s) => (s.mode === 'external' ? s.source : undefined));
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [stopping, setStopping] = useState(false);

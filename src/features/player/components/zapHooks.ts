@@ -41,9 +41,9 @@ function releaseHold(held: { current: number | null }): void {
 /** The banner is up for what plays now (the surfaces dim the title bar under it). */
 export function useZapBannerShown(): boolean {
   const visible = useZapBanner((s) => s.visible);
-  const status = usePlayerStore((s) => s.status);
-  usePlayerStore((s) => s.source);
-  usePlayerStore((s) => s.mode);
+  // The answer only, not the status and the item it is made of: a zap's placeholder and its status
+  // steps re-rendered the dock and the surface for an answer that stayed the same.
+  const shown = usePlayerStore((s) => visible && s.status !== 'error' && zapBannerApplies());
   usePlayerSettings();
-  return visible && status !== 'error' && zapBannerApplies();
+  return shown;
 }

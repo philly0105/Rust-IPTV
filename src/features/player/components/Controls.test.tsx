@@ -336,6 +336,26 @@ describe('Controls re-renders (PB-4)', () => {
     expect(barRenders()).toBe(before);
   });
 
+  it("a zap's steps re-render the LIVE badge, not the bar", () => {
+    const ref = (id: string) => ({ sourceId: 's1', contentType: 'live' as const, itemId: id });
+    const live = { url: 'http://h/live/1.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: ref('1') };
+    act(() => usePlayerStore.setState({ source: live, status: 'playing', durationSeconds: undefined, positionSeconds: 30 }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByTestId('live-badge').dataset['state']).toBe('on-air');
+    const before = barRenders();
+    // The next channel's name over the same stream, loading, the new stream, playing again.
+    act(() => usePlayerStore.setState({ source: { ...live, title: 'Sport', ref: ref('2') }, status: 'loading', positionSeconds: 0 }));
+    expect(screen.getByTestId('live-badge').dataset['state']).toBe('standby');
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    act(() => usePlayerStore.setState({ source: { ...live, url: 'http://h/live/2.ts', title: 'Sport', ref: ref('2') } }));
+    act(() => usePlayerStore.setState({ status: 'playing', positionSeconds: 1 }));
+    expect(screen.getByTestId('live-badge').dataset['state']).toBe('on-air');
+    expect(barRenders()).toBe(before);
+    // What the bar does lay out still re-renders it: a failure swaps Pause for Retry.
+    act(() => usePlayerStore.setState({ status: 'error', error: 'gone' }));
+    expect(barRenders()).toBeGreaterThan(before);
+  });
+
   it("the bar's own re-renders leave its icons as they were drawn (P2-PLAYER-4)", () => {
     const { rerender } = render(<Controls variant="overlay" visible />);
     const drawn = vi.mocked(Settings2).mock.calls.length;

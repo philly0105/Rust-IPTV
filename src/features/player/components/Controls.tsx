@@ -45,6 +45,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import { isDesktop, rpc } from '@/api/transport';
 import { intlLocale } from '@/lib/intl';
@@ -60,7 +61,7 @@ import { useMediaStore, type TimeRange } from '../media';
 import { noteMenuDismissed } from '../menuDismiss';
 import { ASPECTS, setPicture, usePictureStore, ZOOMS, type PictureAspect, type PictureZoom } from '../picture';
 import { usePipStore } from '../pip';
-import { canZap, nextInQueue, prevInQueue, replay, reportStatus, retryResolve, selectEnded, usePlayerStore, zap, type PlayerState } from '../store';
+import { canZap, replay, reportStatus, retryResolve, sameSource, selectEnded, usePlayerStore, zap, type PlayerState } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { canEnterFullscreen } from '../fullscreen';
 import { InlineSpinner } from './InlineSpinner';
@@ -1160,11 +1161,43 @@ function TimeReadout({ shown, duration, tiny }: { shown: boolean; duration: numb
   );
 }
 
+/** What the control bar lays out from the item playing (see `Controls`): primitives, compared one by one. */
+interface BarItem {
+  present: boolean;
+  isLive: boolean;
+  isRadio: boolean;
+  episodic: boolean;
+  zappable: boolean;
+  hasPrev: boolean;
+  hasNext: boolean;
+}
+
+function selectBarItem(s: PlayerState): BarItem {
+  const src = s.source;
+  // The queue's neighbours of the item (prevInQueue and nextInQueue): only their presence shows.
+  const at = src && s.queue.length > 0 ? s.queue.findIndex((q) => sameSource(q, src)) : -1;
+  return {
+    present: !!src,
+    isLive: !!src?.isLive,
+    isRadio: !!src?.isRadio,
+    episodic: !!src?.episodeId,
+    zappable: canZap(s),
+    hasPrev: at > 0,
+    hasNext: at >= 0 && at < s.queue.length - 1,
+  };
+}
+
+/**
+ * The status as the bar shows it: a live stream starting again (a zap, a reconnect) keeps its
+ * pause button, as `loading` and `playing` show alike there; the LIVE badge follows the real one.
+ */
+function selectBarStatus(s: PlayerState): PlayerState['status'] {
+  return s.status === 'loading' && s.source?.isLive ? 'playing' : s.status;
+}
+
 /** Live: the badge at the live edge (or after a failure), else Go live and how far behind it playback is. */
 function LiveEdge({
   shown,
-  status,
-  pulseKey,
   short,
   narrow,
   tiny,
@@ -1172,8 +1205,6 @@ function LiveEdge({
   mpv,
 }: {
   shown: boolean;
-  status: PlayerState['status'];
-  pulseKey: string;
   /** Compact or narrow: "Live" and "-1:30" instead of "Go live" and "1:30 behind live". */
   short: boolean;
   narrow: boolean;
@@ -1183,6 +1214,10 @@ function LiveEdge({
   mpv: boolean;
 }) {
   const { t } = useTranslation('player');
+  // Its own: the bar does not re-render for a status step or a new stream (see `Controls`).
+  const status = usePlayerStore((s) => s.status);
+  // A new channel (or the stream coming back) pulses the dot again.
+  const pulseKey = usePlayerStore((s) => s.source?.url ?? '');
   const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
   const seekable = useWhileShown(useMediaStore, (s) => s.seekable, shown);
   const liveWindow = liveWindowOf(seekable);
@@ -1359,18 +1394,22 @@ function jump(seconds: number): void {
  */
 export const Controls = memo(function Controls({ variant, visible, compact, short, onMenuOpenChange, onVolumeDragChange, readoutIdle, channelPanel = false }: ControlsProps) {
   const { t } = useTranslation('player');
-  const source = usePlayerStore((s) => s.source);
-  const status = usePlayerStore((s) => s.status);
+  // What the bar lays out from the item, not the item itself: a zap's placeholder (a new title over
+  // the same stream) and its status steps (playing, loading, playing) re-rendered every button,
+  // tooltip and icon of the bar, twice or three times a zap. The LIVE badge follows the status and
+  // the stream itself (LiveEdge).
+  const source = usePlayerStore(useShallow(selectBarItem));
+  const status = usePlayerStore(selectBarStatus);
   // The position, buffer and live window are read by the leaves that show them (PositionSeekBar,
-  // TimeReadout, LiveEdge): the bar itself re-renders only when what it lays out changes.
-  const hasPosition = usePlayerStore((s) => s.positionSeconds > 0);
+  // TimeReadout, LiveEdge): the bar itself re-renders only when what it lays out changes. Whether
+  // a VOD position is known yet only picks the time readout (live shows the badge instead).
+  const hasPosition = usePlayerStore((s) => !s.source?.isLive && s.positionSeconds > 0);
   const duration = usePlayerStore((s) => s.durationSeconds);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const mode = usePlayerStore((s) => s.mode);
   const mpvAttached = useMediaStore((s) => !!s.mpv?.attached);
   const ended = usePlayerStore(selectEnded);
-  usePlayerStore((s) => s.queue);
   const liveWindowed = useMediaStore((s) => !!liveWindowOf(s.seekable));
   const tracks = useMediaStore((s) => s.tracks);
   const canPip = useMediaStore((s) => s.canPip);
@@ -1484,7 +1523,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
     return () => document.removeEventListener('pointerdown', onPress, true);
   }, [popupOpen, root, menu]);
 
-  if (!source) return null;
+  if (!source.present) return null;
   const isLive = source.isLive;
   const isVod = !isLive && !source.isRadio;
   const playing = status === 'playing' || status === 'loading';
@@ -1495,10 +1534,10 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   // and a "No signal" badge under "This stream did not play" were noise. The dock bar (embedded
   // mpv, whose error strip may leave Retry out) keeps them.
   const panelOwnsError = failed && variant === 'overlay';
-  const prev = prevInQueue();
-  const next = nextInQueue();
+  const prev = source.hasPrev;
+  const next = source.hasNext;
   const captionsOn = tracks.text.some((x) => x.selected);
-  const episodic = !!source.episodeId;
+  const episodic = source.episodic;
 
   // mpv's cache runs a few seconds ahead of playback even at the live edge.
   const edgeSlack = mode === 'embedded-mpv' ? LIVE_EDGE_SLACK_MPV : LIVE_EDGE_SLACK;
@@ -1518,7 +1557,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   // replaced a lone disc at the screen's edge), so changing channel needs no keyboard. Over a
   // failed stream too: zapping away is often the way out. Elsewhere the page's own list is beside
   // the stage.
-  const canZapHere = variant === 'overlay' && big && canZap({ source });
+  const canZapHere = variant === 'overlay' && big && source.zappable;
 
   const store = usePlayerStore.getState();
   // Overlay: controls laid on an edge-to-edge scrim over the picture, no pane. Dock: a strong glass
@@ -1756,8 +1795,6 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
               {panelOwnsError ? null : isLive ? (
                 <LiveEdge
                   shown={visible}
-                  status={status}
-                  pulseKey={source.url}
                   short={!!compact || narrow}
                   narrow={narrow}
                   tiny={tiny}

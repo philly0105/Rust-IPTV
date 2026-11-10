@@ -95,9 +95,51 @@ strip = true
 
 # The bundled SQLite is C code built by the cc crate, which follows the
 # profile's opt-level: "s" compiles it for size (/O1 with MSVC). Every catalog
-# query runs in it, so it gets full optimization. The rest of the binary stays
-# at "s" until opt-level 3 is measured against the installer size.
+# query runs in it, so it gets full optimization.
 [profile.release.package.libsqlite3-sys]
+opt-level = 3
+
+# The crates that do the CPU work of imports, guides, JSON replies and poster
+# variants also build at opt-level 3; the rest stays at "s". Measured on Linux
+# (iptv-server, fat LTO, 2026-11-09, CPU time of the release perf tests,
+# median of 7 interleaved runs on a busy 4-core box):
+#
+# | Build                        | iptv-server | xz -9    | image_resize | epg_perf | catalog_perf | m3u_perf |
+# | ---------------------------- | ----------- | -------- | ------------ | -------- | ------------ | -------- |
+# | all "s"                      | 18.43 MB    | 6.23 MB  | 1.23 s       | 1.89 s   | 12.02 s      | 1.53 s   |
+# | "s" + these crates at 3      | 21.08 MB    | 6.97 MB  | 1.06 s       | 1.77 s   | 11.23 s      | 1.48 s   |
+# | everything at 3              | 24.25 MB    | 7.67 MB  | 1.03 s       | 1.73 s   | 11.09 s      | 1.49 s   |
+#
+# Resizing a 512 px PNG logo to 192 px took 8.4 ms at "s" and 4.6 ms with
+# these crates at 3 (a 600x900 JPEG poster 16.5 to 13.3 ms, a 2000x3000
+# original 74 to 60 ms). These crates give nearly all of opt-level 3's gain
+# for half its size cost. Wall-clock times on that box swung by up to 2x
+# between runs, so only the CPU times above were used.
+[profile.release.package.iptv-core]
+opt-level = 3
+[profile.release.package.serde_json]
+opt-level = 3
+[profile.release.package.quick-xml]
+opt-level = 3
+[profile.release.package.memchr]
+opt-level = 3
+[profile.release.package.regex-automata]
+opt-level = 3
+[profile.release.package.flate2]
+opt-level = 3
+[profile.release.package.miniz_oxide]
+opt-level = 3
+[profile.release.package.zlib-rs]
+opt-level = 3
+[profile.release.package.image]
+opt-level = 3
+[profile.release.package.png]
+opt-level = 3
+[profile.release.package.fdeflate]
+opt-level = 3
+[profile.release.package.zune-jpeg]
+opt-level = 3
+[profile.release.package.sha2]
 opt-level = 3
 
 # Debug builds keep line tables for our crates (readable backtraces) and no

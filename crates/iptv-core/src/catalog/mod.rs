@@ -2694,5 +2694,14 @@ mod tests {
         check(&c, [29, 39]);
         crate::channeledit::set_hidden(&mut c, &hidden, false).unwrap();
         check(&c, [30, 40]);
+        // The unfiltered page reads the stored counts and runs no count
+        // statement (a page of 200k channels read every key to count them);
+        // a hidden channel still counts the rows.
+        c.execute("UPDATE categories SET item_count = item_count + 1", [])
+            .unwrap();
+        assert_eq!(page(&c, ContentType::Live, false).0, 30 + 3);
+        assert_eq!(page(&c, ContentType::Radio, true).0, 40 + 4);
+        crate::channeledit::set_hidden(&mut c, &hidden[..1], true).unwrap();
+        assert_eq!(page(&c, ContentType::Live, false).0, 29);
     }
 }

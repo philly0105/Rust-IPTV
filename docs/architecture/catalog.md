@@ -1,6 +1,6 @@
 # Catalog
 
-Code: `crates/iptv-core/src/catalog/`. Tests: `crates/iptv-core/tests/catalog_query.rs`, `catalog_perf.rs` and `l2_query_perf.rs` (read budgets), `l2_query_english.rs` (stored English-only verdicts), `l2_cross_bulk_write.rs` (index rebuild, declared categories, rollback), `l3_search_perf.rs` (search, filtered VOD pages and parental hide mode on 215k items, with results checked against single-list searches), `quality_storage.rs` (stored channel quality and its backfill) plus unit tests in `mod.rs`, `title.rs`, `language.rs` and `quality.rs`.
+Code: `crates/iptv-core/src/catalog/`. Tests: `crates/iptv-core/tests/catalog_query.rs`, `catalog_perf.rs` and `l2_query_perf.rs` (read budgets), `read_rpc_bench.rs` (an ignored benchmark of the hot read RPCs on 200k channels, 180k VOD titles and an 876k-programme guide), `l2_query_english.rs` (stored English-only verdicts), `l2_cross_bulk_write.rs` (index rebuild, declared categories, rollback), `l3_search_perf.rs` (search, filtered VOD pages and parental hide mode on 215k items, with results checked against single-list searches), `quality_storage.rs` (stored channel quality and its backfill) plus unit tests in `mod.rs`, `title.rs`, `language.rs` and `quality.rs`.
 
 The catalog is the `items` and `categories` tables (C3) for every source kind. Importers write it; the UI reads it through `catalog.*` rpc. One row shape (`ItemRow`) serves live, radio, movie and series items.
 

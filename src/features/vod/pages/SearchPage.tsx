@@ -218,13 +218,14 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // A source facet searches that source alone, so its results and caps are its own.
   const searchSourceId = sourceId ?? facet;
   const catalogArgs = searchSourceId ? { query, sourceId: searchSourceId, limit: requestLimit } : { query, limit: requestLimit };
-  const catalog = useRpcQuery('catalog.search', catalogArgs, { enabled: !!query, staleTime: 30_000, keepPrevious: true });
+  // Its answers re-render the page in a transition (NAV-3), not in one task.
+  const catalog = useRpcQuery('catalog.search', catalogArgs, { enabled: !!query, staleTime: 30_000, keepPrevious: true, transition: true });
   // The chips keep counting every source while a facet narrows the results (the same args as the
   // unfiltered first page, so picking a chip reads it from the cache).
   const facetBase = useRpcQuery(
     'catalog.search',
     { query, limit: searchRequestLimit(SEARCH_LIMIT) },
-    { enabled: !!query && !!facet, staleTime: 30_000, keepPrevious: true },
+    { enabled: !!query && !!facet, staleTime: 30_000, keepPrevious: true, transition: true },
   );
   const stalker = useStalkerSearch(searchSources, query);
   // Guide programmes: every searched source's, or the picked chip's.

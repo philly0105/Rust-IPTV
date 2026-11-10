@@ -252,6 +252,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0027_guide_catalog_stamp",
         sql: include_str!("migrations/0027_guide_catalog_stamp.sql"),
     },
+    // guide search: search rows and title index in start order.
+    Migration {
+        version: 28,
+        name: "0028_guide_search_order",
+        sql: include_str!("migrations/0028_guide_search_order.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

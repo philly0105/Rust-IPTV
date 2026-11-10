@@ -1024,6 +1024,8 @@ async fn search_statements_use_indexes() {
             .any(|d| d.starts_with("SCAN f VIRTUAL TABLE INDEX")),
         "{fts:?}"
     );
+    // Hits come in index rowid order, which is start order: no sort.
+    assert!(!fts.iter().any(|d| d.contains("TEMP B-TREE")), "{fts:?}");
     let p: Vec<&String> = fts.iter().filter(|d| d.contains(" p ")).collect();
     assert!(!p.is_empty(), "{fts:?}");
     for d in p {

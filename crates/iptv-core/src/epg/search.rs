@@ -11,10 +11,12 @@
 //! - every statement that deletes or swaps programmes removes the marker in
 //!   the same transaction (`store::commit_staging`, `clear_all`, `prune`,
 //!   and the staging cleanups when they deleted rows);
-//! - [`rebuild_index`] empties the index, indexes every title as [`fold`]
-//!   folds it, refills `epg_search_rows` (each programme's start, stop,
-//!   feed and guide channel by rowid, migration 0019: the hits are read
-//!   there instead of in the wide programme rows), and sets the marker to
+//! - [`rebuild_index`] empties the index, refills `epg_search_rows` (each
+//!   programme's rowid, start, stop, feed and guide channel, migration
+//!   0019: the hits are read there instead of in the wide programme rows)
+//!   numbered in (start, feed) order, indexes every title as [`fold`] folds
+//!   it under its search row's id (migration 0028: a search reads its hits
+//!   in start order and stops once settled), and sets the marker to
 //!   [`INDEX_VERSION`] in one transaction: after each refresh, after
 //!   `epg.clearAll`, after a prune, and once in the background at startup
 //!   when the marker is missing or from an older version and programmes
@@ -52,9 +54,15 @@ use std::sync::Arc;
 /// `app_state` key present while `epg_programs_fts` matches `epg_programs`.
 pub const INDEX_MARKER: &str = "epg_search_index";
 /// Marker value of an index of [`fold`]ed titles with its
-/// `epg_search_rows`. A marker with any other value (`ready`: raw titles,
-/// before the fold; `folded-1`: before the search rows) counts as missing.
-pub const INDEX_VERSION: &str = "folded-2";
+/// `epg_search_rows`, both numbered in search order (migration 0028). A
+/// marker with any other value (`ready`: raw titles, before the fold;
+/// `folded-1`: before the search rows; `folded-2`: by programme rowid)
+/// counts as missing.
+pub const INDEX_VERSION: &str = "ordered-1";
+/// `app_state` key with the longest programme of the search rows, in
+/// seconds: hits are read from that long before the window, so a
+/// programme on air at its start is not missed.
+const LONGEST_KEY: &str = "epg_search_longest";
 /// SQL function [`rebuild_index`] registers to fold titles while indexing.
 const FOLD_SQL_FUNCTION: &str = "epg_search_fold";
 /// Query length bounds, in characters after trimming.
@@ -153,18 +161,36 @@ pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
         "INSERT INTO epg_programs_fts(epg_programs_fts) VALUES('delete-all')",
         [],
     )?;
+    tx.execute("DELETE FROM epg_search_rows", [])?;
+    // One sort of the programmes in search order, titles folded on the
+    // way; its rowids (1, 2, ...) become the search rows' ids and the
+    // index's rowids, which the index takes fastest in ascending order.
+    tx.execute("DROP TABLE IF EXISTS temp.epg_search_sorted", [])?;
     tx.execute(
         &format!(
-            "INSERT INTO epg_programs_fts(rowid, title) SELECT rowid, {FOLD_SQL_FUNCTION}(title) FROM epg_programs"
+            "CREATE TEMP TABLE epg_search_sorted AS
+             SELECT p.rowid AS prog, p.start AS start, p.stop AS stop, s.rowid AS feed,
+                    p.channel_id AS channel_id, {FOLD_SQL_FUNCTION}(p.title) AS title
+             FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
+             ORDER BY p.start, s.rowid, p.rowid"
         ),
         [],
     )?;
-    tx.execute("DELETE FROM epg_search_rows", [])?;
     tx.execute(
-        "INSERT INTO epg_search_rows(id, start, stop, feed, channel_id)
-         SELECT p.rowid, p.start, p.stop, s.rowid, p.channel_id
-         FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url",
+        "INSERT INTO epg_search_rows(id, prog, start, stop, feed, channel_id)
+         SELECT rowid, prog, start, stop, feed, channel_id FROM temp.epg_search_sorted",
         [],
+    )?;
+    tx.execute(
+        "INSERT INTO epg_programs_fts(rowid, title) SELECT rowid, title FROM temp.epg_search_sorted",
+        [],
+    )?;
+    tx.execute("DROP TABLE temp.epg_search_sorted", [])?;
+    tx.execute(
+        "INSERT INTO app_state(key, value, updated_at)
+         SELECT ?1, coalesce(max(stop - start), 0), CURRENT_TIMESTAMP FROM epg_search_rows WHERE true
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        [LONGEST_KEY],
     )?;
     tx.execute(
         "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
@@ -986,54 +1012,126 @@ pub const SEEK_SQL: &str = "SELECT k.key, i.rowid, i.number FROM json_each(?3) k
 pub const MAPPED_SQL: &str = "SELECT k.key, i.rowid, i.number FROM json_each(?3) k CROSS JOIN items i
      WHERE i.rowid = k.value AND i.source_id = ?1 AND i.content_type = ?2 AND i.content_type IN ('live', 'radio')";
 
-/// The source's visible channels on `guides`, the guide channels with hits,
-/// by the guide channel each resolves to, as [`source_channels`] finds
-/// them but without resolving every channel of the source: the catalog
-/// keys ([`CatalogKeys`]) give the keys of those guide channels, and only
-/// their rows are read (index seeks), unless they are a large share of the
-/// source, where one walk of its channels is cheaper. Manual mappings win
-/// as there. Guide channels without a visible channel are left out.
-fn channels_on(
-    conn: &Connection,
-    rt: &EpgRuntime,
-    dir: &ChannelDirectory,
-    source_id: &str,
-    hide: Option<Hide>,
-    quality: Option<QualityFilter>,
-    guides: &[Arc<str>],
-) -> CoreResult<SourceChannels> {
-    let index: HashMap<&str, usize> = guides.iter().enumerate().map(|(i, g)| (&**g, i)).collect();
-    // Channels per entry of `guides`.
-    let mut found: Vec<Vec<ChannelKey>> = vec![Vec::new(); guides.len()];
-    let mut programmes = |id: &str| has_programmes_memo(conn, rt, dir.generation(), id);
-    for content_type in [ContentType::Live, ContentType::Radio] {
-        let manual: HashMap<i64, Option<String>> = conn
-            .prepare_cached(MANUAL_SQL)?
-            .query_map(params![source_id, content_type.as_str()], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })?
-            .collect::<Result<_, _>>()?;
-        let keys = catalog_keys(conn, rt, source_id, content_type)?;
-        if keys.keys.is_empty() {
-            continue;
-        }
-        let pairs = keys.resolving_to(dir, guides, &mut programmes)?;
-        let visible = visible_clauses(conn, source_id, content_type, hide, quality)?;
-        let mut push = |guide: usize, rowid: i64, number: Option<i64>| {
-            found[guide].push(ChannelKey {
-                rowid,
+/// Finds the source's visible channels of guide channels, a few guide
+/// channels at a time (those of each batch of hits), by the guide channel
+/// each resolves to, as [`source_channels`] would but without resolving
+/// every channel of the source: the catalog keys ([`CatalogKeys`]) give the
+/// keys of those guide channels, and only their rows are read (index
+/// seeks), until the rows read that way would come to a large share of
+/// the source; then the source's visible channels are walked once and
+/// kept by key for the rest of the search. Manual mappings win as there.
+struct ChannelFinder<'a> {
+    source_id: &'a str,
+    types: Vec<TypeChannels>,
+}
+
+/// [`ChannelFinder`]'s state for one channel type.
+struct TypeChannels {
+    content_type: ContentType,
+    /// Manual mappings by item rowid (`None`: no guide).
+    manual: HashMap<i64, Option<String>>,
+    keys: Arc<CatalogKeys>,
+    /// [`visible_clauses`] for this type.
+    visible: String,
+    /// Rows asked for by key so far.
+    sought: usize,
+    walked: Option<Walked>,
+}
+
+/// The visible channels of one type, read in one walk.
+struct Walked {
+    /// (key index, rowid, number), sorted by key index.
+    by_key: Vec<(u32, i64, Option<i64>)>,
+    /// Channels mapped by hand, and any whose key the list lacks, by the
+    /// guide channel they resolve to.
+    other: HashMap<Box<str>, Vec<(i64, Option<i64>)>>,
+}
+
+impl<'a> ChannelFinder<'a> {
+    fn new(
+        conn: &Connection,
+        rt: &EpgRuntime,
+        source_id: &'a str,
+        hide: Option<Hide>,
+        quality: Option<QualityFilter>,
+    ) -> CoreResult<Self> {
+        let mut types = Vec::new();
+        for content_type in [ContentType::Live, ContentType::Radio] {
+            let keys = catalog_keys(conn, rt, source_id, content_type)?;
+            if keys.keys.is_empty() {
+                continue;
+            }
+            let manual = conn
+                .prepare_cached(MANUAL_SQL)?
+                .query_map(params![source_id, content_type.as_str()], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
+                .collect::<Result<_, _>>()?;
+            types.push(TypeChannels {
                 content_type,
-                number,
+                manual,
+                keys,
+                visible: visible_clauses(conn, source_id, content_type, hide, quality)?,
+                sought: 0,
+                walked: None,
             });
-        };
-        let wanted: usize = pairs
-            .iter()
-            .map(|&(k, _)| keys.keys[k as usize].rows as usize)
-            .sum();
-        let seek = wanted.saturating_mul(SEEK_COST) <= keys.rows;
-        #[cfg(test)]
-        let seek = tests::FORCE_SEEK.with(|f| f.get()).unwrap_or(seek);
-        if seek {
+        }
+        Ok(Self { source_id, types })
+    }
+
+    /// The channels of each of `guides` (guide channels with hits; see
+    /// [`CatalogKeys::resolving_to`]), in that order.
+    fn find(
+        &mut self,
+        conn: &Connection,
+        rt: &EpgRuntime,
+        dir: &ChannelDirectory,
+        guides: &[Arc<str>],
+    ) -> CoreResult<Vec<Vec<ChannelKey>>> {
+        let index: HashMap<&str, usize> =
+            guides.iter().enumerate().map(|(i, g)| (&**g, i)).collect();
+        let mut found: Vec<Vec<ChannelKey>> = vec![Vec::new(); guides.len()];
+        let mut programmes = |id: &str| has_programmes_memo(conn, rt, dir.generation(), id);
+        let source_id = self.source_id;
+        for tc in &mut self.types {
+            let content_type = tc.content_type;
+            let keys = tc.keys.clone();
+            let pairs = keys.resolving_to(dir, guides, &mut programmes)?;
+            let mut push = |guide: usize, rowid: i64, number: Option<i64>| {
+                found[guide].push(ChannelKey {
+                    rowid,
+                    content_type,
+                    number,
+                });
+            };
+            let wanted: usize = pairs
+                .iter()
+                .map(|&(k, _)| keys.keys[k as usize].rows as usize)
+                .sum();
+            tc.sought += wanted;
+            let walk = tc.sought.saturating_mul(SEEK_COST) > keys.rows;
+            #[cfg(test)]
+            let walk = tests::FORCE_SEEK
+                .with(|f| f.get())
+                .map_or(walk, |seek| !seek);
+            if walk && tc.walked.is_none() {
+                tc.walked = Some(walk_channels(conn, dir, source_id, tc)?);
+            }
+            if let Some(w) = &tc.walked {
+                for &(k, gi) in &pairs {
+                    let start = w.by_key.partition_point(|e| e.0 < k);
+                    for &(_, rowid, number) in w.by_key[start..].iter().take_while(|e| e.0 == k) {
+                        push(gi, rowid, number);
+                    }
+                }
+                for (gi, g) in guides.iter().enumerate() {
+                    for &(rowid, number) in w.other.get(&**g).into_iter().flatten() {
+                        push(gi, rowid, number);
+                    }
+                }
+                continue;
+            }
+            let visible = &tc.visible;
             if !pairs.is_empty() {
                 let list: Vec<ResolvedKey<'_>> = pairs
                     .iter()
@@ -1045,12 +1143,13 @@ fn channels_on(
                 while let Some(r) = rows.next()? {
                     let at = r.get::<_, i64>(0)? as usize;
                     let rowid: i64 = r.get(1)?;
-                    if !manual.contains_key(&rowid) {
+                    if !tc.manual.contains_key(&rowid) {
                         push(pairs[at].1, rowid, r.get(2)?);
                     }
                 }
             }
-            let mapped: Vec<(i64, usize)> = manual
+            let mapped: Vec<(i64, usize)> = tc
+                .manual
                 .iter()
                 .filter_map(|(rowid, m)| {
                     let g = m.as_deref().map(str::trim)?;
@@ -1067,41 +1166,72 @@ fn channels_on(
                     push(mapped[at].1, r.get(1)?, r.get(2)?);
                 }
             }
-        } else {
-            // Most of the source: walk its channels alongside the keys.
-            let mut guide_of = vec![u32::MAX; keys.keys.len()];
-            for &(k, gi) in &pairs {
-                guide_of[k as usize] = gi as u32;
-            }
-            let mut stmt = conn.prepare_cached(&format!("{CHANNELS_SQL}{visible}"))?;
-            let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
-            let mut cursor = 0usize;
-            let mut fresh = FreshResolver::default();
-            while let Some(r) = rows.next()? {
-                let rowid: i64 = r.get(0)?;
-                let guide = match manual.get(&rowid) {
-                    Some(m) => m
-                        .as_deref()
-                        .map(str::trim)
-                        .and_then(|g| index.get(g).copied()),
-                    None => {
-                        let key = (text(r, 2)?, text(r, 1)?.unwrap_or_default());
-                        match keys.find(&mut cursor, key) {
-                            Some(k) => Some(guide_of[k] as usize).filter(|&g| g < guides.len()),
-                            // Not under the stamp just read: cannot happen
-                            // inside one read transaction, but resolve it.
-                            None => fresh
-                                .resolve(conn, dir, key.0, key.1)?
-                                .and_then(|g| index.get(&*g).copied()),
-                        }
+        }
+        Ok(found)
+    }
+}
+
+/// One walk of the visible channels of `tc`'s type, kept by key.
+fn walk_channels(
+    conn: &Connection,
+    dir: &ChannelDirectory,
+    source_id: &str,
+    tc: &TypeChannels,
+) -> CoreResult<Walked> {
+    let mut out = Walked {
+        by_key: Vec::new(),
+        other: HashMap::new(),
+    };
+    let mut stmt = conn.prepare_cached(&format!("{CHANNELS_SQL}{}", tc.visible))?;
+    let mut rows = stmt.query(params![source_id, tc.content_type.as_str()])?;
+    let mut cursor = 0usize;
+    let mut fresh = FreshResolver::default();
+    while let Some(r) = rows.next()? {
+        let rowid: i64 = r.get(0)?;
+        let number: Option<i64> = r.get(3)?;
+        let guide: Option<Box<str>> = match tc.manual.get(&rowid) {
+            Some(m) => m
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(Into::into),
+            None => {
+                let key = (text(r, 2)?, text(r, 1)?.unwrap_or_default());
+                match tc.keys.find(&mut cursor, key) {
+                    Some(k) => {
+                        out.by_key.push((k as u32, rowid, number));
+                        continue;
                     }
-                };
-                if let Some(g) = guide {
-                    push(g, rowid, r.get(3)?);
+                    // Not under the stamp just read: cannot happen inside
+                    // one read transaction, but resolve it.
+                    None => fresh
+                        .resolve(conn, dir, key.0, key.1)?
+                        .map(|g| Box::from(&*g)),
                 }
             }
+        };
+        if let Some(g) = guide {
+            out.other.entry(g).or_default().push((rowid, number));
         }
     }
+    out.by_key.sort_unstable_by_key(|e| e.0);
+    Ok(out)
+}
+
+/// The source's visible channels on `guides` in one [`ChannelFinder::find`].
+/// Guide channels without a visible channel are left out.
+#[cfg(test)]
+fn channels_on(
+    conn: &Connection,
+    rt: &EpgRuntime,
+    dir: &ChannelDirectory,
+    source_id: &str,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+    guides: &[Arc<str>],
+) -> CoreResult<SourceChannels> {
+    let mut finder = ChannelFinder::new(conn, rt, source_id, hide, quality)?;
+    let found = finder.find(conn, rt, dir, guides)?;
     let mut out = SourceChannels::default();
     for (g, channels) in guides.iter().zip(found) {
         if !channels.is_empty() {
@@ -1145,15 +1275,21 @@ struct Candidate {
     channel: Arc<SourceChannel>,
 }
 
-/// The index statement: the title index's hits in the window, each with
-/// its search row by rowid (`epg_search_rows`, alias `p`: start, stop, feed
-/// and guide channel, a narrow row instead of the programme's). Unordered:
-/// [`candidates`] drops the hits of disabled feeds and of guide channels
-/// the source does not have, and sorts the rest.
-pub const FTS_SQL: &str = "SELECT p.id, p.channel_id, p.start, p.stop, p.feed
+/// The index statement: the title index's hits among the search rows
+/// `?2 <= id < ?3` that end after `?4`, in id order, which is (start, feed)
+/// order (migration 0028), at most `?5` of them; each with its search row
+/// (`epg_search_rows`, alias `p`: programme rowid, start, stop, feed and
+/// guide channel, a narrow row instead of the programme's). [`candidates`]
+/// reads them in batches and stops once its result is settled.
+pub const FTS_SQL: &str = "SELECT p.id, p.prog, p.channel_id, p.start, p.stop, p.feed
      FROM epg_programs_fts f
      CROSS JOIN epg_search_rows p ON p.id = f.rowid
-     WHERE epg_programs_fts MATCH ?1 AND p.stop > ?2 AND p.start < ?3";
+     WHERE epg_programs_fts MATCH ?1 AND f.rowid >= ?2 AND f.rowid < ?3 AND p.stop > ?4
+     ORDER BY f.rowid LIMIT ?5";
+
+/// Hits the first batch of the index statement reads; each later batch
+/// reads twice as many as the one before.
+const FIRST_BATCH: i64 = 512;
 
 /// The fallback statement: every programme overlapping the window (on the
 /// `stop` index); titles are matched in Rust with the same folding.
@@ -1174,16 +1310,186 @@ fn hit_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
         .then_with(|| a.channel.item_ref.cmp(&b.channel.item_ref))
 }
 
+/// The id after the last search row, and the first search row whose start
+/// is at or after `t` (`last + 1` when none): ids follow start order
+/// (migration 0028), so a binary search over them finds it.
+fn search_rows_from(conn: &Connection, last: i64, t: i64) -> CoreResult<i64> {
+    let mut probe = conn
+        .prepare_cached("SELECT start FROM epg_search_rows WHERE id >= ?1 ORDER BY id LIMIT 1")?;
+    let (mut lo, mut hi) = (1i64, last + 1);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let start: Option<i64> = probe.query_row([mid], |r| r.get(0)).optional()?;
+        if start.is_none_or(|s| s >= t) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    Ok(lo)
+}
+
+/// Where a hit's guide channel stands while a batch is read.
+#[derive(Clone, Copy)]
+enum Slot {
+    /// Index into [`SourceChannels::guides`].
+    Known(usize),
+    /// New in this batch: index into its new guide channels.
+    New(usize),
+}
+
+/// Reads the index's hits in (start, feed) order, a batch at a time, and
+/// the source's channels of each guide channel as it first shows up.
+struct IndexReader<'a> {
+    fts: String,
+    /// The next search row id to read, and the first one past the window.
+    next: i64,
+    end: i64,
+    /// Hits must end after this.
+    from: i64,
+    batch: i64,
+    feeds: Option<HashSet<i64>>,
+    /// Guide channel -> its index in [`SourceChannels::guides`], or `None`
+    /// when the source has no visible channel on it.
+    slots: HashMap<Box<str>, Option<usize>>,
+    source_id: &'a str,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+    finder: Option<ChannelFinder<'a>>,
+}
+
+impl IndexReader<'_> {
+    fn exhausted(&self) -> bool {
+        self.next >= self.end
+    }
+
+    /// Reads the next batch: its hits on guide channels with a visible
+    /// channel go to the end of `hits`, and those channels to `channels`.
+    fn more(
+        &mut self,
+        conn: &Connection,
+        rt: &EpgRuntime,
+        dir: &ChannelDirectory,
+        hits: &mut Vec<Hit>,
+        channels: &mut SourceChannels,
+    ) -> CoreResult<()> {
+        if self.exhausted() {
+            return Ok(());
+        }
+        let mut raw: Vec<(i64, i64, i64, i64, Slot)> = Vec::new();
+        let mut fresh: Vec<Arc<str>> = Vec::new();
+        let mut fresh_at: HashMap<Box<str>, usize> = HashMap::new();
+        let mut read = 0i64;
+        let mut last_id = self.next;
+        {
+            let mut stmt = conn.prepare_cached(FTS_SQL)?;
+            let mut rows = stmt.query(params![
+                self.fts, self.next, self.end, self.from, self.batch
+            ])?;
+            while let Some(r) = rows.next()? {
+                read += 1;
+                last_id = r.get(0)?;
+                let feed: i64 = r.get(5)?;
+                let feeds = match &self.feeds {
+                    Some(f) => f,
+                    None => self.feeds.insert(search_feeds(conn)?),
+                };
+                if !feeds.contains(&feed) {
+                    continue;
+                }
+                let id = text(r, 2)?.unwrap_or_default();
+                let slot = match self.slots.get(id) {
+                    Some(Some(i)) => Slot::Known(*i),
+                    Some(None) => continue,
+                    None => match fresh_at.get(id) {
+                        Some(&j) => Slot::New(j),
+                        None => {
+                            fresh_at.insert(id.into(), fresh.len());
+                            fresh.push(id.into());
+                            Slot::New(fresh.len() - 1)
+                        }
+                    },
+                };
+                raw.push((r.get(1)?, r.get(3)?, r.get(4)?, feed, slot));
+            }
+        }
+        self.next = if read < self.batch {
+            self.end
+        } else {
+            last_id + 1
+        };
+        self.batch = self.batch.saturating_mul(2);
+        let mut placed: Vec<Option<usize>> = vec![None; fresh.len()];
+        if !fresh.is_empty() {
+            let finder = match &mut self.finder {
+                Some(f) => f,
+                None => self.finder.insert(ChannelFinder::new(
+                    conn,
+                    rt,
+                    self.source_id,
+                    self.hide,
+                    self.quality,
+                )?),
+            };
+            let found = finder.find(conn, rt, dir, &fresh)?;
+            for ((g, list), at) in fresh.iter().zip(found).zip(placed.iter_mut()) {
+                if !list.is_empty() {
+                    channels.by_guide.insert(g.clone(), channels.guides.len());
+                    channels.guides.push((g.clone(), list));
+                    *at = Some(channels.guides.len() - 1);
+                }
+                self.slots.insert((&**g).into(), *at);
+            }
+        }
+        for (rowid, start, stop, feed, slot) in raw {
+            let guide = match slot {
+                Slot::Known(i) => Some(i),
+                Slot::New(j) => placed[j],
+            };
+            if let Some(guide) = guide {
+                hits.push(Hit {
+                    rowid,
+                    start,
+                    stop,
+                    feed,
+                    guide,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn first_batch() -> i64 {
+    #[cfg(test)]
+    if let Some(b) = tests::FIRST_BATCH_OVERRIDE.with(|f| f.get()) {
+        return b;
+    }
+    FIRST_BATCH
+}
+
+/// The longest programme of the search rows, in seconds; unknown reads as
+/// longer than any guide.
+fn longest_programme(conn: &Connection) -> CoreResult<i64> {
+    let value: Option<String> = conn
+        .prepare_cached("SELECT value FROM app_state WHERE key = ?1")?
+        .query_row([LONGEST_KEY], |r| r.get(0))
+        .optional()?;
+    Ok(value.and_then(|v| v.parse().ok()).unwrap_or(i64::MAX / 4))
+}
+
 /// The first `limit` candidates in (start, channel number, name, ref)
 /// order. Returns whether the index was used.
 ///
-/// With the index, the matching programmes are found first: a query
-/// without hits never reads the channels. Otherwise the scan reads the
-/// channels first so it folds only the titles of guide channels the source
-/// has. Either way the hits are walked in (start, feed) order up to the
-/// start time at which the limit is reached (every channel of a guide
-/// channel counts), and only the channels that can make the result are
-/// read beyond the channel scan.
+/// With the index, the matching programmes are read in (start, feed) order
+/// from the longest programme's length before the window, in batches, and
+/// the channels of each guide channel are read as it first shows up: a
+/// query without hits never reads the channels, and the reading stops once
+/// the result is settled. Otherwise the scan reads the channels first so
+/// it folds only the titles of guide channels the source has. Either way
+/// the hits are walked in (start, feed) order up to the start time at which
+/// the limit is reached (every channel of a guide channel counts), and only
+/// the channels that can make the result are read beyond that.
 ///
 /// The window is read on the guide's clock: moved back by `source_secs`,
 /// the source's guide shift, which moves every channel of the source alike
@@ -1207,64 +1513,33 @@ fn candidates(
     let (from, to) = (q.from - source_secs, q.to - source_secs);
     let used_index = index_ready(conn)?;
     let mut hits: Vec<Hit> = Vec::new();
-    let channels = if used_index {
-        let mut stmt = conn.prepare_cached(FTS_SQL)?;
-        let mut rows = stmt.query(params![fts_expression(&q.words), from, to])?;
-        let Some(first) = rows.next()? else {
+    let mut reader: Option<IndexReader<'_>> = None;
+    let mut channels = if used_index {
+        let last: i64 = conn.query_row(
+            "SELECT coalesce(max(id), 0) FROM epg_search_rows",
+            [],
+            |r| r.get(0),
+        )?;
+        let longest = longest_programme(conn)?;
+        let mut r = IndexReader {
+            fts: fts_expression(&q.words),
+            next: search_rows_from(conn, last, from.saturating_sub(longest))?,
+            end: search_rows_from(conn, last, to)?,
+            from,
+            batch: first_batch(),
+            feeds: None,
+            slots: HashMap::new(),
+            source_id: &q.source_id,
+            hide,
+            quality,
+            finder: None,
+        };
+        let mut channels = SourceChannels::default();
+        r.more(conn, rt, dir, &mut hits, &mut channels)?;
+        if hits.is_empty() && r.exhausted() {
             return Ok((Vec::new(), true));
-        };
-        let feeds = search_feeds(conn)?;
-        // The guide channels with hits, in the order first seen; `guide`
-        // indexes them until the channels are known.
-        let mut seen: HashMap<Box<str>, usize> = HashMap::new();
-        let mut guides: Vec<Arc<str>> = Vec::new();
-        // Hits come in programme rowid order, so mostly a channel's in a row.
-        let mut last = usize::MAX;
-        let mut hit = |r: &rusqlite::Row<'_>| -> CoreResult<Option<Hit>> {
-            let feed: i64 = r.get(4)?;
-            if !feeds.contains(&feed) {
-                return Ok(None);
-            }
-            let id = text(r, 1)?.unwrap_or_default();
-            let guide = if guides.get(last).is_some_and(|g| **g == *id) {
-                last
-            } else {
-                match seen.get(id) {
-                    Some(&g) => g,
-                    None => {
-                        seen.insert(id.into(), guides.len());
-                        guides.push(id.into());
-                        guides.len() - 1
-                    }
-                }
-            };
-            last = guide;
-            Ok(Some(Hit {
-                rowid: r.get(0)?,
-                start: r.get(2)?,
-                stop: r.get(3)?,
-                feed,
-                guide,
-            }))
-        };
-        hits.extend(hit(first)?);
-        while let Some(r) = rows.next()? {
-            hits.extend(hit(r)?);
         }
-        drop(rows);
-        // Only the channels of those guide channels are read.
-        let channels = channels_on(conn, rt, dir, &q.source_id, hide, quality, &guides)?;
-        let at: Vec<Option<usize>> = guides
-            .iter()
-            .map(|g| channels.by_guide.get(g).copied())
-            .collect();
-        hits.retain_mut(|h| match at[h.guide] {
-            Some(i) => {
-                h.guide = i;
-                true
-            }
-            None => false,
-        });
+        reader = Some(r);
         channels
     } else {
         let channels = source_channels(conn, rt, dir, &q.source_id, hide, quality)?;
@@ -1288,9 +1563,9 @@ fn candidates(
                 guide,
             });
         }
+        hits.sort_unstable_by_key(|h| (h.start, h.feed));
         channels
     };
-    hits.sort_unstable_by_key(|h| (h.start, h.feed));
     let prefix = |p: &(Hit, ChannelKey)| (p.0.start, p.1.number.unwrap_or(i64::MAX));
     let mut stmt = conn.prepare_cached(
         "SELECT item_id, title, logo_url, category_id FROM items WHERE rowid = ?1",
@@ -1315,6 +1590,13 @@ fn candidates(
             }
             if kept >= target && cut.is_none() {
                 cut = Some(h.start);
+            }
+        }
+        // Not settled before the hits read so far run out: read on.
+        if end == hits.len() {
+            if let Some(r) = reader.as_mut().filter(|r| !r.exhausted()) {
+                r.more(conn, rt, dir, &mut hits, &mut channels)?;
+                continue;
             }
         }
         // Each channel of each kept programme's guide channel, once per start
@@ -1502,6 +1784,8 @@ mod tests {
         /// Overrides the choice between reading by key and walking the
         /// source in [`channels_on`].
         pub(super) static FORCE_SEEK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+        /// Overrides [`FIRST_BATCH`].
+        pub(super) static FIRST_BATCH_OVERRIDE: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
     }
 
     fn w(s: &str) -> Vec<String> {
@@ -1775,5 +2059,160 @@ mod tests {
                 "by guide after changes, seek {seek}"
             );
         }
+    }
+
+    /// The index path reads its hits in start order a batch at a time and
+    /// stops once the result is settled. Whatever the batch size, and
+    /// whether channels are read by key or by walking the source, it picks
+    /// what the scan picks: programmes on air at the window's start (one
+    /// began a day earlier), a second feed repeating slots, a disabled feed,
+    /// guide channels with two channels, none, or one mapped by hand, and
+    /// channel shifts that move hits out of the window, so the walk goes on.
+    #[test]
+    fn batched_index_reads_match_the_scan() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sources(id, kind, name, config_json) VALUES ('s', 'm3u', 'S', '{}');
+             INSERT INTO epg_sources(url, enabled, origin) VALUES
+               ('u1', 1, 'settings'), ('u2', 1, 'settings'), ('u3', 0, 'settings');",
+        )
+        .unwrap();
+        let base = 1_800_000_000i64;
+        const TITLES: [&str; 5] = ["World News", "Late News Hour", "Cooking", "News", "Film"];
+        let program = |c: &Connection, url: &str, g: i64, start: i64, stop: i64, title: &str| {
+            c.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![url, format!("g{g}.tv"), start, stop, title],
+            )
+            .unwrap();
+        };
+        for g in 0..10i64 {
+            conn.execute(
+                "INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES ('u1', ?1, ?2)",
+                params![format!("g{g}.tv"), format!("Guide {g}")],
+            )
+            .unwrap();
+            let mut t = base - 3 * 3600 + g * 600;
+            let mut n = 0usize;
+            while t < base + 2 * 86_400 {
+                let len = [1800, 3600, 5400, 2700][(n + g as usize) % 4];
+                program(&conn, "u1", g, t, t + len, TITLES[(n * 3 + g as usize) % 5]);
+                if g < 3 && n.is_multiple_of(2) {
+                    program(&conn, "u2", g, t, t + len, "News Repeat");
+                }
+                if n.is_multiple_of(3) {
+                    program(&conn, "u3", g, t, t + len, "News Disabled");
+                }
+                t += len;
+                n += 1;
+            }
+        }
+        program(&conn, "u2", 9, base - 86_400, base + 3600, "News Marathon");
+        let item = |c: &Connection,
+                    id: &str,
+                    title: &str,
+                    epg: Option<&str>,
+                    number: Option<i64>| {
+            c.execute(
+                "INSERT INTO items(source_id, content_type, item_id, category_id, title, epg_channel_id, number)
+                 VALUES ('s', 'live', ?1, 'g', ?2, ?3, ?4)",
+                params![id, title, epg, number],
+            )
+            .unwrap();
+        };
+        for (id, title, epg, number) in [
+            ("i0", "Zero", Some("g0.tv"), Some(1)),
+            ("i1", "G1 HD", Some("g1.tv"), Some(2)),
+            ("i1b", "Guide 1", None, Some(3)),
+            ("i2", "Two", Some("G2.TV"), None),
+            ("i3", "Three", Some("g3.tv"), Some(4)),
+            ("i4", "Four", Some("g4.tv"), Some(5)),
+            ("i5", "Five", Some("g5.tv"), Some(6)),
+            ("i6", "Six", Some("g6.tv"), Some(7)),
+            ("i7", "Seven", Some("g7.tv"), Some(8)),
+            ("i9", "Nine", Some("g9.tv"), Some(9)),
+        ] {
+            item(&conn, id, title, epg, number);
+        }
+        for n in 0..100 {
+            item(
+                &conn,
+                &format!("f{n}"),
+                &format!("Filler {n}"),
+                Some(&format!("nope{n}")),
+                Some(100 + n),
+            );
+        }
+        conn.execute_batch(
+            "INSERT INTO epg_channel_map(source_id, content_type, item_id, epg_channel_id) VALUES ('s', 'live', 'i3', 'g4.tv');
+             INSERT INTO epg_channel_shift(source_id, content_type, item_id, shift_minutes) VALUES
+               ('s', 'live', 'i5', -120), ('s', 'live', 'i6', 90);",
+        )
+        .unwrap();
+        let rt = EpgRuntime::default();
+        let dir = resolve::directory(&conn, &rt).unwrap();
+        let mut cases = Vec::new();
+        for query in ["news", "late news", "cooking", "film", "zzz"] {
+            for (from, to) in [
+                (base, base + 86_400),
+                (base + 5_000, base + 9_000),
+                (base - 7_200, base + 30 * 3600),
+            ] {
+                for limit in [1, 2, 5, 13, 40, 200] {
+                    cases.push(Query {
+                        source_id: "s".into(),
+                        words: words(query),
+                        from,
+                        to,
+                        limit,
+                    });
+                }
+            }
+        }
+        type Found = Vec<(i64, String, i64, i64)>;
+        let run = |conn: &Connection, q: &Query, index: bool| -> Found {
+            let (found, used) = candidates(conn, &rt, &dir, q, None, None, 0).unwrap();
+            assert_eq!(used, index);
+            found
+                .iter()
+                .map(|c| {
+                    (
+                        c.rowid,
+                        c.channel.item_ref.item_id.clone(),
+                        c.start,
+                        c.shift,
+                    )
+                })
+                .collect()
+        };
+        let scanned: Vec<Found> = cases.iter().map(|q| run(&conn, q, false)).collect();
+        assert!(
+            scanned.iter().any(|f| f.len() >= 40),
+            "some cases fill the limit"
+        );
+        assert!(
+            scanned
+                .iter()
+                .flatten()
+                .any(|f| f.1 == "i9" && f.2 == base - 86_400),
+            "the marathon on air at the start is found"
+        );
+        rebuild_index(&mut conn).unwrap();
+        for batch in [1, 2, 3, 7, 512] {
+            for seek in [true, false] {
+                FIRST_BATCH_OVERRIDE.with(|f| f.set(Some(batch)));
+                FORCE_SEEK.with(|f| f.set(Some(seek)));
+                for (q, want) in cases.iter().zip(&scanned) {
+                    assert_eq!(
+                        &run(&conn, q, true),
+                        want,
+                        "batch {batch}, seek {seek}: {q:?}"
+                    );
+                }
+            }
+        }
+        FIRST_BATCH_OVERRIDE.with(|f| f.set(None));
+        FORCE_SEEK.with(|f| f.set(None));
     }
 }

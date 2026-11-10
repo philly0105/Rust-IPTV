@@ -14,7 +14,8 @@
 //! `SAMPLES=<n>` (default 30), `BENCH_COLD=1` bumps the guide generation
 //! before each call (cold guide caches), `BENCH_PRAGMA="PRAGMA ..."` runs
 //! on every pooled connection first, `BENCH_KEEP=<path>` saves the fixture
-//! database there (`VACUUM INTO`) for `EXPLAIN QUERY PLAN` sessions.
+//! database there (`VACUUM INTO`) for `EXPLAIN QUERY PLAN` sessions,
+//! `BENCH_REBUILD=<n>` times `n` rebuilds of the guide search index first.
 
 #[path = "m3u_support.rs"]
 mod support;
@@ -186,6 +187,26 @@ async fn read_rpcs_on_a_large_library() {
         .unwrap();
     iptv_core::epg::runtime(&state).bump();
     eprintln!("fixture in {:?}", t0.elapsed());
+    if let Ok(n) = std::env::var("BENCH_REBUILD") {
+        let n: usize = n.parse().unwrap_or(5).max(1);
+        let times = state
+            .db_call(move |c| {
+                let mut times = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let t = Instant::now();
+                    iptv_core::epg::search::rebuild_index(c)?;
+                    times.push(t.elapsed());
+                }
+                Ok(times)
+            })
+            .await
+            .unwrap();
+        let (p50, p95) = pct(times);
+        eprintln!(
+            "{:<28} p50 {p50:>8.2} ms  p95 {p95:>8.2} ms",
+            "rebuild_index"
+        );
+    }
 
     let call = |method: &'static str, args: Value| {
         let r = &r;

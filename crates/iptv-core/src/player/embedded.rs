@@ -509,9 +509,13 @@ async fn attach_locked(
     #[cfg(target_os = "macos")]
     let started = platform::start(hwnd, &settings.mpv_args, initial_volume, initial_muted).await;
     #[cfg(not(any(windows, target_os = "macos")))]
-    let started = platform::start(Path::new(""), &[], "")
-        .await
-        .map(|(child, stream)| (Some(child), stream));
+    let started = {
+        // No embedded mpv here: the stub refuses before any of these is used.
+        let _ = (&settings, initial_volume, initial_muted);
+        platform::start(Path::new(""), &[], "")
+            .await
+            .map(|(child, stream)| (Some(child), stream))
+    };
     #[cfg(windows)]
     let (child, stream) = match started {
         Ok(v) => v,

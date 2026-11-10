@@ -1507,7 +1507,8 @@ pub fn query_named(
     // channels hidden by a channel edit, so it is the row count whenever
     // `edited` is empty (always for movies and series). All channels of a
     // live source takes it too: its count read every entry of the source's
-    // key index (about 30 ms a page at 200k channels, under 0.1 ms now).
+    // key index (12-16 ms for the first page of 200k channels, about 1 ms
+    // now).
     // Every other shape counts its rows.
     let summed = q.category_id.is_none()
         && search.is_none()

@@ -384,6 +384,9 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
         return Err(CoreError::NotFound(format!("source {id} not found")));
     }
     tx.execute("DELETE FROM fts_suspend WHERE source_id = ?1", [id])?;
+    // The guide search's catalog stamps (migration 0027): the items went
+    // with the triggers suspended.
+    tx.execute("DELETE FROM guide_catalog_stamp WHERE source_id = ?1", [id])?;
     forget_session(&tx, id)?;
     tx.execute(
         "DELETE FROM app_state WHERE key = 'backup_pending:' || ?1",

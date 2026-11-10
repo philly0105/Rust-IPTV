@@ -44,7 +44,9 @@ use crate::state::AppState;
 use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 /// `app_state` key present while `epg_programs_fts` matches `epg_programs`.
@@ -68,6 +70,12 @@ pub const MAX_SPAN_SECS: i64 = 16 * 86_400;
 /// Memoized channel resolutions above this count are dropped (bounds the
 /// memory of a guide with very many unknown ids).
 const MEMO_CAP: usize = 500_000;
+/// Catalog keys ([`CatalogKeys`]) kept in all; past this the other
+/// catalogs are dropped when one is loaded (about 60 bytes a key).
+const KEYS_CAP: usize = 1_000_000;
+/// A catalog row read through its key ([`SEEK_SQL`]) costs about this many
+/// rows of the plain channel walk; past that share the walk is cheaper.
+const SEEK_COST: usize = 4;
 
 /// `epg.search` arguments.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -541,28 +549,13 @@ fn source_channels(
             })?
             .collect::<Result<_, _>>()?;
         let mut sql = String::from(CHANNELS_SQL);
-        sql.push_str(&crate::channeledit::scoped(
+        sql.push_str(&visible_clauses(
             conn,
             source_id,
             content_type,
-            "?1",
-            "?2",
+            hide,
+            quality,
         )?);
-        if let Some(h) = hide {
-            sql.push_str(&crate::parental::filter::scoped(
-                conn,
-                source_id,
-                content_type,
-                h,
-                "?1",
-                "?2",
-            )?);
-        }
-        // `quality` is the last column of idx_items_guide: the scan stays
-        // index-only. Radio is never filtered.
-        if content_type == ContentType::Live {
-            sql.push_str(&crate::catalog::quality::live_clause(quality, "i"));
-        }
         let mut stmt = conn.prepare_cached(&sql)?;
         let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
         let list_key = (source_id.to_string(), content_type);
@@ -619,6 +612,503 @@ fn source_channels(
         memo.lists.insert(list_key, known);
     }
     memo.put_back(rt);
+    Ok(out)
+}
+
+/// The `AND` clauses that leave out the channels a search must not show:
+/// hidden by a channel edit, locked or adult while hide mode is on, and
+/// with `quality` the live channels the Live TV quality filter hides, for
+/// statements over `items i` with the source id and type as `?1` and `?2`.
+fn visible_clauses(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+) -> CoreResult<String> {
+    let mut sql = crate::channeledit::scoped(conn, source_id, content_type, "?1", "?2")?;
+    if let Some(h) = hide {
+        sql.push_str(&crate::parental::filter::scoped(
+            conn,
+            source_id,
+            content_type,
+            h,
+            "?1",
+            "?2",
+        )?);
+    }
+    // `quality` is the last column of idx_items_guide: the scan stays
+    // index-only. Radio is never filtered.
+    if content_type == ContentType::Live {
+        sql.push_str(&crate::catalog::quality::live_clause(quality, "i"));
+    }
+    Ok(sql)
+}
+
+// ---------------------------------------------------------------------------
+// Catalog keys: the channels of the guide channels with hits
+// ---------------------------------------------------------------------------
+
+/// Writes a new stamp for the catalog keys of one source and type
+/// (migration 0027). Writers that suspend the per-row triggers call it in
+/// the transaction that rewrote the rows.
+pub fn touch_catalog_stamp(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+) -> CoreResult<()> {
+    conn.prepare_cached(
+        "INSERT INTO guide_catalog_stamp (source_id, content_type, stamp) VALUES (?1, ?2, random())
+         ON CONFLICT (source_id, content_type) DO UPDATE SET stamp = excluded.stamp",
+    )?
+    .execute(params![source_id, content_type.as_str()])?;
+    Ok(())
+}
+
+/// The stored stamp of one source and type; `None` while it has none (no
+/// row was ever written for it, or the source was removed).
+fn catalog_stamp(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+) -> CoreResult<Option<i64>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT stamp FROM guide_catalog_stamp WHERE source_id = ?1 AND content_type = ?2",
+        )?
+        .query_row(params![source_id, content_type.as_str()], |r| r.get(0))
+        .optional()?)
+}
+
+fn key_hash(s: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
+}
+
+/// The entries of a sorted `(hash, key)` list with hash `h`.
+fn with_hash(list: &[(u64, u32)], h: u64) -> impl Iterator<Item = u32> + '_ {
+    let start = list.partition_point(|e| e.0 < h);
+    list[start..]
+        .iter()
+        .take_while(move |e| e.0 == h)
+        .map(|e| e.1)
+}
+
+/// One distinct key of [`CatalogKeys`]: offsets into its text.
+#[derive(Debug, Clone, Copy)]
+struct KeyEntry {
+    /// `epg_channel_id` (start, end); `None` for SQL NULL.
+    epg: Option<(u32, u32)>,
+    title: (u32, u32),
+    /// Rows of the catalog with this key.
+    rows: u32,
+    /// Hash of `normalize_name(title)`; `None` when that is empty. Carried
+    /// over from the previous list for the keys it had, since normalizing
+    /// is most of the cost of a load.
+    name: Option<u64>,
+}
+
+/// Every distinct (`epg_channel_id`, title) pair of one source and type,
+/// with or without a manual mapping or a channel edit, as stored under
+/// `stamp`. What a key resolves to depends on the guide alone, so the
+/// list lives across guide changes and is read again only when the stamp
+/// moves (migration 0027: any write that adds, removes or re-keys a row).
+/// Lookups go the other way round from a channel scan, from a guide
+/// channel to its keys: by the lowercased id ([`ChannelDirectory::find_id`]
+/// and channels with programmes) and by the normalized title
+/// ([`ChannelDirectory::find_name_exact`]), both kept as hashes and checked
+/// against the key's own text.
+struct CatalogKeys {
+    stamp: Option<i64>,
+    text: String,
+    /// Sorted the way the channel scan returns its rows ([`ResolvedKey`]).
+    keys: Vec<KeyEntry>,
+    /// (hash of the trimmed, lowercased `epg_channel_id`, key), sorted.
+    by_id: Vec<(u64, u32)>,
+    /// (hash of `normalize_name(title)`, key), sorted.
+    by_name: Vec<(u64, u32)>,
+    /// Rows of the catalog.
+    rows: usize,
+}
+
+/// Every key of one source and type, in key order (`idx_items_guide`).
+const KEYS_SQL: &str = "SELECT i.epg_channel_id, i.title FROM items i
+     WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.content_type IN ('live', 'radio')
+     ORDER BY i.epg_channel_id, i.title";
+
+impl CatalogKeys {
+    fn load(
+        conn: &Connection,
+        source_id: &str,
+        content_type: ContentType,
+        stamp: Option<i64>,
+        previous: Option<&CatalogKeys>,
+    ) -> CoreResult<Self> {
+        let mut out = Self {
+            stamp,
+            text: String::new(),
+            keys: Vec::new(),
+            by_id: Vec::new(),
+            by_name: Vec::new(),
+            rows: 0,
+        };
+        let mut stmt = conn.prepare_cached(KEYS_SQL)?;
+        let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
+        while let Some(r) = rows.next()? {
+            out.rows += 1;
+            let key = (text(r, 0)?, text(r, 1)?.unwrap_or_default());
+            if let Some(last) = out.keys.last_mut() {
+                let e = *last;
+                if out_key(&out.text, &e) == key {
+                    last.rows += 1;
+                    continue;
+                }
+            }
+            let mut span = |s: &str| {
+                let start = out.text.len() as u32;
+                out.text.push_str(s);
+                (start, out.text.len() as u32)
+            };
+            let epg = key.0.map(&mut span);
+            let title = span(key.1);
+            out.keys.push(KeyEntry {
+                epg,
+                title,
+                rows: 1,
+                name: None,
+            });
+        }
+        // SQLite orders TEXT by bytes, as `str` does; a mixed-type column
+        // would not, so sort anyway (a sorted list costs one pass).
+        if !out.keys.windows(2).all(|w| out.key(&w[0]) < out.key(&w[1])) {
+            let text = &out.text;
+            out.keys
+                .sort_by(|a, b| out_key(text, a).cmp(&out_key(text, b)));
+            let mut merged: Vec<KeyEntry> = Vec::with_capacity(out.keys.len());
+            for e in out.keys.drain(..) {
+                match merged.last_mut() {
+                    Some(last) if out_key(text, last) == out_key(text, &e) => last.rows += e.rows,
+                    _ => merged.push(e),
+                }
+            }
+            out.keys = merged;
+        }
+        // A refresh mostly writes the keys it had: walk the previous list
+        // alongside for their name hashes.
+        let mut cursor = 0usize;
+        for (i, e) in out.keys.iter_mut().enumerate() {
+            let (epg, title) = out_key(&out.text, e);
+            if let Some(id) = epg.map(str::trim).filter(|s| !s.is_empty()) {
+                out.by_id.push((key_hash(&id.to_lowercase()), i as u32));
+            }
+            e.name = match previous.and_then(|p| Some((p, p.find(&mut cursor, (epg, title))?))) {
+                Some((p, at)) => p.keys[at].name,
+                None => {
+                    let name = resolve::normalize_name(title);
+                    (!name.is_empty()).then(|| key_hash(&name))
+                }
+            };
+            if let Some(h) = e.name {
+                out.by_name.push((h, i as u32));
+            }
+        }
+        out.by_id.sort_unstable();
+        out.by_name.sort_unstable();
+        out.text.shrink_to_fit();
+        Ok(out)
+    }
+
+    fn key(&self, e: &KeyEntry) -> ResolvedKey<'_> {
+        out_key(&self.text, e)
+    }
+
+    /// Index of `key`; `cursor` follows a scan in key order, as
+    /// [`ResolvedList::find`] does.
+    fn find(&self, cursor: &mut usize, key: ResolvedKey<'_>) -> Option<usize> {
+        let keys = &self.keys;
+        while *cursor < keys.len() && self.key(&keys[*cursor]) < key {
+            *cursor += 1;
+        }
+        if keys.get(*cursor).is_some_and(|e| self.key(e) == key) {
+            return Some(*cursor);
+        }
+        keys.binary_search_by(|e| self.key(e).cmp(&key)).ok()
+    }
+
+    /// The keys that resolve to each of `guides` without a manual mapping,
+    /// as [`FreshResolver::resolve`] would: (key index, index in `guides`).
+    /// `programmes` answers [`resolve::has_programmes`] for ids that are
+    /// not among `guides` (each of those has programmes: it has hits).
+    fn resolving_to(
+        &self,
+        dir: &ChannelDirectory,
+        guides: &[Arc<str>],
+        programmes: &mut dyn FnMut(&str) -> CoreResult<bool>,
+    ) -> CoreResult<Vec<(u32, usize)>> {
+        let in_guides: HashSet<&str> = guides.iter().map(|g| &**g).collect();
+        let trimmed_id = |k: u32| {
+            self.key(&self.keys[k as usize])
+                .0
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        };
+        let mut out = Vec::new();
+        for (gi, g) in guides.iter().enumerate() {
+            // An id the directory knows (case-insensitively) as `g`.
+            for lower in dir.ids_of(g) {
+                for k in with_hash(&self.by_id, key_hash(lower)) {
+                    if trimmed_id(k).is_some_and(|id| id.to_lowercase() == *lower) {
+                        out.push((k, gi));
+                    }
+                }
+            }
+            // `g` itself when the directory does not know it: it has
+            // programmes.
+            if dir.find_id(g).is_none() {
+                for k in with_hash(&self.by_id, key_hash(&g.to_lowercase())) {
+                    if trimmed_id(k) == Some(&**g) {
+                        out.push((k, gi));
+                    }
+                }
+            }
+            // The exact normalized name, for keys whose id resolves to
+            // nothing.
+            for name in dir.names_of(g) {
+                for k in with_hash(&self.by_name, key_hash(name)) {
+                    let title = self.key(&self.keys[k as usize]).1;
+                    if resolve::normalize_name(title) != *name {
+                        continue;
+                    }
+                    if let Some(id) = trimmed_id(k) {
+                        if dir.find_id(id).is_some() || in_guides.contains(id) || programmes(id)? {
+                            continue;
+                        }
+                    }
+                    out.push((k, gi));
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn out_key<'a>(text: &'a str, e: &KeyEntry) -> ResolvedKey<'a> {
+    (
+        e.epg.map(|(s, t)| &text[s as usize..t as usize]),
+        &text[e.title.0 as usize..e.title.1 as usize],
+    )
+}
+
+/// Catalog keys by source and type, and [`resolve::has_programmes`]
+/// answers for the current guide generation. Kept on the EPG runtime; the
+/// lock is held only to look up or store, never while reading the database.
+#[derive(Default)]
+pub(crate) struct KeysMemo {
+    catalogs: HashMap<(String, ContentType), Arc<CatalogKeys>>,
+    generation: u64,
+    programmes: HashMap<Box<str>, bool>,
+}
+
+/// The catalog keys of one source and type as of `stamp`: the memo's, or
+/// read now (inside the caller's read transaction, so the keys and the
+/// stamp describe the same rows).
+fn catalog_keys(
+    conn: &Connection,
+    rt: &EpgRuntime,
+    source_id: &str,
+    content_type: ContentType,
+) -> CoreResult<Arc<CatalogKeys>> {
+    let stamp = catalog_stamp(conn, source_id, content_type)?;
+    let id = (source_id.to_string(), content_type);
+    if let Some(k) = rt.search_keys.lock().catalogs.get(&id) {
+        if k.stamp == stamp {
+            return Ok(k.clone());
+        }
+    }
+    let previous = rt.search_keys.lock().catalogs.get(&id).cloned();
+    let keys = Arc::new(CatalogKeys::load(
+        conn,
+        source_id,
+        content_type,
+        stamp,
+        previous.as_deref(),
+    )?);
+    drop(previous);
+    let mut memo = rt.search_keys.lock();
+    let held: usize = memo
+        .catalogs
+        .iter()
+        .filter(|(k, _)| **k != id)
+        .map(|(_, c)| c.keys.len())
+        .sum();
+    if held + keys.keys.len() > KEYS_CAP {
+        memo.catalogs.clear();
+    }
+    memo.catalogs.insert(id, keys.clone());
+    Ok(keys)
+}
+
+/// [`resolve::has_programmes`], remembered for the guide generation.
+fn has_programmes_memo(
+    conn: &Connection,
+    rt: &EpgRuntime,
+    generation: u64,
+    id: &str,
+) -> CoreResult<bool> {
+    {
+        let mut memo = rt.search_keys.lock();
+        if memo.generation != generation {
+            memo.generation = generation;
+            memo.programmes.clear();
+        }
+        if let Some(&found) = memo.programmes.get(id) {
+            return Ok(found);
+        }
+    }
+    let found = resolve::has_programmes(conn, id)?;
+    let mut memo = rt.search_keys.lock();
+    if memo.generation == generation && memo.programmes.len() < MEMO_CAP {
+        memo.programmes.insert(id.into(), found);
+    }
+    Ok(found)
+}
+
+/// The channels of every key in `keys` (a JSON array of `[epg_channel_id,
+/// title]`), by their position in it: index seeks on `idx_items_guide`.
+/// The visibility clauses follow; `CROSS JOIN` keeps the list outside.
+pub const SEEK_SQL: &str = "SELECT k.key, i.rowid, i.number FROM json_each(?3) k CROSS JOIN items i
+     WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.content_type IN ('live', 'radio')
+       AND i.epg_channel_id IS (k.value ->> 0) AND i.title = (k.value ->> 1)";
+
+/// The rows of `?3` (a JSON array of rowids), by their position in it, for
+/// the channels mapped by hand; the visibility clauses follow.
+pub const MAPPED_SQL: &str = "SELECT k.key, i.rowid, i.number FROM json_each(?3) k CROSS JOIN items i
+     WHERE i.rowid = k.value AND i.source_id = ?1 AND i.content_type = ?2 AND i.content_type IN ('live', 'radio')";
+
+/// The source's visible channels on `guides`, the guide channels with hits,
+/// by the guide channel each resolves to, as [`source_channels`] finds
+/// them but without resolving every channel of the source: the catalog
+/// keys ([`CatalogKeys`]) give the keys of those guide channels, and only
+/// their rows are read (index seeks), unless they are a large share of the
+/// source, where one walk of its channels is cheaper. Manual mappings win
+/// as there. Guide channels without a visible channel are left out.
+fn channels_on(
+    conn: &Connection,
+    rt: &EpgRuntime,
+    dir: &ChannelDirectory,
+    source_id: &str,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+    guides: &[Arc<str>],
+) -> CoreResult<SourceChannels> {
+    let index: HashMap<&str, usize> = guides.iter().enumerate().map(|(i, g)| (&**g, i)).collect();
+    // Channels per entry of `guides`.
+    let mut found: Vec<Vec<ChannelKey>> = vec![Vec::new(); guides.len()];
+    let mut programmes = |id: &str| has_programmes_memo(conn, rt, dir.generation(), id);
+    for content_type in [ContentType::Live, ContentType::Radio] {
+        let manual: HashMap<i64, Option<String>> = conn
+            .prepare_cached(MANUAL_SQL)?
+            .query_map(params![source_id, content_type.as_str()], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        let keys = catalog_keys(conn, rt, source_id, content_type)?;
+        if keys.keys.is_empty() {
+            continue;
+        }
+        let pairs = keys.resolving_to(dir, guides, &mut programmes)?;
+        let visible = visible_clauses(conn, source_id, content_type, hide, quality)?;
+        let mut push = |guide: usize, rowid: i64, number: Option<i64>| {
+            found[guide].push(ChannelKey {
+                rowid,
+                content_type,
+                number,
+            });
+        };
+        let wanted: usize = pairs
+            .iter()
+            .map(|&(k, _)| keys.keys[k as usize].rows as usize)
+            .sum();
+        let seek = wanted.saturating_mul(SEEK_COST) <= keys.rows;
+        #[cfg(test)]
+        let seek = tests::FORCE_SEEK.with(|f| f.get()).unwrap_or(seek);
+        if seek {
+            if !pairs.is_empty() {
+                let list: Vec<ResolvedKey<'_>> = pairs
+                    .iter()
+                    .map(|&(k, _)| keys.key(&keys.keys[k as usize]))
+                    .collect();
+                let list = serde_json::to_string(&list)?;
+                let mut stmt = conn.prepare_cached(&format!("{SEEK_SQL}{visible}"))?;
+                let mut rows = stmt.query(params![source_id, content_type.as_str(), list])?;
+                while let Some(r) = rows.next()? {
+                    let at = r.get::<_, i64>(0)? as usize;
+                    let rowid: i64 = r.get(1)?;
+                    if !manual.contains_key(&rowid) {
+                        push(pairs[at].1, rowid, r.get(2)?);
+                    }
+                }
+            }
+            let mapped: Vec<(i64, usize)> = manual
+                .iter()
+                .filter_map(|(rowid, m)| {
+                    let g = m.as_deref().map(str::trim)?;
+                    index.get(g).map(|&gi| (*rowid, gi))
+                })
+                .collect();
+            if !mapped.is_empty() {
+                let list =
+                    serde_json::to_string(&mapped.iter().map(|m| m.0).collect::<Vec<i64>>())?;
+                let mut stmt = conn.prepare_cached(&format!("{MAPPED_SQL}{visible}"))?;
+                let mut rows = stmt.query(params![source_id, content_type.as_str(), list])?;
+                while let Some(r) = rows.next()? {
+                    let at = r.get::<_, i64>(0)? as usize;
+                    push(mapped[at].1, r.get(1)?, r.get(2)?);
+                }
+            }
+        } else {
+            // Most of the source: walk its channels alongside the keys.
+            let mut guide_of = vec![u32::MAX; keys.keys.len()];
+            for &(k, gi) in &pairs {
+                guide_of[k as usize] = gi as u32;
+            }
+            let mut stmt = conn.prepare_cached(&format!("{CHANNELS_SQL}{visible}"))?;
+            let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
+            let mut cursor = 0usize;
+            let mut fresh = FreshResolver::default();
+            while let Some(r) = rows.next()? {
+                let rowid: i64 = r.get(0)?;
+                let guide = match manual.get(&rowid) {
+                    Some(m) => m
+                        .as_deref()
+                        .map(str::trim)
+                        .and_then(|g| index.get(g).copied()),
+                    None => {
+                        let key = (text(r, 2)?, text(r, 1)?.unwrap_or_default());
+                        match keys.find(&mut cursor, key) {
+                            Some(k) => Some(guide_of[k] as usize).filter(|&g| g < guides.len()),
+                            // Not under the stamp just read: cannot happen
+                            // inside one read transaction, but resolve it.
+                            None => fresh
+                                .resolve(conn, dir, key.0, key.1)?
+                                .and_then(|g| index.get(&*g).copied()),
+                        }
+                    }
+                };
+                if let Some(g) = guide {
+                    push(g, rowid, r.get(3)?);
+                }
+            }
+        }
+    }
+    let mut out = SourceChannels::default();
+    for (g, channels) in guides.iter().zip(found) {
+        if !channels.is_empty() {
+            out.by_guide.insert(g.clone(), out.guides.len());
+            out.guides.push((g.clone(), channels));
+        }
+    }
     Ok(out)
 }
 
@@ -724,15 +1214,31 @@ fn candidates(
             return Ok((Vec::new(), true));
         };
         let feeds = search_feeds(conn)?;
-        let channels = source_channels(conn, rt, dir, &q.source_id, hide, quality)?;
-        let hit = |r: &rusqlite::Row<'_>| -> CoreResult<Option<Hit>> {
+        // The guide channels with hits, in the order first seen; `guide`
+        // indexes them until the channels are known.
+        let mut seen: HashMap<Box<str>, usize> = HashMap::new();
+        let mut guides: Vec<Arc<str>> = Vec::new();
+        // Hits come in programme rowid order, so mostly a channel's in a row.
+        let mut last = usize::MAX;
+        let mut hit = |r: &rusqlite::Row<'_>| -> CoreResult<Option<Hit>> {
             let feed: i64 = r.get(4)?;
             if !feeds.contains(&feed) {
                 return Ok(None);
             }
-            let Some(&guide) = channels.by_guide.get(text(r, 1)?.unwrap_or_default()) else {
-                return Ok(None);
+            let id = text(r, 1)?.unwrap_or_default();
+            let guide = if guides.get(last).is_some_and(|g| **g == *id) {
+                last
+            } else {
+                match seen.get(id) {
+                    Some(&g) => g,
+                    None => {
+                        seen.insert(id.into(), guides.len());
+                        guides.push(id.into());
+                        guides.len() - 1
+                    }
+                }
             };
+            last = guide;
             Ok(Some(Hit {
                 rowid: r.get(0)?,
                 start: r.get(2)?,
@@ -745,6 +1251,20 @@ fn candidates(
         while let Some(r) = rows.next()? {
             hits.extend(hit(r)?);
         }
+        drop(rows);
+        // Only the channels of those guide channels are read.
+        let channels = channels_on(conn, rt, dir, &q.source_id, hide, quality, &guides)?;
+        let at: Vec<Option<usize>> = guides
+            .iter()
+            .map(|g| channels.by_guide.get(g).copied())
+            .collect();
+        hits.retain_mut(|h| match at[h.guide] {
+            Some(i) => {
+                h.guide = i;
+                true
+            }
+            None => false,
+        });
         channels
     } else {
         let channels = source_channels(conn, rt, dir, &q.source_id, hide, quality)?;
@@ -978,6 +1498,12 @@ pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<Guid
 mod tests {
     use super::*;
 
+    thread_local! {
+        /// Overrides the choice between reading by key and walking the
+        /// source in [`channels_on`].
+        pub(super) static FORCE_SEEK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    }
+
     fn w(s: &str) -> Vec<String> {
         words(s)
     }
@@ -1203,10 +1729,33 @@ mod tests {
                     .collect(),
             )
         };
+        // The other way round, from guide channels to their channels,
+        // reading them by key and walking the source; plus a guide channel
+        // none of them is on.
+        let by_guides = |conn: &Connection, want: &Shape, seek: bool| -> Shape {
+            let mut guides: Vec<Arc<str>> = want.iter().map(|(g, _)| g.as_str().into()).collect();
+            guides.push("nobody.uk".into());
+            FORCE_SEEK.with(|f| f.set(Some(seek)));
+            let out = channels_on(conn, &rt, &dir, "s", None, None, &guides).unwrap();
+            FORCE_SEEK.with(|f| f.set(None));
+            sorted(
+                out.guides
+                    .into_iter()
+                    .map(|(g, keys)| (g.to_string(), keys.iter().map(|k| k.rowid).collect()))
+                    .collect(),
+            )
+        };
         let before = fresh(&conn);
         assert_eq!(before.len(), 4, "{before:?}");
         assert_eq!(scan(&conn), before, "cold memo");
         assert_eq!(scan(&conn), before, "warm memo");
+        for seek in [true, false, true] {
+            assert_eq!(
+                by_guides(&conn, &before, seek),
+                before,
+                "by guide, seek {seek}"
+            );
+        }
         conn.execute_batch(
             "UPDATE items SET title = 'ITV 1' WHERE item_id = '8';
              UPDATE items SET epg_channel_id = 'news.uk' WHERE item_id = '6';
@@ -1219,5 +1768,12 @@ mod tests {
         assert_ne!(after, before, "the changes move channels");
         assert_eq!(scan(&conn), after, "after catalog changes");
         assert_eq!(scan(&conn), after, "warm again");
+        for seek in [true, false] {
+            assert_eq!(
+                by_guides(&conn, &after, seek),
+                after,
+                "by guide after changes, seek {seek}"
+            );
+        }
     }
 }

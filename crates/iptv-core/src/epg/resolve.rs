@@ -8,7 +8,7 @@ use super::ingest::EpgRuntime;
 use super::store::STAGING_ORIGIN;
 use crate::error::CoreResult;
 use crate::model::ItemRef;
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use parking_lot::Mutex;
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -192,6 +192,20 @@ pub struct ChannelDirectory {
     /// Title -> index in `entries` of its fuzzy match ([`Self::find_name`]).
     /// The directory is replaced when the generation moves, and this with it.
     fuzzy: Mutex<HashMap<String, Option<usize>>>,
+    /// `ids` and `names` the other way round, built on first use (guide
+    /// search only).
+    reverse: OnceCell<Reverse>,
+}
+
+/// [`ChannelDirectory::ids_of`] and [`ChannelDirectory::names_of`].
+#[derive(Default)]
+struct Reverse {
+    /// Canonical id -> the lowercase ids that [`ChannelDirectory::find_id`]
+    /// turns into it.
+    ids: HashMap<String, Vec<String>>,
+    /// Channel id -> the normalized names [`ChannelDirectory::find_name_exact`]
+    /// turns into it.
+    names: HashMap<String, Vec<String>>,
 }
 
 impl ChannelDirectory {
@@ -210,6 +224,7 @@ impl ChannelDirectory {
             names: HashMap::new(),
             entries: Vec::new(),
             fuzzy: Mutex::new(HashMap::new()),
+            reverse: OnceCell::new(),
         };
         for row in rows {
             let (id, name) = row?;
@@ -317,6 +332,37 @@ impl ChannelDirectory {
             return None;
         }
         self.names.get(&key).map(String::as_str)
+    }
+
+    fn reverse(&self) -> &Reverse {
+        self.reverse.get_or_init(|| {
+            let mut r = Reverse::default();
+            for (lower, id) in &self.ids {
+                r.ids.entry(id.clone()).or_default().push(lower.clone());
+            }
+            for (key, id) in &self.names {
+                r.names.entry(id.clone()).or_default().push(key.clone());
+            }
+            r
+        })
+    }
+
+    /// Every lowercase id [`Self::find_id`] answers with `canonical`.
+    pub fn ids_of(&self, canonical: &str) -> &[String] {
+        self.reverse()
+            .ids
+            .get(canonical)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Every normalized name [`Self::find_name_exact`] answers with `id`.
+    pub fn names_of(&self, id: &str) -> &[String] {
+        self.reverse()
+            .names
+            .get(id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     /// The runtime generation this snapshot was loaded at.

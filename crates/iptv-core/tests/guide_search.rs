@@ -3,6 +3,7 @@
 //! and parental-locked channels, the time window, the limit, the query
 //! plans and the speed on 200k programmes.
 
+use iptv_core::catalog::{replace_catalog, CategoryRow, ItemRow};
 use iptv_core::epg::{self, search};
 use iptv_core::model::{ContentType, ParentalLockKind, ParentalLockTarget};
 use iptv_core::rpc::RpcRouter;
@@ -729,6 +730,267 @@ async fn index_follows_refresh_clear_and_staging() {
         .is_empty());
 }
 
+impl Env {
+    /// The search on the index path, checked against the scan the search
+    /// uses before the index is built, which resolves every channel of the
+    /// source afresh (marker removed, then the index built again).
+    async fn search_checked(&self, args: Value) -> Vec<Value> {
+        let hits = self.search(args.clone()).await;
+        self.state
+            .db_call(|c| search::invalidate_index(c))
+            .await
+            .unwrap();
+        let scanned = self.search(args.clone()).await;
+        assert!(self
+            .state
+            .db_call(|c| search::ensure_index(c, false))
+            .await
+            .unwrap());
+        assert_eq!(hits, scanned, "index path and scan disagree on {args}");
+        hits
+    }
+
+    async fn sql(&self, sql: &'static str) {
+        self.state
+            .db_call(move |c| Ok(c.execute_batch(sql)?))
+            .await
+            .unwrap();
+    }
+
+    async fn rpc(&self, method: &str, args: Value) {
+        self.router
+            .dispatch(self.state.clone(), method, args)
+            .await
+            .unwrap_or_else(|e| panic!("{method}: {e:?}"));
+    }
+}
+
+/// `src-1`'s channels as `env` writes them, plus `fillers` channels the
+/// guide knows neither by id nor by name, through the catalog writer.
+fn catalog(fillers: usize, extra: &[(&str, &str, Option<i64>, Option<&str>)]) -> Vec<ItemRow> {
+    let base: [(&str, &str, Option<i64>, Option<&str>); 6] = [
+        ("c1", "Channel One", Some(1), Some("one.uk")),
+        ("c2", "Channel Two HD", Some(2), None),
+        ("c3", "Channel Threee", Some(3), None),
+        ("c4", "Mapped", Some(4), None),
+        ("c5", "Unnumbered", None, Some("ONE.UK")),
+        ("c6", "Blocked", Some(6), Some("two.uk")),
+    ];
+    let named = base
+        .iter()
+        .chain(extra)
+        .map(|&(id, title, number, epg)| ItemRow {
+            source_id: SRC.into(),
+            content_type: ContentType::Live,
+            item_id: id.into(),
+            category_id: "news".into(),
+            title: title.into(),
+            number,
+            epg_channel_id: epg.map(Into::into),
+            ..Default::default()
+        });
+    let filler = (0..fillers).map(|n| ItemRow {
+        source_id: SRC.into(),
+        content_type: ContentType::Live,
+        item_id: format!("f{n}"),
+        category_id: "news".into(),
+        title: format!("Filler {n}"),
+        number: Some(100 + n as i64),
+        epg_channel_id: Some(format!("filler{n}.example")),
+        ..Default::default()
+    });
+    named
+        .chain(filler)
+        .enumerate()
+        .map(|(i, mut row)| {
+            row.position = i as i64;
+            row
+        })
+        .collect()
+}
+
+async fn rewrite(e: &Env, rows: Vec<ItemRow>) {
+    e.state
+        .db_call(move |c| {
+            replace_catalog(
+                c,
+                SRC,
+                ContentType::Live,
+                &[CategoryRow {
+                    category_id: "news".into(),
+                    name: "News".into(),
+                    position: 0,
+                }],
+                &mut rows.into_iter(),
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// The search keeps each catalog's channel keys across searches and guide
+/// changes, and reads only the channels of the guide channels with hits.
+/// Every change that moves a channel onto or off a guide channel must show
+/// in the next search: a catalog rewrite, rows written outside the catalog
+/// writer (inserted, re-keyed, renamed, deleted), manual mappings, a guide
+/// refresh that renames a channel or brings programmes for an undeclared
+/// id, a feed disabled and enabled again, and the source removed. Each
+/// result is also checked against the scan, which resolves every channel
+/// afresh. With `fillers`, the guide channels with hits are a small share
+/// of the source, so their channels are read by key; without, the source's
+/// channels are walked.
+async fn follows_catalog_and_guide_changes(fillers: usize) {
+    let e = env().await;
+    let b = base();
+    rewrite(&e, catalog(fillers, &[])).await;
+    let url = e.ingest(b).await;
+    let range = window("cafe society", b - HOUR, b + HOUR);
+    let start = vec![k("c1", b), k("c2", b), k("c5", b)];
+    assert_eq!(keys(&e.search_checked(range.clone()).await), start);
+    assert_eq!(keys(&e.search(range.clone()).await), start, "warm");
+
+    // Outside the catalog writer: a new channel named like three.uk, a
+    // channel with a junk id named like it too, c5 re-keyed to two.uk and
+    // c2 renamed away from "Channel Two".
+    e.sql(
+        "INSERT INTO items(source_id, content_type, item_id, category_id, title, number, epg_channel_id)
+           VALUES ('src-1', 'live', 'c7', 'news', 'Channel Three', 7, NULL),
+                  ('src-1', 'live', 'c8', 'news', 'UK: Channel Three HD', 8, 'junk.id');
+         UPDATE items SET epg_channel_id = 'two.uk' WHERE source_id = 'src-1' AND item_id = 'c5';
+         UPDATE items SET title = 'Channel Deux' WHERE source_id = 'src-1' AND item_id = 'c2';",
+    )
+    .await;
+    assert_eq!(
+        keys(&e.search_checked(range.clone()).await),
+        vec![k("c1", b), k("c7", b), k("c8", b), k("c5", b)]
+    );
+    e.sql("DELETE FROM items WHERE source_id = 'src-1' AND item_id IN ('c1', 'c8')")
+        .await;
+    assert_eq!(
+        keys(&e.search_checked(range.clone()).await),
+        vec![k("c7", b), k("c5", b)]
+    );
+
+    // A catalog rewrite: c3 renamed to the exact name, c9 on three.uk by id
+    // in another case, c10 on an id only the programmes know.
+    rewrite(
+        &e,
+        catalog(
+            fillers,
+            &[
+                ("c9", "Nine", Some(9), Some(" THREE.uk ")),
+                ("c10", "Ten", Some(10), Some("solo.tv")),
+                ("c11", "Eleven", Some(11), Some("SOLO.TV")),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(
+        keys(&e.search_checked(range.clone()).await),
+        vec![k("c1", b), k("c2", b), k("c9", b), k("c5", b)]
+    );
+
+    // Manual mappings: c4 moved to one.uk, c1 to none, c3 to three.uk.
+    for (item, guide) in [
+        ("c4", json!("one.uk")),
+        ("c1", Value::Null),
+        ("c3", json!(" three.uk ")),
+    ] {
+        e.rpc(
+            "epg.setMapping",
+            json!({"ref": {"sourceId": SRC, "contentType": "live", "itemId": item}, "epgChannelId": guide}),
+        )
+        .await;
+    }
+    assert_eq!(
+        keys(&e.search_checked(range.clone()).await),
+        vec![k("c2", b), k("c3", b), k("c4", b), k("c9", b), k("c5", b)]
+    );
+    e.rpc(
+        "epg.clearMapping",
+        json!({"ref": {"sourceId": SRC, "contentType": "live", "itemId": "c1"}}),
+    )
+    .await;
+
+    // A guide refresh: two.uk renamed (c2 matched it by name), and
+    // programmes for solo.tv, which no <channel> declares (c10 has that id
+    // exactly; c11's differs in case, so it is no match).
+    let xml = format!(
+        "<?xml version=\"1.0\"?><tv>\
+         <channel id=\"one.uk\"><display-name>Channel One</display-name></channel>\
+         <channel id=\"two.uk\"><display-name>Channel Deux</display-name></channel>\
+         <channel id=\"three.uk\"><display-name>Channel Three</display-name></channel>\
+         <programme start=\"{s}\" stop=\"{t}\" channel=\"one.uk\"><title>Café Society</title></programme>\
+         <programme start=\"{s}\" stop=\"{t}\" channel=\"two.uk\"><title>Café Society</title></programme>\
+         <programme start=\"{s}\" stop=\"{t}\" channel=\"three.uk\"><title>Café Society</title></programme>\
+         <programme start=\"{s}\" stop=\"{t}\" channel=\"solo.tv\"><title>Café Society</title></programme>\
+         </tv>",
+        s = xmltv_ts(b),
+        t = xmltv_ts(b + HOUR)
+    );
+    std::fs::write(&url, xml).unwrap();
+    epg::refresh_now(e.state.clone(), &url).await.unwrap();
+    assert_eq!(
+        keys(&e.search_checked(range.clone()).await),
+        vec![
+            k("c1", b),
+            k("c3", b),
+            k("c4", b),
+            k("c9", b),
+            k("c10", b),
+            k("c5", b)
+        ]
+    );
+
+    // The feed disabled: no guide, no hits; enabled again: all back.
+    e.rpc("epg.setEnabled", json!({"url": url, "enabled": false}))
+        .await;
+    assert!(e.search_checked(range.clone()).await.is_empty());
+    e.rpc("epg.setEnabled", json!({"url": url, "enabled": true}))
+        .await;
+    assert_eq!(keys(&e.search(range.clone()).await).len(), 6);
+
+    // The source removed: not found, and a source added again under its id
+    // starts from its own catalog.
+    e.state
+        .db_call(|c| iptv_core::sources::store::delete(c, SRC))
+        .await
+        .unwrap();
+    assert_eq!(e.search_err(range.clone()).await, RpcErrorCode::NotFound);
+    e.state
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO sources(id, kind, name, position, config_json, epg_json) VALUES (?1, 'm3u', ?1, 0, ?2, ?3)",
+                [SRC, CONFIG, EPG_JSON],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(e.search_checked(range.clone()).await.is_empty());
+    // Its manual mappings went with it: c6 is on two.uk by id again.
+    rewrite(
+        &e,
+        catalog(fillers, &[("c12", "Channel Three", None, None)]),
+    )
+    .await;
+    assert_eq!(
+        keys(&e.search_checked(range).await),
+        vec![k("c1", b), k("c6", b), k("c12", b), k("c5", b)]
+    );
+}
+
+#[tokio::test]
+async fn follows_catalog_and_guide_changes_reading_by_key() {
+    follows_catalog_and_guide_changes(200).await;
+}
+
+#[tokio::test]
+async fn follows_catalog_and_guide_changes_walking_the_source() {
+    follows_catalog_and_guide_changes(0).await;
+}
+
 /// The index test of `db/mod.rs` covers the grid statements; these are the
 /// two search statements: the FTS match drives the index path (each hit
 /// reads its programme by rowid), and the scan walks the `stop` index.
@@ -739,7 +1001,12 @@ async fn search_statements_use_indexes() {
         .state
         .db_call(|c| {
             let mut out = Vec::new();
-            for sql in [search::FTS_SQL, search::SCAN_SQL] {
+            for sql in [
+                search::FTS_SQL,
+                search::SCAN_SQL,
+                search::SEEK_SQL,
+                search::MAPPED_SQL,
+            ] {
                 let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
                 let args = vec![rusqlite::types::Null; stmt.parameter_count()];
                 let plan: Vec<String> = stmt
@@ -774,6 +1041,31 @@ async fn search_statements_use_indexes() {
             "{scan:?}"
         );
     }
+    // The channels of the guide channels with hits: the key list drives,
+    // and each key is a seek on the guide index (index-only); a channel
+    // mapped by hand is read by rowid.
+    let seek = &plans[2];
+    assert!(
+        seek[0].starts_with("SCAN k VIRTUAL TABLE INDEX"),
+        "{seek:?}"
+    );
+    assert!(
+        seek.iter().any(|d| d.starts_with(
+            "SEARCH i USING COVERING INDEX idx_items_guide (source_id=? AND content_type=? AND epg_channel_id=? AND title=?)"
+        )),
+        "{seek:?}"
+    );
+    let mapped = &plans[3];
+    assert!(
+        mapped[0].starts_with("SCAN k VIRTUAL TABLE INDEX"),
+        "{mapped:?}"
+    );
+    assert!(
+        mapped
+            .iter()
+            .any(|d| d.starts_with("SEARCH i USING INTEGER PRIMARY KEY (rowid=?)")),
+        "{mapped:?}"
+    );
 }
 
 /// 1,000 guide channels x 200 half-hour programmes, searched from a source

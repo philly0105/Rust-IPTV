@@ -51,6 +51,9 @@ pub struct EpgRuntime {
     pub(crate) names: Mutex<Option<Arc<super::resolve::ChannelDirectory>>>,
     /// Guide search: channel resolutions reused until the generation moves.
     pub(crate) search_memo: Mutex<super::search::SearchMemo>,
+    /// Guide search: each catalog's channel keys, reused until its stamp
+    /// moves.
+    pub(crate) search_keys: Mutex<super::search::KeysMemo>,
 }
 
 impl Default for EpgRuntime {
@@ -62,6 +65,7 @@ impl Default for EpgRuntime {
             generation: AtomicU64::new(1),
             names: Mutex::new(None),
             search_memo: Mutex::new(Default::default()),
+            search_keys: Mutex::new(Default::default()),
         }
     }
 }

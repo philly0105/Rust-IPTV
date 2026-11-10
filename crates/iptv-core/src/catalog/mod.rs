@@ -930,6 +930,11 @@ impl<'c> CatalogWriter<'c> {
             "DELETE FROM fts_suspend WHERE source_id = ?1",
             [&self.source_id],
         )?;
+        // The guide search's channel keys of the rewritten types (migration
+        // 0027): the per-row triggers that move the stamp were suspended.
+        for ct in &self.types {
+            crate::epg::search::touch_catalog_stamp(self.conn, &self.source_id, *ct)?;
+        }
         update_counts(self.conn, &self.source_id)?;
         Ok(self.total)
     }

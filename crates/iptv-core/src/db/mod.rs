@@ -246,6 +246,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0026_download_rate_limit",
         sql: include_str!("migrations/0026_download_rate_limit.sql"),
     },
+    // guide search: a stamp of each catalog's channel keys.
+    Migration {
+        version: 27,
+        name: "0027_guide_catalog_stamp",
+        sql: include_str!("migrations/0027_guide_catalog_stamp.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

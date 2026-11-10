@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type Channel, type EpgProgram, type Recording } from '@/api/types';
 import { IconButton, Menu, type MenuItem } from '@/ui';
-import { intlLocale } from '@/lib/intl';
+import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useRecordingCapabilities, useRuleIndex, useScheduleActions, useScheduleIndex } from '../hooks';
 import { canHaveRule, ruleFor } from '../lib/rules';
@@ -25,6 +25,9 @@ export interface RibbonActionsProps {
   program?: EpgProgram;
   now: number;
 }
+
+const MINUTE_UNIT: Intl.NumberFormatOptions = { style: 'unit', unit: 'minute', unitDisplay: 'short' };
+const HOUR_UNIT: Intl.NumberFormatOptions = { style: 'unit', unit: 'hour', unitDisplay: 'short' };
 
 export function RibbonActions({ channel, channelName, program, now }: RibbonActionsProps) {
   const { t, i18n } = useTranslation('live');
@@ -43,10 +46,11 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
   const canRecord = caps.data?.supported === true;
   const target = program ? { ref: channel.ref, channelName, program } : undefined;
 
+  // Cached formatters: the ribbon re-renders this on every zap, and building them took about 2 ms each time.
   const minutes = (m: number) =>
     m < 60
-      ? new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(m)
-      : new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'hour', unitDisplay: 'short' }).format(m / 60);
+      ? numberFormat(intlLocale(i18n.language), MINUTE_UNIT).format(m)
+      : numberFormat(intlLocale(i18n.language), HOUR_UNIT).format(m / 60);
 
   const items: MenuItem[] = [];
   const stoppable = mark.recording ?? running;

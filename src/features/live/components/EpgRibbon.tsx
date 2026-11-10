@@ -2,11 +2,13 @@ import { CalendarClock, ChartGantt, ChevronDown, CircleAlert, History, LayoutLis
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
+import { useShallow } from 'zustand/react/shallow';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
-import { sameRef, type Channel, type EpgProgram, type ItemRef, type SourceKind } from '@/api/types';
+import { sameRef, type Channel, type EpgProgram, type ItemRef, type PlayerSource, type SourceKind } from '@/api/types';
 import { usePlayerStore } from '@/features/player';
+import { isPendingZap, type PlayerState } from '@/features/player/store';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
@@ -81,6 +83,13 @@ export interface EpgRibbonProps {
   onMapEpg(channel: Channel): void;
   guideHref?: string;
   /**
+   * The player's item as it concerns `channel` (`ribbonPlayback`), when the page hands it over
+   * with the channel, in the same background render (Live): a zap then re-renders the ribbon once,
+   * for the new channel, instead of also when the stream changes under the old one. Without it the
+   * ribbon follows the player itself.
+   */
+  playback?: RibbonPlayback;
+  /**
    * The stage column's full ribbon (Live and custom lists, LG-02): from md up the header is a
    * Now card (the channel, programme art, a progress bar, three lines of description) and Up next
    * fills the column under the timeline. Below md the ribbon folds to one line until it is opened
@@ -88,6 +97,57 @@ export interface EpgRibbonProps {
    */
   details?: boolean;
 }
+
+/** What the ribbon reads from the player, for `channel`: primitives, compared one by one. */
+export interface RibbonPlayback {
+  /** `channel` is what plays (live or its catch-up). */
+  channelPlaying: boolean;
+  isLive: boolean;
+  url: string | undefined;
+  /** The catch-up programme playing, whatever channel it is on (a new one clears the ribbon's pick). */
+  anyCatchupStart: string | undefined;
+  /** `channel`'s catch-up playing: its programme's start, and the player's title, subtitle and length for it. */
+  catchupStart: string | undefined;
+  title: string | undefined;
+  subtitle: string | undefined;
+  durationSeconds: number | undefined;
+}
+
+export function ribbonPlayback(src: PlayerSource | undefined, channel: Channel | undefined): RibbonPlayback {
+  const channelPlaying = !!channel && !!src?.ref && sameRef(src.ref, channel.ref);
+  const archive = channelPlaying && src && !src.isLive ? src : undefined;
+  return {
+    channelPlaying,
+    isLive: !!src?.isLive,
+    url: src?.url,
+    anyCatchupStart: src?.catchupProgramStart,
+    catchupStart: archive?.catchupProgramStart,
+    title: archive?.title,
+    subtitle: archive?.subtitle,
+    durationSeconds: archive?.durationSeconds,
+  };
+}
+
+/**
+ * The player's item as the ribbon shows it. Not the item itself: its other changes (a new
+ * programme title, the rename of a channel) re-rendered the ribbon, every button of its header
+ * and its programme actions. A zap's placeholder (the next channel's name over the picture still
+ * playing) counts as the item it holds: that picture is still the channel the ribbon shows, and
+ * the ribbon moves to the new channel once it is tuned (LivePage follows the settled item), so a
+ * zap re-rendered it for the placeholder only to say nothing plays here.
+ */
+function useRibbonPlayback(channel: Channel | undefined, follow: boolean): RibbonPlayback {
+  const settled = useRef<PlayerSource | undefined>(undefined);
+  return usePlayerStore(
+    useShallow((s: PlayerState) => {
+      if (!follow) return NOT_FOLLOWED;
+      const src = isPendingZap(s.source) ? settled.current : (settled.current = s.source);
+      return ribbonPlayback(src, channel);
+    }),
+  );
+}
+
+const NOT_FOLLOWED: RibbonPlayback = ribbonPlayback(undefined, undefined);
 
 /** After the pointer leaves the timeline, the header waits this long before it goes back (LG-06). */
 export const RIBBON_PREVIEW_LINGER_MS = 300;
@@ -100,11 +160,14 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const [localMode, setLocalMode] = useState<Mode | null>(null);
   const mode: Mode = localMode ?? settings.data?.epgViewMode ?? 'timeline';
   const { channel, sourceKind } = props;
-  const playerSource = usePlayerStore((s) => s.source);
+  const followed = useRibbonPlayback(channel, props.playback === undefined);
+  const playback = props.playback ?? followed;
+  const { channelPlaying, catchupStart } = playback;
   // Keep the guide on the programme being watched without re-rendering it for every video frame.
-  const positionSeconds = usePlayerStore((s) => Math.floor(Math.max(0, Number.isFinite(s.positionSeconds) ? s.positionSeconds : 0) / 5) * 5);
-  const channelPlaying = !!channel && !!playerSource?.ref && sameRef(playerSource.ref, channel.ref);
-  const catchupStart = channelPlaying && playerSource && !playerSource.isLive ? playerSource.catchupProgramStart : undefined;
+  // Only catch-up reads it: live TV ran the ribbon again every 5 s for nothing.
+  const positionSeconds = usePlayerStore((s) =>
+    catchupStart ? Math.floor(Math.max(0, Number.isFinite(s.positionSeconds) ? s.positionSeconds : 0) / 5) * 5 : 0,
+  );
   const catchupStartMs = catchupStart ? ms(catchupStart) : NaN;
   const watchingCatchup = Number.isFinite(catchupStartMs);
   const playbackAt = watchingCatchup ? catchupStartMs + positionSeconds * 1000 : undefined;
@@ -133,18 +196,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
     if (!watchingCatchup || !catchupStart || shifted.some((p) => p.start === catchupStart)) return shifted;
     // The selected programme can precede both guides, or the provider can still be answering.
     // The player already knows its title and duration, so the card need not show a live show.
-    const duration = playerSource?.durationSeconds;
+    const duration = playback.durationSeconds;
     const fallback: EpgProgram = {
-      channelId: channel?.ref.itemId ?? '', title: playerSource?.subtitle ?? playerSource?.title ?? channel?.name ?? '',
+      channelId: channel?.ref.itemId ?? '', title: playback.subtitle ?? playback.title ?? channel?.name ?? '',
       start: catchupStart,
       end: new Date(catchupStartMs + (duration && Number.isFinite(duration) && duration > 0 ? duration : 30 * 60) * 1000).toISOString(),
     };
     return mergePrograms([fallback], shifted);
-  }, [archiveTable.data, programs.programs, prefs.epgOffsetMinutes, from, to, offsetMs, watchingCatchup, catchupStart, catchupStartMs, channel?.ref.itemId, channel?.name, playerSource?.subtitle, playerSource?.title, playerSource?.durationSeconds]);
+  }, [archiveTable.data, programs.programs, prefs.epgOffsetMinutes, from, to, offsetMs, watchingCatchup, catchupStart, catchupStartMs, channel?.ref.itemId, channel?.name, playback.subtitle, playback.title, playback.durationSeconds]);
   const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
   const catchupProgram = playbackAt === undefined ? undefined : list.find((p) => programWhen(p, playbackAt) === 'now') ?? list.find((p) => p.start === catchupStart);
-  const playingProgramStart = watchingCatchup ? catchupProgram?.start : channelPlaying && playerSource?.isLive ? current?.start : undefined;
+  const playingProgramStart = watchingCatchup ? catchupProgram?.start : channelPlaying && playback.isLive ? current?.start : undefined;
   // LG-06: the pointer previews (the header follows a hovered block and goes back once the pointer
   // leaves the timeline); a click, Enter or keyboard focus picks (the header stays on it, the
   // block is ringed, and "Back to now" returns). A zap clears both.
@@ -155,7 +218,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
     window.clearTimeout(lingerTimer.current);
     setHovered(undefined);
     setPinned(undefined);
-  }, [channel?.ref.itemId, playerSource?.url, playerSource?.catchupProgramStart]);
+  }, [channel?.ref.itemId, playback.url, playback.anyCatchupStart]);
   useEffect(() => () => window.clearTimeout(lingerTimer.current), []);
   const preview = useCallback((p: EpgProgram | undefined) => {
     window.clearTimeout(lingerTimer.current);

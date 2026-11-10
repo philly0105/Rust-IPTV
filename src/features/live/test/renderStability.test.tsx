@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Category } from '@/api/types';
+import { usePlayerStore } from '@/features/player';
 
 import { CategorySidebar } from '../components/CategorySidebar';
 import { refsKeyHash } from '../hooks/usePagedChannels';
@@ -16,7 +17,7 @@ import { EpgRibbon } from '../components/EpgRibbon';
 import { MINUTE } from '../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
-const counts = vi.hoisted(() => ({ intents: 0, catchUps: 0 }));
+const counts = vi.hoisted(() => ({ intents: 0, catchUps: 0, ribbonHeaders: 0 }));
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -46,6 +47,17 @@ vi.mock('@/shell/routeIntent', () => ({
     return { onPointerEnter: () => undefined, onPointerLeave: () => undefined, onFocus: () => undefined, onBlur: () => undefined };
   },
 }));
+// The ribbon header's actions render once per ribbon render: they count the ribbon's renders.
+vi.mock('@/features/recording', async (orig) => {
+  const real = await orig<typeof import('@/features/recording')>();
+  return {
+    ...real,
+    RibbonActions: (props: Parameters<typeof real.RibbonActions>[0]) => {
+      counts.ribbonHeaders++;
+      return real.RibbonActions(props);
+    },
+  };
+});
 vi.mock('../lib/epgTime', async (orig) => {
   const real = await orig<typeof import('../lib/epgTime')>();
   return {
@@ -147,6 +159,34 @@ describe('the guide ribbon timeline', () => {
     act(() => bump());
     // Each block rendered again on every page render before (its click handler changed identity).
     expect(counts.catchUps).toBe(0);
+  });
+
+  it("re-renders for the player only when what it shows of the channel changes", async () => {
+    const now = Date.now();
+    rpcMock.handlers['epg.programs'] = () => [program('Airing', now - 10 * MINUTE, now + 50 * MINUTE)];
+    const channel = makeChannel(0);
+    const other = makeChannel(1);
+    const stream = (ch: typeof channel, extra: object = {}) => ({ url: `http://h/${ch.ref.itemId}.ts`, kind: 'direct' as const, title: ch.name, isLive: true, isRadio: false, ref: ch.ref, ...extra });
+    act(() => usePlayerStore.setState({ source: stream(channel), status: 'playing', positionSeconds: 5 }));
+    let client: QueryClient | undefined;
+    function Harness() {
+      client = useQueryClient();
+      return <EpgRibbon channel={channel} sourceKind="m3u" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} />;
+    }
+    renderAt('/', [{ path: '/', element: <Harness /> }]);
+    expect(await screen.findByRole('button', { name: /Airing/ })).toBeTruthy();
+    await waitFor(() => expect(client?.isFetching()).toBe(0));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    counts.ribbonHeaders = 0;
+    // Live playback moving on, the status, and a new programme title on the same stream.
+    act(() => usePlayerStore.setState({ positionSeconds: 25 }));
+    act(() => usePlayerStore.setState({ status: 'loading' }));
+    act(() => usePlayerStore.setState({ source: stream(channel, { subtitle: 'Airing' }) }));
+    expect(counts.ribbonHeaders).toBe(0);
+    // Another channel playing is news for it.
+    act(() => usePlayerStore.setState({ source: stream(other) }));
+    expect(counts.ribbonHeaders).toBeGreaterThan(0);
+    act(() => usePlayerStore.setState({ source: undefined, status: 'idle', positionSeconds: 0 }));
   });
 });
 

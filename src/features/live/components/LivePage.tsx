@@ -69,7 +69,7 @@ import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from './ChannelR
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
-import { EpgRibbon } from './EpgRibbon';
+import { EpgRibbon, ribbonPlayback } from './EpgRibbon';
 import { HiddenChannelsButton } from './HiddenChannelsButton';
 import { LiveStageColumn } from './LiveStageColumn';
 import { ManageCategoriesDialog } from './ManageCategoriesDialog';
@@ -121,6 +121,10 @@ export function shownGroups(all: readonly Category[], channelsHidden: boolean): 
 }
 
 const MemoRibbon = memo(EpgRibbon);
+const MemoStageColumn = memo(LiveStageColumn);
+const MemoChannelList = memo(ChannelList);
+const MemoListsSection = memo(ListsSidebarSection);
+const MemoHiddenChannels = memo(HiddenChannelsButton);
 const MemoSidebar = memo(CategorySidebar);
 const MemoManageDialog = memo(ManageCategoriesDialog);
 const MemoMappingDialog = memo(EpgMappingDialog);
@@ -190,7 +194,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     epgOffsetMinutes: prefs.epgOffsetMinutes,
   });
   const viewPaged = useLiveViewChannels(liveView, { sourceId, contentType, search: debouncedSearch, now, epgOffsetMinutes: prefs.epgOffsetMinutes });
-  const paged = viewPaged ?? groupPaged;
+  const latestPaged = viewPaged ?? groupPaged;
+  // One object while nothing in it changed, so the memoized list is passed by when the page
+  // re-renders for something else (a zap moving the player). The group pages' hook makes a new
+  // object, and a new `retry`, on every render.
+  const retryLatest = useRef(latestPaged.retry);
+  retryLatest.current = latestPaged.retry;
+  const retryPaged = useCallback(() => retryLatest.current(), []);
+  const paged = useStableFields({ ...latestPaged, retry: retryPaged });
   // The loading skeleton matches the list's rows at the current scale and density.
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
   useEffect(() => {
@@ -271,10 +282,24 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // player up) paints first, and the ribbon's programmes come right after (L1-live-20).
   // The idle card's button starts the channel the ribbon describes: the ribbon leaves out its own.
   const stageOffersChannel = !!idleChannel && !!ribbonChannel && sameRef(idleChannel.ref, ribbonChannel.ref);
+  // LG-01: the guide opens on this group, at the channel playing here (or the list's cursor). The
+  // channel a zap settled on, like the ribbon: naming each channel a burst passes re-rendered the
+  // ribbon and the header for every press, before the ribbon's own render for the new channel.
+  const guideFocus = (detailRef ?? playingRef)?.itemId ?? activeChannel?.ref.itemId;
+  const guideHref = isRadio
+    ? guideLink(sourceId)
+    : liveView === 'favorites'
+      ? `${guideLink(sourceId, undefined, guideFocus)}&view=favorites`
+      : guideLink(sourceId, categoryId, guideFocus);
+  // What plays, as it concerns the ribbon's channel, handed over with the channel: the ribbon
+  // followed the player itself, and re-rendered when the zap's stream started under the old
+  // channel, just before its render for the new one. Kept while its fields stay the same.
+  const ribbonPlay = useStableFields(ribbonPlayback(detailSource, ribbonChannel));
+  // The guide link follows a zap with the ribbon, in its background render.
   const ribbon = useDeferredValue(
     useMemo(
-      () => ({ channel: ribbonChannel, watchingLive, watchingArchive, stageOffersChannel }),
-      [ribbonChannel, watchingLive, watchingArchive, stageOffersChannel],
+      () => ({ channel: ribbonChannel, watchingLive, watchingArchive, stageOffersChannel, guideHref, playback: ribbonPlay }),
+      [ribbonChannel, watchingLive, watchingArchive, stageOffersChannel, guideHref, ribbonPlay],
     ),
   );
   const offset = prefs.epgOffsetMinutes;
@@ -487,13 +512,6 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     digits.push(e.key);
   }, { description: t('shortcutDigits'), area: shortcutArea });
 
-  // LG-01: the guide opens on this group, at the channel playing here (or the list's cursor).
-  const guideFocus = playingRef?.itemId ?? activeChannel?.ref.itemId;
-  const guideHref = isRadio
-    ? guideLink(sourceId)
-    : liveView === 'favorites'
-      ? `${guideLink(sourceId, undefined, guideFocus)}&view=favorites`
-      : guideLink(sourceId, categoryId, guideFocus);
   useEffect(
     () =>
       registerCommands([
@@ -523,13 +541,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // list no longer repeats them over its rows.
   const scope = groupName && countText ? t('groupWithCount', { group: groupName, count: countText }) : groupName || countText;
   const headerSubtitle = sourceName && scope ? t('groupWithCount', { group: sourceName, count: scope }) : sourceName || scope;
+  // The ribbon's (deferred) copy: the header's link moves with the ribbon, not in a zap's own commit.
+  const headerGuideHref = ribbon.guideHref;
   useEffect(() => {
     shell.setHeader({
       title,
       ...(headerSubtitle ? { subtitle: headerSubtitle } : {}),
       actions: (
         <Link
-          to={guideHref}
+          to={headerGuideHref}
           aria-label={t('openGuide')}
           // The kit's small ghost button, like every other page's header actions (a hand-built muted
           // link read as a caption beside them). On a phone it is the icon alone, in an icon
@@ -546,7 +566,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         </Link>
       ),
     });
-  }, [title, headerSubtitle, guideHref, i18n.language]);
+  }, [title, headerSubtitle, headerGuideHref, i18n.language]);
   useEffect(() => () => shell.setHeader({ title: '' }), []);
 
   // ---- remote control -----------------------------------------------------
@@ -636,6 +656,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     onToggleFavorite: onToggleFavorite,
     onMapGuide: setMapping,
     editHints: true,
+    // The page's clock, not the hook's default (a new time on every render made new items, and the
+    // closed menu rendered again on every page render).
+    now,
   });
   const groupLockItems = useLockMenuItems(
     groupMenu
@@ -748,6 +771,111 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     />
   );
 
+  // The stage column's parts, made once per change: a zap re-renders the page (the list marks the
+  // row each press lands on), and new elements here re-rendered the column, its stage and the
+  // ribbon with it. The ribbon follows the deferred copy (above), in its own background render.
+  const stageLabel = t('stage');
+  const digitOsd = useMemo(() => <DigitOsd state={osd} />, [osd]);
+  const ribbonSourceKind = ribbon.channel && source.data?.id === ribbon.channel.ref.sourceId ? kind : undefined;
+  const ribbonElement = useMemo(
+    () => (
+      <MemoRibbon
+        channel={ribbon.channel}
+        sourceKind={ribbonSourceKind}
+        watchingLive={ribbon.watchingLive}
+        watchingArchive={ribbon.watchingArchive}
+        stageOffersChannel={ribbon.stageOffersChannel}
+        onPlayLive={onPlayLive}
+        onMapEpg={setMapping}
+        guideHref={ribbon.guideHref}
+        playback={ribbon.playback}
+        details
+      />
+    ),
+    [ribbon, ribbonSourceKind, onPlayLive],
+  );
+
+  // The list's toolbar, made once per change: a zap re-renders the page, and the groups button,
+  // the search field and the quality filter (tooltips and icons included) rendered again with it.
+  const sidebarVisible = wide && !collapsed;
+  const toolbar = useMemo(
+    () => (
+      <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
+        {groupOnToolbar ? (
+          // The group being browsed, as the button that changes it: one press opens the groups.
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-w-[55%] min-w-0 shrink gap-1.5 px-2"
+            // A long group name shrinks the label, never the icon.
+            icon={<ListTree className="size-4 shrink-0" />}
+            aria-expanded={drawerOpen}
+            aria-haspopup="dialog"
+            onClick={toggleSidebar}
+            data-testid="live-groups-toggle"
+          >
+            <span className="sr-only">{`${t('groups')}: `}</span>
+            <span dir="auto" className="truncate">
+              {groupLabel}
+            </span>
+            <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
+          </Button>
+        ) : (
+          <IconButton
+            size="sm"
+            label={sidebarVisible || drawerOpen ? t('hideGroups') : t('showGroupsPanel')}
+            aria-expanded={sidebarVisible || drawerOpen}
+            icon={<ListTree className="size-4" />}
+            onClick={toggleSidebar}
+            data-testid="live-groups-toggle"
+          />
+        )}
+        <SearchInput
+          size="sm"
+          // Beside the group's name the field keeps room for its whole "Search"; a long name is
+          // what gives way on a narrow phone.
+          className={groupOnToolbar ? 'min-w-32 flex-1' : 'min-w-0 flex-1'}
+          value={search}
+          // Clearing (the clear button) commits at once, like Escape.
+          onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}
+          onKeyDown={(e) => {
+            const toList = () =>
+              document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
+            if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.nativeEvent.isComposing)) {
+              e.preventDefault();
+              if (search.trim() !== debouncedSearch) {
+                // The typed query has not reached the list yet: run it now, focus its first row when it lands.
+                commitSearch(search);
+                focusListPending.current = true;
+              } else toList();
+            } else if (e.key === 'Escape') {
+              // First Escape clears the query, the second hands focus back to the list.
+              e.preventDefault();
+              e.stopPropagation();
+              if (search) clearSearch();
+              else toList();
+            }
+          }}
+          ref={searchRef}
+          // On a narrow page the groups button beside it names the group, so the field says only
+          // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
+          placeholder={
+            groupOnToolbar
+              ? t('common:search')
+              : category
+                ? t('searchInGroup', { group: category.name })
+                : t(isRadio ? 'searchStations' : 'searchChannels')
+          }
+          label={t(isRadio ? 'searchStations' : 'searchChannels')}
+        />
+        {/* Radio has no picture: its stations are never filtered by quality. */}
+        {isRadio ? null : <QualityFilterButton min={quality.min} hideUntagged={quality.hideUntagged} onChange={quality.update} />}
+      </div>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- searchRef and focusListPending are refs
+    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, isRadio, quality.min, quality.hideUntagged, quality.update, t],
+  );
+
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
   const heading = <h1 className="sr-only">{title}</h1>;
@@ -766,7 +894,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // Lists hold TV channels: Radio leaves them out.
   const sidebar = (
     <>
-      {isRadio ? null : <ListsSidebarSection onNavigate={closeDrawer} />}
+      {isRadio ? null : <MemoListsSection onNavigate={closeDrawer} />}
       <div className="flex min-h-0 flex-1 flex-col">
         <MemoSidebar
           categories={groups}
@@ -786,7 +914,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           isLocked={locks.categoryLocked}
         />
       </div>
-      <HiddenChannelsButton sourceId={sourceId} />
+      <MemoHiddenChannels sourceId={sourceId} />
     </>
   );
 
@@ -887,7 +1015,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     );
   } else {
     listBody = (
-      <ChannelList
+      <MemoChannelList
         paged={paged}
         resetKey={listKey}
         playingRef={playingRef}
@@ -907,8 +1035,6 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       />
     );
   }
-
-  const sidebarVisible = wide && !collapsed;
 
   return (
     <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
@@ -946,77 +1072,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(300px,32%,400px)] md:min-w-60 md:flex-initial md:border-e"
         onFocus={onListFocus}
       >
-        <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
-          {groupOnToolbar ? (
-            // The group being browsed, as the button that changes it: one press opens the groups.
-            <Button
-              variant="ghost"
-              size="sm"
-              className="max-w-[55%] min-w-0 shrink gap-1.5 px-2"
-              // A long group name shrinks the label, never the icon.
-              icon={<ListTree className="size-4 shrink-0" />}
-              aria-expanded={drawerOpen}
-              aria-haspopup="dialog"
-              onClick={toggleSidebar}
-              data-testid="live-groups-toggle"
-            >
-              <span className="sr-only">{`${t('groups')}: `}</span>
-              <span dir="auto" className="truncate">
-                {groupLabel}
-              </span>
-              <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
-            </Button>
-          ) : (
-            <IconButton
-              size="sm"
-              label={sidebarVisible || drawerOpen ? t('hideGroups') : t('showGroupsPanel')}
-              aria-expanded={sidebarVisible || drawerOpen}
-              icon={<ListTree className="size-4" />}
-              onClick={toggleSidebar}
-              data-testid="live-groups-toggle"
-            />
-          )}
-          <SearchInput
-            size="sm"
-            // Beside the group's name the field keeps room for its whole "Search"; a long name is
-            // what gives way on a narrow phone.
-            className={groupOnToolbar ? 'min-w-32 flex-1' : 'min-w-0 flex-1'}
-            value={search}
-            // Clearing (the clear button) commits at once, like Escape.
-            onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}
-            onKeyDown={(e) => {
-              const toList = () =>
-                document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
-              if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.nativeEvent.isComposing)) {
-                e.preventDefault();
-                if (search.trim() !== debouncedSearch) {
-                  // The typed query has not reached the list yet: run it now, focus its first row when it lands.
-                  commitSearch(search);
-                  focusListPending.current = true;
-                } else toList();
-              } else if (e.key === 'Escape') {
-                // First Escape clears the query, the second hands focus back to the list.
-                e.preventDefault();
-                e.stopPropagation();
-                if (search) clearSearch();
-                else toList();
-              }
-            }}
-            ref={searchRef}
-            // On a narrow page the groups button beside it names the group, so the field says only
-            // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
-            placeholder={
-              groupOnToolbar
-                ? t('common:search')
-                : category
-                  ? t('searchInGroup', { group: category.name })
-                  : t(isRadio ? 'searchStations' : 'searchChannels')
-            }
-            label={t(isRadio ? 'searchStations' : 'searchChannels')}
-          />
-          {/* Radio has no picture: its stations are never filtered by quality. */}
-          {isRadio ? null : <QualityFilterButton min={quality.min} hideUntagged={quality.hideUntagged} onChange={quality.update} />}
-        </div>
+        {toolbar}
         {/* The count is in the header; screen readers hear it change as a search narrows the list. */}
         <p className="sr-only" aria-live="polite">
           {countText}
@@ -1030,26 +1086,16 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           <DigitOsd state={osd} />
         </section>
       ) : (
-        <LiveStageColumn
-          label={t('stage')}
+        <MemoStageColumn
+          label={stageLabel}
           busy={stageBusy}
-          idle={idle}
-          overlay={<DigitOsd state={osd} />}
+          // The stage shows the idle card only while nothing plays (PlayerStage), so a zap passes
+          // the column by instead of building the card it does not show.
+          idle={stageBusy ? null : idle}
+          overlay={digitOsd}
           stageTestId="live-stage"
           ribbonOnPhone={stageBusy}
-          ribbon={
-            <MemoRibbon
-              channel={ribbon.channel}
-              sourceKind={ribbon.channel && source.data?.id === ribbon.channel.ref.sourceId ? kind : undefined}
-              watchingLive={ribbon.watchingLive}
-              watchingArchive={ribbon.watchingArchive}
-              stageOffersChannel={ribbon.stageOffersChannel}
-              onPlayLive={onPlayLive}
-              onMapEpg={setMapping}
-              guideHref={guideHref}
-              details
-            />
-          }
+          ribbon={ribbonElement}
         />
       )}
 
@@ -1084,6 +1130,15 @@ function RadioStage({ idle }: { idle: ReactNode }) {
       )}
     </div>
   );
+}
+
+/** `value`, or the object returned last time when every field is the same (`Object.is`). */
+function useStableFields<T extends object>(value: T): T {
+  const last = useRef(value);
+  const prev = last.current;
+  const keys = Object.keys(value) as (keyof T)[];
+  if (prev !== value && (keys.length !== Object.keys(prev).length || keys.some((k) => !Object.is(prev[k], value[k])))) last.current = value;
+  return last.current;
 }
 
 /** The guide's address for a source, opened on a group at a channel's row (LG-01). */

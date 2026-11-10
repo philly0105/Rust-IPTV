@@ -154,6 +154,7 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     const [a, b, c, d] = row.querySelectorAll<HTMLElement>('span');
     const query = vi.spyOn(row, 'querySelectorAll');
     const fitter = createStickyTitleManager();
+    fitter.setMoving(true, 0);
     const unregister = fitter.register(row, 0);
     expect(query).toHaveBeenCalledTimes(1);
     expect([a!.classList.contains('sticky'), b!.classList.contains('sticky'), c!.classList.contains('sticky'), d!.classList.contains('sticky')]).toEqual([true, true, false, false]);
@@ -172,10 +173,53 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     row.innerHTML = '<span data-pad-left="0" data-pad-width="25"></span><span data-pad-left="25" data-pad-width="50"></span><span data-pad-left="75" data-pad-width="300"></span>';
     const [short, medium, long] = row.querySelectorAll<HTMLElement>('span');
     const fitter = createStickyTitleManager();
+    fitter.setMoving(true, 20);
     fitter.register(row, 20);
     expect(short!.classList.contains('sticky')).toBe(false);
     expect(medium!.classList.contains('sticky')).toBe(false);
     expect(long!.classList.contains('sticky')).toBe(true);
+  });
+
+  it('at rest sticks only the title the edge cuts; motion primes its neighbours at once and rest drops them', () => {
+    const row = document.createElement('div');
+    row.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span><span data-pad-left="600" data-pad-width="300"></span><span data-pad-left="900" data-pad-width="300"></span>';
+    const spans = [...row.querySelectorAll<HTMLElement>('span')];
+    const sticky = () => spans.map((el) => el.classList.contains('sticky'));
+    const fitter = createStickyTitleManager();
+    const unregister = fitter.register(row, 500);
+    expect(sticky()).toEqual([true, false, false]);
+    // Each sticky title is a composited layer: a vertical scroll at rest keeps one per row.
+    fitter.update(700);
+    expect(sticky()).toEqual([false, true, false]);
+    fitter.setMoving(true, 700);
+    expect(sticky()).toEqual([true, true, true]);
+    fitter.setMoving(false, 700);
+    expect(sticky()).toEqual([false, true, false]);
+    // A title an edge left between two registrations does not stay sticky.
+    unregister();
+    expect(sticky()).toEqual([false, false, false]);
+  });
+
+  it('places the pinned channel cells at the scroll position at rest and leaves them to native sticky while moving', () => {
+    const pins = createStickyTitleManager();
+    const a = document.createElement('div');
+    const b = document.createElement('div');
+    const unpinA = pins.pin(a);
+    expect(a.style.insetInlineStart).toBe('0px');
+    pins.update(320);
+    expect(a.style.insetInlineStart).toBe('320px');
+    pins.setMoving(true, 320);
+    expect(pins.moving).toBe(true);
+    expect(a.style.insetInlineStart).toBe('');
+    // A pin mounted mid-gesture is sticky from its first frame, and scrolling writes nothing.
+    pins.pin(b);
+    pins.update(900);
+    expect([a.style.insetInlineStart, b.style.insetInlineStart]).toEqual(['', '']);
+    pins.setMoving(false, 905);
+    expect([a.style.insetInlineStart, b.style.insetInlineStart]).toEqual(['905px', '905px']);
+    unpinA();
+    pins.update(10);
+    expect([a.style.insetInlineStart, b.style.insetInlineStart]).toEqual(['905px', '10px']);
   });
 
   it('keeps the current title sticky through a gesture and primes newly mounted rows', () => {
@@ -203,13 +247,56 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     await screen.findByRole('button', { name: /^c1 P0,/ });
     const grid = screen.getByTestId('epg-grid');
-    expect((await screen.findByRole('button', { name: /^c1 P1,/ })).querySelector<HTMLElement>('[data-testid="cell-text"]')!.classList.contains('sticky')).toBe(true);
+    // At rest only the title the edge cuts sticks; its neighbour is primed once motion starts.
+    expect((await screen.findByRole('button', { name: /^c1 P1,/ })).querySelector<HTMLElement>('[data-testid="cell-text"]')!.classList.contains('sticky')).toBe(false);
+    const p0 = grid.querySelector<HTMLElement>(`[data-cell-row="1"][data-start="${new Date(at).toISOString()}"] [data-testid="cell-text"]`)!;
+    expect(p0.classList.contains('sticky')).toBe(true);
     act(() => { grid.scrollLeft += 400; fireEvent.scroll(grid); });
+    expect(grid.hasAttribute('data-guide-moving')).toBe(true);
     expect(textOf(/^c1 P1,/).classList.contains('sticky')).toBe(true);
     expect(textOf(/^c1 P1,/).style.transform).toBe('');
     expect(grid.style.getPropertyValue('--grid-scroll')).toBe('');
     act(() => { grid.scrollLeft -= 400; fireEvent.scroll(grid); });
     await waitFor(() => expect(textOf(/^c1 P0,/).classList.contains('sticky')).toBe(true));
+  });
+
+  it('pins the channel column at rest, and makes it sticky before sideways input moves the grid', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    const grid = screen.getByTestId('epg-grid');
+    const pins = () => [...grid.querySelectorAll<HTMLElement>('[role=rowheader], [role=columnheader]:not([data-slot])')];
+    const x = grid.scrollLeft;
+    expect(x).toBeGreaterThan(0);
+    expect(pins().length).toBeGreaterThan(2);
+    // At rest: offset boxes, not sticky ones (each sticky box is a composited layer).
+    expect(grid.hasAttribute('data-guide-moving')).toBe(false);
+    for (const el of pins()) {
+      expect(el.className).toContain('in-data-[guide-moving]:sticky');
+      expect(el.style.insetInlineStart).toBe(`${x}px`);
+    }
+    // A vertical wheel step changes nothing.
+    fireEvent.wheel(grid, { deltaY: 120 });
+    expect(grid.hasAttribute('data-guide-moving')).toBe(false);
+    // Sideways input turns them sticky in the same task, before the browser scrolls.
+    fireEvent.wheel(grid, { deltaX: 40 });
+    expect(grid.hasAttribute('data-guide-moving')).toBe(true);
+    for (const el of pins()) expect(el.style.insetInlineStart).toBe('');
+    // Once it settles they are offset boxes at the new position again.
+    act(() => { grid.scrollLeft = x + 40; fireEvent.scroll(grid); });
+    await waitFor(() => expect(grid.hasAttribute('data-guide-moving')).toBe(false), { timeout: 10 * GRID_HORIZONTAL_IDLE_MS });
+    for (const el of pins()) expect(el.style.insetInlineStart).toBe(`${x + 40}px`);
+    // A touch may pan sideways on the compositor: sticky from the press until it settles.
+    fireEvent.pointerDown(grid, { pointerId: 7, pointerType: 'touch' });
+    expect(grid.hasAttribute('data-guide-moving')).toBe(true);
+    await new Promise((r) => setTimeout(r, 2 * GRID_HORIZONTAL_IDLE_MS));
+    expect(grid.hasAttribute('data-guide-moving')).toBe(true);
+    fireEvent.pointerUp(window, { pointerId: 7, pointerType: 'touch' });
+    await waitFor(() => expect(grid.hasAttribute('data-guide-moving')).toBe(false), { timeout: 10 * GRID_HORIZONTAL_IDLE_MS });
+    // A mouse press on a cell (a click, or a drag pan the page scrolls itself) leaves them alone.
+    fireEvent.pointerDown(grid.querySelector<HTMLElement>('button[data-start]')!, { pointerId: 1, pointerType: 'mouse' });
+    expect(grid.hasAttribute('data-guide-moving')).toBe(false);
   });
 
   it('a cell keeps its full title as a tooltip (L3-visual-12)', async () => {

@@ -454,15 +454,19 @@ describe('channel numbers in the guide (LG-01)', () => {
 });
 
 describe('the ruler and the row menu (stage 2)', () => {
-  it('slot labels stick past the channel column, so the window’s first slot keeps its time', async () => {
+  it('the slot label at the window’s start sticks past the channel column, so it keeps its time', async () => {
     renderGuide({ path: '/epg?source=src1', routes: GRID });
     await screen.findByRole('button', { name: /^c0 P0,/ });
     const labels = screen.getAllByTestId('ruler-label');
     expect(labels.length).toBeGreaterThan(2);
-    for (const l of labels) {
-      expect(l.className).toContain('sticky');
-      expect(Number.parseFloat(l.style.insetInlineStart)).toBeGreaterThan(0);
-    }
+    for (const l of labels) expect(Number.parseFloat(l.style.insetInlineStart)).toBeGreaterThan(0);
+    // Only the label the visible edge cuts is sticky at rest: each sticky label is a composited
+    // layer, and the others never reach the edge without a scroll that primes them first.
+    const viewAt = Number(screen.getByTestId('epg-grid').dataset.viewAt);
+    const sticky = labels.filter((l) => l.className.includes('sticky'));
+    expect(sticky).toHaveLength(1);
+    const slot = Number(sticky[0]!.parentElement!.dataset.slot);
+    expect(slot <= viewAt && viewAt < slot + 30 * 60_000).toBe(true);
   });
 
   it('the channel menu is headed by the channel and what is on, with Live’s entries', async () => {

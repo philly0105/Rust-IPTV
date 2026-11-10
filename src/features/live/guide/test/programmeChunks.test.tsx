@@ -84,11 +84,15 @@ describe('programme time groups', () => {
       const chunk = cell.closest<HTMLElement>('[data-programme-chunk]')!;
       const side = rtl ? 'right' : 'left';
       const text = cell.querySelector<HTMLElement>('[data-pad-left]')!;
-      expect(Number.parseFloat(chunk.style[side]) + 4 + Number.parseFloat(cell.style[side])).toBe(Number(text.dataset.padLeft) + 1);
-      expect(Number.parseFloat(chunk.style.width)).toBe(1358);
+      expect(Number.parseFloat(chunk.style[side]) + Number.parseFloat(cell.style[side])).toBe(Number(text.dataset.padLeft) + 1);
+      // Exactly the group's bounds, with no layout or paint containment: either would make the
+      // group a stacking context, and its sticky titles would split the cells into more layers.
+      expect(Number.parseFloat(chunk.style.width)).toBe(1350);
       expect(Number.parseFloat(cell.style.width)).toBe(1348);
-      expect(chunk.style.contain).toBe('strict');
-      expect(chunk.style.top).toBe('-4px'); // space for the focus ring outside programme edges
+      expect(chunk.style.contain).toBe('size style');
+      expect([chunk.style.top, chunk.style.bottom]).toEqual(['0px', '0px']);
+      expect(chunk.style.zIndex).toBe('');
+      expect(cell.parentElement).toBe(chunk);
     }
   });
 

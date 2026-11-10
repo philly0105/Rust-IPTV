@@ -141,6 +141,12 @@ describe('layout containment (P2-GUIDE-3)', () => {
     const cell = await screen.findByRole('button', { name: /^c1 P0,/ });
     const content = screen.getByTestId('epg-grid').firstElementChild as HTMLElement;
     expect(content.className).toContain('[contain:size_layout]');
-    expect(cell.closest('[aria-rowindex]')!.className).toContain('[contain:size_layout]');
+    // A row is a fixed-size clipped box: a relayout boundary that, unlike layout containment, is
+    // no stacking context, so the rows' sticky titles share layers instead of one set per row.
+    const row = cell.closest<HTMLElement>('[aria-rowindex]')!;
+    expect(row.style.contain).toBe('size style');
+    expect(row.style.overflow).toBe('clip');
+    expect(row.style.height).toMatch(/^\d+px$/);
+    expect(row.style.width).toBe('var(--grid-total-width)');
   });
 });

@@ -103,7 +103,7 @@ import { JumpToDialog } from '../guide/JumpToDialog';
 import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
 import { isGuideHitState } from '../guide/programmeSearch';
-import { createStickyTitleManager, updateGuideClock, GuideRow, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
+import { createStickyTitleManager, updateGuideClock, GuideRow, GUIDE_MOVING_ATTR, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
 import { createGuideHydrator } from '../guide/hydration';
 import { attachGuideDragPan } from '../guide/dragPan';
 import { nextGuideRenderWindow } from '../guide/renderWindow';
@@ -1257,17 +1257,32 @@ export function EpgGridPage() {
     }
     return { x, time };
   });
+  /**
+   * The pinned channel column is native-sticky only while the grid moves sideways (see
+   * `createStickyTitleManager`). The attribute's only dependents are the pinned cells.
+   */
+  const setPinsMoving = useStable((next: boolean) => {
+    const root = scroller.current;
+    if (!root || next === stickyTitles.current.moving) return;
+    stickyTitles.current.setMoving(next, scrollX.current);
+    if (next) root.setAttribute(GUIDE_MOVING_ATTR, '');
+    else root.removeAttribute(GUIDE_MOVING_ATTR);
+  });
+  /** Presses that may scroll sideways on the compositor (touch, the horizontal scrollbar). */
+  const heldPointers = useRef(new Set<number>());
   const observeHorizontalInput = useStable((markGesture: boolean = true) => {
     // Mark continuous motion for diagnostics. CSS sticky keeps clipped titles in place.
     // This marker has no CSS dependents: ancestor hover rules made every tile restyle here.
     if (markGesture && scroller.current && scroller.current.dataset.guideScrolling === undefined) scroller.current.dataset.guideScrolling = '';
     horizontalScrolling.current = true;
+    setPinsMoving(true);
     window.clearTimeout(horizontalIdleTimer.current);
     horizontalIdleTimer.current = window.setTimeout(() => {
       // Read the final native offset even if its scroll event has not yet been delivered.
       if (scroller.current) publishViewport(scroller.current, true);
       horizontalScrolling.current = false;
       if (scroller.current) delete scroller.current.dataset.guideScrolling;
+      if (heldPointers.current.size === 0) setPinsMoving(false);
       setBufferStart(guideDataStart(viewAtRef.current));
     }, GRID_HORIZONTAL_IDLE_MS);
   });
@@ -1312,6 +1327,8 @@ export function EpgGridPage() {
     observedScrollX.current = x;
     root.scrollLeft = scrollLeftFor(x, rtl);
     publishViewport(root, true, false, { x, y });
+    // An instant jump places the pins itself, before this frame paints.
+    if (!deferBuffer && heldPointers.current.size === 0) setPinsMoving(false);
     if (updateUrl) {
       manualView.current = true;
       settleScrollUrl(viewAtRef.current);
@@ -1399,24 +1416,49 @@ export function EpgGridPage() {
       }
     };
     const cancelWheel = () => wheelScroller.current.cancel(root);
+    // A touch pan and a horizontal scrollbar drag move on the compositor before the page hears
+    // of them, so the pins turn sticky on the press (and stay so until the motion settles).
+    const held = heldPointers.current;
+    let release = 0;
+    const onPointerDown = (e: PointerEvent) => {
+      cancelWheel();
+      if (e.pointerType !== 'touch' && (e.target !== root || e.clientY - root.getBoundingClientRect().top < root.clientHeight)) return;
+      held.add(e.pointerId);
+      window.clearTimeout(release);
+      setPinsMoving(true);
+    };
+    const onPointerEnd = (e: PointerEvent) => {
+      if (!held.delete(e.pointerId) || held.size > 0) return;
+      // A sideways scroll the press started keeps the pins sticky until its own idle timer.
+      window.clearTimeout(release);
+      release = window.setTimeout(() => {
+        if (held.size === 0 && !horizontalScrolling.current) setPinsMoving(false);
+      }, GRID_HORIZONTAL_IDLE_MS);
+    };
     const settleWheel = () => wheelScroller.current.settled(root);
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) cancelWheel();
     };
     root.addEventListener('wheel', onWheel, { passive: false });
-    root.addEventListener('pointerdown', cancelWheel, { passive: true });
+    root.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointerup', onPointerEnd, { passive: true });
+    window.addEventListener('pointercancel', onPointerEnd, { passive: true });
     root.addEventListener('touchstart', cancelWheel, { passive: true });
     root.addEventListener('keydown', onKey);
     root.addEventListener('scrollend', settleWheel);
     return () => {
       root.removeEventListener('wheel', onWheel);
-      root.removeEventListener('pointerdown', cancelWheel);
+      root.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerEnd);
+      held.clear();
+      window.clearTimeout(release);
       root.removeEventListener('touchstart', cancelWheel);
       root.removeEventListener('keydown', onKey);
       root.removeEventListener('scrollend', settleWheel);
       cancelWheel();
     };
-  }, [gridMounted, zoomBy, rtl, observeHorizontalInput, channelCol, trackWidth, pageWidth]);
+  }, [gridMounted, zoomBy, rtl, observeHorizontalInput, setPinsMoving, channelCol, trackWidth, pageWidth]);
   useEffect(() => {
     const root = scroller.current;
     if (root) return attachGuideDragPan(root);
@@ -1904,6 +1946,7 @@ export function EpgGridPage() {
     updateGuideClock(row, clockPositionRef.current);
     return stickyTitles.current.register(row, scrollX.current);
   }, []);
+  const pinCell = useCallback((cell: HTMLElement) => stickyTitles.current.pin(cell), []);
   const pressCell = useStable((channel: Channel, program: EpgProgram) => prefetchProgramDescription(queryClient, channel.ref, program, offsetMs));
   // The preview band follows the pointer after it rests a moment (a sweep across the grid does
   // not re-render the band per cell), and goes back to the keyboard cursor when it leaves.
@@ -1928,8 +1971,8 @@ export function EpgGridPage() {
     hoverTimer.current = window.setTimeout(() => setHovered(null), PREVIEW_HOVER_MS);
   });
   const rowHandlers = useMemo<GuideRowHandlers>(
-    () => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt, trackTitles, press: pressCell, hover: hoverCell, hydration }),
-    [playLive, openCell, focusCell, rowMenuAt, trackTitles, pressCell, hoverCell, hydration],
+    () => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt, trackTitles, pin: pinCell, press: pressCell, hover: hoverCell, hydration }),
+    [playLive, openCell, focusCell, rowMenuAt, trackTitles, pinCell, pressCell, hoverCell, hydration],
   );
 
   // ---- render ---------------------------------------------------------------
@@ -2172,6 +2215,8 @@ export function EpgGridPage() {
                 nowLabel={nowInWindow ? formatClock(now, lang) : undefined}
                 nowX={nowX}
                 rtl={rtl}
+                trackTitles={trackTitles}
+                pin={pinCell}
               />
 
               {nowInWindow ? (
@@ -2374,6 +2419,8 @@ const GuideHeader = memo(function GuideHeader({
   nowLabel,
   nowX,
   rtl,
+  trackTitles,
+  pin,
 }: {
   height: number;
   slots: readonly number[];
@@ -2389,10 +2436,18 @@ const GuideHeader = memo(function GuideHeader({
   /** px from the track's inline start to now. */
   nowX: number;
   rtl: boolean;
+  /** The row handlers' sticky-title tracking: only the labels at the visible edge stick. */
+  trackTitles(row: HTMLElement): () => void;
+  /** The row handlers' pin: the corner stays over the channel column. */
+  pin(cell: HTMLElement): () => void;
 }) {
   const { t } = useTranslation('live');
+  const ruler = useRef<HTMLDivElement>(null);
+  const corner = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => (corner.current ? pin(corner.current) : undefined), [pin]);
+  useLayoutEffect(() => (ruler.current ? trackTitles(ruler.current) : undefined), [trackTitles, slots, start, slotPx, channelCol]);
   return (
-    <div role="row" className="sticky top-0 z-20 border-b border-divider bg-surface" style={{ height, width: channelCol + trackWidth }}>
+    <div ref={ruler} role="row" className="sticky top-0 z-20 border-b border-divider bg-surface" style={{ height, width: channelCol + trackWidth }}>
       {nowLabel ? (
         // The now line's labelled head: it used to be a dot the ruler painted over. Under the
         // sticky channel column (z-10 here) when the track is scrolled past now.
@@ -2406,7 +2461,7 @@ const GuideHeader = memo(function GuideHeader({
           {nowLabel}
         </span>
       ) : null}
-      <div role="columnheader" className="sticky start-0 z-10 flex h-full items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
+      <div ref={corner} role="columnheader" className="relative start-0 z-10 flex h-full items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle in-data-[guide-moving]:sticky" style={{ width: channelCol }}>
         <span className={compact ? 'sr-only' : undefined}>{t('channels')}</span>
       </div>
       {/* Slot keys keep nearby ruler labels stable as the visible time changes. */}
@@ -2417,8 +2472,17 @@ const GuideHeader = memo(function GuideHeader({
         return (
           <div role="columnheader" key={slot} data-slot={slot} className="absolute top-0 flex h-full items-center border-s border-divider text-xs tabular-nums text-fg-muted" style={{ ...inlineStart(channelCol + slotX, rtl), width: slotPx }}>
             {/* Sticky past the channel column: the slot the window starts in keeps its time in
-                view while the column covers its start, so the left of the grid is never unlabelled. */}
-            <span className={cn('sticky px-2 whitespace-nowrap', covered && 'invisible')} style={{ insetInlineStart: channelCol }} data-testid="ruler-label">
+                view while the column covers its start, so the left of the grid is never unlabelled.
+                Only the labels at the visible edge get the sticky class (trackTitles), and they
+                paint over the slots (z-index), so the ruler is a few layers rather than one per
+                slot. The class is the tracker's, so React's must not change: covered is a style. */}
+            <span
+              className="z-[1] px-2 whitespace-nowrap"
+              style={{ insetInlineStart: channelCol, visibility: covered ? 'hidden' : undefined }}
+              data-testid="ruler-label"
+              data-pad-left={slotX}
+              data-pad-width={slotPx}
+            >
               {labels[i]}
             </span>
           </div>

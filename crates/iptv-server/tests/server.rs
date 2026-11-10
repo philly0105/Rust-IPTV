@@ -285,9 +285,18 @@ async fn rpc_app_info_and_error_mapping() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
+    // The reply is the JSON text `dispatch_json` wrote, typed as JSON.
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "application/json");
     let v: serde_json::Value = r.json().await.unwrap();
     assert_eq!(v["isDesktop"], false);
     assert!(v["version"].is_string());
+    let direct = h
+        .server
+        .rpc
+        .dispatch(h.server.app.clone(), "app.info", serde_json::Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(v, direct, "the HTTP reply carries what dispatch answers");
 
     let r = h
         .http

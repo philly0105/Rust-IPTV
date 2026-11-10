@@ -4,6 +4,7 @@ use crate::Server;
 use axum::body::Bytes;
 use axum::extract::ws::{close_code, CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
+use axum::http::header::{self, HeaderValue};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -34,6 +35,18 @@ pub fn error_response(err: RpcError) -> Response {
 /// JSON error response with an explicit status.
 pub fn error_response_with(status: StatusCode, err: RpcError) -> Response {
     (status, Json(err)).into_response()
+}
+
+/// 200 with a reply's JSON text, as `Json` would send it.
+fn json_response(json: Vec<u8>) -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        json,
+    )
+        .into_response()
 }
 
 /// `GET /api/health -> {ok, version}`.
@@ -67,15 +80,15 @@ pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) 
     let started = Instant::now();
     let result = if cancels_on_disconnect(&cmd) {
         // Read-only: a superseded query the UI aborted stops its SQL.
-        iptv_core::state::cancel_on_drop(s.rpc.dispatch(s.app.clone(), &cmd, args)).await
+        iptv_core::state::cancel_on_drop(s.rpc.dispatch_json(s.app.clone(), &cmd, args)).await
     } else {
         dispatch_detached(&s, cmd.clone(), args).await
     };
     let ms = started.elapsed().as_millis() as u64;
     match result {
-        Ok(v) => {
+        Ok(json) => {
             tracing::debug!(%cmd, ms, "rpc ok");
-            Json(v).into_response()
+            json_response(json)
         }
         Err(e) => {
             // The message is safe to log; args (which may hold passwords) are not.
@@ -121,9 +134,9 @@ async fn dispatch_detached(
     s: &Server,
     cmd: String,
     args: serde_json::Value,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<Vec<u8>, RpcError> {
     let (rpc, app) = (s.rpc.clone(), s.app.clone());
-    let task = tokio::spawn(async move { rpc.dispatch(app, &cmd, args).await });
+    let task = tokio::spawn(async move { rpc.dispatch_json(app, &cmd, args).await });
     match task.await {
         Ok(result) => result,
         Err(err) => {

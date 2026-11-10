@@ -57,6 +57,23 @@ A body that is not JSON is 400 `invalid`. Limit 256 MiB (backup imports,
 pasted playlists). Errors are logged with the command name and message, never
 the args.
 
+The reply body is written by `RpcRouter::dispatch_json`, which serializes the
+handler's result straight to JSON text. Before, every result was built as a
+`serde_json::Value` tree and then serialized again (performance audit DB-5).
+The JSON is the same, except that object keys keep the result's field order
+instead of the tree's sorted order. Measured against a release server with
+a 44k-channel M3U source (brotli replies, two keep-alive connections,
+median of 5 rounds): a 120-row `catalog.channels` page (46 KB of JSON)
+went from 5.1 to 4.5 ms at p50 and a 60-row `catalog.movies` page (19 KB)
+from 1.29 to 1.10 ms.
+
+Compression of those replies costs little next to the query: in a
+release-built micro benchmark, brotli level 4 took 0.2-0.4 ms for the
+46 KB page (to 3.3 KB) and gzip level 4 0.2-0.3 ms (to 4.0 KB). Cold start
+of a release server with that library, from exec to the first answered
+RPC, was 20-25 ms, and `/api/proxy` moved a 512 MiB body from the mock at
+0.8-1.1 GB/s for 0.4-0.5 s of server CPU per GB (2026-11-09).
+
 Each call runs on its own task (`api::dispatch_detached`: `tokio::spawn`,
 then the handler awaits the `JoinHandle`). Axum drops a handler's future when
 the client goes away (a reload, Back, a closed tab), and a call awaited

@@ -241,13 +241,18 @@ type StateGate = boot::BootGate<Arc<AppState>>;
 
 /// The single IPC entry point: `invoke('rpc', { cmd, args })`. Calls made
 /// while the database is still opening wait for it.
+///
+/// The result goes to the webview as the JSON text `dispatch_json` wrote
+/// straight from the handler's result: returning a `Value` built it as a
+/// tree first, which Tauri then serialized again (performance audit DB-5).
+/// The webview parses the same JSON either way.
 #[tauri::command]
 async fn rpc(
     boot: tauri::State<'_, StateGate>,
     router: tauri::State<'_, Arc<RpcRouter>>,
     cmd: String,
     args: Option<serde_json::Value>,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<tauri::ipc::Response, RpcError> {
     let Some(state) = boot.get().await else {
         return Err(RpcError::new(
             RpcErrorCode::Internal,
@@ -255,9 +260,19 @@ async fn rpc(
         ));
     };
     let router = Arc::clone(&router);
-    router
-        .dispatch(state, &cmd, args.unwrap_or(serde_json::Value::Null))
-        .await
+    let json = router
+        .dispatch_json(state, &cmd, args.unwrap_or(serde_json::Value::Null))
+        .await?;
+    // serde_json writes UTF-8 only; the check never fails.
+    let text = String::from_utf8(json).map_err(|e| {
+        RpcError::new(
+            RpcErrorCode::Internal,
+            format!("failed to encode result of {cmd}: {e}"),
+        )
+    })?;
+    Ok(tauri::ipc::Response::new(
+        tauri::ipc::InvokeResponseBody::Json(text),
+    ))
 }
 
 /// Logs deep links (action names only: an `add` link's query can carry

@@ -23,9 +23,36 @@ use std::time::Instant;
 /// Result of a dispatched command: JSON value or `RpcError`.
 pub type RpcResult = Result<serde_json::Value, RpcError>;
 
+/// Result of [`RpcRouter::dispatch_json`]: the reply's JSON text or `RpcError`.
+pub type RpcJsonResult = Result<Vec<u8>, RpcError>;
+
+/// What a handler turns its result into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Encoding {
+    /// A `serde_json::Value` ([`RpcRouter::dispatch`]).
+    Value,
+    /// JSON text, serialized straight from the result
+    /// ([`RpcRouter::dispatch_json`]).
+    Json,
+}
+
+/// A handler's encoded result (see [`Encoding`]).
+#[derive(Debug)]
+pub enum Encoded {
+    Value(serde_json::Value),
+    Json(Vec<u8>),
+}
+
 /// Type-erased handler.
-pub type Handler =
-    Arc<dyn Fn(Arc<AppState>, serde_json::Value) -> BoxFuture<'static, RpcResult> + Send + Sync>;
+pub type Handler = Arc<
+    dyn Fn(
+            Arc<AppState>,
+            serde_json::Value,
+            Encoding,
+        ) -> BoxFuture<'static, Result<Encoded, RpcError>>
+        + Send
+        + Sync,
+>;
 
 /// Name -> handler table.
 #[derive(Default, Clone)]
@@ -71,12 +98,16 @@ impl RpcRouter {
         Fut: Future<Output = Result<R, RpcError>> + Send + 'static,
     {
         let f = Arc::new(f);
-        let handler: Handler = Arc::new(move |state, args| {
+        let handler: Handler = Arc::new(move |state, args, encoding| {
             let f = Arc::clone(&f);
             async move {
                 let parsed: A = parse_args(name, args)?;
                 let out = f(state, parsed).await?;
-                serde_json::to_value(out).map_err(|e| {
+                let encoded = match encoding {
+                    Encoding::Value => serde_json::to_value(out).map(Encoded::Value),
+                    Encoding::Json => serde_json::to_vec(&out).map(Encoded::Json),
+                };
+                encoded.map_err(|e| {
                     RpcError::internal(format!("failed to encode result of {name}: {e}"))
                 })
             }
@@ -95,12 +126,48 @@ impl RpcRouter {
         cmd: &str,
         args: serde_json::Value,
     ) -> RpcResult {
+        match self.run(state, cmd, args, Encoding::Value).await? {
+            Encoded::Value(v) => Ok(v),
+            Encoded::Json(text) => serde_json::from_slice(&text)
+                .map_err(|e| RpcError::internal(format!("failed to encode result of {cmd}: {e}"))),
+        }
+    }
+
+    /// [`Self::dispatch`] that answers the result's JSON text, serialized
+    /// once straight from the handler's result. For a host that sends the
+    /// reply on as JSON (the server's `/api/rpc`): building a `Value` first
+    /// and then serializing it cost about as much again (performance audit
+    /// DB-5). Object keys keep the result's field order instead of the
+    /// `Value` map's sorted order; the JSON means the same.
+    pub async fn dispatch_json(
+        &self,
+        state: Arc<AppState>,
+        cmd: &str,
+        args: serde_json::Value,
+    ) -> RpcJsonResult {
+        match self.run(state, cmd, args, Encoding::Json).await? {
+            Encoded::Json(text) => Ok(text),
+            Encoded::Value(v) => serde_json::to_vec(&v)
+                .map_err(|e| RpcError::internal(format!("failed to encode result of {cmd}: {e}"))),
+        }
+    }
+
+    async fn run(
+        &self,
+        state: Arc<AppState>,
+        cmd: &str,
+        args: serde_json::Value,
+        encoding: Encoding,
+    ) -> Result<Encoded, RpcError> {
         let Some(handler) = self.handlers.get(cmd).cloned() else {
             tracing::warn!(cmd, "unknown rpc command");
             return Err(RpcError::not_found(format!("unknown command: {cmd}")));
         };
         let started = Instant::now();
-        let result = match AssertUnwindSafe(handler(state, args)).catch_unwind().await {
+        let result = match AssertUnwindSafe(handler(state, args, encoding))
+            .catch_unwind()
+            .await
+        {
             Ok(r) => r,
             Err(panic) => {
                 let msg = panic
@@ -402,6 +469,70 @@ mod tests {
             );
         }
         crate::player::kill_embedded(&s);
+    }
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Reply {
+        zeta: u32,
+        alpha: Option<String>,
+        nested: Vec<serde_json::Value>,
+    }
+
+    /// `dispatch_json` answers the same JSON as `dispatch`, serialized once
+    /// from the result (fields in declaration order), and the same errors.
+    #[tokio::test]
+    async fn dispatch_json_matches_dispatch() {
+        let (_tmp, s) = state().await;
+        let mut r = build_router();
+        r.add("test.reply", |_s, a: Opt| async move {
+            Ok(Reply {
+                zeta: 7,
+                alpha: a.source_id,
+                nested: vec![serde_json::json!({"b": 1, "a": [true, null]})],
+            })
+        });
+        r.add("test.panic", |_s, _a: ()| async move {
+            if true {
+                panic!("boom");
+            }
+            Ok(())
+        });
+        for (cmd, args) in [
+            ("test.reply", serde_json::json!({"sourceId": "x"})),
+            ("test.reply", serde_json::Value::Null),
+            ("app.ping", serde_json::Value::Null),
+            ("app.info", serde_json::json!({})),
+        ] {
+            let value = r.dispatch(s.clone(), cmd, args.clone()).await.unwrap();
+            let text = r.dispatch_json(s.clone(), cmd, args).await.unwrap();
+            let parsed: serde_json::Value = serde_json::from_slice(&text).unwrap();
+            assert_eq!(parsed, value, "{cmd}");
+        }
+        let text = r
+            .dispatch_json(s.clone(), "test.reply", serde_json::Value::Null)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::str::from_utf8(&text).unwrap(),
+            r#"{"zeta":7,"alpha":null,"nested":[{"a":[true,null],"b":1}]}"#
+        );
+        for (cmd, args, code) in [
+            ("nope.nope", serde_json::Value::Null, RpcErrorCode::NotFound),
+            (
+                "test.reply",
+                serde_json::json!({"sourceId": 5}),
+                RpcErrorCode::Invalid,
+            ),
+            (
+                "test.panic",
+                serde_json::Value::Null,
+                RpcErrorCode::Internal,
+            ),
+        ] {
+            let e = r.dispatch_json(s.clone(), cmd, args).await.unwrap_err();
+            assert_eq!(e.code, code, "{cmd}");
+        }
     }
 
     #[tokio::test]

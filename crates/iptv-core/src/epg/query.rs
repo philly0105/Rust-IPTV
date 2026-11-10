@@ -232,6 +232,13 @@ pub const INSIDE_BRIEF_SQL: &str =
 /// overlap by days).
 ///
 /// `with_description: false` leaves every description out.
+///
+/// `settled_at_two`: the caller reads only the first two programmes (now and
+/// next, [`now_next_with`]), so later feeds are skipped once those two are
+/// settled ([`first_two_settled`]), not only once the range is covered. A
+/// now/next range is a day ahead and its first feed rarely covers that in 16
+/// rows, so every enabled feed with programmes was read for every channel.
+#[allow(clippy::too_many_arguments)]
 fn rows(
     conn: &Connection,
     channel_id: &str,
@@ -240,6 +247,7 @@ fn rows(
     limit: i64,
     shift: i64,
     with_description: bool,
+    settled_at_two: bool,
 ) -> CoreResult<Vec<Row>> {
     let (from, to) = (from - shift, to - shift);
     let mut feeds = conn.prepare_cached(FEED_SQL)?;
@@ -295,7 +303,7 @@ fn rows(
             }
             covered_to = covered_to.max(r.stop);
         }
-        if covered_to >= to {
+        if covered_to >= to || (settled_at_two && first_two_settled(&out, from, covered_to)) {
             break;
         }
     }
@@ -305,6 +313,20 @@ fn rows(
         r.stop += shift;
     }
     Ok(out)
+}
+
+/// True when no later feed can change the first two programmes of `out`
+/// (sorted, the feeds read so far merged), given that `out` covers
+/// `[from, covered_to)` without a gap. A later feed only adds whole
+/// programmes that overlap nothing in `out` ([`fill_feed_gaps`]), and every
+/// programme it keeps runs after `from`, so it can only add programmes that
+/// start at `covered_to` or later. When the first programme is on at `from`
+/// and the second starts before `covered_to`, both stay first.
+fn first_two_settled(out: &[Row], from: i64, covered_to: i64) -> bool {
+    match out {
+        [now, next, ..] => now.start <= from && next.start < covered_to,
+        _ => false,
+    }
 }
 
 /// Add only whole, non-overlapping programmes from a lower-priority feed.
@@ -390,6 +412,7 @@ pub fn programs_with(
         MAX_PER_CHANNEL,
         shift,
         with_description,
+        false,
     )?
     .into_iter()
     .map(|r| to_program(channel_id, r))
@@ -424,23 +447,28 @@ pub fn now_next_with(
         16,
         shift,
         with_description,
+        true,
     )?;
-    let mut out = EpgNowNext::default();
-    let mut it = list.into_iter().peekable();
+    let (now, next) = pick_now_next(list, now);
+    Ok(EpgNowNext {
+        now: now.map(|r| to_program(channel_id, r)),
+        next: next.map(|r| to_program(channel_id, r)),
+    })
+}
+
+/// The programme on at `now` in a tidied list and the one after it, or no
+/// current programme and the first one after `now`.
+fn pick_now_next(list: Vec<Row>, now: i64) -> (Option<Row>, Option<Row>) {
+    let mut it = list.into_iter();
     while let Some(r) = it.next() {
         if r.start <= now && now < r.stop {
-            out.now = Some(to_program(channel_id, r));
-            if let Some(n) = it.next() {
-                out.next = Some(to_program(channel_id, n));
-            }
-            break;
+            return (Some(r), it.next());
         }
         if r.start > now {
-            out.next = Some(to_program(channel_id, r));
-            break;
+            return (None, Some(r));
         }
     }
-    Ok(out)
+    (None, None)
 }
 
 /// One `epg.channelsSearch` hit.
@@ -726,6 +754,77 @@ mod tests {
             };
             assert_eq!(plan(full), plan(brief), "{brief}");
         }
+    }
+
+    /// Now/next stops reading feeds once its first two programmes are
+    /// settled; on generated multi-feed guides (gaps, overlaps, duplicate
+    /// starts, zero-length rows, feeds starting late) it must pick exactly
+    /// what reading every feed picks.
+    #[test]
+    fn now_next_early_stop_matches_reading_every_feed() {
+        let now = 1_800_000_000;
+        let m = 60;
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut rand = |n: i64| -> i64 {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) % n as u64) as i64
+        };
+        let mut stopped_early = 0;
+        for case in 0..400 {
+            let mut conn = Connection::open_in_memory().unwrap();
+            crate::db::migrate(&mut conn).unwrap();
+            let feeds = 1 + rand(3);
+            for f in 0..feeds {
+                let url = format!("f{f}");
+                conn.execute("INSERT INTO epg_sources(url) VALUES (?1)", [&url])
+                    .unwrap();
+                // A schedule from about 3 h before now to 3 h after, with
+                // random lengths, gaps, overlaps and repeats.
+                let mut t = now - 3 * 60 * m + rand(60) * m;
+                while t < now + 3 * 60 * m {
+                    let len = match rand(10) {
+                        0 => 0,
+                        1 => 5 * m,
+                        _ => (15 + rand(90)) * m,
+                    };
+                    conn.execute(
+                        "INSERT OR IGNORE INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, 'c', ?2, ?3, ?4)",
+                        params![url, t, t + len, format!("{url}@{t}")],
+                    )
+                    .unwrap();
+                    t += match rand(6) {
+                        0 => len + rand(40) * m, // a gap
+                        1 => len / 2,            // an overlap
+                        2 if rand(2) == 0 => 0,  // a repeated start
+                        _ => len.max(m),
+                    };
+                }
+            }
+            let at = now + rand(60) * m - 30 * m;
+            let read = |settled: bool| {
+                let list = rows(&conn, "c", at, at + 86_400, 16, 0, false, settled).unwrap();
+                let key = |r: &Row| (r.start, r.stop, r.title.clone());
+                let (n, x) = pick_now_next(list, at);
+                (n.as_ref().map(key), x.as_ref().map(key))
+            };
+            let all = read(false);
+            assert_eq!(read(true), all, "case {case}");
+            // How often the stop applied: a feed it did not read.
+            let feeds_read = {
+                let full = rows(&conn, "c", at, at + 86_400, 16, 0, false, false).unwrap();
+                let short = rows(&conn, "c", at, at + 86_400, 16, 0, false, true).unwrap();
+                full.len() != short.len()
+            };
+            if feeds_read {
+                stopped_early += 1;
+            }
+        }
+        assert!(
+            stopped_early > 20,
+            "the stop applied in {stopped_early} cases"
+        );
     }
 
     #[test]

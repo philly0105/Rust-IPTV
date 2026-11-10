@@ -447,11 +447,7 @@ async fn run(
     }
     emit("saving", 0, Some(total), Some("Saving the catalog"));
     let sid = source_id.to_string();
-    let part = |content_type, categories, rows| CatalogPart {
-        content_type,
-        categories,
-        rows,
-    };
+    let part = CatalogPart::new;
     // A section that failed for now is left out: replace_catalogs does not
     // touch the types it is not given.
     let mut parts = vec![part(ContentType::Live, live_categories, live_rows)];

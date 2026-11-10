@@ -417,15 +417,42 @@ pub const UNREADABLE_REPLY: &str =
 
 /// Decodes a body; empty bodies are `null`, HTML or garbage is `Invalid`.
 pub fn decode<T: DeserializeOwned>(bytes: &[u8], label: &str) -> CoreResult<T> {
+    let body = body_of(bytes);
+    serde_json::from_slice(body).map_err(|err| decode_error(body, label, err))
+}
+
+/// [`decode`] for a list read as a `LenientVec<T>`, handing each element to
+/// `f` as it is read ([`super::raw::for_each_lenient`]) instead of collecting
+/// them; returns the elements skipped. On an error the elements already
+/// handed over are part of a body that does not decode.
+pub fn decode_each<T: DeserializeOwned>(
+    bytes: &[u8],
+    label: &str,
+    f: impl FnMut(T),
+) -> CoreResult<usize> {
+    let body = body_of(bytes);
+    let mut de = serde_json::Deserializer::from_slice(body);
+    super::raw::for_each_lenient(&mut de, f)
+        .and_then(|skipped| de.end().map(|()| skipped))
+        .map_err(|err| decode_error(body, label, err))
+}
+
+/// The JSON of a body: empty bodies are `null`.
+fn body_of(bytes: &[u8]) -> &[u8] {
     let trimmed = bytes.trim_ascii();
-    let body: &[u8] = if trimmed.is_empty() { b"null" } else { trimmed };
-    serde_json::from_slice(body).map_err(|err| {
-        let looks_html = body.first() == Some(&b'<');
-        CoreError::Invalid(if looks_html {
-            format!("Xtream {label}: the server answered with a web page instead of JSON. Check the server URL.")
-        } else {
-            format!("{UNREADABLE_REPLY}{DETAIL_SEPARATOR}Xtream {label}: {err}")
-        })
+    if trimmed.is_empty() {
+        b"null"
+    } else {
+        trimmed
+    }
+}
+
+fn decode_error(body: &[u8], label: &str, err: serde_json::Error) -> CoreError {
+    let looks_html = body.first() == Some(&b'<');
+    CoreError::Invalid(if looks_html {
+        format!("Xtream {label}: the server answered with a web page instead of JSON. Check the server URL.")
+    } else {
+        format!("{UNREADABLE_REPLY}{DETAIL_SEPARATOR}Xtream {label}: {err}")
     })
 }
 

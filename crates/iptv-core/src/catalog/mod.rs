@@ -451,6 +451,16 @@ fn stored_category_name(name: &str) -> &str {
     }
 }
 
+/// The `extra_json` text a catalog row stores for `extra` (`{}` for null or
+/// an empty object).
+pub fn extra_json(extra: &serde_json::Value) -> String {
+    if extra.is_null() || extra.as_object().is_some_and(|o| o.is_empty()) {
+        "{}".to_string()
+    } else {
+        extra.to_string()
+    }
+}
+
 /// Streaming catalog writer over a caller-owned transaction.
 ///
 /// `begin` deletes the existing categories and items of the given content
@@ -693,6 +703,14 @@ impl<'c> CatalogWriter<'c> {
     /// a duplicate `(content_type, item_id)` keeps the first row.
     /// Returns true when the row was inserted.
     pub fn insert(&mut self, item: &ItemRow) -> CoreResult<bool> {
+        self.insert_with_extra(item, &extra_json(&item.extra))
+    }
+
+    /// [`CatalogWriter::insert`] with the row's `extra_json` given, as
+    /// [`extra_json`] writes it; `item.extra` is not read. Importers that
+    /// hold many rows until the write keep the text instead of the JSON
+    /// tree, which is several times larger.
+    pub fn insert_with_extra(&mut self, item: &ItemRow, extra: &str) -> CoreResult<bool> {
         if !self.types.contains(&item.content_type) {
             return Err(CoreError::Invalid(format!(
                 "catalog writer for {:?} got a {} item",
@@ -706,12 +724,6 @@ impl<'c> CatalogWriter<'c> {
         let (tb, year) = match &derived {
             Some((base, y)) => (Some(base.as_str()), item.year.or(*y)),
             None => (item.title_base.as_deref(), item.year),
-        };
-        let extra = if item.extra.as_object().is_some_and(|o| o.is_empty()) || item.extra.is_null()
-        {
-            "{}".to_string()
-        } else {
-            item.extra.to_string()
         };
         let verdict = language::title_verdict(&item.title);
         let undecided = matches!(

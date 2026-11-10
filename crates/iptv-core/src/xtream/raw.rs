@@ -319,71 +319,93 @@ impl<T> Default for LenientVec<T> {
     }
 }
 
-impl<T: DeserializeOwned> LenientVec<T> {
-    /// Adds one element of the list, or counts it as skipped when it does
-    /// not read as a `T`.
-    ///
-    /// The element's text is decoded straight into `T` (no `Value` tree:
-    /// about 20 allocations per title fewer). A JSON object that repeats a
-    /// key fails that way, while a `Value` keeps the last copy of the key, so
-    /// only then the element is read through a `Value` as before: both paths
-    /// give the same items.
-    fn push(&mut self, raw: &RawValue) {
-        let parsed = serde_json::from_str::<T>(raw.get()).or_else(|_| {
-            serde_json::from_str::<Value>(raw.get()).and_then(serde_json::from_value::<T>)
-        });
-        match parsed {
-            Ok(t) => self.items.push(t),
-            Err(_) => self.skipped += 1,
+/// One element of a lenient list, or `None` when it does not read as a `T`.
+///
+/// The element's text is decoded straight into `T` (no `Value` tree: about
+/// 20 allocations per title fewer). A JSON object that repeats a key fails
+/// that way, while a `Value` keeps the last copy of the key, so only then the
+/// element is read through a `Value` as before: both paths give the same
+/// items.
+fn lenient_element<T: DeserializeOwned>(raw: &RawValue) -> Option<T> {
+    serde_json::from_str::<T>(raw.get())
+        .or_else(|_| serde_json::from_str::<Value>(raw.get()).and_then(serde_json::from_value::<T>))
+        .ok()
+}
+
+/// Reads a list the way [`LenientVec`] does (an array, an object keyed by
+/// index, or junk read as empty) and hands each element that reads as a `T`
+/// to `f` at once, in list order, instead of collecting them. Returns the
+/// number of elements skipped.
+///
+/// A sync maps every title to its catalog row as it is read through this, so
+/// the decoded titles of a whole list are never in memory together.
+pub fn for_each_lenient<'de, D, T, F>(d: D, f: F) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+    F: FnMut(T),
+{
+    struct V<T, F> {
+        f: F,
+        _t: PhantomData<T>,
+    }
+    impl<T: DeserializeOwned, F: FnMut(T)> V<T, F> {
+        fn take(&mut self, raw: &RawValue) -> usize {
+            match lenient_element::<T>(raw) {
+                Some(t) => {
+                    (self.f)(t);
+                    0
+                }
+                None => 1,
+            }
         }
     }
+    impl<'de, T: DeserializeOwned, F: FnMut(T)> Visitor<'de> for V<T, F> {
+        type Value = usize;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a list")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(mut self, mut seq: A) -> Result<usize, A::Error> {
+            let mut skipped = 0;
+            while let Some(raw) = seq.next_element::<Box<RawValue>>()? {
+                skipped += self.take(&raw);
+            }
+            Ok(skipped)
+        }
+        fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<usize, A::Error> {
+            let mut skipped = 0;
+            while let Some((_k, raw)) = map.next_entry::<de::IgnoredAny, Box<RawValue>>()? {
+                skipped += self.take(&raw);
+            }
+            Ok(skipped)
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<usize, E> {
+            Ok(0)
+        }
+        fn visit_none<E: de::Error>(self) -> Result<usize, E> {
+            Ok(0)
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<usize, E> {
+            Ok(0)
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> Result<usize, E> {
+            Ok(0)
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> Result<usize, E> {
+            Ok(0)
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> Result<usize, E> {
+            Ok(0)
+        }
+    }
+    d.deserialize_any(V { f, _t: PhantomData })
 }
 
 impl<'de, T: DeserializeOwned> Deserialize<'de> for LenientVec<T> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct V<T>(PhantomData<T>);
-        impl<'de, T: DeserializeOwned> Visitor<'de> for V<T> {
-            type Value = LenientVec<T>;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a list")
-            }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                let mut out = LenientVec {
-                    items: Vec::with_capacity(seq.size_hint().unwrap_or(0).min(1 << 16)),
-                    skipped: 0,
-                };
-                while let Some(raw) = seq.next_element::<Box<RawValue>>()? {
-                    out.push(&raw);
-                }
-                Ok(out)
-            }
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                let mut out = LenientVec::default();
-                while let Some((_k, raw)) = map.next_entry::<de::IgnoredAny, Box<RawValue>>()? {
-                    out.push(&raw);
-                }
-                Ok(out)
-            }
-            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-                Ok(LenientVec::default())
-            }
-            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
-                Ok(LenientVec::default())
-            }
-            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
-                Ok(LenientVec::default())
-            }
-            fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
-                Ok(LenientVec::default())
-            }
-            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
-                Ok(LenientVec::default())
-            }
-            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
-                Ok(LenientVec::default())
-            }
-        }
-        d.deserialize_any(V(PhantomData))
+        let mut items = Vec::new();
+        let skipped = for_each_lenient(d, |t| items.push(t))?;
+        Ok(LenientVec { items, skipped })
     }
 }
 
@@ -1090,6 +1112,38 @@ mod tests {
             serde_json::from_value(serde_json::from_str::<Value>(&text).unwrap()).unwrap();
         let from_value: Vec<String> = from_value.items.iter().map(|t| format!("{t:?}")).collect();
         assert_eq!(from_value, want);
+    }
+
+    #[test]
+    fn decoding_each_element_reads_the_same_list() {
+        use crate::xtream::client::{decode, decode_each};
+        let bodies = [
+            r#"[{"stream_id": 1, "name": "A"}, "junk", {"stream_id": 2, "name": "B", "name": "C"}, 7]"#,
+            r#"{"1": {"stream_id": 1}, "0": {"stream_id": 0}, "x": null}"#,
+            "",
+            "null",
+            "false",
+            "[]",
+        ];
+        for body in bodies {
+            let want: LenientVec<RawLive> = decode(body.as_bytes(), "t").unwrap();
+            let mut got = Vec::new();
+            let skipped = decode_each(body.as_bytes(), "t", |r: RawLive| got.push(r)).unwrap();
+            let fmt = |v: &[RawLive]| v.iter().map(|r| format!("{r:?}")).collect::<Vec<_>>();
+            assert_eq!(fmt(&got), fmt(&want.items), "{body}");
+            assert_eq!(skipped, want.skipped, "{body}");
+        }
+        // A body that does not decode fails the same way, past its first
+        // elements too.
+        for body in [
+            "<html>login</html>",
+            r#"[{"stream_id": 1}, {"#,
+            r#"[] trailing"#,
+        ] {
+            let want = decode::<LenientVec<RawLive>>(body.as_bytes(), "t").unwrap_err();
+            let got = decode_each(body.as_bytes(), "t", |_: RawLive| {}).unwrap_err();
+            assert_eq!(got.to_string(), want.to_string(), "{body}");
+        }
     }
 
     fn decode_list<T: DeserializeOwned>(text: &str) -> LenientVec<T> {

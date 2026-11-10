@@ -618,53 +618,61 @@ async fn fetch_kind(
     let sid = source_id.to_string();
     let fetched = tokio::task::spawn_blocking(move || -> CoreResult<Fetched> {
         let categories = categories.unwrap_or_default();
-        let part = |content_type, categories, rows| CatalogPart {
-            content_type,
-            categories,
-            rows,
-        };
+        // Each title is mapped to its row as it is decoded (its position is
+        // its index among the titles that read), so the decoded titles of
+        // a whole list are never held together.
         let parts = match kind {
             Kind::Live => {
-                let parsed: LenientVec<RawLive> = super::client::decode(&bytes, "live streams")?;
+                let (mut live, mut radio) = (Rows::default(), Rows::default());
+                let mut i = 0i64;
+                let skipped = super::client::decode_each(&bytes, "live streams", |r: RawLive| {
+                    if let Some(row) = live_row(&sid, i, r) {
+                        let rows = if row.is_radio { &mut radio } else { &mut live };
+                        rows.push(row);
+                    }
+                    i += 1;
+                })?;
                 drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let (radio, live): (Vec<ItemRow>, Vec<ItemRow>) = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| live_row(&sid, i as i64, r))
-                    .partition(|r| r.is_radio);
-                let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
+                log_skipped(&sid, kind, skipped);
+                let (live_cats, radio_cats) = split_categories(&categories, &live.0, &radio.0);
                 vec![
-                    part(ContentType::Live, live_cats, live),
-                    part(ContentType::Radio, radio_cats, radio),
+                    CatalogPart::with_extras(ContentType::Live, live_cats, live),
+                    CatalogPart::with_extras(ContentType::Radio, radio_cats, radio),
                 ]
             }
             Kind::Movies => {
-                let parsed: LenientVec<RawVod> = super::client::decode(&bytes, "movies")?;
+                let mut rows = Rows::default();
+                let mut i = 0i64;
+                let skipped = super::client::decode_each(&bytes, "movies", |r: RawVod| {
+                    if let Some(row) = vod_row(&sid, i, r) {
+                        rows.push(with_title_base(row));
+                    }
+                    i += 1;
+                })?;
                 drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let rows = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| vod_row(&sid, i as i64, r))
-                    .map(with_title_base)
-                    .collect();
-                vec![part(ContentType::Movie, categories, rows)]
+                log_skipped(&sid, kind, skipped);
+                vec![CatalogPart::with_extras(
+                    ContentType::Movie,
+                    categories,
+                    rows,
+                )]
             }
             Kind::Series => {
-                let parsed: LenientVec<RawSeries> = super::client::decode(&bytes, "series")?;
+                let mut rows = Rows::default();
+                let mut i = 0i64;
+                let skipped = super::client::decode_each(&bytes, "series", |r: RawSeries| {
+                    if let Some(row) = series_row(&sid, i, r) {
+                        rows.push(with_title_base(row));
+                    }
+                    i += 1;
+                })?;
                 drop(bytes);
-                log_skipped(&sid, kind, parsed.skipped);
-                let rows = parsed
-                    .items
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(i, r)| series_row(&sid, i as i64, r))
-                    .map(with_title_base)
-                    .collect();
-                vec![part(ContentType::Series, categories, rows)]
+                log_skipped(&sid, kind, skipped);
+                vec![CatalogPart::with_extras(
+                    ContentType::Series,
+                    categories,
+                    rows,
+                )]
             }
         };
         Ok(Fetched::Parts { parts, hash })
@@ -696,6 +704,54 @@ pub(crate) struct CatalogPart {
     pub content_type: ContentType,
     pub categories: Vec<CategoryRow>,
     pub rows: Vec<ItemRow>,
+    /// The `extra_json` of each row, worked out before the write (the rows'
+    /// own `extra` is then null), or empty to take it from the rows.
+    pub extras: Vec<String>,
+}
+
+impl CatalogPart {
+    pub(crate) fn new(
+        content_type: ContentType,
+        categories: Vec<CategoryRow>,
+        rows: Vec<ItemRow>,
+    ) -> Self {
+        Self {
+            content_type,
+            categories,
+            rows,
+            extras: Vec::new(),
+        }
+    }
+
+    /// Rows whose extras [`Rows::push`] already turned into text.
+    fn with_extras(
+        content_type: ContentType,
+        categories: Vec<CategoryRow>,
+        Rows(rows, extras): Rows,
+    ) -> Self {
+        Self {
+            content_type,
+            categories,
+            rows,
+            extras,
+        }
+    }
+}
+
+/// Mapped rows, each with its extra taken out as the text the catalog
+/// stores. Worked out as each row is mapped, off the write transaction
+/// (IN-3): a large panel's rows wait in memory for the write, and the text
+/// takes a fraction of the room of the JSON map (a map node alone is several
+/// hundred bytes).
+#[derive(Default)]
+struct Rows(Vec<ItemRow>, Vec<String>);
+
+impl Rows {
+    fn push(&mut self, mut row: ItemRow) {
+        self.1
+            .push(catalog::extra_json(&std::mem::take(&mut row.extra)));
+        self.0.push(row);
+    }
 }
 
 /// Replaces the catalogs of several content types of one source in ONE
@@ -763,8 +819,11 @@ pub(crate) fn replace_catalogs_with(
             w.declare_categories(part.content_type, &part.categories);
         }
         for part in parts {
-            for row in &part.rows {
-                w.insert(row)?;
+            for (i, row) in part.rows.iter().enumerate() {
+                match part.extras.get(i) {
+                    Some(extra) => w.insert_with_extra(row, extra)?,
+                    None => w.insert(row)?,
+                };
                 on_row(part.content_type);
             }
             categories.push((part.content_type, part.categories));
@@ -1149,15 +1208,15 @@ mod tests {
     }
 
     fn part(ct: ContentType, rows: Vec<ItemRow>) -> CatalogPart {
-        CatalogPart {
-            content_type: ct,
-            categories: vec![CategoryRow {
+        CatalogPart::new(
+            ct,
+            vec![CategoryRow {
                 category_id: "c".into(),
                 name: "C".into(),
                 position: 0,
             }],
             rows,
-        }
+        )
     }
 
     fn item_ids(conn: &Connection, sid: &str, ct: ContentType) -> Vec<String> {
@@ -1168,6 +1227,53 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap()
+    }
+
+    #[test]
+    fn extras_turned_into_text_early_store_the_same_rows() {
+        let rows = || -> Vec<ItemRow> {
+            let mut out: Vec<ItemRow> = [
+                json!({"stream_id": 1, "name": "A", "tv_archive": 1, "tv_archive_duration": "3",
+                       "category_ids": [3, 4], "custom_sid": "x", "stream_type": "live"}),
+                json!({"stream_id": 2, "name": "B"}),
+            ]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, v)| live_row("s", i as i64, parse(v)))
+            .collect();
+            // An empty object and null both store `{}`.
+            out[1].extra = json!({});
+            out.push(ItemRow {
+                extra: Value::Null,
+                ..item("s", ContentType::Live, "3")
+            });
+            out
+        };
+        let stored = |part: CatalogPart| -> Vec<(String, String)> {
+            let mut conn = catalog_db("s");
+            replace_catalogs(&mut conn, "s", vec![part], None, &mut |_| {}).unwrap();
+            let mut st = conn
+                .prepare("SELECT item_id, extra_json FROM items ORDER BY item_id")
+                .unwrap();
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let plain = stored(CatalogPart::new(ContentType::Live, Vec::new(), rows()));
+        let mut early = Rows::default();
+        for row in rows() {
+            early.push(row);
+        }
+        let early = stored(CatalogPart::with_extras(
+            ContentType::Live,
+            Vec::new(),
+            early,
+        ));
+        assert_eq!(early, plain);
+        assert_eq!(plain[1].1, "{}");
+        assert_eq!(plain[2].1, "{}");
+        assert!(plain[0].1.contains("\"customSid\":\"x\""), "{}", plain[0].1);
     }
 
     #[test]

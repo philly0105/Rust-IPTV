@@ -263,6 +263,43 @@ export function prefetchNavigations(router: Pick<ReturnType<typeof createBrowser
   });
 }
 
+type RouterSubscriber = Parameters<ReturnType<typeof createBrowserRouter>['subscribe']>[0];
+
+/**
+ * Takes Back and Forward out of the `popstate` event (NAV-2). React renders a transition that
+ * starts inside a `popstate` event synchronously, before the event returns, so that the browser
+ * can restore the document's scroll position against the new content. The router's state updates
+ * are transitions, so going Back to a poster grid rendered the whole page in one task (150 to
+ * 290 ms at a 4x CPU slowdown) during which no frame could paint and no input was handled. The app
+ * scrolls inside `main`, not the document, and every page restores its own scroll position, so
+ * that synchronous render bought nothing.
+ *
+ * A subscriber wrapped here gets the updates the router sends during a `popstate` event in the
+ * next task instead, where React renders them as an ordinary transition: in slices between which
+ * the browser paints and handles input. Updates that arrive while some are still waiting queue
+ * behind them, so the subscriber sees every update in order. Everything else passes straight
+ * through.
+ */
+export function deferPopstateUpdates(subscriber: RouterSubscriber, schedule: (run: () => void) => void = (run) => void setTimeout(run, 0)): RouterSubscriber {
+  let queue: Parameters<RouterSubscriber>[] | null = null;
+  return (...args) => {
+    if (queue) {
+      queue.push(args);
+      return;
+    }
+    if (typeof window === 'undefined' || window.event?.type !== 'popstate') {
+      subscriber(...args);
+      return;
+    }
+    queue = [args];
+    schedule(() => {
+      const waiting = queue ?? [];
+      queue = null;
+      for (const update of waiting) subscriber(...update);
+    });
+  };
+}
+
 export function createAppRouter() {
   const router = createBrowserRouter(routes);
   prefetchNavigations(router);
@@ -276,5 +313,9 @@ export function createAppRouter() {
     chunkFailedAt = null;
     window.location.assign(href);
   });
+  // Subscribers from here on (RouterProvider's) render Back and Forward outside `popstate`. The
+  // two above keep reading every update at once.
+  const subscribe = router.subscribe.bind(router);
+  router.subscribe = (subscriber) => subscribe(deferPopstateUpdates(subscriber));
   return router;
 }

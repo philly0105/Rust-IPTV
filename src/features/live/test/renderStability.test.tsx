@@ -3,8 +3,8 @@
  * a row leaves the row alone, and a page's now/next and favourite keys are hashed once. Group rows count their renders through `useRouteIntent` (one call
  * per render), timeline blocks through `canCatchUp` (one call per render).
  */
-import { hashKey } from '@tanstack/react-query';
-import { act, cleanup, screen } from '@testing-library/react';
+import { hashKey, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -127,7 +127,9 @@ describe('the guide ribbon timeline', () => {
     ];
     const channel = makeChannel(0);
     let bump: () => void = noop;
+    let client: QueryClient | undefined;
     function Harness() {
+      client = useQueryClient();
       const [n, setN] = useState(0);
       bump = () => setN((v) => v + 1);
       // A new props object (and a new handler) on every page render, as Live passes it.
@@ -137,6 +139,9 @@ describe('the guide ribbon timeline', () => {
     expect(await screen.findByRole('button', { name: /Airing/ })).toBeTruthy();
     const blocks = screen.getAllByRole('button').filter((b) => b.hasAttribute('data-start')).length;
     expect(blocks).toBeGreaterThan(0);
+    // Let the reminders and recordings answers land first: a new schedule index re-renders the blocks, rightly.
+    await waitFor(() => expect(client?.isFetching()).toBe(0));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
     counts.catchUps = 0;
     act(() => bump());
     act(() => bump());

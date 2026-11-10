@@ -1,4 +1,6 @@
-import type { EpgNowNext, EpgProgram } from '@/api/types';
+import { hashKey, type QueryKey } from '@tanstack/react-query';
+
+import type { EpgNowNext, EpgProgram, ItemRef } from '@/api/types';
 
 import { isValidProgram as valid, ms } from './epgTime';
 
@@ -67,4 +69,32 @@ export function preferNowNext(primary: EpgNowNext | undefined, fallback: EpgNowN
   if (primary?.now) return primary;
   if (fallback?.now) return fallback;
   return primary ?? fallback;
+}
+
+/** Per refs array, the hash of each key made from it (by command and the other arguments). */
+const refsKeyHashes = new WeakMap<readonly ItemRef[], Map<string, string>>();
+
+/**
+ * TanStack's own hash of a `[command, { refs, ... }]` key, worked out once per refs array and
+ * the other arguments, so prefetches (bootPrefetch) and readers still share the entry. TanStack
+ * hashes a query's key on every render of its observer: the now/next and favourite keys of a
+ * page hold 120 refs each, and a list or guide renders on every range change of a scroll, with
+ * four of them (two pages) even while they are disabled, as on the guide.
+ */
+export function refsKeyHash(key: QueryKey): string {
+  const args = key[1] as { refs?: readonly ItemRef[] } | null | undefined;
+  if (!args || !Array.isArray(args.refs)) return hashKey(key);
+  const { refs, ...rest } = args;
+  const sub = `${String(key[0])}|${JSON.stringify(rest)}`;
+  let byArgs = refsKeyHashes.get(refs);
+  if (!byArgs) {
+    byArgs = new Map();
+    refsKeyHashes.set(refs, byArgs);
+  }
+  let hash = byArgs.get(sub);
+  if (hash === undefined) {
+    hash = hashKey(key);
+    byArgs.set(sub, hash);
+  }
+  return hash;
 }

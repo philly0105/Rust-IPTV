@@ -1,5 +1,5 @@
 import { EllipsisVertical, EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -8,7 +8,6 @@ import { useRouteIntent } from '@/shell/routeIntent';
 
 import { Button, cn, ErrorState, IconButton, SearchInput, Select, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
-import { useStable } from '../guide/useStable';
 import { useLongPress } from '../hooks/useLongPress';
 import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
 import { documentIsRtl } from '../lib/rtl';
@@ -224,10 +223,14 @@ export function CategorySidebar(props: CategorySidebarProps) {
   // One handler for every row, so the memoized rows re-render only when their own props change: new
   // closures per row re-rendered every group on screen (with its link and route intent) whenever
   // the sidebar did, as on each group switch.
-  const groupMenu = useStable((pos: { x: number; y: number }, c: Category, index: number) => {
+  // (A local ref, not guide/useStable: a Live import of that shared module moved it into another
+  // chunk, and Search then loaded the player's controls; pnpm size:check caught it.)
+  const onGroupMenu = useRef(props.onGroupMenu);
+  onGroupMenu.current = props.onGroupMenu;
+  const groupMenu = useCallback((pos: { x: number; y: number }, c: Category, index: number) => {
     setCursor(index);
-    props.onGroupMenu?.(pos, c);
-  });
+    onGroupMenu.current?.(pos, c);
+  }, []);
   const allHidden = !props.isLoading && !props.error && (props.categories?.length ?? 0) === 0 && props.hiddenCount > 0;
   const allActive = !props.activeId;
 

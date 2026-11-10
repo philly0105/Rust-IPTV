@@ -45,7 +45,6 @@ import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../
 // recording:
 import { RibbonActions, ScheduleMark, ScheduleMarkView, useScheduleIndex, type ScheduleIndex } from '@/features/recording';
 import { listSeparator } from '@/lib/intl';
-import { useStable } from '../guide/useStable';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 import { UpNext } from './UpNext';
 
@@ -192,8 +191,12 @@ export function EpgRibbon(props: EpgRibbonProps) {
   };
 
   // Stable (an event handler that reads the latest render): it depended on `props`, a new object
-  // on every parent render, so each Live render re-rendered every memoized timeline block.
-  const activate = useStable(async (p: EpgProgram) => {
+  // on every parent render, so each Live render re-rendered every memoized timeline block. A local
+  // ref, not guide/useStable: importing that shared module here moved it into another chunk, and
+  // Search then loaded the player's controls (pnpm size:check).
+  const activateLatest = useRef<(p: EpgProgram) => Promise<void>>(async () => undefined);
+  const activate = useCallback((p: EpgProgram) => activateLatest.current(p), []);
+  activateLatest.current = async (p: EpgProgram) => {
     if (!channel) return;
     const when = programWhen(p, now);
     if (when === 'now' && !props.watchingLive) {
@@ -209,7 +212,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       return;
     }
     pick(p);
-  });
+  };
 
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
   // With nothing of this channel playing, the button names the channel it starts: something else

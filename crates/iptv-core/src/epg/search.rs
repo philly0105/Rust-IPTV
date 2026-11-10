@@ -358,14 +358,75 @@ struct SourceChannel {
 /// The channels themselves are read on every search that has hits (an
 /// index-only scan of `idx_items_guide`), so catalog changes, channel edits
 /// and parental locks apply at once.
+///
+/// The resolutions are kept per source and channel type, sorted the way
+/// the channel scan returns its rows (`epg_channel_id`, then title), and
+/// the scan walks the list alongside ([`ResolvedList::find`]). Before, two
+/// hash maps keyed by id and by title cost two lookups in large tables for
+/// every channel, most of a search's time at 200k channels.
 #[derive(Default)]
 pub(crate) struct SearchMemo {
     generation: u64,
-    /// Trimmed `items.epg_channel_id` -> the guide channel it names (known
-    /// to the guide, case-insensitive, or with programmes), else `None`.
-    ids: HashMap<String, Option<Arc<str>>>,
-    /// Channel title -> the guide channel with that exact normalized name.
-    names: HashMap<String, Option<Arc<str>>>,
+    /// Per (source id, channel type).
+    lists: HashMap<(String, ContentType), ResolvedList>,
+}
+
+/// One distinct (`epg_channel_id`, title) pair of a source's channels and
+/// the guide channel it resolves to without a manual mapping.
+struct Resolved {
+    epg: Option<Box<str>>,
+    title: Box<str>,
+    guide: Option<Arc<str>>,
+}
+
+/// A row's memo key: its `epg_channel_id` as stored and its title. Tuples
+/// order `None` (SQL NULL) first and text by bytes, as SQLite orders the
+/// BINARY-collated columns of `idx_items_guide`.
+type ResolvedKey<'a> = (Option<&'a str>, &'a str);
+
+impl Resolved {
+    fn key(&self) -> ResolvedKey<'_> {
+        (self.epg.as_deref(), &self.title)
+    }
+}
+
+/// The resolutions of one source and type, sorted by key, distinct.
+#[derive(Default)]
+struct ResolvedList {
+    entries: Vec<Resolved>,
+}
+
+impl ResolvedList {
+    /// The entry for `key`. `cursor` follows a scan in key order, so a hit
+    /// costs a comparison or two with the entries after the last one; a row
+    /// out of that order falls back to a binary search.
+    fn find(&self, cursor: &mut usize, key: ResolvedKey<'_>) -> Option<&Resolved> {
+        let entries = &self.entries;
+        while *cursor < entries.len() && entries[*cursor].key() < key {
+            *cursor += 1;
+        }
+        if let Some(e) = entries.get(*cursor) {
+            if e.key() == key {
+                return Some(e);
+            }
+        }
+        entries
+            .binary_search_by(|e| e.key().cmp(&key))
+            .ok()
+            .map(|i| &entries[i])
+    }
+
+    /// Adds the entries a scan resolved afresh, keeping the list sorted and
+    /// distinct.
+    fn merge(&mut self, added: Vec<Resolved>) {
+        if added.is_empty() {
+            return;
+        }
+        self.entries.extend(added);
+        // Two sorted runs when the scan came in key order.
+        self.entries.sort_by(|a, b| a.key().cmp(&b.key()));
+        self.entries.dedup_by(|a, b| a.key() == b.key());
+    }
 }
 
 impl SearchMemo {
@@ -384,13 +445,23 @@ impl SearchMemo {
     }
 
     fn put_back(mut self, rt: &EpgRuntime) {
-        if self.ids.len() + self.names.len() > MEMO_CAP {
-            self.ids.clear();
-            self.names.clear();
+        if self.lists.values().map(|l| l.entries.len()).sum::<usize>() > MEMO_CAP {
+            self.lists.clear();
         }
         *rt.search_memo.lock() = self;
     }
+}
 
+/// Resolves the channels the memo does not hold yet, within one scan: each
+/// unknown `epg_channel_id` is probed once.
+#[derive(Default)]
+struct FreshResolver {
+    /// Trimmed `items.epg_channel_id` -> the guide channel it names (known
+    /// to the guide, case-insensitive, or with programmes), else `None`.
+    ids: HashMap<String, Option<Arc<str>>>,
+}
+
+impl FreshResolver {
     fn by_id(
         &mut self,
         conn: &Connection,
@@ -409,15 +480,6 @@ impl SearchMemo {
         Ok(found)
     }
 
-    fn by_name(&mut self, dir: &ChannelDirectory, title: &str) -> Option<Arc<str>> {
-        if let Some(found) = self.names.get(title) {
-            return found.clone();
-        }
-        let found: Option<Arc<str>> = dir.find_name_exact(title).map(Into::into);
-        self.names.insert(title.to_string(), found.clone());
-        found
-    }
-
     /// The guide channel of a channel without a manual mapping: its
     /// `epg_channel_id` when that resolves, else its exact normalized name.
     fn resolve(
@@ -432,7 +494,7 @@ impl SearchMemo {
                 return Ok(Some(found));
             }
         }
-        Ok(self.by_name(dir, title))
+        Ok(dir.find_name_exact(title).map(Into::into))
     }
 }
 
@@ -469,6 +531,7 @@ fn source_channels(
     quality: Option<QualityFilter>,
 ) -> CoreResult<SourceChannels> {
     let mut memo = SearchMemo::take(rt, dir.generation());
+    let mut fresh = FreshResolver::default();
     let mut out = SourceChannels::default();
     for content_type in [ContentType::Live, ContentType::Radio] {
         let manual: HashMap<i64, Option<String>> = conn
@@ -502,6 +565,10 @@ fn source_channels(
         }
         let mut stmt = conn.prepare_cached(&sql)?;
         let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
+        let list_key = (source_id.to_string(), content_type);
+        let known = memo.lists.remove(&list_key).unwrap_or_default();
+        let mut cursor = 0usize;
+        let mut added: Vec<Resolved> = Vec::new();
         while let Some(r) = rows.next()? {
             let rowid: i64 = r.get(0)?;
             let guide: Option<Arc<str>> = match manual.get(&rowid) {
@@ -511,7 +578,25 @@ fn source_channels(
                     .filter(|s| !s.is_empty())
                     .map(Arc::from),
                 // Borrowed: the memo answers most channels without a copy.
-                None => memo.resolve(conn, dir, text(r, 2)?, text(r, 1)?.unwrap_or_default())?,
+                None => {
+                    let key = (text(r, 2)?, text(r, 1)?.unwrap_or_default());
+                    match known.find(&mut cursor, key) {
+                        Some(e) => e.guide.clone(),
+                        // Rows with the same key come one after another.
+                        None => match added.last().filter(|e| e.key() == key) {
+                            Some(e) => e.guide.clone(),
+                            None => {
+                                let guide = fresh.resolve(conn, dir, key.0, key.1)?;
+                                added.push(Resolved {
+                                    epg: key.0.map(Into::into),
+                                    title: key.1.into(),
+                                    guide: guide.clone(),
+                                });
+                                guide
+                            }
+                        },
+                    }
+                }
             };
             let Some(guide) = guide else {
                 continue;
@@ -529,6 +614,9 @@ fn source_channels(
                 }
             }
         }
+        let mut known = known;
+        known.merge(added);
+        memo.lists.insert(list_key, known);
     }
     memo.put_back(rt);
     Ok(out)
@@ -976,5 +1064,160 @@ mod tests {
             ..base
         };
         assert!(validate(ok, now).is_ok());
+    }
+
+    fn resolved(epg: Option<&str>, title: &str, guide: Option<&str>) -> Resolved {
+        Resolved {
+            epg: epg.map(Into::into),
+            title: title.into(),
+            guide: guide.map(Into::into),
+        }
+    }
+
+    /// The list is found in scan order with a moving cursor, out of order by
+    /// binary search, and a merge keeps it sorted and distinct, NULL ids
+    /// first as SQLite orders them.
+    #[test]
+    fn resolved_list_follows_the_scan_and_merges_sorted() {
+        let mut list = ResolvedList::default();
+        list.merge(vec![
+            resolved(None, "Zed", None),
+            resolved(Some("a.uk"), "A", Some("a.uk")),
+            resolved(Some("b.uk"), "B", None),
+        ]);
+        list.merge(vec![
+            resolved(None, "Alpha", Some("alpha")),
+            resolved(Some("a.uk"), "A", Some("a.uk")),
+            resolved(Some("c.uk"), "C", Some("c.uk")),
+        ]);
+        let keys: Vec<_> = list.entries.iter().map(|e| e.key()).collect();
+        assert_eq!(
+            keys,
+            [
+                (None, "Alpha"),
+                (None, "Zed"),
+                (Some("a.uk"), "A"),
+                (Some("b.uk"), "B"),
+                (Some("c.uk"), "C"),
+            ]
+        );
+        let guide = |cursor: &mut usize, key: ResolvedKey<'_>| {
+            list.find(cursor, key)
+                .map(|e| e.guide.as_deref().map(str::to_string))
+        };
+        let mut cursor = 0;
+        assert_eq!(guide(&mut cursor, (None, "Zed")), Some(None));
+        assert_eq!(cursor, 1);
+        // The same key again: the cursor stays.
+        assert_eq!(guide(&mut cursor, (None, "Zed")), Some(None));
+        assert_eq!(cursor, 1);
+        // A key the list lacks, between two entries.
+        assert_eq!(guide(&mut cursor, (Some("a"), "A")), None);
+        assert_eq!(
+            guide(&mut cursor, (Some("c.uk"), "C")),
+            Some(Some("c.uk".into()))
+        );
+        // Out of order: found behind the cursor.
+        assert_eq!(
+            guide(&mut cursor, (None, "Alpha")),
+            Some(Some("alpha".into()))
+        );
+        assert_eq!(guide(&mut cursor, (Some("d.uk"), "D")), None);
+    }
+
+    /// A warm memo gives the same channels as resolving every row afresh,
+    /// also after the catalog changes under it (renamed, re-keyed, added and
+    /// removed channels).
+    #[test]
+    fn memoized_source_channels_match_fresh_resolution() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sources(id, kind, name, config_json) VALUES ('s', 'm3u', 'S', '{}');
+             INSERT INTO epg_sources(url, enabled, origin) VALUES ('u', 1, 'settings');
+             INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES
+               ('u', 'BBCOne.uk', 'BBC One'), ('u', 'itv.uk', 'ITV 1'), ('u', 'news.uk', 'News 24');
+             INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES
+               ('u', 'undeclared', 0, 60, 'x');",
+        )
+        .unwrap();
+        let insert = |c: &Connection, id: &str, title: &str, epg: Option<&str>| {
+            c.execute(
+                "INSERT INTO items(source_id, content_type, item_id, category_id, title, epg_channel_id, number)
+                 VALUES ('s', 'live', ?1, 'g', ?2, ?3, ?4)",
+                params![id, title, epg, id.len() as i64],
+            )
+            .unwrap();
+        };
+        for (id, title, epg) in [
+            ("1", "BBC One HD", Some("bbcone.uk")),
+            ("2", "BBC One", None),
+            ("3", "UK: ITV 1", Some("nope.uk")),
+            ("4", "ITV 1", Some("nope.uk")),
+            ("5", "Something", Some("undeclared")),
+            ("6", "Something", Some("other")),
+            ("7", "News 24", Some("")),
+            ("8", "Zed", None),
+            ("9", "News 24", Some(" itv.uk ")),
+        ] {
+            insert(&conn, id, title, epg);
+        }
+        let rt = EpgRuntime::default();
+        let dir = resolve::directory(&conn, &rt).unwrap();
+        type Shape = Vec<(String, Vec<i64>)>;
+        let sorted = |by: HashMap<String, Vec<i64>>| -> Shape {
+            let mut v: Shape = by
+                .into_iter()
+                .map(|(g, mut ids)| {
+                    ids.sort_unstable();
+                    (g, ids)
+                })
+                .collect();
+            v.sort();
+            v
+        };
+        let fresh = |conn: &Connection| -> Shape {
+            let mut f = FreshResolver::default();
+            let mut by: HashMap<String, Vec<i64>> = HashMap::new();
+            let mut stmt = conn
+                .prepare("SELECT rowid, epg_channel_id, title FROM items WHERE source_id = 's'")
+                .unwrap();
+            let rows: Vec<(i64, Option<String>, String)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            for (rowid, epg, title) in rows {
+                if let Some(g) = f.resolve(conn, &dir, epg.as_deref(), &title).unwrap() {
+                    by.entry(g.to_string()).or_default().push(rowid);
+                }
+            }
+            sorted(by)
+        };
+        let scan = |conn: &Connection| -> Shape {
+            let out = source_channels(conn, &rt, &dir, "s", None, None).unwrap();
+            sorted(
+                out.guides
+                    .into_iter()
+                    .map(|(g, keys)| (g.to_string(), keys.iter().map(|k| k.rowid).collect()))
+                    .collect(),
+            )
+        };
+        let before = fresh(&conn);
+        assert_eq!(before.len(), 4, "{before:?}");
+        assert_eq!(scan(&conn), before, "cold memo");
+        assert_eq!(scan(&conn), before, "warm memo");
+        conn.execute_batch(
+            "UPDATE items SET title = 'ITV 1' WHERE item_id = '8';
+             UPDATE items SET epg_channel_id = 'news.uk' WHERE item_id = '6';
+             DELETE FROM items WHERE item_id = '2';",
+        )
+        .unwrap();
+        insert(&conn, "10", "BBC One", Some("missing"));
+        insert(&conn, "11", "Aardvark", None);
+        let after = fresh(&conn);
+        assert_ne!(after, before, "the changes move channels");
+        assert_eq!(scan(&conn), after, "after catalog changes");
+        assert_eq!(scan(&conn), after, "warm again");
     }
 }

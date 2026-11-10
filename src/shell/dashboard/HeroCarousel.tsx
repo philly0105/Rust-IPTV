@@ -49,7 +49,7 @@ import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
 import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, tintOf, useImageChain, whenIdle } from '@/ui';
-import { intlLocale, numberFormat } from '@/lib/intl';
+import { formatTenths } from '@/features/vod/lib/rating';
 
 import { useReducedMotion } from '../theme';
 import { buttonMenuAnchor, CardMenuContext, itemPath, usePrefetchTarget, type CardMenuItem } from './cards';
@@ -422,7 +422,8 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
   const vod = isVod(s.ref);
   const continuing = s.kind === 'continue';
   const playable = continuing || s.ref.contentType === 'movie';
-  const rating = s.rating ? numberFormat(intlLocale(i18n.language), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
+  // Without an Intl formatter in English (formatTenths): the first one of a page load is costly.
+  const rating = s.rating ? formatTenths(s.rating, i18n.language) : undefined;
   // A displayed title that still ends with "(2025)" (no titleBase from the core, or an older
   // continue-watching snapshot) does not get the year again below it.
   const year = !titleEndsWithYear(title, s.year) ? s.year : undefined;

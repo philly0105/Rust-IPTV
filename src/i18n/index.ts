@@ -97,6 +97,45 @@ function pinPluralRules(): void {
 type FormatFn = (value: unknown, lng: string | undefined, options: unknown) => string;
 const pinnedFormatters = new WeakSet<object>();
 
+/** `Intl.NumberFormat` options: a `{{x, number(...)}}` that sets any of them goes to `Intl`. */
+const NUMBER_FORMAT_OPTIONS = [
+  'style',
+  'currency',
+  'currencyDisplay',
+  'currencySign',
+  'unit',
+  'unitDisplay',
+  'notation',
+  'compactDisplay',
+  'useGrouping',
+  'signDisplay',
+  'numberingSystem',
+  'minimumIntegerDigits',
+  'minimumFractionDigits',
+  'maximumFractionDigits',
+  'minimumSignificantDigits',
+  'maximumSignificantDigits',
+  'roundingMode',
+  'roundingPriority',
+  'roundingIncrement',
+  'trailingZeroDisplay',
+] as const;
+
+/**
+ * A whole number as English `Intl.NumberFormat` writes it ("1,234", "-5"), for `{{count, number}}`
+ * in English, or undefined (another language, not a safe integer, number options given). The
+ * first `Intl.NumberFormat` of a page load costs about 40 ms of a 4x-slowed cold Home (V8 builds
+ * its locale data then), and i18next's cached formatter builds one per set of t() options, so a
+ * My List count on Home paid it in Home's first commit. Exported for tests.
+ */
+export function englishInteger(value: unknown, lng: string | undefined, options: unknown): string | undefined {
+  if (lng !== DEFAULT_LANGUAGE || typeof value !== 'number' || !Number.isSafeInteger(value)) return undefined;
+  if (typeof options === 'object' && options !== null && NUMBER_FORMAT_OPTIONS.some((k) => k in options)) return undefined;
+  if (Object.is(value, -0)) return '-0';
+  const digits = String(Math.abs(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return value < 0 ? `-${digits}` : digits;
+}
+
 /**
  * Routes i18next's built-in `Intl` formats (`{{count, number}}`, `datetime`,
  * `list` and friends) through `intlLocale`, so an `ary` string formats its
@@ -108,7 +147,9 @@ function pinIntlFormats(): void {
   if (!formatter?.formats || typeof formatter.add !== 'function' || pinnedFormatters.has(formatter)) return;
   for (const name of ['number', 'currency', 'datetime', 'relativetime', 'list']) {
     const builtIn = formatter.formats[name];
-    if (builtIn) formatter.add(name, (value, lng, options) => builtIn(value, intlLocale(lng), options));
+    if (!builtIn) continue;
+    if (name === 'number') formatter.add(name, (value, lng, options) => englishInteger(value, lng, options) ?? builtIn(value, intlLocale(lng), options));
+    else formatter.add(name, (value, lng, options) => builtIn(value, intlLocale(lng), options));
   }
   pinnedFormatters.add(formatter);
 }

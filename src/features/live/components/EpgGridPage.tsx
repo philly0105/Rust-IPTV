@@ -479,10 +479,16 @@ setGuideGridPrefetch(prefetchFirstChunk);
 /** A window `[from, to)` an answer of the grid is for. */
 type Span = readonly [number, number];
 
+/**
+ * react-i18next's `useTranslation(ns)` defaults its options to a new `{}`, which re-creates its
+ * store subscription on every render; the page renders on each change of the visible rows.
+ */
+const I18N_OPTIONS = {};
+
 /** Multi-channel guide: virtualized channel rows x 30-minute columns over a window of at least 6 h that fills the page width. */
 export function EpgGridPage() {
-  const { t, i18n } = useTranslation('live');
-  const { t: tg } = useTranslation('guide');
+  const { t, i18n } = useTranslation('live', I18N_OPTIONS);
+  const { t: tg } = useTranslation('guide', I18N_OPTIONS);
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const location = useLocation();
@@ -636,6 +642,9 @@ export function EpgGridPage() {
   });
   // The cells name their genre (CB-GUIDE-GENRE), so a filtered guide reads as it looks.
   const genreNames = useMemo(() => Object.fromEntries(GENRES.map((g) => [g, tg(`genre_${g}`)])) as Record<Genre, string>, [tg]);
+  // The strings every render of the grid shows, translated once (a t() call is not free, and the
+  // page renders on each change of the visible rows).
+  const text = useMemo(() => ({ guide: t('guide'), copyUrl: t('copyUrl'), close: t('close') }), [t]);
   const rowLabels = useMemo<GuideRowLabels>(
     () => ({
       onNow: t('onNow'),
@@ -1155,7 +1164,8 @@ export function EpgGridPage() {
   // The browser owns horizontal scrolling. This canvas never changes width during a gesture,
   // and scroll events only observe its position for the toolbar and rolling guide queries.
   const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
-  const stickyTitles = useRef(createStickyTitleManager());
+  const [stickyTitlesManager] = useState(createStickyTitleManager);
+  const stickyTitles = useRef(stickyTitlesManager);
   const clockPosition = ((now - origin) / MINUTE) * pxPerMin;
   const clockPositionRef = useRef(clockPosition);
   clockPositionRef.current = clockPosition;
@@ -1653,7 +1663,7 @@ export function EpgGridPage() {
   });
   /** Keyboard moves can request a slice before their destination becomes visible. */
   const prefetchWindow = useStable((delta: number) => prefetchSlice(guideDataStart(shownTime[0] + delta)));
-  const prefetchRefsKey = [...refsA, ...refsB].map(itemKey).join('|');
+  const prefetchRefsKey = useMemo(() => [...refsA, ...refsB].map(itemKey).join('|'), [refsA, refsB]);
   const horizontalPrefetchTimer = useRef(0);
   // The displayed answer takes priority. One outer slice per direction covers a long fling,
   // with only six hours of overlap instead of repeatedly fetching nearly identical 24h slices.
@@ -1723,7 +1733,12 @@ export function EpgGridPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [highlight, setHighlight] = useState<ItemKey | null>(null);
-  const guideArea = tg('shortcutArea');
+  // Shortcut descriptions, translated once rather than on every render.
+  const shortcutText = useMemo(
+    () => ({ area: tg('shortcutArea'), search: tg('searchLabel'), jump: tg('jumpTitle'), digits: tg('shortcutDigits') }),
+    [tg],
+  );
+  const guideArea = shortcutText.area;
   useShortcut(
     '/',
     (e) => {
@@ -1732,7 +1747,7 @@ export function EpgGridPage() {
       searchRef.current?.focus();
       searchRef.current?.select();
     },
-    { description: tg('searchLabel'), area: guideArea },
+    { description: shortcutText.search, area: guideArea },
   );
   useShortcut(
     't',
@@ -1740,7 +1755,7 @@ export function EpgGridPage() {
       e.preventDefault();
       setJumpOpen(true);
     },
-    { description: tg('jumpTitle'), area: guideArea },
+    { description: shortcutText.jump, area: guideArea },
   );
 
   /** A search hit (display time): move the window to its start, in a group that holds the channel. */
@@ -1839,7 +1854,7 @@ export function EpgGridPage() {
       if (e.ctrlKey || e.metaKey || e.altKey || !sourceId) return;
       digits.push(e.key);
     },
-    { description: tg('shortcutDigits'), area: guideArea },
+    { description: shortcutText.digits, area: guideArea },
   );
 
   // Once the list the hit needs is on screen, find the channel's row, scroll to it, put the
@@ -1990,6 +2005,8 @@ export function EpgGridPage() {
   const nowInWindow = now >= start && now < end;
   const nowInViewport = now >= shownTime[0] && now < shownTime[1];
   const nowX = ((now - start) / MINUTE) * pxPerMin;
+  // The ruler's now pill: formatted once per clock tick, not on every scroll render.
+  const nowLabel = useMemo(() => (nowInWindow ? formatClock(now, i18n.language) : undefined), [nowInWindow, now, i18n.language]);
 
   const bar = guideBarLayout(pageWidth);
   // LG-01: "Go to playing" while the playing channel's row is in this list but off screen. Only
@@ -2018,9 +2035,9 @@ export function EpgGridPage() {
   // and Live TV do; with one source its name told the user nothing.
   const heading = (
     <>
-      <h1 className="sr-only">{t('guide')}</h1>
+      <h1 className="sr-only">{text.guide}</h1>
       <GuideHeaderSearch
-        title={t('guide')}
+        title={text.guide}
         subtitle={(sources.data?.length ?? 0) > 1 ? source?.name : undefined}
         inputRef={searchRef}
         sourceId={sourceId}
@@ -2035,6 +2052,13 @@ export function EpgGridPage() {
       />
     </>
   );
+  // The cursor's programme: its row's list is the same array until its guide answer changes.
+  const cursorRowPrograms = programsFor(paged.getChannel(cursor.row));
+  const cursorProg = useMemo(() => {
+    const inWindow = (cursorRowPrograms ?? []).filter((p) => ms(p.end) > dataStart && ms(p.start) < dataEnd);
+    const i = programIndexAt(inWindow, cursor.time);
+    return i >= 0 ? inWindow[i] : undefined;
+  }, [cursorRowPrograms, cursor.time, dataStart, dataEnd]);
   if (sources.error) {
     return (
       <>
@@ -2052,7 +2076,6 @@ export function EpgGridPage() {
     );
   }
 
-  const cursorProg = cursorProgram(cursor.row, cursor.time);
   const cursorStart = cursorProg?.start ?? '';
   const lang = i18n.language;
   // The band describes the hovered cell, else the open popover's, else the keyboard cursor's.
@@ -2172,7 +2195,7 @@ export function EpgGridPage() {
           <div
             ref={scroller}
             role="grid"
-            aria-label={t('guide')}
+            aria-label={text.guide}
             aria-rowcount={count + 1}
             // Focusable from script only: it holds focus while the cursor's row is still loading.
             tabIndex={-1}
@@ -2212,7 +2235,7 @@ export function EpgGridPage() {
                 trackWidth={trackWidth}
                 slotPx={slotPx}
                 compact={compact}
-                nowLabel={nowInWindow ? formatClock(now, lang) : undefined}
+                nowLabel={nowLabel}
                 nowX={nowX}
                 rtl={rtl}
                 trackTitles={trackTitles}
@@ -2239,7 +2262,8 @@ export function EpgGridPage() {
               {pageMeasured && vItems.map((v) => {
                 const ch = paged.getChannel(v.index);
                 const programs = programsFor(ch);
-                const playing = !!ch && playingKey === itemKey(ch.ref);
+                const k = ch ? itemKey(ch.ref) : null;
+                const playing = k !== null && playingKey === k;
                 const playingProgramStart = playing
                   ? playingSource?.isLive
                     ? programs?.find((p) => ms(p.start) <= now && now < ms(p.end))?.start
@@ -2261,7 +2285,7 @@ export function EpgGridPage() {
                     compact={compact}
                     rtl={rtl}
                     kind={kind}
-                    highlighted={!!ch && highlight === itemKey(ch.ref)}
+                    highlighted={k !== null && highlight === k}
                     playing={playing}
                     playingProgramStart={playingProgramStart}
                     genreFilter={genreFilter}
@@ -2350,19 +2374,19 @@ export function EpgGridPage() {
         />
       ) : null}
       <MemoMappingDialog channel={mapping} onClose={closeMapping} />
-      <Dialog open={programmeLink !== null} onClose={() => setProgrammeLink(null)} title={t('copyUrl')} size="lg">
+      <Dialog open={programmeLink !== null} onClose={() => setProgrammeLink(null)} title={text.copyUrl} size="lg">
         <p className="mb-2 text-sm text-fg-muted">Select the stream address and copy it manually.</p>
         <input
           type="text"
           readOnly
           value={programmeLink ?? ''}
-          aria-label={t('copyUrl')}
+          aria-label={text.copyUrl}
           data-autofocus
           onFocus={(e) => e.currentTarget.select()}
           className="w-full rounded-md border border-edge bg-bg px-3 py-2 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-focus"
         />
         <div className="mt-3 flex justify-end">
-          <Button onClick={() => setProgrammeLink(null)}>{t('close')}</Button>
+          <Button onClick={() => setProgrammeLink(null)}>{text.close}</Button>
         </div>
       </Dialog>
 

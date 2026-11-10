@@ -10,7 +10,11 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 
 - Faster channel changes in the built-in player: MPEG-TS and HLS streams reuse a ready worker instead of starting a new one on each zap.
 - The All channels list of a large source opens faster: its total comes from the stored group counts instead of counting every channel on each page.
-- Guide search and the now/next lookups read less per request.
+- Guide search is much faster on large libraries, also right after a guide update: it reads only the channels its hits belong to and stops once the page of results is settled. Rebuilding the search index after a guide refresh takes somewhat longer in exchange, and the index is rebuilt once at the first start after updating.
+- The now/next lookups read less per request.
+- The TV guide scrolls more smoothly: its channel column, programme titles and time labels are pinned only while the grid moves sideways.
+- Going Back to a large grid no longer freezes the window while the page renders, and Home draws its first screen before the rest on a cold start.
+- A channel change redraws far less of the player and the Live page.
 - Xtream syncs decode their lists in one pass and use less memory, and a large catalog refresh rebuilds the title search index in one go.
 - The web UI shows Home sooner on a cold load: the command palette, the shortcut overlay and Home's card menus load on first use, and the settings and sources are requested while the app's code downloads.
 - Typing in search stays responsive while results narrow, and Live's group list, the guide toolbar and Sports cards no longer redraw when nothing in them changed.

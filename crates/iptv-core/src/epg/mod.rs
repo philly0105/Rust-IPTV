@@ -395,6 +395,7 @@ pub async fn set_enabled(state: Arc<AppState>, url: String, enabled: bool) -> Co
         })
         .await?;
     runtime(&state).bump();
+    search::spawn_warm_guide(&state);
     state.emit("epg.changed", serde_json::json!({}));
     if enabled && needs_data {
         ingest::spawn_refresh(state, &url);

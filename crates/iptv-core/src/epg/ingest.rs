@@ -388,6 +388,7 @@ async fn run_refresh(
                 state.emit("epg.changed", STATUS_ONLY);
             } else {
                 rt.bump();
+                super::search::spawn_warm_guide(&state);
                 state.emit("epg.changed", serde_json::json!({}));
             }
         }
@@ -570,6 +571,7 @@ pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
         .await?;
     if pruned > 0 {
         rt.bump();
+        super::search::spawn_warm_guide(&state);
         state.emit("epg.changed", serde_json::json!({}));
     }
     let now = chrono::Utc::now();

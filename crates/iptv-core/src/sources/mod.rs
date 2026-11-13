@@ -1490,6 +1490,11 @@ async fn run_import_inner(
                 emit_changed(&state, Some(id), ChangeReason::Catalog);
             }
             let source = get(&state, id).await?;
+            // Guide search reads the catalog's channel keys ahead, so the
+            // first search on the new catalog does not.
+            if !summary.unchanged || restored {
+                crate::epg::search::spawn_warm_catalog(&state, id);
+            }
             spawn_guide_refresh(&state, &source);
             // account:
             crate::account::after_import(&state, &source);

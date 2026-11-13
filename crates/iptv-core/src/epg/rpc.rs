@@ -163,6 +163,7 @@ pub fn register(r: &mut RpcRouter) {
             .await
             .map_err(RpcError::from)?;
         super::ingest::runtime(&s).bump();
+        super::search::spawn_warm_guide(&s);
         tracing::info!(programs = deleted, "EPG data cleared");
         s.emit("epg.changed", serde_json::json!({}));
         Ok::<(), RpcError>(())

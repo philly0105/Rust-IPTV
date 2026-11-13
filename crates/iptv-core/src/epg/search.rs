@@ -517,6 +517,9 @@ pub fn refresh_index(conn: &mut Connection) {
 
 /// Startup: builds a missing index in the background when the guide has
 /// programmes (a database upgraded to 0015, or an interrupted rebuild).
+/// Then loads what the first search would otherwise load: the channel
+/// directory and every source's catalog keys ([`spawn_warm_guide`],
+/// [`spawn_warm_catalog`]).
 pub fn spawn_startup_build(state: &Arc<AppState>) {
     let weak = Arc::downgrade(state);
     tokio::spawn(async move {
@@ -526,7 +529,81 @@ pub fn spawn_startup_build(state: &Arc<AppState>) {
             Ok(false) => {}
             Err(e) => tracing::warn!(error = %e, "could not build the guide search index"),
         }
+        warm_guide(&state).await;
+        let sources = state
+            .db_call(|c| {
+                Ok(c.prepare("SELECT id FROM sources ORDER BY position")?
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?)
+            })
+            .await
+            .unwrap_or_default();
+        for id in sources {
+            warm_catalog(&state, id).await;
+        }
     });
+}
+
+/// After the guide changed (a refresh, a clear, a prune, a feed enabled or
+/// disabled): loads the channel directory and its reverse lookups in the
+/// background, which the first search after the change would otherwise
+/// load (most of its time). A search meanwhile waits for this load rather
+/// than starting its own.
+pub fn spawn_warm_guide(state: &Arc<AppState>) {
+    let weak = Arc::downgrade(state);
+    tokio::spawn(async move {
+        if let Some(state) = weak.upgrade() {
+            warm_guide(&state).await;
+        }
+    });
+}
+
+async fn warm_guide(state: &AppState) {
+    let rt = runtime(state);
+    let warmed = state
+        .db_call(move |c| {
+            let dir = resolve::directory(c, &rt)?;
+            // Builds the reverse lookups too.
+            dir.ids_of("");
+            Ok(())
+        })
+        .await;
+    if let Err(e) = warmed {
+        tracing::debug!(error = %e, "could not load the guide channel directory ahead");
+    }
+}
+
+/// After a source's catalog was written: reads its catalog keys
+/// ([`CatalogKeys`]) in the background, which the source's first guide
+/// search would otherwise read (normalizing every channel name it has not
+/// seen: about 110 ms for a new 200k-channel catalog in release). Cheap
+/// when they are current.
+pub fn spawn_warm_catalog(state: &Arc<AppState>, source_id: &str) {
+    let weak = Arc::downgrade(state);
+    let id = source_id.to_string();
+    tokio::spawn(async move {
+        if let Some(state) = weak.upgrade() {
+            warm_catalog(&state, id).await;
+        }
+    });
+}
+
+async fn warm_catalog(state: &AppState, source_id: String) {
+    let rt = runtime(state);
+    let warmed = state
+        .db_call(move |c| {
+            // Keys and stamp from one snapshot, as a search reads them.
+            let tx = c.transaction()?;
+            for content_type in [ContentType::Live, ContentType::Radio] {
+                catalog_keys(&tx, &rt, &source_id, content_type)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await;
+    if let Err(e) = warmed {
+        tracing::debug!(error = %e, "could not read catalog keys ahead");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2793,6 +2870,67 @@ mod tests {
         assert_eq!(found(&conn), want);
         let set = current_set(&conn).unwrap().unwrap();
         assert!(set_is_empty(&conn, set.other()).unwrap());
+    }
+
+    /// After a guide change and a catalog write, the channel directory and
+    /// the catalog keys are loaded in the background, current, before any
+    /// search asks for them; a search then finds them loaded.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn guide_and_catalog_are_loaded_ahead_of_the_first_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        state
+            .db_call(|c| {
+                c.execute_batch(
+                    "INSERT INTO sources(id, kind, name, config_json) VALUES ('s', 'm3u', 'S', '{}');
+                     INSERT INTO epg_sources(url, enabled, origin) VALUES ('u1', 1, 'settings');
+                     INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES ('u1', 'g1.tv', 'Guide One');
+                     INSERT INTO items(source_id, content_type, item_id, category_id, title, epg_channel_id)
+                       VALUES ('s', 'live', 'i1', 'c', 'Guide One', NULL);",
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let rt = runtime(&state);
+        let wait = |done: &dyn Fn() -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !done() {
+                assert!(std::time::Instant::now() < deadline, "not loaded");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+        for _ in 0..2 {
+            rt.bump();
+            spawn_warm_guide(&state);
+            let generation = rt.generation();
+            let names = || {
+                rt.names.lock().as_ref().is_some_and(|d| {
+                    d.generation() == generation && !d.names_of("g1.tv").is_empty()
+                })
+            };
+            tokio::task::block_in_place(|| wait(&names));
+        }
+        let stamp = state
+            .db_call(|c| catalog_stamp(c, "s", ContentType::Live))
+            .await
+            .unwrap();
+        assert!(stamp.is_some());
+        spawn_warm_catalog(&state, "s");
+        let keys = || {
+            rt.search_keys
+                .lock()
+                .catalogs
+                .get(&("s".to_string(), ContentType::Live))
+                .is_some_and(|k| k.stamp == stamp && k.keys.len() == 1 && k.by_name.len() == 1)
+        };
+        tokio::task::block_in_place(|| wait(&keys));
     }
 
     /// Two refreshes back to back: the second one's rebuild waits for the

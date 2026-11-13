@@ -8,7 +8,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { useLayoutEffect, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { useRpcQuery, useTransitionQuery } from './query';
+import { TransitionReads, useRpcQuery, useTransitionQuery } from './query';
 import { rpcRaw } from './transport';
 
 const transitions = vi.hoisted(() => ({ count: 0 }));
@@ -120,6 +120,62 @@ describe('useTransitionQuery', () => {
     expect(screen.getByTestId('t').textContent).toBe('A');
     rerender(withClient(client, <Reader k="b" />));
     expect(screen.getByTestId('t').textContent).toBe('B');
+  });
+});
+
+describe('useTransitionQuery renders', () => {
+  it('re-renders for the result properties it reads, as useQuery does', async () => {
+    const client = newClient();
+    client.setQueryData(['t'], 'same');
+    let calls = 0;
+    const queryFn = async () => {
+      calls++;
+      return 'same';
+    };
+    let dataRenders = 0;
+    let fetchingRenders = 0;
+    function DataReader() {
+      dataRenders++;
+      const q = useTransitionQuery({ queryKey: ['t'], queryFn, staleTime: Infinity });
+      return <p data-testid="d">{q.data}</p>;
+    }
+    function FetchingReader() {
+      fetchingRenders++;
+      const q = useTransitionQuery({ queryKey: ['t'], queryFn, staleTime: Infinity });
+      return <p data-testid="f">{q.isFetching ? 'fetching' : 'idle'}</p>;
+    }
+    render(withClient(client, <><DataReader /><FetchingReader /></>));
+    await waitFor(() => expect(screen.getByTestId('f').textContent).toBe('idle'));
+    const data0 = dataRenders;
+    const fetching0 = fetchingRenders;
+    // A refetch whose answer is the same data: only the fetch state moves.
+    await act(async () => client.invalidateQueries({ queryKey: ['t'] }));
+    await waitFor(() => expect(calls).toBe(1));
+    await waitFor(() => expect(screen.getByTestId('f').textContent).toBe('idle'));
+    expect(fetchingRenders).toBeGreaterThan(fetching0);
+    expect(dataRenders).toBe(data0);
+  });
+});
+
+describe('TransitionReads', () => {
+  it('turns useRpcQuery readers below it into transition readers, except those that opt out', async () => {
+    raw.mockImplementation(async (cmd: string) => (cmd === 'sources.list' ? [{ id: 's1' }] : [{ id: 'l1' }]) as never);
+    const client = newClient();
+    function Scoped() {
+      const q = useRpcQuery('sources.list', undefined);
+      return <p data-testid="s">{q.data ? q.data.map((x) => x.id).join() : 'loading'}</p>;
+    }
+    function OptedOut() {
+      const q = useRpcQuery('lists.list', undefined, { transition: false });
+      return <p data-testid="o">{q.data ? q.data.map((x) => x.id).join() : 'loading'}</p>;
+    }
+    render(withClient(client, <TransitionReads><OptedOut /></TransitionReads>));
+    await waitFor(() => expect(screen.getByTestId('o').textContent).toBe('l1'));
+    expect(transitions.count).toBe(0);
+    cleanup();
+    render(withClient(client, <TransitionReads><Scoped /></TransitionReads>));
+    await waitFor(() => expect(screen.getByTestId('s').textContent).toBe('s1'));
+    expect(transitions.count).toBeGreaterThan(0);
   });
 });
 

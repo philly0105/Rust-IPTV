@@ -3,10 +3,12 @@
  * Only errors with `retryable` are retried, at most twice.
  */
 
-import { startTransition, useEffect, useReducer, useRef } from 'react';
+import { createContext, createElement, startTransition, useContext, useEffect, useReducer, useState, type ReactNode } from 'react';
 import {
   QueryClient,
+  QueryObserver,
   keepPreviousData,
+  notifyManager,
   useMutation,
   useQuery,
   useQueryClient,
@@ -121,46 +123,60 @@ export interface RpcQueryOptions {
    * the same key, so other readers of the command share the cache entry; useWatchedKeys caches it.
    */
   queryKeyHashFn?: (key: QueryKey) => string;
-  /** Re-render for this query's answers in a transition ({@link useTransitionQuery}). */
+  /**
+   * Re-render for this query's answers in a transition ({@link useTransitionQuery}). Unset, a reader
+   * inside {@link TransitionReads} does.
+   */
   transition?: boolean;
 }
 
 /**
  * TanStack hands every reader its query's changes through `useSyncExternalStore`, whose updates
  * React always renders synchronously: a page that re-renders for an answer does so in one task,
- * inside the notify timer (a search's results: up to 100-240 ms at a 4x CPU slowdown, NAV-3). `useQuery` with `notifyOnChangeProps: []` hears nothing from its
- * observer; this hook re-renders the reader in a `startTransition` when the cache reports a
- * change to its query, and the render reads the observer's result, as every render does. React
- * renders a transition in slices between which the browser paints and handles input, and keeps
- * what is on screen until the new render is complete, so no half-updated page shows.
+ * inside the notify timer (a search's results: up to 100-240 ms at a 4x CPU slowdown, NAV-3). This
+ * hook keeps its own `QueryObserver`, as `useQuery` does, but re-renders the reader in a
+ * `startTransition` when the observer reports a change. React renders a transition in slices
+ * between which the browser paints and handles input, and keeps what is on screen until the new
+ * render is complete, so no half-updated page shows.
  *
- * Only the reader that asks for it changes: other readers of the same query keep their own
- * subscription. A change between the render and the subscription is caught by comparing the
- * query's state object, which TanStack replaces on every change.
+ * The observer reports only changes to the result properties the reader's renders read, as it
+ * does for `useQuery` (a fetch starting re-renders a reader of `data` alone not at all), and a
+ * change between the render and the subscription is caught when it subscribes. Only the reader
+ * that asks for it changes: other readers of the same query keep their own subscription. It has
+ * none of `useQuery`'s suspense and error-boundary options (`suspense`, `throwOnError`).
  */
 export function useTransitionQuery<TQueryFnData, TError, TData = TQueryFnData, TQueryKey extends QueryKey = QueryKey>(
   options: UseQueryOptions<TQueryFnData, TError, TData, TQueryKey>,
 ): UseQueryResult<TData, TError> {
   const client = useQueryClient();
-  const hash = client.defaultQueryOptions(options).queryHash;
-  const cache = client.getQueryCache();
-  const seen = cache.get(hash)?.state;
-  const seenRef = useRef(seen);
-  seenRef.current = seen;
+  const defaulted = client.defaultQueryOptions(options);
+  defaulted._optimisticResults = 'optimistic';
+  const [observer] = useState(() => new QueryObserver<TQueryFnData, TError, TData, TQueryFnData, TQueryKey>(client, defaulted));
+  const result = observer.getOptimisticResult(defaulted);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
-    const update = () => startTransition(rerender);
-    const stop = cache.subscribe((event) => {
-      if (event.type === 'updated' && event.query.queryHash === hash) update();
-    });
-    if (cache.get(hash)?.state !== seenRef.current) update();
+    const stop = observer.subscribe(notifyManager.batchCalls(() => startTransition(rerender)));
+    // A change since the render reaches the listener now, as useQuery's subscription catches it.
+    observer.updateResult();
     return stop;
-  }, [cache, hash]);
-  return useQuery({ ...options, notifyOnChangeProps: NO_PROPS });
+  }, [observer]);
+  useEffect(() => {
+    observer.setOptions(defaulted);
+  }, [defaulted, observer]);
+  return observer.trackResult(result) as UseQueryResult<TData, TError>;
 }
 
-/** Stable, so the observer's options compare equal from render to render. */
-const NO_PROPS: [] = [];
+const TransitionReadsContext = createContext(false);
+
+/**
+ * Every `useRpcQuery` reader below re-renders for its answers in a transition ({@link
+ * useTransitionQuery}), unless it passes `transition: false`. For a page whose answers land as
+ * one synchronous render each: wrap the page once, at a place that stays mounted, since a reader
+ * must not change its hook while mounted.
+ */
+export function TransitionReads({ children }: { children?: ReactNode }) {
+  return createElement(TransitionReadsContext.Provider, { value: true }, children);
+}
 
 export function useRpcQuery<K extends RpcName>(
   cmd: K,
@@ -178,8 +194,9 @@ export function useRpcQuery<K extends RpcName>(
   if (opts?.gcTime !== undefined) options.gcTime = opts.gcTime;
   if (opts?.keepPrevious) options.placeholderData = keepPreviousData;
   if (opts?.queryKeyHashFn) options.queryKeyHashFn = opts.queryKeyHashFn;
-  // `transition` picks the hook: it must stay the same for the life of the reader.
-  return opts?.transition ? useTransitionQuery(options) : useQuery<RpcResult<K>, RpcError>(options);
+  // `transition`, or the scope's, picks the hook: it must stay the same for the life of the reader.
+  const scoped = useContext(TransitionReadsContext);
+  return (opts?.transition ?? scoped) ? useTransitionQuery(options) : useQuery<RpcResult<K>, RpcError>(options);
 }
 
 /**

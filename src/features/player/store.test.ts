@@ -1176,6 +1176,155 @@ describe('zap bursts, catch-up zapping and channel renames', () => {
       expect(calls('account.status')).toEqual([]);
     });
   });
+
+  describe('the stream lookup a press starts ahead of its tune', () => {
+    /** A request answered when the test says so. */
+    function deferred<T>(): { promise: Promise<T>; resolve(v: T): void; reject(e: unknown): void } {
+      let resolve: (v: T) => void = () => undefined;
+      let reject: (e: unknown) => void = () => undefined;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+    /** How many `name` requests were out each time a zap placeholder reached the store. */
+    function lookupsAtPlaceholders(name: string): { seen: number[]; off(): void } {
+      const seen: number[] = [];
+      const off = usePlayerStore.subscribe((s, prev) => {
+        if (s.source !== prev.source && store.isPendingZap(s.source)) seen.push(calls(name).length);
+      });
+      return { seen, off };
+    }
+    const tuneChannel1 = async (kind: 'xtream' | 'stalker' = 'xtream'): Promise<void> => {
+      await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: kind });
+      if (kind === 'xtream') await vi.waitFor(() => expect(queryClient.getQueryData(rpcKey('account.status', { sourceId: 's1' }))).toBeTruthy());
+      await flush();
+      rpcMock.mockClear();
+    };
+
+    it('a press on its own asks before its placeholder reaches the store, and its start takes that one answer', async () => {
+      await tuneChannel1();
+      const watch = lookupsAtPlaceholders('xtream.streamUrl');
+      const played = await zap('down');
+      watch.off();
+      expect(played?.number).toBe(2);
+      // The request was out before the press's store update (and so before React rendered it).
+      expect(watch.seen).toEqual([1]);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      expect(usePlayerStore.getState().source).toMatchObject({ url: 'http://x/live/102.m3u8', title: 'Channel 2', ref: channel(2).ref });
+      expect(store.isPendingZap(usePlayerStore.getState().source)).toBe(false);
+    });
+
+    it('a held key asks nothing ahead: its press asks once the gate let it through, as before', async () => {
+      await tuneChannel1();
+      const watch = lookupsAtPlaceholders('xtream.streamUrl');
+      await zap('down', { held: true });
+      watch.off();
+      expect(watch.seen).toEqual([0]);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      expect(usePlayerStore.getState().source?.url).toBe('http://x/live/102.m3u8');
+    });
+
+    it('a Stalker press fetches one link per start, and a burst none for the channels it passes', async () => {
+      let token = 0;
+      handlers['stalker.streamUrl'] = (a) => {
+        const id = (a as { ref: ItemRef }).ref.itemId;
+        token += 1;
+        return { url: `http://p/play/${id}?token=${token}`, kind: 'direct', title: id, isLive: true, isRadio: false };
+      };
+      await tuneChannel1('stalker');
+      expect(store.knownSourceKind('s1')).toBe('stalker');
+      const watch = lookupsAtPlaceholders('stalker.streamUrl');
+      await zap('down');
+      expect(watch.seen).toEqual([1]);
+      // The link the press fetched is the one that plays: no second link for the same start.
+      expect(calls('stalker.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      expect(usePlayerStore.getState().source?.url).toBe('http://p/play/102?token=2');
+      await flush();
+      rpcMock.mockClear();
+
+      // Three quick presses: only the channel the burst stops on gets a link.
+      const landed = await Promise.all([zap('down'), zap('down'), zap('down')]);
+      watch.off();
+      expect(landed.map((c) => c?.number)).toEqual([5, 5, 5]);
+      expect(calls('stalker.streamUrl')).toEqual([{ ref: channel(5).ref }]);
+      expect(usePlayerStore.getState().source?.url).toBe('http://p/play/105?token=3');
+    });
+
+    it('a press back onto the channel whose picture is still up asks nothing for it', async () => {
+      await tuneChannel1();
+      usePlayerStore.setState({ status: 'playing' });
+      const playing = usePlayerStore.getState().source;
+      const slow = deferred<unknown>();
+      handlers['xtream.streamUrl'] = () => slow.promise;
+      const away = zap('down');
+      await vi.waitFor(() => expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]));
+      // The burst goes quiet while channel 2's lookup is still out; the next press is on its own.
+      await new Promise((r) => setTimeout(r, store.ZAP_SETTLE_MS + 30));
+      expect(usePlayerStore.getState().source).toMatchObject({ title: 'Channel 2', url: 'http://x/live/101.m3u8' });
+      const back = zap('up');
+      expect((await back)?.number).toBe(1);
+      expect(usePlayerStore.getState().source).toBe(playing);
+      // Channel 2's answer comes too late: nothing replaces what plays, and nothing more was asked.
+      slow.resolve({ url: 'http://x/live/102.m3u8', kind: 'hls', title: '102', isLive: true, isRadio: false });
+      await away;
+      await flush();
+      expect(usePlayerStore.getState().source).toBe(playing);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      expect(calls('recent.add')).toEqual([]);
+    });
+
+    it('another request after the press wins: the early answer never starts the wrong channel', async () => {
+      await tuneChannel1();
+      const slow = deferred<unknown>();
+      handlers['xtream.streamUrl'] = (a) => {
+        const id = (a as { ref: ItemRef }).ref.itemId;
+        return id === '102' ? slow.promise : { url: `http://x/live/${id}.m3u8`, kind: 'hls', title: id, isLive: true, isRadio: false };
+      };
+      const press = zap('down');
+      await vi.waitFor(() => expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]));
+      // A click on channel 7 while channel 2's link is on its way.
+      await playChannel(channel(7), 'xtream');
+      expect(usePlayerStore.getState().source?.url).toBe('http://x/live/107.m3u8');
+      slow.resolve({ url: 'http://x/live/102.m3u8', kind: 'hls', title: '102', isLive: true, isRadio: false });
+      expect(await press).toBeUndefined();
+      await flush();
+      expect(usePlayerStore.getState().source?.url).toBe('http://x/live/107.m3u8');
+      expect(calls('recent.add')).toEqual([expect.objectContaining({ ref: channel(7).ref })]);
+    });
+
+    it('a request that takes over before the lock check answers leaves the press asking nothing', async () => {
+      await tuneChannel1();
+      // The parental status is not known yet: the press's lock check waits on it.
+      queryClient.removeQueries({ queryKey: ['parental.status'] });
+      const status = deferred<unknown>();
+      handlers['parental.status'] = () => status.promise;
+      const press = zap('down');
+      await vi.waitFor(() => expect(calls('parental.status')).toHaveLength(1));
+      await playChannel(channel(7), 'xtream');
+      status.resolve({ enabled: false });
+      expect(await press).toBeUndefined();
+      await flush();
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(7).ref }]);
+      expect(usePlayerStore.getState().source?.url).toBe('http://x/live/107.m3u8');
+    });
+
+    it('a failed early lookup shows the stream error on the press, and Retry asks again', async () => {
+      await tuneChannel1();
+      handlers['xtream.streamUrl'] = () => {
+        throw Object.assign(new Error('panel down'), { code: 'network' });
+      };
+      await zap('down');
+      expect(usePlayerStore.getState().status).toBe('error');
+      expect(usePlayerStore.getState().source?.ref).toEqual(channel(2).ref);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      handlers['xtream.streamUrl'] = () => ({ url: 'http://x/live/102.m3u8', kind: 'hls', title: '102', isLive: true, isRadio: false });
+      expect(store.retryResolve()).toBe(true);
+      await vi.waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://x/live/102.m3u8'));
+      expect(calls('xtream.streamUrl')).toHaveLength(2);
+    });
+  });
 });
 
 describe('external players (need live-channels#2)', () => {

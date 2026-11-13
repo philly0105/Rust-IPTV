@@ -292,6 +292,76 @@ describe('zapping past a locked channel (Ask mode)', () => {
     expect(usePlayerStore.getState().source?.url).toBe('http://x/live/666.m3u8');
   });
 
+  describe('the stream lookup a press starts ahead of its tune', () => {
+    /** An account allowing two connections, known before the press: a press on its own tunes at once. */
+    async function tuneOn101(): Promise<void> {
+      handlers['account.status'] = () => ({ sourceId: 's1', kind: 'xtream', isTrial: false, maxConnections: 2, checkedAt: new Date().toISOString() });
+      await store.playChannel(channel('101'));
+      await vi.waitFor(() => expect(queryClient.getQueryState(['account.status', { sourceId: 's1' }])?.status).toBe('success'));
+      await flush();
+      rpcMock.mockClear();
+    }
+    const lookups = (): string[] => calls('xtream.streamUrl').map((a) => (a as { ref: ItemRef }).ref.itemId);
+
+    it('asks for an open channel as soon as its lock check passes, once', async () => {
+      order = ['101', '102'];
+      await tuneOn101();
+      const seen: number[] = [];
+      const off = usePlayerStore.subscribe((s, prev) => {
+        if (s.source !== prev.source && store.isPendingZap(s.source)) seen.push(lookups().length);
+      });
+      expect((await zap('down'))?.ref.itemId).toBe('102');
+      off();
+      // Out before the placeholder, and the gate's own check did not ask a second time.
+      expect(seen).toEqual([1]);
+      expect(lookups()).toEqual(['102']);
+    });
+
+    it('asks nothing for a locked channel behind the PIN prompt, and once after it is accepted', async () => {
+      await tuneOn101();
+      const pending = zap('down');
+      await vi.waitFor(() => expect(useGateStore.getState().queue).toHaveLength(1));
+      await flush();
+      expect(lookups()).toEqual([]);
+      settleGate(useGateStore.getState().queue[0]!.id, true);
+      expect((await pending)?.ref.itemId).toBe('666');
+      expect(lookups()).toEqual(['666']);
+      expect(usePlayerStore.getState().source?.url).toBe('http://x/live/666.m3u8');
+    });
+
+    it('asks nothing for a locked channel whose prompt is cancelled; the zap steps on and asks for the open one', async () => {
+      await tuneOn101();
+      const pending = zap('down');
+      await vi.waitFor(() => expect(useGateStore.getState().queue).toHaveLength(1));
+      settleGate(useGateStore.getState().queue[0]!.id, false);
+      expect((await pending)?.ref.itemId).toBe('103');
+      expect(lookups()).toEqual(['103']);
+    });
+
+    it('asks nothing when the lock check fails (the gate fails closed too)', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      order = ['101', '102'];
+      await tuneOn101();
+      handlers['parental.check'] = () => {
+        throw new Error('database is locked');
+      };
+      await zap('down');
+      await flush();
+      expect(lookups()).toEqual([]);
+      expect(usePlayerStore.getState().source?.ref?.itemId).toBe('101');
+    });
+
+    it('Hide mode: asks nothing for a hidden channel, and steps on to the next one it shows', async () => {
+      await tuneOn101();
+      handlers['parental.status'] = () => status({ mode: 'hide' });
+      applyStatus(status({ mode: 'hide' }));
+      const played = await zap('down');
+      expect(played?.ref.itemId).toBe('103');
+      expect(lookups()).toEqual(['103']);
+      expect(useGateStore.getState().queue).toEqual([]);
+    });
+  });
+
   it('stays put at the end of the list when everything past the refusal is locked', async () => {
     order = ['101', '666', '667'];
     await store.playChannel(channel('101'));

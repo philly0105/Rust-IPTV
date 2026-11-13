@@ -90,7 +90,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
 
   /** Wrap a handler: skip when the focused element owns the key, else prevent default and run. */
   const guard =
-    (kind: KeyKind, fn: () => void) =>
+    (kind: KeyKind, fn: (e: KeyboardEvent) => void) =>
     (e: KeyboardEvent): void => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (targetOwnsKey(e, kind)) {
@@ -103,7 +103,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
         return;
       }
       e.preventDefault();
-      fn();
+      fn(e);
     };
   /**
    * One press, one action: a held key's auto-repeat (about 30 keydowns a second) is ignored.
@@ -284,12 +284,13 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     once(guard('letter', () => setHistoryOpen(!useHistoryStore.getState().open))),
     { ...base, enabled: active && live && video, description: t('shortcutChannelHistory') },
   );
-  useShortcut('pageup', guard('arrow', () => void zap('up').catch(() => undefined)), {
+  // A held key's repeats are one burst: they tell the zap, which then asks no stream ahead of them.
+  useShortcut('pageup', guard('arrow', (e) => void zap('up', { held: e.repeat }).catch(() => undefined)), {
     ...pageKeys,
     enabled: active && zappable,
     description: t('shortcutChannelUp'),
   });
-  useShortcut('pagedown', guard('arrow', () => void zap('down').catch(() => undefined)), {
+  useShortcut('pagedown', guard('arrow', (e) => void zap('down', { held: e.repeat }).catch(() => undefined)), {
     ...pageKeys,
     enabled: active && zappable,
     description: t('shortcutChannelDown'),

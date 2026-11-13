@@ -1317,21 +1317,55 @@ function liveTsPlayable(): boolean {
  */
 async function autoLiveFormat(args: PlayItemArgs): Promise<'ts' | undefined> {
   if ((args.ref.contentType !== 'live' && args.ref.contentType !== 'radio') || !liveTsPlayable()) return undefined;
-  const settings = peekSettings() ?? (await getSettings());
+  return autoFormatFor(args, peekSettings() ?? (await getSettings()));
+}
+
+function autoFormatFor(args: PlayItemArgs, settings: Settings | null): 'ts' | undefined {
   if (settings?.streamFormat !== 'auto') return undefined;
   const mode = modeForSettings(settings.livePlayer ?? settings.player, { isRadio: !!args.isRadio });
   // play() moves embedded mpv to the built-in player outside the desktop app.
   return mode === 'inline' || mode === 'radio' || (mode === 'embedded-mpv' && !isDesktop) ? 'ts' : undefined;
 }
 
+/**
+ * `autoLiveFormat` without waiting, when the settings are already read: a zap's early lookup
+ * sends its request in the same turn as the press, before React renders the press.
+ */
+function autoLiveFormatNow(args: PlayItemArgs): Promise<'ts' | undefined> | 'ts' | undefined {
+  if ((args.ref.contentType !== 'live' && args.ref.contentType !== 'radio') || !liveTsPlayable()) return undefined;
+  const settings = peekSettings();
+  return settings ? autoFormatFor(args, settings) : autoLiveFormat(args);
+}
+
 /** Resolve a catalog item to a PlayerSource by source kind. Exported for tests. */
 export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
+  return describeResolved(await lookupStream(args), args);
+}
+
+/**
+ * The provider's answer for `args` (its stream URL, headers, DRM), before the caller's title,
+ * subtitle and artwork are put on it (`describeResolved`). One call is one request for a link:
+ * a Stalker portal hands out a fresh, short-lived one each time.
+ */
+function lookupStream(args: PlayItemArgs): Promise<PlayerSource> {
+  if (args.sourceKind === 'xtream') {
+    const autoFormat = autoLiveFormatNow(args);
+    return autoFormat instanceof Promise ? autoFormat.then((f) => xtreamLookup(args, f)) : xtreamLookup(args, autoFormat);
+  }
+  return otherLookup(args);
+}
+
+async function xtreamLookup(args: PlayItemArgs, autoFormat: 'ts' | undefined): Promise<PlayerSource> {
+  const { ref, episodeId } = args;
+  const resolved = await rpc('xtream.streamUrl', { ref, ...(episodeId ? { episodeId } : {}), ...(autoFormat ? { autoFormat } : {}) });
+  sourceKindCache.set(ref.sourceId, args.sourceKind);
+  return resolved;
+}
+
+async function otherLookup(args: PlayItemArgs): Promise<PlayerSource> {
   const { ref, episodeId } = args;
   let resolved: PlayerSource;
-  if (args.sourceKind === 'xtream') {
-    const autoFormat = await autoLiveFormat(args);
-    resolved = await rpc('xtream.streamUrl', { ref, ...(episodeId ? { episodeId } : {}), ...(autoFormat ? { autoFormat } : {}) });
-  } else if (args.sourceKind === 'stalker') {
+  if (args.sourceKind === 'stalker') {
     resolved = await rpc('stalker.streamUrl', episodeId ? { ref, episodeId } : { ref });
   } else if (episodeId) {
     // An m3u episode: its URL is stored in the series row (m3u.md, Series).
@@ -1362,7 +1396,12 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
     if (drm) resolved.drm = drm;
   }
   sourceKindCache.set(ref.sourceId, args.sourceKind);
+  return resolved;
+}
 
+/** The provider's answer from `lookupStream`, titled and described as the caller asked. */
+function describeResolved(resolved: PlayerSource, args: PlayItemArgs): PlayerSource {
+  const { ref, episodeId } = args;
   const out: PlayerSource = {
     ...resolved,
     title: args.title || resolved.title,
@@ -1506,6 +1545,12 @@ export async function startItem(
      */
     onRequest?: (seq: number) => void;
     onPlay?: (seq: number) => void;
+    /**
+     * The provider's answer for this item, asked for ahead of the start by a zap press that tunes
+     * at once (`startEarlyLookup`), after the item's lock check and never for a locked item. Null
+     * when it asked nothing: the start then asks once the gate lets the item through, as without it.
+     */
+    lookup?: Promise<PlayerSource | null>;
   },
 ): Promise<StartOutcome> {
   const seq = ++requestSeq;
@@ -1531,15 +1576,23 @@ export async function startItem(
   if (args.episodeId) placeholder.episodeId = args.episodeId;
   if (args.subtitle) placeholder.subtitle = args.subtitle;
   if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
-  usePlayerStore.setState({
+  const before = usePlayerStore.getState();
+  const loading: Partial<PlayerState> = {
     status: 'loading',
     error: undefined,
-    source: args.isLive ? usePlayerStore.getState().source ?? placeholder : placeholder,
-    dock: stageCount > 0 ? 'stage' : usePlayerStore.getState().dock === 'hidden' ? 'mini' : usePlayerStore.getState().dock,
-  });
+    source: args.isLive ? (before.source ?? placeholder) : placeholder,
+    dock: stageCount > 0 ? 'stage' : before.dock === 'hidden' ? 'mini' : before.dock,
+  };
+  // A zap's tune finds its placeholder loading already: no update for every subscriber to compare.
+  if (before.status !== loading.status || before.error !== undefined || before.source !== loading.source || before.dock !== loading.dock) {
+    usePlayerStore.setState(loading);
+  }
   let source: PlayerSource;
   try {
-    const resolved = await resolveSource(args);
+    const early = opts?.lookup ? await opts.lookup : null;
+    // It asked nothing (a lock, or a newer request came first): a superseded start asks nothing either.
+    if (opts?.lookup && !early && seq !== requestSeq) return 'superseded';
+    const resolved = early ? describeResolved(early, args) : await resolveSource(args);
     source = args.fromStart ? fromTheStart(resolved) : await withResume(resolved);
   } catch (err) {
     // A newer request won the race: do not clobber it.
@@ -1757,6 +1810,8 @@ interface TuneOptions {
   settings?: Settings | null;
   onRequest?: (seq: number) => void;
   onPlay?: (seq: number) => void;
+  /** A zap press's early stream lookup for this channel (see `startItem`). */
+  lookup?: Promise<PlayerSource | null>;
 }
 
 /** `playChannel` with its outcome: a zap steps past a channel the parental gate refused. */
@@ -1782,7 +1837,7 @@ async function tuneChannel(channel: Channel, sourceKind?: SourceKind, opts: Tune
   if (cached) args.subtitle = cached;
   // Tuner readout: number big, name below. Only once the gate let the channel through, so a
   // cancelled PIN prompt leaves no locked channel's name on screen.
-  const { readout = true, keepList = false, onRequest, onPlay } = opts;
+  const { readout = true, keepList = false, onRequest, onPlay, lookup } = opts;
   return startItem(args, {
     onAllowed: () => {
       passNowNext(channel.ref);
@@ -1792,7 +1847,16 @@ async function tuneChannel(channel: Channel, sourceKind?: SourceKind, opts: Tune
     ...(cached === undefined ? { subtitle: nowTitle(channel.ref) } : {}),
     ...(onRequest ? { onRequest } : {}),
     ...(onPlay ? { onPlay } : {}),
+    ...(lookup ? { lookup } : {}),
   });
+}
+
+/**
+ * The args `tuneChannel` builds for `channel`, as far as the stream lookup reads them (the ref,
+ * the kind, live or radio, and an m3u row's own URL).
+ */
+function lookupArgs(channel: Channel, kind: SourceKind): PlayItemArgs {
+  return { ref: channel.ref, title: channel.name, isLive: true, isRadio: channel.isRadio, sourceKind: kind, channel };
 }
 
 /** Tuner readout: number big, name below. `locked`: a locked channel the zap is passing. */
@@ -2061,6 +2125,8 @@ interface ZapBurst {
   tunedPress: number | null;
   /** Where the latest finished tune landed, and for which press. */
   landed?: { press: number; channel: Channel | undefined };
+  /** The stream lookup a press that tunes at once started ahead of its tune (`startEarlyLookup`). */
+  early?: { press: number; key: ItemKey; result: Promise<PlayerSource | null> };
   timer: ReturnType<typeof setTimeout> | null;
   done: Promise<Channel | undefined>;
   finish(ch: Channel | undefined): void;
@@ -2149,8 +2215,8 @@ function putBackHeld(): boolean {
  * channel (Ask mode) shows its number and name with a lock, without logo or guide; Hide mode
  * never names it.
  */
-async function showZapTarget(b: ZapBurst, target: Channel, press: number): Promise<void> {
-  const locked = await lockedNow(gateItemOf(target));
+async function showZapTarget(b: ZapBurst, target: Channel, press: number, lockCheck: Promise<boolean>): Promise<void> {
+  const locked = await lockCheck;
   if (locked && (await hideModeNow())) return;
   // A later press, another request, or this press's own tune got there first.
   if (!current(b, press) || b.tunedPress === press) return;
@@ -2191,8 +2257,39 @@ async function showZapTarget(b: ZapBurst, target: Channel, press: number): Promi
   showZapReadout(target, name, locked);
 }
 
+/**
+ * A press that tunes at once asks for its channel's stream here, as soon as the channel's lock
+ * check says it is not locked, instead of after the parental gate's own steps: those come after
+ * the press's placeholder has reached the store, and React renders that update in between, so the
+ * request waited on the render (34-65 ms at full CPU speed). The tune's start takes this answer in
+ * place of its own lookup (`startItem` `lookup`), so a start still asks once.
+ *
+ * Nothing is asked for a channel the check finds locked (or cannot check: that counts as locked),
+ * nor once a later press or another request took over, nor where the tune asks nothing (back on
+ * the channel whose picture is still up), nor for a press of a held key (`held`): the next repeat
+ * comes within ZAP_SETTLE_MS and supersedes this tune, and its answer would go unused (a Stalker
+ * link is a fresh one per request).
+ */
+function startEarlyLookup(b: ZapBurst, press: number, target: Channel, lockCheck: Promise<boolean>): void {
+  b.early = undefined;
+  const kind = knownSourceKind(target.ref.sourceId);
+  if (!kind || holdsPictureOf(target)) return;
+  const result = lockCheck.then((locked) => (locked || !current(b, press) ? null : lookupStream(lookupArgs(target, kind))));
+  // An answer the tune does not take (it gave way) is dropped; a failure reaches the tune's start.
+  result.catch(() => undefined);
+  b.early = { press, key: itemKey(target.ref), result };
+}
+
+/** The early lookup press `press` made for `target`, taken once. */
+function takeEarlyLookup(b: ZapBurst, press: number, target: Channel): Promise<PlayerSource | null> | undefined {
+  const early = b.early;
+  if (!early || early.press !== press || early.key !== itemKey(target.ref)) return undefined;
+  b.early = undefined;
+  return early.result;
+}
+
 /** One press: step from where the burst stands, show the new target, and tune or wait for quiet. */
-async function stepZap(direction: 'up' | 'down'): Promise<ZapBurst | undefined> {
+async function stepZap(direction: 'up' | 'down', held = false): Promise<ZapBurst | undefined> {
   queuedPresses = Math.max(0, queuedPresses - 1);
   // A burst that went quiet may still be tuning; it ends itself when this press takes over.
   const prior = burst && owns(burst) ? burst : null;
@@ -2247,8 +2344,12 @@ async function stepZap(direction: 'up' | 'down'): Promise<ZapBurst | undefined> 
   }
   if (!tunesNow && !awaitsLimit && peekNowNext(target.ref) === undefined) holdNowNext(target.ref, ZAP_SETTLE_MS);
   void fetchNowNext(target.ref);
+  // One lock check for the placeholder and the early lookup. The lookup's reaction is registered
+  // first, so its request goes out before the placeholder's store update (and React's render).
+  const lockCheck = lockedNow(gateItemOf(target));
+  if (tunesNow && !held) startEarlyLookup(b, b.press, target, lockCheck);
   // Nothing on screen moves when the parental lookup fails: the tune asks the gate itself.
-  void showZapTarget(b, target, b.press).catch(() => undefined);
+  void showZapTarget(b, target, b.press, lockCheck).catch(() => undefined);
   preloadEngineFor(target.url);
   // The next press in this burst steps from the target without a round trip.
   prefetchNeighbours(target.ref);
@@ -2285,12 +2386,16 @@ function gaveWay(b: ZapBurst): void {
  * back): that item comes back as it was, without a new stream or a Recent row.
  */
 function keepHeld(b: ZapBurst, press: number, target: Channel): boolean {
-  const cur = usePlayerStore.getState().source;
-  const held = cur && pendingSources.has(cur) ? heldItems.get(cur) : undefined;
-  // Only while its picture is still up (a failed item's was dropped: that one tunes again).
-  if (!held?.source.ref || !cur?.url || itemKey(held.source.ref) !== itemKey(target.ref) || !current(b, press)) return false;
+  if (!holdsPictureOf(target) || !current(b, press)) return false;
   b.tunedPress = press;
   return putBackHeld();
+}
+
+/** The placeholder on screen still shows `target`'s picture (only while it is up: a failed item's was dropped). */
+function holdsPictureOf(target: Channel): boolean {
+  const cur = usePlayerStore.getState().source;
+  const held = cur && pendingSources.has(cur) ? heldItems.get(cur) : undefined;
+  return !!held?.source.ref && !!cur?.url && itemKey(held.source.ref) === itemKey(target.ref);
 }
 
 /**
@@ -2298,7 +2403,13 @@ function keepHeld(b: ZapBurst, press: number, target: Channel): boolean {
  * stays the burst (later presses still wait for quiet). Null: a later press or another request
  * came first.
  */
-async function tuneZapTarget(b: ZapBurst, press: number, target: Channel, readout: TuneOptions['readout']): Promise<StartOutcome | null> {
+async function tuneZapTarget(
+  b: ZapBurst,
+  press: number,
+  target: Channel,
+  readout: TuneOptions['readout'],
+  lookup?: Promise<PlayerSource | null>,
+): Promise<StartOutcome | null> {
   // Read first, so nothing runs between the check below and the tune's request.
   const settings = peekSettings() ?? (await getSettings());
   const kind = knownSourceKind(target.ref.sourceId) ?? (await sourceKindOf(target.ref.sourceId));
@@ -2308,6 +2419,7 @@ async function tuneZapTarget(b: ZapBurst, press: number, target: Channel, readou
     keepList: true,
     readout,
     settings,
+    ...(lookup ? { lookup } : {}),
     onRequest: (seq) => {
       if (b.seq === seq - 1) b.seq = seq;
     },
@@ -2347,7 +2459,8 @@ async function runTune(b: ZapBurst, press: number): Promise<void> {
       }
       // The burst already put this channel's readout up (and the banner took its place).
       const tuned = target;
-      const outcome = await tuneZapTarget(b, press, tuned, () => !b.shown || itemKey(b.shown.ref) !== itemKey(tuned.ref));
+      const early = step === 0 ? takeEarlyLookup(b, press, tuned) : undefined;
+      const outcome = await tuneZapTarget(b, press, tuned, () => !b.shown || itemKey(b.shown.ref) !== itemKey(tuned.ref), early);
       if (outcome === 'started') return landed(b, press, tuned);
       if (outcome !== 'refused') return gaveWay(b);
     }
@@ -2391,10 +2504,11 @@ async function runTune(b: ZapBurst, press: number): Promise<void> {
  * follow it within ZAP_SETTLE_MS tune only once they go quiet, so the channels passed on the way
  * never open a stream or a Recent row.
  */
-export function zap(direction: 'up' | 'down'): Promise<Channel | undefined> {
+export function zap(direction: 'up' | 'down', opts?: { held?: boolean }): Promise<Channel | undefined> {
   preloadEngineFor(usePlayerStore.getState().source?.url);
   queuedPresses++;
-  const step = zapQueue.then(() => stepZap(direction));
+  const held = !!opts?.held;
+  const step = zapQueue.then(() => stepZap(direction, held));
   zapQueue = step.catch(() => undefined);
   return step.then((b) => (b ? b.done : undefined));
 }

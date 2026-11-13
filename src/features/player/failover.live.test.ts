@@ -25,6 +25,7 @@ const reconnect = await import('./reconnect');
 const pins = await import('./livePins');
 const history = await import('./history');
 const { useToastStore } = await import('@/ui/Toast');
+const { queryClient } = await import('@/api/query');
 const { usePlayerStore, reportStatus } = store;
 
 const ref = (sourceId: string, itemId: string): ItemRef => ({ sourceId, contentType: 'live', itemId });
@@ -308,6 +309,35 @@ describe('live failover', () => {
     reportStatus('error', 'HTTP 404');
     await vi.waitFor(() => expect(sourceIdNow()).toBe('s3'));
     expect(streamUrlCalls()).toEqual(['s3']);
+  });
+
+  it('a zap that asked for its stream ahead of its tune fails over with one fresh lookup per copy', async () => {
+    const channel = (id: string) => ({ ref: ref('s1', id), name: 'Sky Sports 1', number: Number(id), categoryId: 'c', categoryName: 'C', isRadio: false });
+    handlers['parental.status'] = () => ({ enabled: false });
+    handlers['account.status'] = () => ({ sourceId: 's1', kind: 'xtream', isTrial: false, maxConnections: 2, checkedAt: new Date().toISOString() });
+    handlers['catalog.neighbors'] = (a) => {
+      const n = Number((a as { ref: ItemRef }).ref.itemId);
+      return { prev: channel(String(n - 1)), next: channel(String(n + 1)) };
+    };
+    queryClient.removeQueries({ queryKey: ['account.status'] });
+    await store.playChannel(channel('1'), 'xtream');
+    reportStatus('playing');
+    await vi.waitFor(() => expect(queryClient.getQueryState(['account.status', { sourceId: 's1' }])?.status).toBe('success'));
+    await settle();
+    rpcMock.mockClear();
+
+    // A press on its own: its lookup goes out ahead of its tune, and the tune uses it.
+    expect((await store.zap('down'))?.ref.itemId).toBe('2');
+    expect(streamUrlCalls()).toEqual(['s1']);
+    expect(usePlayerStore.getState().source?.url).toBe('http://s1/live/2.m3u8');
+    reportStatus('playing');
+    await settle();
+
+    // The copy is looked up afresh; the press's answer is never played again.
+    reportStatus('error', 'HTTP 404');
+    await vi.waitFor(() => expect(sourceIdNow()).toBe('s2'));
+    expect(usePlayerStore.getState().source?.url).toBe('http://s2/live/20.m3u8');
+    expect(streamUrlCalls()).toEqual(['s1', 's2']);
   });
 
   it('drops an answer asked for before the quality filter changed', async () => {

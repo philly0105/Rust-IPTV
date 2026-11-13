@@ -166,7 +166,7 @@ export function useTransitionQuery<TQueryFnData, TError, TData = TQueryFnData, T
   return observer.trackResult(result) as UseQueryResult<TData, TError>;
 }
 
-const TransitionReadsContext = createContext(false);
+const TransitionReadsContext = /* @__PURE__ */ createContext(false);
 
 /**
  * Every `useRpcQuery` reader below re-renders for its answers in a transition ({@link

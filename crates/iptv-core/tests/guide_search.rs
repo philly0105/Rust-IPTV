@@ -730,6 +730,61 @@ async fn index_follows_refresh_clear_and_staging() {
         .is_empty());
 }
 
+/// Two feeds refreshed at the same time, three times over, while searches
+/// run: each search answers (on the index or the scan), and once both
+/// refreshes are done the index is current and finds what the scan finds,
+/// whichever refresh's rebuild ran last or saw the other come in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn feeds_refreshing_together_leave_a_current_index() {
+    let e = env().await;
+    let b = base();
+    let url = e.ingest(b).await;
+    let second = e.feed_path("second.xml");
+    e.state.settings.write().epg_urls = vec![url.clone(), second.clone()];
+    let range = window("cafe", b - HOUR, b + 2 * 86_400);
+    for round in 0..3i64 {
+        let mut xml = String::from("<?xml version=\"1.0\"?><tv>");
+        for (id, name) in [("one.uk", "Channel One"), ("two.uk", "Channel Two")] {
+            xml.push_str(&format!(
+                "<channel id=\"{id}\"><display-name>{name}</display-name></channel>"
+            ));
+            for n in 0..600 {
+                let s = b - 86_400 + n * 600 + round * 60;
+                xml.push_str(&format!(
+                    "<programme start=\"{}\" stop=\"{}\" channel=\"{id}\"><title>Café Round {round} {n}</title></programme>",
+                    xmltv_ts(s),
+                    xmltv_ts(s + 600)
+                ));
+            }
+        }
+        xml.push_str("</tv>");
+        std::fs::write(&second, xml).unwrap();
+        let searches = async {
+            for _ in 0..10 {
+                e.search(range.clone()).await;
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        let (first, other, ()) = tokio::join!(
+            epg::refresh_now(e.state.clone(), &url),
+            epg::refresh_now(e.state.clone(), &second),
+            searches
+        );
+        first.unwrap();
+        other.unwrap();
+        assert!(e.index_ready().await, "round {round}");
+        let hits = e.search_checked(range.clone()).await;
+        assert!(!hits.is_empty());
+        let mine = e
+            .search_checked(window(&format!("round {round}"), b - HOUR, b + HOUR))
+            .await;
+        assert!(
+            !mine.is_empty(),
+            "round {round}: the second feed is indexed"
+        );
+    }
+}
+
 impl Env {
     /// The search on the index path, checked against the scan the search
     /// uses before the index is built, which resolves every channel of the
@@ -1006,6 +1061,7 @@ async fn search_statements_use_indexes() {
                 search::SCAN_SQL,
                 search::SEEK_SQL,
                 search::MAPPED_SQL,
+                search::FTS_SQL_B,
             ] {
                 let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
                 let args = vec![rusqlite::types::Null; stmt.parameter_count()];
@@ -1018,21 +1074,23 @@ async fn search_statements_use_indexes() {
         })
         .await
         .unwrap();
-    let fts = &plans[0];
-    assert!(
-        fts.iter()
-            .any(|d| d.starts_with("SCAN f VIRTUAL TABLE INDEX")),
-        "{fts:?}"
-    );
-    // Hits come in index rowid order, which is start order: no sort.
-    assert!(!fts.iter().any(|d| d.contains("TEMP B-TREE")), "{fts:?}");
-    let p: Vec<&String> = fts.iter().filter(|d| d.contains(" p ")).collect();
-    assert!(!p.is_empty(), "{fts:?}");
-    for d in p {
+    // Both sets of index tables (migration 0029) alike.
+    for fts in [&plans[0], &plans[4]] {
         assert!(
-            d.starts_with("SEARCH p USING INTEGER PRIMARY KEY"),
+            fts.iter()
+                .any(|d| d.starts_with("SCAN f VIRTUAL TABLE INDEX")),
             "{fts:?}"
         );
+        // Hits come in index rowid order, which is start order: no sort.
+        assert!(!fts.iter().any(|d| d.contains("TEMP B-TREE")), "{fts:?}");
+        let p: Vec<&String> = fts.iter().filter(|d| d.contains(" p ")).collect();
+        assert!(!p.is_empty(), "{fts:?}");
+        for d in p {
+            assert!(
+                d.starts_with("SEARCH p USING INTEGER PRIMARY KEY"),
+                "{fts:?}"
+            );
+        }
     }
     let scan = &plans[1];
     let p: Vec<&String> = scan.iter().filter(|d| d.contains(" p ")).collect();

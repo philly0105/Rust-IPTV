@@ -58,7 +58,63 @@ pub fn long_write() -> LongWrite {
     LongWrite(())
 }
 
+/// Writers that hand the write lock over between short transactions (the
+/// guide search index build, see [`hand_over`]) while they run. Meanwhile
+/// busy waits poll every [`HAND_OVER_POLL`] at most, so a waiting writer
+/// takes the lock in the gap between two of their transactions.
+static HANDING_OVER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// When a busy wait of another thread than a handing-over writer's last
+/// polled: nanoseconds since [`busy_epoch`].
+static BUSY_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Longest sleep of a busy wait while a writer hands the lock over.
+const HAND_OVER_POLL: Duration = Duration::from_millis(2);
+
+fn busy_epoch() -> std::time::Instant {
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(std::time::Instant::now)
+}
+
+fn busy_nanos(t: std::time::Instant) -> u64 {
+    t.saturating_duration_since(busy_epoch()).as_nanos() as u64
+}
+
+/// Marks a writer that commits in short transactions as running on this
+/// thread; see [`hand_over`].
+#[must_use = "the mark lasts until the guard is dropped"]
+pub struct HandingOver(());
+
+impl Drop for HandingOver {
+    fn drop(&mut self) {
+        HANDING_OVER.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        HANDS_OVER.with(|c| c.set(false));
+    }
+}
+
+/// Starts a run of short write transactions on this thread that lets other
+/// writers in between them: busy waits poll often until the guard drops,
+/// and [`hand_over`] pauses after a transaction while one waits.
+pub fn handing_over() -> HandingOver {
+    busy_epoch();
+    HANDS_OVER.with(|c| c.set(true));
+    HANDING_OVER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    HandingOver(())
+}
+
+/// Call between two write transactions of a [`handing_over`] run, with the
+/// time the last one began: when another connection waited for the write
+/// lock meanwhile, sleeps a little so that it takes the lock before the
+/// next transaction does. SQLite's lock has no queue: a writer that commits
+/// and begins again at once would keep it from waiters that sleep between
+/// their polls.
+pub fn hand_over(since: std::time::Instant) {
+    if BUSY_AT.load(std::sync::atomic::Ordering::SeqCst) >= busy_nanos(since) {
+        std::thread::sleep(HAND_OVER_POLL * 2);
+    }
+}
+
 thread_local! {
+    /// True on a thread inside [`handing_over`].
+    static HANDS_OVER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// When the current busy wait on this thread began.
     static BUSY_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
@@ -85,8 +141,15 @@ fn busy_wait(count: i32) -> bool {
     if now.duration_since(since) >= limit {
         return false;
     }
-    let delay = DELAYS_MS[(count.max(0) as usize).min(DELAYS_MS.len() - 1)];
-    std::thread::sleep(Duration::from_millis(delay));
+    let mut delay =
+        Duration::from_millis(DELAYS_MS[(count.max(0) as usize).min(DELAYS_MS.len() - 1)]);
+    if HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+        if !HANDS_OVER.with(|c| c.get()) {
+            BUSY_AT.fetch_max(busy_nanos(now), std::sync::atomic::Ordering::SeqCst);
+        }
+        delay = delay.min(HAND_OVER_POLL);
+    }
+    std::thread::sleep(delay);
     true
 }
 
@@ -257,6 +320,12 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 28,
         name: "0028_guide_search_order",
         sql: include_str!("migrations/0028_guide_search_order.sql"),
+    },
+    // guide search: a second set of index tables, built while searches read the first.
+    Migration {
+        version: 29,
+        name: "0029_guide_search_sets",
+        sql: include_str!("migrations/0029_guide_search_sets.sql"),
     },
 ];
 
@@ -846,6 +915,7 @@ mod tests {
             "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
             // epg/search.rs: guide search through the title index, and its fallback scan.
             crate::epg::search::FTS_SQL,
+            crate::epg::search::FTS_SQL_B,
             crate::epg::search::SCAN_SQL,
         ];
         for sql in statements {

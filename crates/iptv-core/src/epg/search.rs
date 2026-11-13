@@ -51,14 +51,32 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-/// `app_state` key present while `epg_programs_fts` matches `epg_programs`.
+/// `app_state` key present while one set of index tables ([`IndexSet`])
+/// matches `epg_programs`; its value names the set.
 pub const INDEX_MARKER: &str = "epg_search_index";
-/// Marker value of an index of [`fold`]ed titles with its
-/// `epg_search_rows`, both numbered in search order (migration 0028). A
-/// marker with any other value (`ready`: raw titles, before the fold;
-/// `folded-1`: before the search rows; `folded-2`: by programme rowid)
-/// counts as missing.
+/// Marker value while the first set (`epg_programs_fts` of [`fold`]ed
+/// titles with its `epg_search_rows`, both numbered in search order,
+/// migration 0028) is current. A marker with any value but this and
+/// [`INDEX_VERSION_B`] (`ready`: raw titles, before the fold; `folded-1`:
+/// before the search rows; `folded-2`: by programme rowid) counts as
+/// missing.
 pub const INDEX_VERSION: &str = "ordered-1";
+/// Marker value while the second set (`epg_programs_fts_b`,
+/// `epg_search_rows_b`, migration 0029) is current.
+pub const INDEX_VERSION_B: &str = "ordered-1b";
+/// `app_state` key with a random value that every transaction which deletes
+/// or swaps programmes replaces as it removes the marker
+/// ([`invalidate_index`]): a build reads it with the programmes it indexes
+/// and makes its set current only while it still holds that value.
+const GUIDE_STAMP_KEY: &str = "epg_search_guide";
+/// Rows the first write transaction of a build copies; each later one is
+/// sized from the one before to take about [`CHUNK_TARGET`].
+const FIRST_CHUNK: i64 = 8_192;
+/// Write lock time each transaction of a build aims at.
+const CHUNK_TARGET: std::time::Duration = std::time::Duration::from_millis(25);
+/// Builds started again after the guide changed under them before one
+/// gives up (the change's own rebuild follows it).
+const BUILD_ATTEMPTS: usize = 3;
 /// `app_state` key with the longest programme of the search rows, in
 /// seconds: hits are read from that long before the window, so a
 /// programme on air at its start is not missed.
@@ -118,32 +136,166 @@ pub struct GuideSearchHit {
 // Index maintenance
 // ---------------------------------------------------------------------------
 
+/// [`FTS_SQL`] over one set of tables.
+macro_rules! fts_sql {
+    ($fts:literal, $rows:literal) => {
+        concat!(
+            "SELECT p.id, p.prog, p.channel_id, p.start, p.stop, p.feed
+     FROM ",
+            $fts,
+            " f
+     CROSS JOIN ",
+            $rows,
+            " p ON p.id = f.rowid
+     WHERE ",
+            $fts,
+            " MATCH ?1 AND f.rowid >= ?2 AND f.rowid < ?3 AND p.stop > ?4
+     ORDER BY f.rowid LIMIT ?5"
+        )
+    };
+}
+
+/// One of the two sets of index tables. Searches read the set the marker
+/// names while a build fills the other one, which then becomes current
+/// (migration 0029).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexSet {
+    /// `epg_programs_fts` and `epg_search_rows`.
+    A,
+    /// `epg_programs_fts_b` and `epg_search_rows_b`.
+    B,
+}
+
+impl IndexSet {
+    fn marker(self) -> &'static str {
+        match self {
+            Self::A => INDEX_VERSION,
+            Self::B => INDEX_VERSION_B,
+        }
+    }
+
+    /// The title index.
+    pub fn fts(self) -> &'static str {
+        match self {
+            Self::A => "epg_programs_fts",
+            Self::B => "epg_programs_fts_b",
+        }
+    }
+
+    /// The search rows.
+    pub fn rows(self) -> &'static str {
+        match self {
+            Self::A => "epg_search_rows",
+            Self::B => "epg_search_rows_b",
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+
+    /// [`FTS_SQL`] over this set.
+    fn fts_sql(self) -> &'static str {
+        match self {
+            Self::A => FTS_SQL,
+            Self::B => FTS_SQL_B,
+        }
+    }
+}
+
 /// Marks the index stale. Call inside the transaction that deletes or
-/// re-keys programmes.
+/// re-keys programmes: it also replaces the guide stamp, so a build that
+/// read the programmes before this change does not make its set current.
 pub fn invalidate_index(conn: &Connection) -> CoreResult<()> {
-    conn.execute("DELETE FROM app_state WHERE key = ?1", [INDEX_MARKER])?;
+    conn.prepare_cached("DELETE FROM app_state WHERE key = ?1")?
+        .execute([INDEX_MARKER])?;
+    conn.prepare_cached(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, random(), CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )?
+    .execute([GUIDE_STAMP_KEY])?;
     Ok(())
+}
+
+/// The set that matches the programme table, if any.
+pub fn current_set(conn: &Connection) -> CoreResult<Option<IndexSet>> {
+    let value: Option<String> = conn
+        .prepare_cached("SELECT value FROM app_state WHERE key = ?1")?
+        .query_row([INDEX_MARKER], |r| r.get(0))
+        .optional()?;
+    Ok(match value.as_deref() {
+        Some(INDEX_VERSION) => Some(IndexSet::A),
+        Some(INDEX_VERSION_B) => Some(IndexSet::B),
+        _ => None,
+    })
 }
 
 /// True when the index matches the programme table and holds folded titles.
 pub fn index_ready(conn: &Connection) -> CoreResult<bool> {
-    Ok(conn
-        .query_row(
-            "SELECT 1 FROM app_state WHERE key = ?1 AND value = ?2",
-            [INDEX_MARKER, INDEX_VERSION],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
+    Ok(current_set(conn)?.is_some())
 }
 
-/// Rebuilds the whole index from `epg_programs` and marks it ready, in one
-/// write transaction. Titles are indexed as [`fold`] folds them (not with
-/// `'rebuild'`, which would index the raw titles of the content table), so
-/// the index and the scan agree on every script; queries are folded the
-/// same way before they reach the tokenizer.
+fn guide_stamp(conn: &Connection) -> CoreResult<Option<String>> {
+    Ok(conn
+        .prepare_cached("SELECT value FROM app_state WHERE key = ?1")?
+        .query_row([GUIDE_STAMP_KEY], |r| r.get(0))
+        .optional()?)
+}
+
+/// One build at a time per database file: two would fill the same set.
+fn build_lock(conn: &Connection) -> Arc<parking_lot::Mutex<()>> {
+    static LOCKS: std::sync::LazyLock<
+        parking_lot::Mutex<HashMap<String, Arc<parking_lot::Mutex<()>>>>,
+    > = std::sync::LazyLock::new(Default::default);
+    let key = conn.path().unwrap_or_default().to_string();
+    LOCKS.lock().entry(key).or_default().clone()
+}
+
+/// Empties one set of index tables.
+fn empty_set(conn: &Connection, set: IndexSet) -> CoreResult<()> {
+    let fts = set.fts();
+    conn.execute_batch(&format!(
+        "INSERT INTO {fts}({fts}) VALUES('delete-all'); DELETE FROM {};",
+        set.rows()
+    ))?;
+    Ok(())
+}
+
+fn set_is_empty(conn: &Connection, set: IndexSet) -> CoreResult<bool> {
+    Ok(conn
+        .query_row(&format!("SELECT 1 FROM {} LIMIT 1", set.rows()), [], |_| {
+            Ok(())
+        })
+        .optional()?
+        .is_none())
+}
+
+/// Rebuilds the whole index from `epg_programs` and marks it ready. Titles
+/// are indexed as [`fold`] folds them (not with `'rebuild'`, which would
+/// index the raw titles of the content table), so the index and the scan
+/// agree on every script; queries are folded the same way before they
+/// reach the tokenizer.
+///
+/// The set searches do not read is filled in short write transactions
+/// ([`CHUNK_TARGET`]) that let other writers in between them
+/// (`db::hand_over`), from one sort of the programmes taken in a read
+/// transaction, and the last of them makes it current. When the guide
+/// changed since that sort (the guide stamp moved: a refresh committed,
+/// the guide was cleared or pruned), the build starts again from a new
+/// sort, up to [`BUILD_ATTEMPTS`] times; searches scan meanwhile, since the
+/// change removed the marker. The set read before is emptied afterwards.
 pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
-    let started = std::time::Instant::now();
+    let lock = build_lock(conn);
+    let _one = lock.lock();
+    build(conn).map(|_| ())
+}
+
+/// [`rebuild_index`] with the build lock held. Returns whether a set was
+/// made current.
+fn build(conn: &mut Connection) -> CoreResult<bool> {
     conn.create_scalar_function(
         FOLD_SQL_FUNCTION,
         1,
@@ -156,59 +308,184 @@ pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
             Ok(title.map(fold))
         },
     )?;
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.execute(
-        "INSERT INTO epg_programs_fts(epg_programs_fts) VALUES('delete-all')",
-        [],
-    )?;
-    tx.execute("DELETE FROM epg_search_rows", [])?;
+    // The sort goes through a temporary file behind the temporary
+    // database's small page cache, whatever the connection's setting (a
+    // refresh already set it): the startup build of a large guide held
+    // about 70 MB of sorted rows in memory, for no measured gain in time.
+    // Restoring the setting closes the temporary database.
+    let temp_store: i64 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0))?;
+    if temp_store != 1 {
+        conn.execute_batch("PRAGMA temp_store=FILE")?;
+    }
+    let mut result = Ok(false);
+    for _ in 0..BUILD_ATTEMPTS {
+        result = build_once(conn);
+        // Never left behind on a pooled connection, also when the build
+        // failed part-way.
+        let _ = conn.execute("DROP TABLE IF EXISTS temp.epg_search_sorted", []);
+        if !matches!(result, Ok(false)) {
+            break;
+        }
+        tracing::debug!("the guide changed during the guide search index build");
+    }
+    if temp_store != 1 {
+        conn.execute_batch(&format!("PRAGMA temp_store={temp_store}"))?;
+    }
+    if matches!(result, Ok(false)) {
+        tracing::warn!("the guide kept changing during the guide search index build; search scans until the next one");
+    }
+    result
+}
+
+/// Statement that copies rows `?1 <= rowid < ?2` of the sorted programmes
+/// into a set's search rows.
+fn copy_rows_sql(set: IndexSet) -> String {
+    format!(
+        "INSERT INTO {}(id, prog, start, stop, feed, channel_id)
+         SELECT rowid, prog, start, stop, feed, channel_id FROM temp.epg_search_sorted
+         WHERE rowid >= ?1 AND rowid < ?2",
+        set.rows()
+    )
+}
+
+/// Statement that indexes the titles of rows `?1 <= rowid < ?2` of the
+/// sorted programmes in a set's title index.
+fn copy_titles_sql(set: IndexSet) -> String {
+    format!(
+        "INSERT INTO {}(rowid, title) SELECT rowid, title FROM temp.epg_search_sorted
+         WHERE rowid >= ?1 AND rowid < ?2",
+        set.fts()
+    )
+}
+
+/// One build; false when the guide changed before the set was made current
+/// (nothing was made current then).
+fn build_once(conn: &mut Connection) -> CoreResult<bool> {
+    let started = std::time::Instant::now();
     // One sort of the programmes in search order, titles folded on the
     // way; its rowids (1, 2, ...) become the search rows' ids and the
-    // index's rowids, which the index takes fastest in ascending order.
-    tx.execute("DROP TABLE IF EXISTS temp.epg_search_sorted", [])?;
-    tx.execute(
-        &format!(
-            "CREATE TEMP TABLE epg_search_sorted AS
-             SELECT p.rowid AS prog, p.start AS start, p.stop AS stop, s.rowid AS feed,
-                    p.channel_id AS channel_id, {FOLD_SQL_FUNCTION}(p.title) AS title
-             FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
-             ORDER BY p.start, s.rowid, p.rowid"
-        ),
-        [],
-    )?;
-    tx.execute(
-        "INSERT INTO epg_search_rows(id, prog, start, stop, feed, channel_id)
-         SELECT rowid, prog, start, stop, feed, channel_id FROM temp.epg_search_sorted",
-        [],
-    )?;
-    tx.execute(
-        "INSERT INTO epg_programs_fts(rowid, title) SELECT rowid, title FROM temp.epg_search_sorted",
-        [],
-    )?;
-    tx.execute("DROP TABLE temp.epg_search_sorted", [])?;
-    tx.execute(
-        "INSERT INTO app_state(key, value, updated_at)
-         SELECT ?1, coalesce(max(stop - start), 0), CURRENT_TIMESTAMP FROM epg_search_rows WHERE true
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        [LONGEST_KEY],
-    )?;
-    tx.execute(
-        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        [INDEX_MARKER, INDEX_VERSION],
-    )?;
+    // index's rowids, which the index takes fastest in ascending order. A
+    // read transaction: it writes the temporary database only, so it takes
+    // no write lock, and the guide stamp read with it says which guide it
+    // saw.
+    let (stamp, target, count, longest) = {
+        let tx = conn.transaction()?;
+        let stamp = guide_stamp(&tx)?;
+        let target = match current_set(&tx)? {
+            Some(set) => set.other(),
+            // No set is read: build into an empty one when there is one,
+            // so emptying the stale one waits until the end.
+            None if !set_is_empty(&tx, IndexSet::A)? && set_is_empty(&tx, IndexSet::B)? => {
+                IndexSet::B
+            }
+            None => IndexSet::A,
+        };
+        tx.execute("DROP TABLE IF EXISTS temp.epg_search_sorted", [])?;
+        tx.execute(
+            &format!(
+                "CREATE TEMP TABLE epg_search_sorted AS
+                 SELECT p.rowid AS prog, p.start AS start, p.stop AS stop, s.rowid AS feed,
+                        p.channel_id AS channel_id, {FOLD_SQL_FUNCTION}(p.title) AS title
+                 FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
+                 ORDER BY p.start, s.rowid, p.rowid"
+            ),
+            [],
+        )?;
+        let (count, longest): (i64, i64) = tx.query_row(
+            "SELECT coalesce(max(rowid), 0), coalesce(max(stop - start), 0) FROM temp.epg_search_sorted",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        tx.commit()?;
+        (stamp, target, count, longest)
+    };
+    let sorted = started.elapsed();
+    let (copy_rows, copy_titles) = (copy_rows_sql(target), copy_titles_sql(target));
+    let _handing = crate::db::handing_over();
+    let mut chunk = first_chunk();
+    let mut lo = 1i64;
+    let mut chunks = 0usize;
+    let mut longest_chunk = std::time::Duration::ZERO;
+    loop {
+        let began = std::time::Instant::now();
+        let hi = lo.saturating_add(chunk);
+        let last = hi > count;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if guide_stamp(&tx)? != stamp {
+            return Ok(false);
+        }
+        if lo == 1 && !set_is_empty(&tx, target)? {
+            empty_set(&tx, target)?;
+        }
+        tx.prepare_cached(&copy_rows)?.execute([lo, hi])?;
+        tx.prepare_cached(&copy_titles)?.execute([lo, hi])?;
+        if last {
+            tx.execute(
+                "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                params![LONGEST_KEY, longest.to_string()],
+            )?;
+            tx.execute(
+                "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                [INDEX_MARKER, target.marker()],
+            )?;
+        }
+        tx.commit()?;
+        chunks += 1;
+        let took = began.elapsed();
+        longest_chunk = longest_chunk.max(took);
+        #[cfg(test)]
+        tests::after_chunk(chunks)?;
+        if last {
+            break;
+        }
+        lo = hi;
+        // Sized from the last one, at most twice as large.
+        let scaled = chunk as f64 * CHUNK_TARGET.as_secs_f64() / took.as_secs_f64().max(1e-4);
+        chunk = (scaled as i64).min(chunk.saturating_mul(2)).max(1_024);
+        #[cfg(test)]
+        if let Some(n) = tests::CHUNK_OVERRIDE.with(|c| c.get()) {
+            chunk = n;
+        }
+        crate::db::hand_over(began);
+    }
+    // The set searches read before: emptied, so the file does not hold two
+    // indexes and the next build starts from empty tables. A search still
+    // reading it keeps its snapshot.
+    let other = target.other();
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if !set_is_empty(&tx, other)? {
+        empty_set(&tx, other)?;
+    }
     tx.commit()?;
     tracing::debug!(
         ms = started.elapsed().as_millis() as u64,
+        sort_ms = sorted.as_millis() as u64,
+        rows = count,
+        chunks,
+        longest_chunk_ms = longest_chunk.as_millis() as u64,
         "guide search index rebuilt"
     );
-    Ok(())
+    Ok(true)
+}
+
+fn first_chunk() -> i64 {
+    #[cfg(test)]
+    if let Some(n) = tests::CHUNK_OVERRIDE.with(|c| c.get()) {
+        return n;
+    }
+    FIRST_CHUNK
 }
 
 /// Rebuilds the index when it is stale. With `only_if_programmes`, an empty
 /// guide is left alone (nothing to index; startup must not write for
-/// nothing). Returns whether a rebuild ran. Holds the long-write guard so
-/// user writes wait for it instead of failing.
+/// nothing). Returns whether a rebuild ran and made the index current. A
+/// build already running for this database is waited for, and when it
+/// left the index current nothing more is done (two refreshes back to
+/// back rebuild once after the second when the first build saw it come
+/// in). Holds the long-write guard so user writes wait for its
+/// transactions instead of failing.
 pub fn ensure_index(conn: &mut Connection, only_if_programmes: bool) -> CoreResult<bool> {
     if index_ready(conn)? {
         return Ok(false);
@@ -221,9 +498,13 @@ pub fn ensure_index(conn: &mut Connection, only_if_programmes: bool) -> CoreResu
             return Ok(false);
         }
     }
+    let lock = build_lock(conn);
+    let _one = lock.lock();
+    if index_ready(conn)? {
+        return Ok(false);
+    }
     let _long = crate::db::long_write();
-    rebuild_index(conn)?;
-    Ok(true)
+    build(conn)
 }
 
 /// [`ensure_index`] for the write paths (refresh, clear, prune): a failure
@@ -1281,11 +1562,9 @@ struct Candidate {
 /// (`epg_search_rows`, alias `p`: programme rowid, start, stop, feed and
 /// guide channel, a narrow row instead of the programme's). [`candidates`]
 /// reads them in batches and stops once its result is settled.
-pub const FTS_SQL: &str = "SELECT p.id, p.prog, p.channel_id, p.start, p.stop, p.feed
-     FROM epg_programs_fts f
-     CROSS JOIN epg_search_rows p ON p.id = f.rowid
-     WHERE epg_programs_fts MATCH ?1 AND f.rowid >= ?2 AND f.rowid < ?3 AND p.stop > ?4
-     ORDER BY f.rowid LIMIT ?5";
+pub const FTS_SQL: &str = fts_sql!("epg_programs_fts", "epg_search_rows");
+/// [`FTS_SQL`] over the second set of tables ([`IndexSet::B`]).
+pub const FTS_SQL_B: &str = fts_sql!("epg_programs_fts_b", "epg_search_rows_b");
 
 /// Hits the first batch of the index statement reads; each later batch
 /// reads twice as many as the one before.
@@ -1313,9 +1592,11 @@ fn hit_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
 /// The id after the last search row, and the first search row whose start
 /// is at or after `t` (`last + 1` when none): ids follow start order
 /// (migration 0028), so a binary search over them finds it.
-fn search_rows_from(conn: &Connection, last: i64, t: i64) -> CoreResult<i64> {
-    let mut probe = conn
-        .prepare_cached("SELECT start FROM epg_search_rows WHERE id >= ?1 ORDER BY id LIMIT 1")?;
+fn search_rows_from(conn: &Connection, set: IndexSet, last: i64, t: i64) -> CoreResult<i64> {
+    let mut probe = conn.prepare_cached(&format!(
+        "SELECT start FROM {} WHERE id >= ?1 ORDER BY id LIMIT 1",
+        set.rows()
+    ))?;
     let (mut lo, mut hi) = (1i64, last + 1);
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
@@ -1341,6 +1622,8 @@ enum Slot {
 /// Reads the index's hits in (start, feed) order, a batch at a time, and
 /// the source's channels of each guide channel as it first shows up.
 struct IndexReader<'a> {
+    /// The current set of index tables.
+    set: IndexSet,
     fts: String,
     /// The next search row id to read, and the first one past the window.
     next: i64,
@@ -1382,7 +1665,7 @@ impl IndexReader<'_> {
         let mut read = 0i64;
         let mut last_id = self.next;
         {
-            let mut stmt = conn.prepare_cached(FTS_SQL)?;
+            let mut stmt = conn.prepare_cached(self.set.fts_sql())?;
             let mut rows = stmt.query(params![
                 self.fts, self.next, self.end, self.from, self.batch
             ])?;
@@ -1511,20 +1794,20 @@ fn candidates(
         return Ok((Vec::new(), false));
     }
     let (from, to) = (q.from - source_secs, q.to - source_secs);
-    let used_index = index_ready(conn)?;
+    let set = current_set(conn)?;
+    let used_index = set.is_some();
     let mut hits: Vec<Hit> = Vec::new();
     let mut reader: Option<IndexReader<'_>> = None;
-    let mut channels = if used_index {
-        let last: i64 = conn.query_row(
-            "SELECT coalesce(max(id), 0) FROM epg_search_rows",
-            [],
-            |r| r.get(0),
-        )?;
+    let mut channels = if let Some(set) = set {
+        let last: i64 = conn
+            .prepare_cached(&format!("SELECT coalesce(max(id), 0) FROM {}", set.rows()))?
+            .query_row([], |r| r.get(0))?;
         let longest = longest_programme(conn)?;
         let mut r = IndexReader {
+            set,
             fts: fts_expression(&q.words),
-            next: search_rows_from(conn, last, from.saturating_sub(longest))?,
-            end: search_rows_from(conn, last, to)?,
+            next: search_rows_from(conn, set, last, from.saturating_sub(longest))?,
+            end: search_rows_from(conn, set, last, to)?,
             from,
             batch: first_batch(),
             feeds: None,
@@ -1786,6 +2069,21 @@ mod tests {
         pub(super) static FORCE_SEEK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
         /// Overrides [`FIRST_BATCH`].
         pub(super) static FIRST_BATCH_OVERRIDE: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+        /// Rows per write transaction of an index build.
+        pub(super) static CHUNK_OVERRIDE: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+        /// Runs after each committed transaction of an index build on this
+        /// thread, with its number; an error ends the build there.
+        static AFTER_CHUNK: std::cell::RefCell<Option<ChunkHook>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    type ChunkHook = Box<dyn FnMut(usize) -> CoreResult<()>>;
+
+    pub(super) fn after_chunk(n: usize) -> CoreResult<()> {
+        AFTER_CHUNK.with(|h| match h.borrow_mut().as_mut() {
+            Some(f) => f(n),
+            None => Ok(()),
+        })
     }
 
     fn w(s: &str) -> Vec<String> {
@@ -2214,5 +2512,336 @@ mod tests {
         }
         FIRST_BATCH_OVERRIDE.with(|f| f.set(None));
         FORCE_SEEK.with(|f| f.set(None));
+    }
+
+    // -----------------------------------------------------------------------
+    // Index builds in short transactions (migration 0029)
+    // -----------------------------------------------------------------------
+
+    /// Sets the hook run after each transaction of a build on this thread.
+    fn on_chunk(f: impl FnMut(usize) -> CoreResult<()> + 'static) {
+        AFTER_CHUNK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+    }
+
+    fn no_hook() {
+        AFTER_CHUNK.with(|h| *h.borrow_mut() = None);
+        CHUNK_OVERRIDE.with(|c| c.set(None));
+    }
+
+    /// A file database with two feeds of 20 guide channels over two days
+    /// (about 3,000 programmes) and a source with a channel on each.
+    fn build_fixture() -> (tempfile::TempDir, crate::db::DbPool) {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open_and_migrate(&dir.path().join("t.db")).unwrap();
+        let conn = pool.get().unwrap();
+        conn.execute_batch(
+            "INSERT INTO sources(id, kind, name, config_json) VALUES ('s', 'm3u', 'S', '{}');
+             INSERT INTO epg_sources(url, enabled, origin) VALUES ('u1', 1, 'settings'), ('u2', 1, 'settings');",
+        )
+        .unwrap();
+        const TITLES: [&str; 4] = ["World News", "Cooking", "Late News", "Film"];
+        for g in 0..20i64 {
+            let id = format!("g{g}.tv");
+            conn.execute(
+                "INSERT INTO items(source_id, content_type, item_id, category_id, title, epg_channel_id, number)
+                 VALUES ('s', 'live', ?1, 'c', ?2, ?1, ?3)",
+                params![id, format!("Channel {g}"), g + 1],
+            )
+            .unwrap();
+            for (url, step) in [("u1", 1800i64), ("u2", 3600)] {
+                if url == "u2" && g % 2 == 1 {
+                    continue;
+                }
+                conn.execute(
+                    "INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES (?1, ?2, ?2)",
+                    params![url, id],
+                )
+                .unwrap();
+                let mut t = BASE - 86_400;
+                let mut n = 0usize;
+                while t < BASE + 86_400 {
+                    conn.execute(
+                        "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![url, id, t, t + step, TITLES[(n + g as usize) % 4]],
+                    )
+                    .unwrap();
+                    t += step;
+                    n += 1;
+                }
+            }
+        }
+        (dir, pool)
+    }
+
+    const BASE: i64 = 1_800_000_000;
+
+    type Found = Vec<(i64, String, i64)>;
+
+    /// Candidates for a few queries, on the index when one is current.
+    fn found(conn: &Connection) -> Vec<Found> {
+        let rt = EpgRuntime::default();
+        let dir = resolve::directory(conn, &rt).unwrap();
+        ["news", "cooking", "late news", "breaking"]
+            .iter()
+            .map(|query| {
+                let q = Query {
+                    source_id: "s".into(),
+                    words: words(query),
+                    from: BASE - 7_200,
+                    to: BASE + 40_000,
+                    limit: 30,
+                };
+                let (found, _) = candidates(conn, &rt, &dir, &q, None, None, 0).unwrap();
+                found
+                    .iter()
+                    .map(|c| (c.rowid, c.channel.item_ref.item_id.clone(), c.start))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// What the scan finds now (the marker removed in a transaction rolled
+    /// back after).
+    fn scanned(conn: &Connection) -> Vec<Found> {
+        let tx = conn.unchecked_transaction().unwrap();
+        tx.execute("DELETE FROM app_state WHERE key = ?1", [INDEX_MARKER])
+            .unwrap();
+        let out = found(&tx);
+        tx.rollback().unwrap();
+        out
+    }
+
+    /// A refresh's swap: a feed's programmes replaced in one transaction
+    /// that marks the index stale, as `store::commit_staging` does.
+    fn swap_feed(conn: &mut Connection, url: &str, title: &str) {
+        let tx = conn.transaction().unwrap();
+        tx.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])
+            .unwrap();
+        for g in 0..20i64 {
+            tx.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![url, format!("g{g}.tv"), BASE + g * 60, BASE + 3600, title],
+            )
+            .unwrap();
+        }
+        invalidate_index(&tx).unwrap();
+        tx.commit().unwrap();
+    }
+
+    fn temp_left(conn: &Connection) -> i64 {
+        conn.query_row(
+            "SELECT count(*) FROM temp.sqlite_master WHERE name = 'epg_search_sorted'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// A build commits in many short transactions. Between them another
+    /// connection writes without waiting (the build holds no lock), and a
+    /// search finds what the scan finds: on the set current before while a
+    /// rebuild fills the other, on the scan while the marker is gone. Each
+    /// build alternates the sets and empties the one read before.
+    #[test]
+    fn builds_in_short_transactions_while_searches_stay_right() {
+        let (_dir, pool) = build_fixture();
+        let mut conn = pool.get().unwrap();
+        let other = std::rc::Rc::new(pool.get().unwrap());
+        other.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let want = scanned(&conn);
+        assert!(want[0].len() == 30 && want[3].is_empty(), "{want:?}");
+        CHUNK_OVERRIDE.with(|c| c.set(Some(100)));
+        let mut sets = Vec::new();
+        for round in 0..3 {
+            if round == 2 {
+                invalidate_index(&conn).unwrap();
+            }
+            let before = current_set(&conn).unwrap();
+            let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let (o, w, s) = (other.clone(), want.clone(), seen.clone());
+            on_chunk(move |i| {
+                // Fails at once if the build held the write lock.
+                o.execute(
+                    "INSERT INTO app_state(key, value) VALUES ('t', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    [i as i64],
+                )?;
+                s.borrow_mut().push(current_set(&o)?);
+                assert_eq!(found(&o), w, "chunk {i}");
+                Ok(())
+            });
+            rebuild_index(&mut conn).unwrap();
+            let now = current_set(&conn).unwrap().unwrap();
+            let seen = seen.borrow();
+            assert!(seen.len() > 20, "{} transactions", seen.len());
+            // The set read before until the last transaction made the new
+            // one current.
+            assert!(seen[..seen.len() - 1].iter().all(|s| *s == before));
+            assert_eq!(seen.last(), Some(&Some(now)));
+            assert!(set_is_empty(&conn, now.other()).unwrap());
+            assert!(!set_is_empty(&conn, now).unwrap());
+            assert_eq!(found(&conn), want, "round {round}");
+            assert_eq!(temp_left(&conn), 0);
+            sets.push(now);
+        }
+        // From A to B and back; after the marker went, into the empty set.
+        assert_eq!(sets, [IndexSet::A, IndexSet::B, IndexSet::A]);
+        no_hook();
+    }
+
+    /// A guide refresh that commits while a build runs (the guide stamp
+    /// moves): the build sees it at its next transaction and starts again
+    /// from a new sort, so the set it makes current holds the new
+    /// programmes. A guide that changes under every attempt leaves the
+    /// marker unset (searches scan), and the next build indexes it.
+    #[test]
+    fn a_refresh_during_a_build_starts_it_again() {
+        let (_dir, pool) = build_fixture();
+        let mut conn = pool.get().unwrap();
+        let other = std::rc::Rc::new(std::cell::RefCell::new(pool.get().unwrap()));
+        rebuild_index(&mut conn).unwrap();
+        CHUNK_OVERRIDE.with(|c| c.set(Some(200)));
+        let swaps = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (o, s) = (other.clone(), swaps.clone());
+        on_chunk(move |i| {
+            if i == 3 && s.get() == 0 {
+                s.set(1);
+                swap_feed(&mut o.borrow_mut(), "u2", "Breaking News");
+                // The change removed the marker: searches scan.
+                assert_eq!(current_set(&o.borrow())?, None);
+                assert_eq!(found(&o.borrow()), scanned(&o.borrow()));
+            }
+            Ok(())
+        });
+        invalidate_index(&conn).unwrap();
+        assert!(ensure_index(&mut conn, false).unwrap());
+        assert_eq!(swaps.get(), 1);
+        let after = found(&conn);
+        assert!(
+            !after[3].is_empty(),
+            "the refreshed feed's titles are found"
+        );
+        assert_eq!(after, scanned(&conn));
+
+        // Changed under every attempt: given up, the marker stays unset.
+        let (o, s) = (other.clone(), swaps.clone());
+        on_chunk(move |i| {
+            if i == 2 {
+                s.set(s.get() + 1);
+                let title = format!("Breaking {}", s.get());
+                swap_feed(&mut o.borrow_mut(), "u2", &title);
+            }
+            Ok(())
+        });
+        rebuild_index(&mut conn).unwrap();
+        assert_eq!(swaps.get(), 1 + BUILD_ATTEMPTS);
+        assert!(!index_ready(&conn).unwrap());
+        assert_eq!(temp_left(&conn), 0);
+        let scan = found(&conn);
+        no_hook();
+        assert!(ensure_index(&mut conn, false).unwrap());
+        assert_eq!(found(&conn), scan);
+    }
+
+    /// A build that stops part-way (interrupted, the app shut down): the set
+    /// current before stays current and whole, or searches go on scanning
+    /// when there was none; nothing is left in the temporary database, and
+    /// the next build, also on a reopened database, indexes everything.
+    #[test]
+    fn a_build_stopped_part_way_changes_nothing_searches_read() {
+        let (dir, pool) = build_fixture();
+        let mut conn = pool.get().unwrap();
+        // As a refresh sets it: the build keeps the temporary database
+        // open (restoring another setting would close it).
+        conn.execute_batch("PRAGMA temp_store=FILE").unwrap();
+        let want = scanned(&conn);
+        rebuild_index(&mut conn).unwrap();
+        assert_eq!(current_set(&conn).unwrap(), Some(IndexSet::A));
+        CHUNK_OVERRIDE.with(|c| c.set(Some(300)));
+        let stop = |at: usize| {
+            on_chunk(move |i| {
+                if i == at {
+                    Err(CoreError::Other(anyhow::anyhow!("interrupted")))
+                } else {
+                    Ok(())
+                }
+            })
+        };
+        stop(3);
+        assert!(rebuild_index(&mut conn).is_err());
+        assert_eq!(current_set(&conn).unwrap(), Some(IndexSet::A));
+        assert!(!set_is_empty(&conn, IndexSet::B).unwrap(), "part-built");
+        assert_eq!(found(&conn), want);
+        assert_eq!(temp_left(&conn), 0);
+
+        // Stale, then stopped again: searches scan.
+        invalidate_index(&conn).unwrap();
+        stop(2);
+        assert!(ensure_index(&mut conn, false).is_err());
+        assert!(!index_ready(&conn).unwrap());
+        assert_eq!(found(&conn), want);
+
+        // The app shut down there: reopened, the next build indexes it all.
+        drop(conn);
+        drop(pool);
+        no_hook();
+        let pool = crate::db::open_and_migrate(&dir.path().join("t.db")).unwrap();
+        let mut conn = pool.get().unwrap();
+        assert!(!index_ready(&conn).unwrap());
+        assert_eq!(found(&conn), want);
+        assert!(ensure_index(&mut conn, true).unwrap());
+        assert_eq!(found(&conn), want);
+        let set = current_set(&conn).unwrap().unwrap();
+        assert!(set_is_empty(&conn, set.other()).unwrap());
+    }
+
+    /// Two refreshes back to back: the second one's rebuild waits for the
+    /// first's, which saw the second swap come in and indexed it; the
+    /// second then finds the index current and builds nothing.
+    #[test]
+    fn back_to_back_refreshes_build_once_after_the_last() {
+        let (_dir, pool) = build_fixture();
+        let mut conn = pool.get().unwrap();
+        rebuild_index(&mut conn).unwrap();
+        CHUNK_OVERRIDE.with(|c| c.set(Some(200)));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let mut paused = false;
+        on_chunk(move |i| {
+            if i == 2 && !paused {
+                paused = true;
+                started_tx.send(()).unwrap();
+                go_rx.recv().unwrap();
+            }
+            Ok(())
+        });
+        swap_feed(&mut pool.get().unwrap(), "u1", "First News");
+        let second = std::thread::spawn({
+            let pool = pool.clone();
+            move || {
+                started_rx.recv().unwrap();
+                let mut c = pool.get().unwrap();
+                swap_feed(&mut c, "u2", "Breaking Second");
+                let (done_tx, done_rx) = std::sync::mpsc::channel();
+                let waiter = std::thread::spawn(move || {
+                    let r = ensure_index(&mut c, false).unwrap();
+                    done_tx.send(()).unwrap();
+                    r
+                });
+                // Waits for the first build.
+                assert!(done_rx
+                    .recv_timeout(std::time::Duration::from_millis(200))
+                    .is_err());
+                go_tx.send(()).unwrap();
+                waiter.join().unwrap()
+            }
+        });
+        assert!(ensure_index(&mut conn, false).unwrap());
+        assert!(!second.join().unwrap(), "nothing left to build");
+        no_hook();
+        assert!(index_ready(&conn).unwrap());
+        let after = found(&conn);
+        assert!(!after[3].is_empty(), "the second refresh is indexed");
+        assert_eq!(after, scanned(&conn));
     }
 }

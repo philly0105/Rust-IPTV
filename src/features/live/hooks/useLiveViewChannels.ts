@@ -20,6 +20,7 @@ import type { RpcResult } from '@/api/transport';
 import { itemKey, type Channel, type ContentType, type EpgNowNext, type FavoriteEntry, type ItemKey, type ItemRef, type RecentEntry } from '@/api/types';
 
 import { foldForFilter } from '../components/CategorySidebar';
+import { refsKeyHash } from '../lib/epgMerge';
 import { MINUTE, ms } from '../lib/epgTime';
 import type { PagedChannels } from './usePagedChannels';
 
@@ -115,10 +116,10 @@ export function useLiveViewChannels(view: LiveView | undefined, args: LiveViewAr
   const refsA = useMemo((): ItemRef[] => entries.slice(a * CHUNK, (a + 1) * CHUNK).map((e) => e.ref), [entries, a]);
   const refsB = useMemo((): ItemRef[] => (b !== a ? entries.slice(b * CHUNK, (b + 1) * CHUNK).map((e) => e.ref) : []), [entries, a, b]);
   const nnArgs = (refs: ItemRef[]) => (offsetMinutes ? { refs, offsetMinutes, withDescription: false } : { refs, withDescription: false });
-  const nnA = useRpcQuery('epg.nowNext', nnArgs(refsA), { enabled: refsA.length > 0, staleTime: 60_000 });
-  const nnB = useRpcQuery('epg.nowNext', nnArgs(refsB), { enabled: refsB.length > 0, staleTime: 60_000 });
-  const favA = useRpcQuery('favorites.contains', { refs: refsA }, { enabled: view === 'recent' && refsA.length > 0 });
-  const favB = useRpcQuery('favorites.contains', { refs: refsB }, { enabled: view === 'recent' && refsB.length > 0 });
+  const nnA = useRpcQuery('epg.nowNext', nnArgs(refsA), { enabled: refsA.length > 0, staleTime: 60_000, queryKeyHashFn: refsKeyHash, transition: false });
+  const nnB = useRpcQuery('epg.nowNext', nnArgs(refsB), { enabled: refsB.length > 0, staleTime: 60_000, queryKeyHashFn: refsKeyHash, transition: false });
+  const favA = useRpcQuery('favorites.contains', { refs: refsA }, { enabled: view === 'recent' && refsA.length > 0, queryKeyHashFn: refsKeyHash, transition: false });
+  const favB = useRpcQuery('favorites.contains', { refs: refsB }, { enabled: view === 'recent' && refsB.length > 0, queryKeyHashFn: refsKeyHash, transition: false });
   const favSet = useMemo(() => new Set<ItemKey>([...(favA.data ?? []), ...(favB.data ?? [])].map(itemKey)), [favA.data, favB.data]);
 
   const getNowNext = useCallback(

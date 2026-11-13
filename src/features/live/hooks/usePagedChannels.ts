@@ -115,8 +115,9 @@ const NO_REFS: ItemRef[] = [];
 function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offsetMinutes: number) {
   const refs = useMemo(() => page?.items.map((c) => c.ref) ?? NO_REFS, [page]);
   const has = enabled && refs.length > 0;
-  const nowNext = useRpcQuery('epg.nowNext', nowNextArgs(refs, offsetMinutes), { enabled: has, staleTime: NOW_NEXT_STALE_MS, queryKeyHashFn: refsKeyHash });
-  const favs = useRpcQuery('favorites.contains', favoritesContainsArgs(refs), { enabled: has, queryKeyHashFn: refsKeyHash });
+  // Rows: synchronous, so a page's titles never wait behind the page's other renders.
+  const nowNext = useRpcQuery('epg.nowNext', nowNextArgs(refs, offsetMinutes), { enabled: has, staleTime: NOW_NEXT_STALE_MS, queryKeyHashFn: refsKeyHash, transition: false });
+  const favs = useRpcQuery('favorites.contains', favoritesContainsArgs(refs), { enabled: has, queryKeyHashFn: refsKeyHash, transition: false });
   const favSet = useMemo(() => new Set<ItemKey>((favs.data ?? []).map(itemKey)), [favs.data]);
   return { nowNext: nowNext.data, favSet };
 }

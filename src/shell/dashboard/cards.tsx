@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next';
 import { BookmarkCheck, EllipsisVertical, Play, Search } from 'lucide-react';
 import { createContext, useContext, useMemo, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
@@ -16,6 +16,7 @@ import { intlLocale, listSeparator } from '@/lib/intl';
 import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
+import { useStableNavigate } from './stableNavigate';
 import { sourceHomePath } from '../railLinks';
 import { kindShortKey } from '../sourceKind';
 
@@ -455,7 +456,7 @@ function swallowFollowUpClicks(): void {
  * play only says the source is gone, and the page would show the source's error.
  */
 function useWatchChannel(onPlay: () => void, channel: Channel | undefined, path: string | undefined): () => void {
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const kinds = useContext(SourceKindContext);
   const ref = channel?.ref;
   return () => {

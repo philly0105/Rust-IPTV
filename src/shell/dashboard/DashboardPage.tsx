@@ -4,7 +4,7 @@ import { CalendarRange, CircleCheck, Clapperboard, CloudOff, Info, Layers, Searc
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, type NavigateFunction } from 'react-router';
+import { Link, type NavigateFunction } from 'react-router';
 
 import { HOME_RAIL_LIMIT, homeContinueArgs, homeFavoritesArgs, homeRecentArgs, homeRecentlyAddedArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
@@ -47,6 +47,7 @@ import { ChannelCard, ContinueCard, OnNowCard, PosterCard, RailMyListProvider, S
 import { ChannelMenuHost, snapshotChannel } from './ChannelCardMenu';
 import { DashboardRail, type RailCardProps } from './DashboardRail';
 import { RailDeferContext, railLeastHeight, sectionsBelowFold, useFirstScreenSettled, type FoldSection } from './firstScreen';
+import { StableNavigateProvider, useStableNavigate } from './stableNavigate';
 import { HeroCarousel } from './HeroCarousel';
 import { HeroSkeleton } from './HeroSkeleton';
 import { buildHeroSlides, titleEndsWithYear, type HeroSlide } from './heroSlides';
@@ -234,17 +235,20 @@ export function onNowItems(
 export function DashboardPage() {
   const { t } = useTranslation('shell');
   return (
-    <ChannelMenuHost>
-      <h1 className="sr-only">{t('navDashboard')}</h1>
-      <DashboardBody />
-    </ChannelMenuHost>
+    // A navigation that starts re-renders no card (stableNavigate.tsx).
+    <StableNavigateProvider>
+      <ChannelMenuHost>
+        <h1 className="sr-only">{t('navDashboard')}</h1>
+        <DashboardBody />
+      </ChannelMenuHost>
+    </StableNavigateProvider>
   );
 }
 
 function DashboardBody() {
   const { t } = useTranslation('shell');
   const shell = useShell();
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const { toast } = useToast();
   const offline = useOffline();
 
@@ -913,7 +917,7 @@ function continueMenu(p: PlaybackPosition, title: string, navigate: NavigateFunc
 /** One Continue watching card: the 16:9 still, the episode and the time left, and its menu (CB-CONTINUE-MENU). */
 function ContinueItem({ p, rail, play, saved }: { p: PlaybackPosition; rail: RailCardProps; play: PlayFn; saved: boolean }) {
   const { t, i18n } = useTranslation('shell');
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const [card, setCard] = useState<HTMLElement | null>(null);
   const backdropUrl = useBackdrop(p.ref, useNearView(card));
   // L2-visual-3: a snapshot saved before the player stored the base title still carries

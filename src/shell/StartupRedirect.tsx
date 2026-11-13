@@ -6,7 +6,7 @@ import { rpc } from '@/api/transport';
 import type { CustomList, Settings, Source } from '@/api/types';
 import { Skeleton } from '@/ui';
 
-import { consumeStartupDeepLink, isRestorableRoute, useStartupDeepLink } from './effects';
+import { consumeStartupDeepLink, isRestorableRoute, pendingStartupDeepLink, pullStartupDeepLink, useStartupDeepLink } from './effects';
 import { routeSourceId } from './railLinks';
 import { useSettings } from './useSettings';
 
@@ -58,6 +58,64 @@ export function startupTarget(settings: Settings | undefined, checks: StartupChe
   return settings.showDashboard ? '/dashboard' : '/sources';
 }
 
+/**
+ * Forgets a saved screen that no longer exists, so no later start tries it again. The reply goes
+ * into the cache: a lastRoute-only update sends no settings.changed event.
+ */
+function forgetDeadScreen(target: string): void {
+  void rpc('settings.update', { patch: { lastRoute: target } })
+    .then((s) => queryClient.setQueryData(rpcKey('settings.get'), s))
+    .catch(() => undefined);
+}
+
+/** Where a cold start at `/` goes, worked out before the router exists (`resolveStartup`). */
+export interface StartupDecision {
+  /** The path the router starts at instead of `/`. */
+  path: string;
+  /**
+   * Does what StartupRedirect does once it navigates there: marks the startup deep link handled,
+   * or writes the default target back as lastRoute when the saved screen is dead. Call it only
+   * when the router does start at `path`; otherwise StartupRedirect decides as before.
+   */
+  commit: () => void;
+}
+
+/**
+ * The startup target of a cold start at `/` (C7), worked out as StartupRedirect does, from the
+ * boot's `settings.get` and, when the saved screen needs them, `sources.list` or `lists.list`; on
+ * desktop after the one `app.pendingDeepLinks` pull, whose link wins. main.tsx starts the router
+ * at it, so the first render is the page itself: no redirect step from `/` and no shell render of
+ * the index route before it. Null when settings fail: the router then starts at `/` and
+ * StartupRedirect shows its fallback. A list that fails restores the screen anyway, as there.
+ */
+export async function resolveStartup(isKnownPath?: (pathname: string) => boolean): Promise<StartupDecision | null> {
+  let settings: Settings;
+  try {
+    [settings] = await Promise.all([queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpc('settings.get') }), pullStartupDeepLink()]);
+  } catch {
+    return null;
+  }
+  const link = pendingStartupDeepLink();
+  if (link) return { path: link, commit: consumeStartupDeepLink };
+  const saved = savedRoute(settings);
+  const [sources, lists] = await Promise.all([
+    saved !== undefined && routeSourceId(saved) !== undefined
+      ? queryClient.ensureQueryData({ queryKey: rpcKey('sources.list'), queryFn: () => rpc('sources.list') }).catch(() => undefined)
+      : undefined,
+    saved !== undefined && routeListId(saved) !== undefined
+      ? queryClient.ensureQueryData({ queryKey: rpcKey('lists.list'), queryFn: () => rpc('lists.list') }).catch(() => undefined)
+      : undefined,
+  ]);
+  const path = startupTarget(settings, { sources, lists, isKnownPath });
+  const stale = saved !== undefined && path !== saved;
+  return {
+    path,
+    commit: () => {
+      if (stale) forgetDeadScreen(path);
+    },
+  };
+}
+
 /** Starts the dashboard chunk download; shared by the route and the startup prefetch. */
 export const loadDashboard = () => import('./dashboard/DashboardPage');
 
@@ -94,13 +152,7 @@ export function StartupRedirect({ isKnownPath }: { isKnownPath?: (pathname: stri
     if (link.path) consumeStartupDeepLink();
   }, [link.path]);
   useEffect(() => {
-    // Forget the dead screen, so no later start tries it again. The reply goes into the cache:
-    // a lastRoute-only update sends no settings.changed event.
-    if (stale) {
-      void rpc('settings.update', { patch: { lastRoute: target } })
-        .then((s) => queryClient.setQueryData(rpcKey('settings.get'), s))
-        .catch(() => undefined);
-    }
+    if (stale) forgetDeadScreen(target);
   }, [stale, target]);
   if (link.path) return <Navigate to={link.path} replace />;
   if (settings.isPending || !link.settled || checksPending) {

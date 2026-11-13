@@ -38,6 +38,9 @@ vi.mock('@/App', async () => {
     return <div>{s.data && src.data ? `ready ${src.data.length}` : 'waiting'}</div>;
   }
   return {
+    // No router here: main.tsx creates it (BOOT-1) and waits for nothing.
+    appRouter: () => undefined,
+    appRouterReady: () => undefined,
     App: () => (
       <QueryClientProvider client={queryClient}>
         <Reader />

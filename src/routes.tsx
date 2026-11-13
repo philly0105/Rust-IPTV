@@ -227,10 +227,11 @@ export function isKnownPath(pathname: string): boolean {
 
 /**
  * Starts downloading the lazy page chunks of `path` without rendering anything (L3-ui-data-x5).
- * The router starts a deep link's chunks itself as it is created, but `/` only redirects to the
- * saved screen once settings are in and the shell has rendered, so main.tsx calls this as soon as
- * settings arrive: the page chunk then downloads alongside the language and the first render. A
- * failed download is left to the route, which tries again and shows the error.
+ * The router starts its first location's chunks itself as it is created, the startup target
+ * included (main.tsx creates it there, BOOT-1). When settings came too late for that and the
+ * router started at `/`, main.tsx calls this as soon as they arrive, so the page chunk downloads
+ * while StartupRedirect waits. The shell's intent prefetch uses it too. A failed download is left
+ * to the route, which tries again and shows the error.
  */
 export function preloadRoute(path: string): void {
   for (const { route } of matchRoutes(routes, path) ?? []) {

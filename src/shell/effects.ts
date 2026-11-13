@@ -107,6 +107,11 @@ export function pullStartupDeepLink(): Promise<void> {
   return startupPull;
 }
 
+/** The pulled cold-start link's path while it is unhandled; null before the pull settles. */
+export function pendingStartupDeepLink(): string | null {
+  return startupLink?.path ?? null;
+}
+
 /** Marks the startup deep link as handled so a later visit to `/` uses the normal target. */
 export function consumeStartupDeepLink(): void {
   if (startupLink) startupLink = { settled: true, path: null };

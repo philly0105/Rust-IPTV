@@ -10,7 +10,9 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 
 - Faster channel changes in the built-in player: MPEG-TS and HLS streams reuse a ready worker instead of starting a new one on each zap.
 - The All channels list of a large source opens faster: its total comes from the stored group counts instead of counting every channel on each page.
-- Guide search is much faster on large libraries, also right after a guide update: it reads only the channels its hits belong to and stops once the page of results is settled. Rebuilding the search index after a guide refresh takes somewhat longer in exchange, and the index is rebuilt once at the first start after updating.
+- Guide search is much faster on large libraries, also right after a guide update: it reads only the channels its hits belong to and stops once the page of results is settled. The search index is rebuilt once at the first start after updating; until a rebuild finishes, searches still answer, more slowly.
+- A guide refresh no longer holds up other changes while it rebuilds the search index: marking a favorite or saving a setting during a rebuild waits a few hundredths of a second instead of up to two seconds.
+- A cold start opens the startup page directly, with the window frame and the page appearing together instead of one after the other.
 - The now/next lookups read less per request.
 - The TV guide scrolls more smoothly: its channel column, programme titles and time labels are pinned only while the grid moves sideways.
 - Going Back to a large grid no longer freezes the window while the page renders, and Home draws its first screen before the rest on a cold start.

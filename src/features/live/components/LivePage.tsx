@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
-import { invalidate, rpcKey, TransitionReads, useRpcQuery } from '@/api/query';
+import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import {
   itemKey,
@@ -131,16 +131,6 @@ const MemoMappingDialog = memo(EpgMappingDialog);
 const MemoContextMenu = memo(ContextMenu);
 
 export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
-  // The page's own answers (the stage, the ribbon, the groups) render in transitions; the rows'
-  // pages and their now/next keep the synchronous path (P3-LIVE-READS).
-  return (
-    <TransitionReads>
-      <LivePageBody mode={mode} />
-    </TransitionReads>
-  );
-}
-
-function LivePageBody({ mode }: { mode: 'live' | 'radio' }) {
   const { t, i18n } = useTranslation('live');
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const { toast } = useToast();

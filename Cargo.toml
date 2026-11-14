@@ -37,7 +37,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "brotli"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 # compression-*: gzip/brotli for server-mode RPC replies and the built UI.
-tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip", "compression-br"] }
+tower-http = { version = "0.7", features = ["fs", "cors", "trace", "compression-gzip", "compression-br"] }
 tower = { version = "0.5", features = ["util"] }
 futures = "0.3"
 bytes = "1"

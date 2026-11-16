@@ -82,6 +82,7 @@
   "noteGuideSmoothText": "The guide scrolls smoothly on large lineups and fills gaps in XMLTV listings with your Xtream account's own guide.",
   "tourCoachTitle": "Your source is ready",
   "tourCoachText": "Search finds channels, movies and series in all your sources. The command palette gets you anywhere else.",
+  "tourCoachTextTouch": "Search finds channels, movies and series in all your sources.",
   "tourShowAround": "Show me around",
   "tourGotIt": "Got it"
 }

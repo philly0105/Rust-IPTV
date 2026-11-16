@@ -82,6 +82,7 @@
   "noteGuideSmoothText": "Der Programmführer scrollt auch bei großen Senderlisten flüssig und füllt Lücken in XMLTV-Daten mit dem eigenen Programmführer Ihres Xtream-Kontos.",
   "tourCoachTitle": "Ihre Quelle ist bereit",
   "tourCoachText": "Die Suche findet Sender, Filme und Serien in allen Quellen. Die Befehlspalette bringt Sie überallhin.",
+  "tourCoachTextTouch": "Die Suche findet Sender, Filme und Serien in allen Quellen.",
   "tourShowAround": "Rundgang starten",
   "tourGotIt": "Verstanden"
 }

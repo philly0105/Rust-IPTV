@@ -21,6 +21,8 @@ export interface TourStep {
   /** Keys in `onboarding.json`. */
   titleKey: string;
   textKey: string;
+  /** The text when the main pointer is a finger, for a `textKey` that talks about keyboard tools. */
+  touchTextKey?: string;
 }
 
 export const TOUR_STEPS: readonly TourStep[] = [
@@ -34,7 +36,10 @@ export const TOUR_STEPS: readonly TourStep[] = [
  * and the command palette, the two things the screen does not show on its own. The new source's
  * page is already on screen behind it; the full tour stays one press away on the card.
  */
-export const COACH_STEPS: readonly TourStep[] = [{ anchor: 'search', icon: Search, titleKey: 'tourCoachTitle', textKey: 'tourCoachText' }];
+export const COACH_STEPS: readonly TourStep[] = [
+  // A phone has no command palette shortcut: there the card talks about search alone.
+  { anchor: 'search', icon: Search, titleKey: 'tourCoachTitle', textKey: 'tourCoachText', touchTextKey: 'tourCoachTextTouch' },
+];
 
 /** CSS selector of a step's anchor. */
 export function anchorSelector(anchor: TourAnchor): string {

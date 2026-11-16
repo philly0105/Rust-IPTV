@@ -82,6 +82,7 @@
   "noteGuideSmoothText": "채널이 많아도 TV 가이드가 부드럽게 스크롤되고, XMLTV 정보의 빈 곳을 Xtream 계정 자체 가이드로 채웁니다.",
   "tourCoachTitle": "소스가 준비되었습니다",
   "tourCoachText": "검색으로 모든 소스의 채널, 영화, 시리즈를 찾을 수 있습니다. 그 밖의 곳은 명령 팔레트로 이동하세요.",
+  "tourCoachTextTouch": "검색으로 모든 소스의 채널, 영화, 시리즈를 찾을 수 있습니다.",
   "tourShowAround": "둘러보기",
   "tourGotIt": "확인"
 }

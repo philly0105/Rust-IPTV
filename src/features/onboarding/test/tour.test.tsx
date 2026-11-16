@@ -327,6 +327,10 @@ describe('Tour', () => {
     expect(step()).toBe('search');
     expect(screen.getByRole('dialog', { name: 'Your source is ready' })).toBeTruthy();
     expect(screen.getByTestId('tour-hints')).toBeTruthy();
+    // A finger has no command palette shortcut: its text is about search alone (pointer-coarse).
+    const touch = screen.getByText('Search finds channels, movies and series in all your sources.');
+    expect(touch.className).toContain('pointer-coarse:inline');
+    expect(screen.getByText(/The command palette gets you anywhere else/).className).toContain('pointer-coarse:hidden');
     expect(document.activeElement).toBe(screen.getByTestId('tour-next'));
     expect(screen.getByTestId('tour-next').textContent).toBe('Got it');
     fireEvent.click(screen.getByTestId('tour-show-around'));

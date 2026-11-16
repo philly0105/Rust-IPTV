@@ -82,6 +82,7 @@
   "noteGuideSmoothText": "Le guide TV défile de façon fluide même avec beaucoup de chaînes, et comble les trous des données XMLTV avec le guide de votre compte Xtream.",
   "tourCoachTitle": "Votre source est prête",
   "tourCoachText": "La recherche trouve chaînes, films et séries dans toutes vos sources. La palette de commandes mène partout ailleurs.",
+  "tourCoachTextTouch": "La recherche trouve chaînes, films et séries dans toutes vos sources.",
   "tourShowAround": "Faire le tour",
   "tourGotIt": "Compris"
 }

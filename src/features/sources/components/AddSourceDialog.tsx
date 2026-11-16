@@ -158,16 +158,15 @@ export function AddSourceDialog({
    */
   const claimRef = useRef<{ failedId: string | null; knownAtSubmit: Set<string> | null }>({ failedId: null, knownAtSubmit: null });
 
-  // Reset whenever the dialog opens with a (possibly new) initial request.
+  // Reset whenever the dialog opens with a (possibly new) initial request. The state resets while
+  // rendering, so the form is the requested kind on the dialog's first open render: the Dialog
+  // focuses that kind's address field. Reset in an effect, a host that keeps the dialog mounted
+  // (the Sources page) had the previous kind's field focused, then unmounted, and focus fell to
+  // <body>, out of reach of Escape and the focus trap.
   const initialKey = JSON.stringify(initial ?? null);
-  useEffect(
-    () => () => {
-      runRef.current += 1;
-    },
-    [open, initialKey],
-  );
-  useEffect(() => {
-    if (!open) return;
+  const [openedFor, setOpenedFor] = useState<string | null>(open ? initialKey : null);
+  if (open && openedFor !== initialKey) {
+    setOpenedFor(initialKey);
     setDraft(initialDraft(initial));
     setErrors({});
     setNameTouched(Boolean(initial?.name));
@@ -177,6 +176,17 @@ export function AddSourceDialog({
     setIdsAtSubmit([]);
     setFailed(null);
     setCancelled(false);
+  } else if (!open && openedFor !== null) {
+    setOpenedFor(null);
+  }
+  useEffect(
+    () => () => {
+      runRef.current += 1;
+    },
+    [open, initialKey],
+  );
+  useEffect(() => {
+    if (!open) return;
     cancelIdRef.current = null;
     claimRef.current = { failedId: null, knownAtSubmit: null };
   }, [open, initialKey]);

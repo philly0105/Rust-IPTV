@@ -200,6 +200,24 @@ describe('Sources page states', () => {
     for (const id of ['onboard-m3u', 'onboard-xtream', 'onboard-stalker']) expect(screen.getByTestId(id)).toBeTruthy();
   });
 
+  it("opened from a tile, focuses that kind's address field and closes on Escape", async () => {
+    // The page keeps the dialog mounted on Xtream while closed: the M3U and Stalker tiles must
+    // not leave focus on an Xtream field that unmounts (it fell to <body>, out of Escape's reach).
+    for (const [tile, field] of [
+      ['onboard-m3u', /^Playlist URL/],
+      ['onboard-stalker', /^Portal URL/],
+    ] as const) {
+      rpcMock.handlers['sources.list'] = () => [];
+      renderAt(routes(), '/sources');
+      fireEvent.click(await screen.findByTestId(tile));
+      const input = within(dialog()).getByLabelText(field, { selector: 'input' });
+      expect(document.activeElement).toBe(input);
+      fireEvent.keyDown(input, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      cleanup();
+    }
+  });
+
   it('asks for the kind only when the dialog opens without one', async () => {
     // A tile is the choice: its dialog goes straight to the form under the tabs.
     const tile = await openAdd();

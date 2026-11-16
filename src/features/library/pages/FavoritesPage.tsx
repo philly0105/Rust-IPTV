@@ -6,7 +6,7 @@
 
 import { k } from '../lib/keys';
 import { ArrowDown, ArrowUp, Heart } from 'lucide-react';
-import { useCallback, useMemo, useState, type DragEvent } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState, type DragEvent } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router';
 
@@ -16,7 +16,6 @@ import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types'
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, TEXT_LINK, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
-import { EntryChannelMenu, addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../components/EntryChannelMenu';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -32,7 +31,10 @@ import {
   withPositions,
   type FavoriteRow,
 } from '../lib/favorites';
+import { addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../lib/entryMenu';
 import { SourceGoneError, openEntry, relativeTime } from '../lib/open';
+
+const EntryChannelMenu = lazy(() => import('../components/EntryChannelMenu').then((m) => ({ default: m.EntryChannelMenu })));
 
 const HEADER_HEIGHT = 56;
 /**
@@ -68,6 +70,9 @@ export function FavoritesPage() {
   const quality = useLiveQuality();
   const [drag, setDrag] = useState<{ key: string; over?: { key: string; where: 'before' | 'after' } } | null>(null);
   const [menu, setMenu] = useState<EntryMenuRequest | null>(null);
+  // The channel menu's code (Live TV's menu, lists, multi-view, edits) loads with the first menu.
+  const [menuUsed, setMenuUsed] = useState(false);
+  if (menu && !menuUsed) setMenuUsed(true);
 
   const entries = useMemo(() => sortFavorites(query.data ?? []), [query.data]);
   const rows = useMemo(() => buildFavoriteRows(entries, search), [entries, search]);
@@ -340,7 +345,11 @@ export function FavoritesPage() {
     <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="favorites-page">
       <PageTitle>{title}</PageTitle>
       {body}
-      <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
+      {menuUsed ? (
+        <Suspense fallback={null}>
+          <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
+        </Suspense>
+      ) : null}
     </Page>
   );
 }

@@ -154,6 +154,8 @@ describe('MyListPage: designed states', () => {
   });
 
   it('asks for a source first when there is none', async () => {
+    // The dialog is a lazy chunk: loaded ahead, so a slow transform under load does not outlast findBy.
+    await import('@/features/sources/components/AddSourceDialog');
     h.installCore(rpc, []);
     rpc.handlers['sources.list'] = () => [];
     open();

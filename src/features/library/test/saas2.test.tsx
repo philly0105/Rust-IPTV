@@ -121,6 +121,8 @@ describe('Favorites rows say what is on air', () => {
     // Touch: one menu button, hidden on a fine pointer (the strip has its own ⋮ before it). A
     // channel's menu is Live TV's (library-04), with the page's moves among its entries.
     const trigger = within(row).getAllByRole('button', { name: /Actions for/ }).at(-1)!;
+    // The menu's code is a lazy chunk: loaded ahead, so findByRole does not wait on its transform.
+    await import('../components/EntryChannelMenu');
     expect(trigger.className).toContain('not-pointer-coarse:hidden');
     fireEvent.click(trigger);
     const menu = await screen.findByRole('menu');

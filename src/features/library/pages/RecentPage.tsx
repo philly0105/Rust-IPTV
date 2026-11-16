@@ -6,7 +6,7 @@
 
 import { k } from '../lib/keys';
 import { History, Trash, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
 
@@ -17,7 +17,6 @@ import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
-import { EntryChannelMenu, addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../components/EntryChannelMenu';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton, type EntryResume } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -25,6 +24,7 @@ import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
 import { formatClock } from '../lib/format';
+import { addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../lib/entryMenu';
 import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
 import {
   buildRecentRows,
@@ -38,6 +38,8 @@ import {
   type PositionCalls,
   type RecentRow,
 } from '../lib/recent';
+
+const EntryChannelMenu = lazy(() => import('../components/EntryChannelMenu').then((m) => ({ default: m.EntryChannelMenu })));
 
 const positionCalls: PositionCalls = {
   forSeries: (a) => rpc('positions.forSeries', a),
@@ -74,6 +76,9 @@ export function RecentPage() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [menu, setMenu] = useState<EntryMenuRequest | null>(null);
+  // The channel menu's code (Live TV's menu, lists, multi-view, edits) loads with the first menu.
+  const [menuUsed, setMenuUsed] = useState(false);
+  if (menu && !menuUsed) setMenuUsed(true);
   const closeMenu = useCallback(() => setMenu(null), []);
   // An empty history may be the Live TV quality filter's doing: it leaves out the channels it hides.
   const quality = useLiveQuality();
@@ -375,7 +380,11 @@ export function RecentPage() {
         </div>
       ) : null}
       {body}
-      <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
+      {menuUsed ? (
+        <Suspense fallback={null}>
+          <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
+        </Suspense>
+      ) : null}
       <ConfirmDialog
         open={confirmClear}
         onClose={() => setConfirmClear(false)}

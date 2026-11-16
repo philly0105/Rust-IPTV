@@ -327,7 +327,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
                 <p className="mb-0.5 flex min-w-0 items-center gap-1.5 text-caption text-fg-muted" data-testid="ribbon-channel">
                   <ChannelLogo src={channel.logoUrl} name={channelName} size={20} sourceId={channel.ref.sourceId} />
                   {channel.number !== undefined ? <span className="shrink-0 font-numeric tabular-nums">{channel.number}</span> : null}
-                  <ChannelName name={channel.name} strip={prefs.stripCountryPrefix} className="min-w-0 truncate text-match-parent" />
+                  <ChannelName name={channel.name} strip={prefs.stripCountryPrefix} title={channel.name} className="min-w-0 truncate text-match-parent" />
                 </p>
               ) : null}
               {/* The Now card reads eyebrow, title, then the details, as the hero and the detail pages

@@ -15,6 +15,7 @@ import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
 import { itemKey, type Category, type Channel, type ChannelQuality, type ItemKey, type Page, type Source, type SourceKind } from '@/api/types';
 import { channelQuality } from '@/lib/channelQuality';
+import { isSeparatorName } from '@/lib/channelName';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import {
@@ -136,14 +137,6 @@ function describe(channel: Channel): Described {
     described.set(channel, d);
   }
   return d;
-}
-
-/**
- * A provider's heading row between groups of channels ("##### FOX ᴴᴰ/ᴿᴬᵂ #####", "===== NFL ====="): a
- * playlist entry with a name, but no channel, which would otherwise read as the network it names.
- */
-export function isSeparatorName(name: string): boolean {
-  return /^\s*[#=*~_]{3,}|[#=*~_]{3,}\s*$/.test(name);
 }
 
 /** One index row. */

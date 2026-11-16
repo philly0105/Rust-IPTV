@@ -26,7 +26,7 @@ export interface RadioPlayerProps {
 
 /** The round icon buttons beside play: the control bar's (Controls CtlButton), 44 px under a coarse pointer. */
 const RADIO_BUTTON =
-  'inline-flex shrink-0 items-center justify-center rounded-full text-on-glass hover:bg-white/12 active:bg-white/20 motion-safe:transition-colors pointer-coarse:size-11';
+  'inline-flex shrink-0 items-center justify-center rounded-full text-on-glass hover:bg-white/12 active:bg-white/20 motion-safe:transition-colors pointer-coarse:size-[calc(44rem/15)]';
 
 /** Signal meter: five bars that breathe while audio plays (static under reduced motion). */
 function SignalMeter({ active }: { active: boolean }) {
@@ -153,7 +153,7 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
               onClick={() => store.togglePlay()}
               className={cn(
                 'inline-flex shrink-0 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg hover:bg-accent-solid-hover active:bg-accent-solid-pressed motion-safe:transition-colors',
-                stage && !shortStage ? 'size-14' : stage ? 'size-12' : 'size-10 pointer-coarse:size-11',
+                stage && !shortStage ? 'size-14' : stage ? 'size-12' : 'size-10 pointer-coarse:size-[calc(44rem/15)]',
               )}
             >
               {playing ? <Pause className="size-6 fill-current" /> : <Play className="size-6 fill-current" />}

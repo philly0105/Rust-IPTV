@@ -122,7 +122,7 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
             type="button"
             aria-label={tc('close')}
             onClick={() => setHistoryOpen(false)}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-10"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-[calc(44rem/15)]"
           >
             <X className="size-4" aria-hidden />
           </button>

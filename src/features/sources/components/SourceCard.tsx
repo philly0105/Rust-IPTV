@@ -456,10 +456,15 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
                       <span className="sr-only">{exact}</span>
                     </>
                   ) : (
-                    <>
-                      <span aria-hidden>–</span>
-                      <span className="sr-only">{imported ? exact : t('neverRefreshed')}</span>
-                    </>
+                    imported ? (
+                      <>
+                        <span aria-hidden>–</span>
+                        <span className="sr-only">{exact}</span>
+                      </>
+                    ) : (
+                      // Nothing imported yet: no count to give (the times line or the error says why).
+                      '–'
+                    )
                   )}
                 </dd>
               </div>

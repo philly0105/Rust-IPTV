@@ -273,6 +273,12 @@ export const GuideRow = memo(function GuideRow({
   const longPress = useLongPress((x, y) => {
     if (ch) handlers.menu(ch, x, y);
   });
+  // And on a programme: the same menu with that programme, as a right click on the cell gives.
+  const cellPress = useLongPress((x, y) => {
+    if (!ch) return;
+    const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>('button[data-start]');
+    handlers.menu(ch, x, y, cell ? programs?.find((p) => p.start === cell.dataset.start) : undefined);
+  });
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
   // Catch-up remains in the accessible name and tooltip.
   const archive = !!ch && hasUsableArchive(ch, kind);
@@ -422,11 +428,12 @@ export const GuideRow = memo(function GuideRow({
         ) : (
           <div
             data-testid="cell-layer"
-            className="absolute inset-y-0"
+            className="absolute inset-y-0 select-none [-webkit-touch-callout:none]"
             style={rtl ? { right: layer } : { left: layer }}
             onMouseLeave={() => {
               if (ch) handlers.hover(index, ch, undefined);
             }}
+            {...cellPress}
           >
             {chunks.filter((chunk) => {
               const left = base + chunk.left;

@@ -20,6 +20,8 @@ import lists from '@/i18n/en/lists.json';
 import live from '@/i18n/en/live.json';
 import multiview from '@/i18n/en/multiview.json';
 import parental from '@/i18n/en/parental.json';
+import shell from '@/i18n/en/shell.json';
+import vod from '@/i18n/en/vod.json';
 
 export { installDomStubs, makeChannel, program, settings } from '../../test/harness';
 
@@ -28,9 +30,9 @@ void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
   // The channel row menu (C2) also speaks channels, lists, multiview and parental.
-  ns: ['live', 'guide', 'common', 'channels', 'lists', 'multiview', 'parental'],
+  ns: ['live', 'guide', 'common', 'channels', 'lists', 'multiview', 'parental', 'shell', 'vod'],
   defaultNS: 'live',
-  resources: { en: { live, guide, common, channels, lists, multiview, parental } },
+  resources: { en: { live, guide, common, channels, lists, multiview, parental, shell, vod } },
   interpolation: { escapeValue: false },
 });
 

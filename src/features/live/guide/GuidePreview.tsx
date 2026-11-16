@@ -186,13 +186,20 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
               {when === 'now' ? t('startOver') : t('watchCatchup')}
             </Button>
           ) : null}
+          {/* A short label: the channel is named above (and in its accessible name); a provider's long name filled the row. */}
           {when !== 'now' ? (
-            <Button size="sm" variant={catchupOk ? 'ghost' : 'secondary'} icon={<Play size={14} />} onClick={() => props.onWatch(channel)} className="min-w-0" title={narrow ? t('playChannel', { name }) : undefined}>
-              <span className="truncate">{t('playChannel', { name })}</span>
+            <Button
+              size="sm"
+              variant={catchupOk ? 'ghost' : 'secondary'}
+              icon={<Play size={14} />}
+              onClick={() => props.onWatch(channel)}
+              aria-label={t('playChannel', { name })}
+            >
+              {t('watchChannel')}
             </Button>
           ) : null}
           {/* recording: */}
-          <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} variant={narrow ? 'icons' : 'buttons'} />
+          <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} variant={narrow ? 'icons' : 'buttons'} explainNoRecording={false} />
         </div>
       </div>
       <div className="mt-1 flex min-w-0 shrink-0 items-center gap-4">

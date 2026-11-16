@@ -168,7 +168,7 @@ describe('the toolbar at narrow widths', () => {
       expect(within(toolbar).queryByRole('searchbox')).toBeNull();
       expect(within(toolbar).queryByRole('button', { name: 'Search the guide' })).toBeNull();
       const field = within(screen.getByTestId('shell-header')).getByRole('searchbox', { name: 'Search the guide' });
-      expect(field.getAttribute('placeholder')).toBe('Search guide');
+      expect(field.getAttribute('placeholder')).toBe('Search programmes and channels');
       // `/` still reaches it (on a phone the header's folded field unfolds as it takes focus).
       fireEvent.keyDown(document.body, { key: '/' });
       expect(document.activeElement).toBe(field);

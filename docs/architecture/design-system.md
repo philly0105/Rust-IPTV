@@ -15,6 +15,7 @@ Rule of thumb: if the kit has it, use it. A feature never draws its own switch, 
 | `bg-surface-2` | recessed or secondary fills: segmented tracks, secondary buttons, chips, the toast |
 | `bg-surface-3` | a step up again: tooltips, neutral badges, the secondary button's hover |
 | `bg-pressed` | the pressed state of anything that rests on a surface step |
+| `skeleton-surface` | loading placeholders (`Skeleton`, `motion-safe:animate-shimmer`): `--color-skeleton`, which is `surface-2` in dark and a step darker than the page in light, where `surface-2` on the page read as blank; the shimmer sweeps `--color-skeleton-shine` |
 | `border-divider` | rules between regions already told apart by spacing (rail edge, header rule, list separators, dialog footer) |
 | `border-edge` / `ring-edge` | the outline of every container: cards, panels, dialogs, menus, toasts, tooltips, settings groups, guide cells, chips, key caps, poster rings, secondary buttons. About 1.3:1, decorative |
 | `border-border` | form controls only: inputs, selects, the off switch track, checkboxes, radios, PIN cells. 3:1, so it identifies the control (WCAG 1.4.11). `hover:border-border` may firm up an edge-outlined thing on hover |

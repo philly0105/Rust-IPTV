@@ -115,6 +115,9 @@
   /* Derived (not in C10; used by shell chrome). */
   --color-scrim: rgb(4 8 16 / 0.72);
   --color-focus: #ffc865;
+  /* Loading placeholders (the skeleton-surface utility) and the band their shimmer sweeps. */
+  --color-skeleton: var(--color-surface-2);
+  --color-skeleton-shine: var(--color-surface-3);
   --color-glow: rgb(245 181 68 / 0.22);
 
   /* Glass (C8): overlays drawn over video or artwork. */
@@ -170,11 +173,17 @@
   --color-live: #c41f2a;
   --color-live-solid: #c41f2a;
 
-  --color-hover: rgb(15 22 38 / 0.05);
+  --color-hover: rgb(15 22 38 / 0.06);
   --color-active: rgb(15 22 38 / 0.09);
 
   --color-scrim: rgb(18 26 42 / 0.45);
   --color-focus: #8f4f00;
+  /*
+   * surface-2 is 1.05:1 on the light page, so a loading page read as blank: the placeholder is a
+   * step darker, and its shimmer brightens rather than darkens.
+   */
+  --color-skeleton: #e1e5ec;
+  --color-skeleton-shine: rgb(255 255 255 / 0.7);
   --color-glow: rgb(143 79 0 / 0.16);
 
   /* Glass stays dark in the light theme: it sits on video and artwork, not on the page. */

@@ -370,6 +370,15 @@ describe('state layers (DS-STATE-FILLS)', () => {
       }
     });
 
+    // A loading page in light read as blank: surface-2 was 1.05:1 on the page. The placeholder
+    // (--color-skeleton, surface-2 unless the theme sets its own) stands off the page and panels.
+    it(`${name}: loading placeholders stand off the page and panels`, () => {
+      const skeleton = c['skeleton'] ?? c['surface-2']!;
+      for (const s of ['bg', 'surface'] as const) {
+        expect(contrast(skeleton, c[s]!), `skeleton on ${s}`).toBeGreaterThanOrEqual(name === 'light' ? 1.1 : 1.07);
+      }
+    });
+
     // The guide's and the ribbon's airing cell is the active layer over the page (guide) or a
     // panel (ribbon), and the red now line is drawn under it: seen through the layer it still
     // reaches 3:1 against the cell, and the cell still stands apart from a future cell.

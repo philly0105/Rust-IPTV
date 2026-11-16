@@ -600,7 +600,7 @@ html[data-theme-switching='true'] *::after {
 
 /* Skeleton surface: the resting placeholder colour (animate with motion-safe:animate-shimmer). */
 @utility skeleton-surface {
-  background-color: var(--color-surface-2);
+  background-color: var(--color-skeleton);
 }
 
 /*
@@ -618,7 +618,7 @@ html[data-theme-switching='true'] *::after {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background-image: linear-gradient(90deg, transparent 0%, var(--color-surface-3) 50%, transparent 100%);
+    background-image: linear-gradient(90deg, transparent 0%, var(--color-skeleton-shine) 50%, transparent 100%);
     transform: translateX(-100%);
     animation: shimmer 1.6s linear infinite;
   }

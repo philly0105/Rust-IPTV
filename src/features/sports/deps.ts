@@ -43,9 +43,12 @@ export { useRecordingCapabilities, useScheduleActions, useScheduleIndex } from '
 export { markFor } from '@/features/recording/lib/schedule';
 export { openExternalUrl } from '@/features/settings/lib/links';
 export { intlLocale } from '@/lib/intl';
+export { PHONE_QUERY } from '@/shell/navigation';
 export { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
 
 /** Live's playChannel and playCatchup, which load the player: only ever behind a press. */
 export const loadPlayback = () => import('@/features/live/lib/playback');
-/** The player store, for the zap context after a Watch. */
+/** The player store, for the zap context after a Watch and the row that plays. */
 export const loadPlayerStore = () => import('@/features/player/store');
+/** Where the mini player's Expand goes, for Watch on a phone. */
+export const loadPlayerStage = () => import('@/features/player/stage');

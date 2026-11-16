@@ -9,7 +9,7 @@ import { IconButton } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, separatorLabel } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
 import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
@@ -53,6 +53,18 @@ export interface ChannelRowProps {
   guideUnavailable?: boolean;
   /** Parental Ask mode: the channel asks for the PIN, so the row carries a lock and keeps its programmes back. */
   locked?: boolean;
+  /**
+   * The list mixes groups (a search across All channels): the programme line leads with the
+   * channel's group, which is what tells a dozen "ESPN HD" feeds apart.
+   */
+  showGroup?: boolean;
+  /**
+   * The group the list is open on. Its rows without a programme say there is no guide instead of
+   * repeating the group's name, which the header and the group column already show.
+   */
+  groupId?: string;
+  /** The list is the Favorites view: every row is one, so the heart mark says nothing. */
+  hideFavoriteMark?: boolean;
   onActivate(index: number, how: 'click' | 'double' | 'key'): void;
   onToggleFavorite(channel: Channel, favorite: boolean): void;
   onContextMenu(e: MouseEvent, channel: Channel, index: number): void;
@@ -63,11 +75,18 @@ export interface ChannelRowProps {
   onMenuAt?(at: { x: number; y: number }, channel: Channel, index: number): void;
 }
 
+/**
+ * The number column: 26 px, or as many digits as the list's highest number has when ChannelList
+ * sets `--num-w` (a source numbered to 57,000 spilled "57012" past the row's padding). In `ch` of
+ * the number's own tabular figures, so every row's logo stays on one line.
+ */
+const NUMBER_WIDTH = 'w-[var(--num-w,1.75rem)] min-w-7';
+
 /** Same columns and height as a loaded row, so nothing moves when the data lands. */
 export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
   return (
     <div className={`flex h-full items-center gap-3 ps-3 pe-3 ${pulse ? 'motion-safe:animate-pulse' : ''}`} aria-hidden>
-      <span className="h-3 w-7 shrink-0 rounded-xs bg-surface-3" />
+      <span className={`h-3 shrink-0 rounded-xs bg-surface-3 ${NUMBER_WIDTH}`} />
       <span className="size-10 shrink-0 rounded-md bg-surface-3" />
       <span className="flex flex-1 flex-col gap-1.5">
         <span className="h-3 w-2/5 rounded-xs bg-surface-3" />
@@ -107,6 +126,7 @@ interface RowText {
   removeFavorite: string;
   channelMenu: string;
   guideNotAnswering: string;
+  noGuide: string;
   archive: string;
   archiveIcon: ReactElement;
   /** Plural texts by key and count, filled as rows ask for them. */
@@ -125,6 +145,7 @@ function rowText(t: TFunction<'live'>): RowText {
       removeFavorite: t('removeFavorite'),
       channelMenu: t('channelMenu'),
       guideNotAnswering: t('guideNotAnswering'),
+      noGuide: t('noGuideShort'),
       archive: t('archive'),
       archiveIcon: <History size={12} aria-label={t('archive')} data-testid="row-archive" />,
       counted: new Map(),
@@ -179,6 +200,26 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
     if (channel) props.onMenuAt?.({ x, y }, channel, index);
   });
   if (!channel) return <RowSkeleton />;
+  if (isSeparatorName(channel.name)) {
+    // A provider's heading ("#### PRIME ᴿᴬᵂ ####") is no channel: a quiet label over the names it
+    // heads, in the row's slot so the list keeps one height. Not playable and passed by the arrows;
+    // a right click or a long press still reaches its menu (Hide).
+    return (
+      <div
+        className="flex h-full touch-manipulation items-end gap-3 ps-2.5 pe-3 pb-2 select-none [-webkit-touch-callout:none]"
+        onContextMenu={(e) => props.onContextMenu(e, channel, index)}
+        data-testid="row-separator"
+        {...longPress}
+      >
+        {/* On the names' line: the number and logo columns stay, empty. */}
+        <span aria-hidden className={cn('shrink-0', NUMBER_WIDTH)} />
+        {compact ? null : <span aria-hidden className="shrink-0" style={{ width: props.station ? 44 : 40 }} />}
+        <span dir="auto" className="min-w-0 truncate text-caption font-semibold tracking-wide text-fg-subtle uppercase">
+          {separatorLabel(channel.name)}
+        </span>
+      </div>
+    );
+  }
 
   const locked = props.locked ?? false;
   // A locked channel's programme titles wait for the PIN, like its stream.
@@ -190,6 +231,9 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
   const name = displayChannelName(channel.name, props.stripPrefix);
   const left = cur ? minutesLeft(cur, now) : 0;
   const text = rowText(t);
+  const group = props.showGroup ? channel.categoryName : '';
+  // In its own group a row without a programme says so; elsewhere its group tells it apart.
+  const inOpenGroup = !!props.groupId && channel.categoryId === props.groupId;
 
   return (
     <div
@@ -213,6 +257,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         aria-label={[
           channel.number !== undefined ? `${channel.number}` : '',
           name,
+          group,
           favorite ? text.favorite : '',
           locked ? text.locked : '',
           cur ? t('nowShowing', { title: cur.title }) : '',
@@ -229,7 +274,8 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             so the logo and the name lead the row. */}
         <span
           className={cn(
-            'w-7 shrink-0 text-end font-numeric text-sm tabular-nums',
+            'shrink-0 text-end font-numeric text-sm tabular-nums',
+            NUMBER_WIDTH,
             playing ? 'text-fg' : 'text-fg-subtle',
           )}
         >
@@ -241,6 +287,8 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             <ChannelName
               name={channel.name}
               strip={props.stripPrefix}
+              // The provider's whole name when the column cuts it (event channels differ at the end).
+              title={channel.name}
               // A step up on touch, held at arm's length: the desktop's dense 13.5 px name and 12 px
               // programme fit the same 60 px row at 15 and 13.5.
               className={cn('truncate text-body-sm text-match-parent text-fg pointer-coarse:text-body', playing ? 'font-semibold' : 'font-medium')}
@@ -248,7 +296,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             {/* Marks, not slots: an empty row gives their room to the title. */}
             {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
                 It steps aside while the floating actions show their own heart. */}
-            {favorite ? FAVORITE_MARK : null}
+            {favorite && !props.hideFavoriteMark ? FAVORITE_MARK : null}
             {archive ? (
               <span
                 title={
@@ -269,6 +317,17 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
                   compact "38m" form, so narrow lists keep the title readable (and RTL titles put the
                   ellipsis at their own end, not before the clock). */}
               <span className="flex min-w-0 items-baseline gap-2 text-caption text-fg-muted pointer-coarse:text-body-sm" data-testid="row-now">
+                {group ? (
+                  // Quiet, and it gives way before the title does.
+                  <>
+                    <span dir="auto" className="max-w-[45%] min-w-0 shrink-0 truncate text-fg-subtle" title={group} data-testid="row-group">
+                      {group}
+                    </span>
+                    <span aria-hidden className="shrink-0 text-fg-subtle">
+                      ·
+                    </span>
+                  </>
+                ) : null}
                 <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" data-testid="row-now-title" title={cur.title}>
                   {cur.title}
                 </span>
@@ -302,6 +361,10 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
           ) : props.guideUnavailable ? (
             <span className="truncate text-caption text-fg-subtle" data-testid="row-guide-unavailable">
               {text.guideNotAnswering}
+            </span>
+          ) : inOpenGroup ? (
+            <span className="truncate text-caption text-fg-subtle" data-testid="row-no-guide">
+              {locked ? text.locked : text.noGuide}
             </span>
           ) : (
             <span dir="auto" className="truncate text-caption text-match-parent text-fg-subtle">

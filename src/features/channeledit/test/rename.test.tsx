@@ -38,8 +38,8 @@ async function open(channel: Channel = bbc) {
     expect(openRenameDialog(channel)).toBe(true);
   });
   await screen.findByTestId('channel-rename-dialog');
-  // Save is no longer disabled while the edits load (L4-live-5): wait for the provider's name.
-  await waitFor(() => expect(screen.getByTestId('channel-rename-provider').textContent).toContain("Provider's name"));
+  // Save is no longer disabled while the edits load (L4-live-5): wait for them to answer.
+  await waitFor(() => expect(document.querySelector('[data-edits-known]')).toBeTruthy());
   return view;
 }
 
@@ -67,16 +67,19 @@ describe('rename dialog', () => {
     warn.mockRestore();
   });
 
-  it('starts with the shown name selected and the provider name in view', async () => {
+  it('starts with the shown name selected, and shows the provider name once it differs from the field', async () => {
     await open();
     expect(input().value).toBe('BBC One');
     expect(document.activeElement).toBe(input());
     expect(input().selectionStart).toBe(0);
     expect(input().selectionEnd).toBe('BBC One'.length);
-    expect(screen.getByTestId('channel-rename-provider').textContent).toContain("Provider's name: BBC One");
+    // The field holds the provider's name: a box repeating it under the field said nothing (live-20).
+    expect(screen.queryByTestId('channel-rename-provider')).toBeNull();
     expect(screen.getByTestId('channel-rename-count').textContent).toBe('7/120');
     // Nothing to go back to while the field holds the provider's name.
     expect(screen.queryByRole('button', { name: 'Use this' })).toBeNull();
+    type('BBC 1');
+    expect(screen.getByTestId('channel-rename-provider').textContent).toContain("Provider's name: BBC One");
   });
 
   it('renames to the trimmed name, then Undo goes back to the provider name', async () => {

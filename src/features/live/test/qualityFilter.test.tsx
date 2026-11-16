@@ -170,8 +170,8 @@ describe('Live TV quality picker', () => {
     rpcMock.handlers['catalog.categories'] = () => [];
     rpcMock.handlers['catalog.channels'] = serve([]);
     renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
+    // A source without radio gets one page-level empty state (live-22), with no filter in it.
     expect(await screen.findByText('No radio stations in this source')).toBeTruthy();
-    expect(screen.getByRole('searchbox', { name: 'Search stations' })).toBeTruthy();
     expect(screen.queryByTestId('live-quality-filter')).toBeNull();
     expect(screen.queryByText('No channels match the quality filter')).toBeNull();
   });

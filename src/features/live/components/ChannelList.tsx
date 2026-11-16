@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { UNSAFE_LocationContext } from 'react-router';
 
@@ -8,6 +8,7 @@ import { TEXT_LINK, cn, useListVirtualizer, useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { ParentalLocks } from '../hooks/useParentalLocks';
+import { isSeparatorName } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow } from './ChannelRow';
@@ -42,6 +43,12 @@ export interface ChannelListProps {
    * the list leaves them alone. Shift+PageUp and Shift+PageDown still page the list.
    */
   zapKeys?: boolean;
+  /** See `ChannelRow.showGroup`: a search across every group. */
+  showGroup?: boolean;
+  /** See `ChannelRow.groupId`: the group the list is open on. */
+  groupId?: string;
+  /** See `ChannelRow.hideFavoriteMark`: the Favorites view. */
+  hideFavoriteMark?: boolean;
 }
 
 interface ListPlace {
@@ -63,6 +70,30 @@ function remember(key: string, patch: Partial<ListPlace>): void {
     const oldest = listMemory.keys().next().value;
     if (oldest !== undefined) listMemory.delete(oldest);
   }
+}
+
+/** The group column's tab stop, which the inline-start arrow moves to from a row (CategorySidebar). */
+const GROUP_TAB_STOP = '[data-testid="group-nav"] [data-cat-index][tabindex="0"]';
+
+/** The index of the row `el` is in, if any. */
+function rowIndexOf(el: EventTarget | null): number | null {
+  const row = el instanceof Element ? el.closest<HTMLElement>('[data-row-index]') : null;
+  const i = row ? Number(row.dataset.rowIndex) : NaN;
+  return Number.isInteger(i) ? i : null;
+}
+
+/**
+ * `i`, or the nearest row from it in the direction `dir` (then back the other way) that is not a
+ * provider's heading. A row not loaded yet counts as playable: the cursor can wait on it.
+ */
+function playableFrom(paged: PagedChannels, i: number, dir: 1 | -1, count: number): number {
+  for (const d of [dir, -dir]) {
+    for (let j = i; j >= 0 && j < count; j += d) {
+      const ch = paged.getChannel(j);
+      if (!ch || !isSeparatorName(ch.name)) return j;
+    }
+  }
+  return i;
 }
 
 /** Tests: forget every remembered list position. */
@@ -247,7 +278,22 @@ export function ChannelList(props: ChannelListProps) {
   // left a parent render queued behind each keystroke of a fast repeat, so no commit ever ended
   // idle and React stopped the chain as an update loop (#185).
   const activeChannel = paged.getChannel(active);
+  // The cursor never rests on a provider's heading (a list that opens on one, a reload).
+  const activeIsHeading = !!activeChannel && isSeparatorName(activeChannel.name);
+  useEffect(() => {
+    if (activeIsHeading) setActive((a) => playableFrom(propsRef.current.paged, a, 1, propsRef.current.paged.total ?? 0));
+  }, [activeIsHeading, setActive]);
   const { onActiveChange } = props;
+
+  // The number column takes the widest number this list has shown (ChannelRow): it only grows
+  // while the list stays, so scrolling back to low numbers does not move every logo again.
+  const widest = useRef({ key: resetKey, digits: 0 });
+  if (widest.current.key !== resetKey) widest.current = { key: resetKey, digits: 0 };
+  for (const l of paged.loaded) {
+    const n = l.channel.number;
+    if (n !== undefined && n >= 1000) widest.current.digits = Math.max(widest.current.digits, String(n).length);
+  }
+  const numberDigits = widest.current.digits;
   useEffect(() => {
     if (!onActiveChange) return;
     const id = window.setTimeout(() => onActiveChange(activeChannel), ACTIVE_SETTLE_MS);
@@ -286,9 +332,9 @@ export function ChannelList(props: ChannelListProps) {
   });
 
   const moveTo = useCallback(
-    (i: number) => {
+    (i: number, dir: 1 | -1 = 1) => {
       if (count === 0) return;
-      const next = Math.max(0, Math.min(count - 1, i));
+      const next = playableFrom(paged, Math.max(0, Math.min(count - 1, i)), dir, count);
       followKey.current = '';
       // In the event handler, not in a commit: the virtualizer answers the scroll from its own listener.
       virtualizer.scrollToIndex(next, { align: 'auto' });
@@ -302,7 +348,7 @@ export function ChannelList(props: ChannelListProps) {
       }
       setActive(next);
     },
-    [count, setActive, virtualizer],
+    [count, setActive, virtualizer, paged],
   );
 
   const activate = useCallback(
@@ -310,7 +356,7 @@ export function ChannelList(props: ChannelListProps) {
       setActive(index);
       const p = propsRef.current.paged;
       const ch = p.getChannel(index);
-      if (!ch) return;
+      if (!ch || isSeparatorName(ch.name)) return;
       const plays = how === 'key' || how === 'double' || (how === 'click' && !propsRef.current.openOnDoubleClick);
       if (plays) propsRef.current.onPlay(ch, p.getNowNext(index));
     },
@@ -331,27 +377,41 @@ export function ChannelList(props: ChannelListProps) {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     // Ctrl+S, Alt+Enter and friends belong to the app and the browser, not to the row.
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    // The keys act on the row that has focus. Focus can land on a row without the list's own
+    // handlers (a screen reader's focus mode, the scroll memory's restore): the cursor follows it.
+    const focusedRow = rowIndexOf(e.target);
+    if (focusedRow !== null && focusedRow !== activeRef.current) setActive(focusedRow);
     const active = activeRef.current;
     const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 640) / rowHeight) - 1);
     switch (e.key) {
       case 'ArrowDown':
-        moveTo(active + 1);
+        moveTo(active + 1, 1);
         break;
       case 'ArrowUp':
-        moveTo(active - 1);
+        moveTo(active - 1, -1);
         break;
+      case 'ArrowLeft':
+      case 'ArrowRight': {
+        // Toward the inline start: over to the group column (a remote has arrows and OK, no Tab).
+        // The other way stays with the player's seek keys.
+        if (!bare || e.shiftKey || e.key !== (documentIsRtl() ? 'ArrowRight' : 'ArrowLeft')) return;
+        const group = document.querySelector<HTMLElement>(GROUP_TAB_STOP);
+        if (!group) return;
+        group.focus();
+        break;
+      }
       case 'PageDown':
       case 'PageUp':
         // While a live channel plays these zap (the `?` overlay's channel up and down): let the key
         // through to the playback shortcuts. Arrows keep moving the cursor, Shift pages the list.
         if (props.zapKeys && !e.shiftKey) return;
-        moveTo(e.key === 'PageDown' ? active + page : active - page);
+        moveTo(e.key === 'PageDown' ? active + page : active - page, e.key === 'PageDown' ? 1 : -1);
         break;
       case 'Home':
-        moveTo(0);
+        moveTo(0, 1);
         break;
       case 'End':
-        moveTo(count - 1);
+        moveTo(count - 1, -1);
         break;
       case 'Enter':
         if (!bare) return;
@@ -426,6 +486,8 @@ export function ChannelList(props: ChannelListProps) {
           if (!(to instanceof Node && e.currentTarget.contains(to)) && (e.target as HTMLElement).isConnected) lastFocused.current = null;
         }}
         // `group/list`: the cursor row is marked only while the list has focus (ChannelRow).
+        // Wide enough for the source's longest channel number (ChannelRow's number column).
+        style={numberDigits > 3 ? ({ '--num-w': `${numberDigits}ch` } as CSSProperties) : undefined}
         className={`group/list relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
           paged.refreshing ? 'opacity-60' : ''
         }`}
@@ -459,6 +521,9 @@ export function ChannelList(props: ChannelListProps) {
                   epgOffsetMinutes={prefs.epgOffsetMinutes}
                   guideUnavailable={paged.guideUnavailable}
                   locked={props.locks?.channelLocked(ch) ?? false}
+                  showGroup={props.showGroup}
+                  groupId={props.groupId}
+                  hideFavoriteMark={props.hideFavoriteMark}
                   onActivate={activate}
                   onToggleFavorite={props.onToggleFavorite}
                   onContextMenu={onRowContext}

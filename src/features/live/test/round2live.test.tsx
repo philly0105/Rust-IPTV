@@ -260,12 +260,12 @@ describe('the idle card and the ribbon tell one story (review round 2)', () => {
     fireEvent.keyDown(first, { key: 'ArrowDown' });
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     await waitFor(() => expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe('Play Channel 2'));
-    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
+    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Selected');
     await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain('Channel 2'));
     expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();
     // Focus moving on (to the ribbon, say) keeps the column on the cursor's channel.
     act(() => (document.activeElement as HTMLElement).blur());
-    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
+    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Selected');
   });
 });
 

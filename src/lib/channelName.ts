@@ -104,3 +104,16 @@ export function displayChannelName(name: string | null | undefined, strip: boole
   const raw = name ?? '';
   return strip ? stripCountryPrefix(raw) : raw;
 }
+
+/**
+ * A provider's heading row between groups of channels ("##### FOX ᴴᴰ/ᴿᴬᵂ #####", "===== NFL ====="): a
+ * playlist entry with a name, but no channel, which would otherwise read as the network it names.
+ */
+export function isSeparatorName(name: string): boolean {
+  return /^\s*[#=*~_]{3,}|[#=*~_]{3,}\s*$/.test(name);
+}
+
+/** A heading row's text without its runs of marks: "PRIME ᴿᴬᵂ" for "#### PRIME ᴿᴬᵂ ####". */
+export function separatorLabel(name: string): string {
+  return name.replace(/^[\s#=*~_]+|[\s#=*~_]+$/g, '');
+}

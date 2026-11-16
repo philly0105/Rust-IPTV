@@ -4,8 +4,9 @@
  * recently watched, custom lists); quality is read from the provider's channel name. Radio has no
  * picture and is never filtered, so the page leaves the button out there.
  *
- * QualityFilterButton is a square button at the end of the list toolbar, inverted while a minimum
- * is set, as the guide's genre picker is while a genre is chosen. It opens a small panel with the
+ * QualityFilterButton is a quiet icon at the end of the list toolbar, like the groups toggle at its
+ * start; while a minimum is set it is an inverted chip that names it ("1080p+"), so a filter set
+ * weeks ago is never a mystery. It opens a small panel with the
  * lowest quality to list and a switch for channels whose name carries no quality tag. The panel is
  * not modal: it opens under the button (above it when there is more room there), kept on screen,
  * with the chosen quality focused. Escape closes it and gives focus back to the button, and so
@@ -26,7 +27,8 @@ import { useLocation } from 'react-router';
 import type { ChannelQuality, Settings } from '@/api/types';
 import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useSettingsValue } from '@/shell/useSettings';
-import { Button, cn, EmptyState, fieldClass, focusableIn, RadioGroup, TOUCH_TARGET, Toggle, Tooltip, usePresence, useScaledPx } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, filterChipClass, focusableIn, RadioGroup, Toggle, Tooltip, usePresence, useScaledPx } from '@/ui';
+import { GHOST_ICON } from '@/ui/Button';
 import { portalContainer } from '@/ui/portal';
 
 /** What the filter writes: `liveMinQuality: null` turns it off. */
@@ -35,11 +37,11 @@ export type QualityPatch = Partial<Pick<Settings, 'liveMinQuality' | 'liveHideUn
 type Choice = 'any' | ChannelQuality;
 
 /** The panel's choices and their live.json labels. 'sd' would hide nothing tagged, so it is not offered. */
-const CHOICES: readonly { value: Choice; key: string }[] = [
+const CHOICES: readonly { value: Choice; key: string; short?: string }[] = [
   { value: 'any', key: 'qualityAny' },
-  { value: 'hd', key: 'qualityHd' },
-  { value: 'fhd', key: 'qualityFhd' },
-  { value: 'uhd', key: 'qualityUhd' },
+  { value: 'hd', key: 'qualityHd', short: 'qualityShortHd' },
+  { value: 'fhd', key: 'qualityFhd', short: 'qualityShortFhd' },
+  { value: 'uhd', key: 'qualityUhd', short: 'qualityShortUhd' },
 ];
 
 const selectMin = (s: Settings) => s.liveMinQuality ?? null;
@@ -224,17 +226,18 @@ export function QualityFilterButton({ min, hideUntagged, onChange }: QualityFilt
           aria-controls={open ? panelId : undefined}
           data-testid="live-quality-filter"
           onClick={() => (open ? close(true) : show())}
-          className={fieldClass(
-            'sm',
-            cn(
-              'inline-flex size-8 shrink-0 items-center justify-center px-0',
-              TOUCH_TARGET,
-              'pointer-coarse:min-w-[calc(44rem/15)]',
-              min ? 'border-fg bg-fg text-bg hover:bg-fg/90' : 'text-fg-muted hover:text-fg',
-            ),
-          )}
+          className={
+            min && current?.short
+              ? filterChipClass(true, 'px-2.5')
+              : buttonClass('ghost', 'sm', cn('w-8 shrink-0 px-0', GHOST_ICON, 'pointer-coarse:min-w-[calc(44rem/15)]'))
+          }
         >
-          <Hd aria-hidden className="size-4" />
+          <Hd aria-hidden className="size-4 shrink-0" />
+          {min && current?.short ? (
+            <span aria-hidden className="tabular-nums">
+              {t(current.short)}
+            </span>
+          ) : null}
           <span className="sr-only">{currentLabel ? `${name}, ${currentLabel}` : name}</span>
         </button>
       </Tooltip>

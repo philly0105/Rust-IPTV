@@ -13,7 +13,7 @@ import { startupTarget } from '@/shell/StartupRedirect';
 import { RpcError } from '@/api/transport';
 import { ErrorState } from '@/ui';
 
-import { AppLoading, isKnownPath, NotFoundPage, resetChunkFailureForTests, RouteErrorPage, routeErrorAsRpc, routes, SourceIndexRedirect } from './routes';
+import { AppLoading, isKnownPath, NotFoundPage, resetChunkFailureForTests, RouteErrorPage, routeErrorAsRpc, routes, SourceGuard, SourceIndexRedirect } from './routes';
 
 /** Every C7 path; each must resolve to a real page, never the `*` fallback. */
 const C7_PATHS = [
@@ -222,5 +222,49 @@ describe('source root redirect (F-VOD-ONLY-SOURCE)', () => {
     // A source the list does not know opens Live as before.
     open('/s/gone');
     expect(await screen.findByText('/s/gone/live')).toBeTruthy();
+  });
+});
+
+describe('a page of a source that is not there (shell-nav-07)', () => {
+  const open = (path: string) => {
+    const router = createMemoryRouter(
+      [{ element: <SourceGuard />, children: [{ path: '/s/:sourceId/live', element: <p>live page</p> }, { path: '/live/archive/:sourceId/:channelId', element: <p>archive page</p> }] }],
+      { initialEntries: [path] },
+    );
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+  };
+  const source = (id: string) => ({ id, kind: 'm3u', name: id, channelCount: 5, movieCount: 0, seriesCount: 0, radioCount: 0 });
+  afterEach(() => {
+    cleanup();
+    queryClient.clear();
+  });
+
+  it('renders the page for a source in the list', async () => {
+    queryClient.setQueryData(rpcKey('sources.list'), [source('tv')]);
+    open('/s/tv/live');
+    expect(await screen.findByText('live page')).toBeTruthy();
+  });
+
+  it('says the source is gone and leads to Live TV of one that is there and to the Sources page', async () => {
+    queryClient.setQueryData(rpcKey('sources.list'), [source('tv')]);
+    open('/s/old/live');
+    expect(await screen.findByRole('heading', { level: 1, name: i18n.t('shell:sourceMissing') })).toBeTruthy();
+    expect(screen.queryByText('live page')).toBeNull();
+    expect(screen.getByRole('link', { name: i18n.t('shell:railLive') }).getAttribute('href')).toBe('/s/tv/live');
+    expect(screen.getByRole('link', { name: i18n.t('shell:manageSources') }).getAttribute('href')).toBe('/sources');
+    expect(useShellStore.getState().header?.title).toBe(i18n.t('common:errorTitleNotFound'));
+    cleanup();
+    open('/live/archive/old/ch1');
+    expect(await screen.findByRole('heading', { level: 1, name: i18n.t('shell:sourceMissing') })).toBeTruthy();
+  });
+
+  it('with no sources left, offers to add one', async () => {
+    queryClient.setQueryData(rpcKey('sources.list'), []);
+    open('/s/old/live');
+    expect((await screen.findByRole('link', { name: i18n.t('shell:addSource') })).getAttribute('href')).toBe('/sources?add=1');
   });
 });

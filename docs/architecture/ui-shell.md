@@ -133,6 +133,8 @@ Routes: `src/shell/routes.tsx` exports `shellRoutes`:
 - the index route is `StartupRedirect`. It goes to `lastRoute` when `startupBehavior` is `restore-last-view`, otherwise to `/dashboard`, or to `/sources` when `showDashboard` is off. On desktop it first waits for the one `app.pendingDeepLinks` pull (`pullStartupDeepLink`, memoized); a cold-start link wins and becomes the only navigation, so a lazy target route or late settings cannot override it. `useShellEvents` navigates to that link itself only when the app did not start at `/` (`src/shell/test/deepLinkStartup.test.tsx`). On a cold start `main.tsx` normally makes the same decision before the router exists and starts the router at the target, so the index route renders only when settings come late or fail, or on a later visit to `/` (see the end of this section).
 - `dashboard` renders `DashboardPage`.
 
+In `src/routes.tsx` every page of a source (`/s/:sourceId/...` and the catch-up archive) sits under the pathless `SourceGuard`: when `sources.list` has answered without that source (an old bookmark, a stale link, a source removed in another window), it shows "That source is gone" with Live TV of a source that is there (`liveTabTarget`) and Manage sources, or Add source with none left, and the header says Not found; the rail's Live TV, Movies and Series and the tab bar do not mark the page. While the list loads or after it failed, the page renders as before.
+
 Wire them as:
 
 ```tsx

@@ -934,7 +934,7 @@ function OptionsMenu({
           {header}
           {moved && moved.length > 0 && (
             // A popover keeps them as a row of icons (it is narrow); a sheet has the width for named rows.
-            <div data-testid="moved-controls" className={cn('mb-1 border-b border-white/10 pb-1', !fit.sheet && 'flex flex-wrap items-center gap-0.5')}>
+            <div data-testid="moved-controls" className={fit.sheet ? undefined : 'mb-1 flex flex-wrap items-center gap-0.5 border-b border-white/10 pb-1'}>
               {moved.map((m) =>
                 fit.sheet ? (
                   <MenuAction key={m.id} icon={m.rowIcon ?? m.icon} label={m.label} shortcut={m.shortcut} onClick={m.onClick} />
@@ -944,6 +944,7 @@ function OptionsMenu({
                   </CtlButton>
                 ),
               )}
+              {fit.sheet && <MenuSeparator />}
             </div>
           )}
           {tracks.qualities.length > 0 && <MenuRow label={t('quality')} value={qualityValue} onClick={() => setView('quality')} />}

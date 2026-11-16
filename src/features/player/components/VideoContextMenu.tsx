@@ -1,4 +1,4 @@
-import { Camera, ChevronLeft, Copy, Maximize, Maximize2, Minimize, Minimize2, Pause, PictureInPicture2, Play } from 'lucide-react';
+import { AppWindow, Camera, ChevronLeft, Copy, Maximize, Minimize, Minimize2, Pause, PictureInPicture2, Play } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,7 @@ import { usePipStore } from '../pip';
 import { canShareSource } from '../shareable';
 import { knownSourceKind, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
-import { ChannelActions } from './ChannelActions';
+import { ChannelActions } from './lazyParts';
 import { MenuAction, MenuChoice, MenuRow, MenuSeparator, MenuToggle, PictureRows, SpeedRows, usePictureSummary } from './Controls';
 import { playerMenuLayer } from './menuFrame';
 import { SleepMenu, SleepRowValue } from './SleepTimer';
@@ -188,7 +188,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           />
           {!pipActive && (
             <MenuAction
-              icon={isWindowFilled ? <Minimize2 className={icon} aria-hidden /> : <Maximize2 className={icon} aria-hidden />}
+              icon={isWindowFilled ? <Minimize2 className={icon} aria-hidden /> : <AppWindow className={icon} aria-hidden />}
               label={isWindowFilled ? t('exitWindowFill') : t('windowFill')}
               onClick={() => pick(() => usePlayerStore.getState().toggleWindowFill())}
             />

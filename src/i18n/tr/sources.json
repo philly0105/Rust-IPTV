@@ -54,8 +54,6 @@
   "previewEmpty": "Henüz kanal bulunamadı.",
   "previewFailed": "Bu oynatma listesi okunamadı: {{message}}",
   "previewTruncated": "(yalnızca ilk 2 MB)",
-  "previewChannels_one": "{{count, number}} kanal",
-  "previewChannels_other": "{{count, number}} kanal",
   "previewGroups_one": "{{count, number}} grup",
   "previewGroups_other": "{{count, number}} grup",
   "previewMoreGroups_one": "{{count, number}} tane daha",

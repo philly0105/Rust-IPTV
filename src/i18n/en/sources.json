@@ -54,8 +54,6 @@
   "previewEmpty": "No channels found yet.",
   "previewFailed": "Couldn't read this playlist: {{message}}",
   "previewTruncated": "(first 2 MB only)",
-  "previewChannels_one": "{{count, number}} channel",
-  "previewChannels_other": "{{count, number}} channels",
   "previewGroups_one": "{{count, number}} group",
   "previewGroups_other": "{{count, number}} groups",
   "previewMoreGroups_one": "{{count, number}} more",

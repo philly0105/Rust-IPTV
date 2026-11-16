@@ -54,8 +54,6 @@
   "previewEmpty": "Δεν βρέθηκαν ακόμα κανάλια.",
   "previewFailed": "Δεν ήταν δυνατή η ανάγνωση της λίστας αναπαραγωγής: {{message}}",
   "previewTruncated": "(μόνο τα πρώτα 2 MB)",
-  "previewChannels_one": "{{count, number}} κανάλι",
-  "previewChannels_other": "{{count, number}} κανάλια",
   "previewGroups_one": "{{count, number}} ομάδα",
   "previewGroups_other": "{{count, number}} ομάδες",
   "previewMoreGroups_one": "{{count, number}} ακόμα",

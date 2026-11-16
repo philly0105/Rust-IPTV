@@ -54,8 +54,6 @@
   "previewEmpty": "Még nem található csatorna.",
   "previewFailed": "Nem sikerült beolvasni a lejátszási listát: {{message}}",
   "previewTruncated": "(csak az első 2 MB)",
-  "previewChannels_one": "{{count, number}} csatorna",
-  "previewChannels_other": "{{count, number}} csatorna",
   "previewGroups_one": "{{count, number}} csoport",
   "previewGroups_other": "{{count, number}} csoport",
   "previewMoreGroups_one": "még {{count, number}}",

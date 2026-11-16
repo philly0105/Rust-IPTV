@@ -54,8 +54,6 @@
   "previewEmpty": "尚未找到频道。",
   "previewFailed": "无法读取此播放列表：{{message}}",
   "previewTruncated": "（仅前 2 MB）",
-  "previewChannels_one": "{{count, number}} 个频道",
-  "previewChannels_other": "{{count, number}} 个频道",
   "previewGroups_one": "{{count, number}} 个分组",
   "previewGroups_other": "{{count, number}} 个分组",
   "previewMoreGroups_one": "还有 {{count, number}} 个",

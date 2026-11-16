@@ -54,8 +54,6 @@
   "previewEmpty": "チャンネルがまだ見つかりません。",
   "previewFailed": "このプレイリストを読み込めませんでした：{{message}}",
   "previewTruncated": "（先頭2 MBのみ）",
-  "previewChannels_one": "{{count, number}}チャンネル",
-  "previewChannels_other": "{{count, number}}チャンネル",
   "previewGroups_one": "{{count, number}}グループ",
   "previewGroups_other": "{{count, number}}グループ",
   "previewMoreGroups_one": "他{{count, number}}件",

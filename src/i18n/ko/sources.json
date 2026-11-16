@@ -54,8 +54,6 @@
   "previewEmpty": "아직 찾은 채널이 없습니다.",
   "previewFailed": "이 재생목록을 읽을 수 없습니다: {{message}}",
   "previewTruncated": "(처음 2MB만)",
-  "previewChannels_one": "채널 {{count, number}}개",
-  "previewChannels_other": "채널 {{count, number}}개",
   "previewGroups_one": "그룹 {{count, number}}개",
   "previewGroups_other": "그룹 {{count, number}}개",
   "previewMoreGroups_one": "외 {{count, number}}개",

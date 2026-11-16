@@ -54,8 +54,6 @@
   "previewEmpty": "尚未找到頻道。",
   "previewFailed": "無法讀取此播放清單：{{message}}",
   "previewTruncated": "（僅限前 2 MB）",
-  "previewChannels_one": "{{count, number}} 個頻道",
-  "previewChannels_other": "{{count, number}} 個頻道",
   "previewGroups_one": "{{count, number}} 個群組",
   "previewGroups_other": "{{count, number}} 個群組",
   "previewMoreGroups_one": "還有 {{count, number}} 個",

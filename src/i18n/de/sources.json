@@ -54,8 +54,6 @@
   "previewEmpty": "Noch keine Sender gefunden.",
   "previewFailed": "Diese Playlist konnte nicht gelesen werden: {{message}}",
   "previewTruncated": "(nur die ersten 2 MB)",
-  "previewChannels_one": "{{count, number}} Sender",
-  "previewChannels_other": "{{count, number}} Sender",
   "previewGroups_one": "{{count, number}} Gruppe",
   "previewGroups_other": "{{count, number}} Gruppen",
   "previewMoreGroups_one": "{{count, number}} weitere",

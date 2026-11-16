@@ -54,8 +54,6 @@
   "previewEmpty": "Nog geen kanalen gevonden.",
   "previewFailed": "Kan deze afspeellijst niet lezen: {{message}}",
   "previewTruncated": "(alleen eerste 2 MB)",
-  "previewChannels_one": "{{count, number}} kanaal",
-  "previewChannels_other": "{{count, number}} kanalen",
   "previewGroups_one": "{{count, number}} groep",
   "previewGroups_other": "{{count, number}} groepen",
   "previewMoreGroups_one": "nog {{count, number}}",

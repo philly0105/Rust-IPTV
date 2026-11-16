@@ -865,7 +865,10 @@ describe('guide grid', () => {
     await screen.findByText('Channel 0');
     const visibleAt = () => Number(screen.getByTestId('epg-grid').dataset.viewAt);
     await waitFor(() => expect(visibleAt()).toBeGreaterThan(0));
-    const first = defaultStart(Date.now());
+    // The day steps go from the slot the guide opens on (now's half hour), not the window's
+    // start half an hour before it (guide-21).
+    const first = visibleAt();
+    expect(first).toBe(defaultStart(Date.now()) + 30 * MINUTE);
 
     fireEvent.click(screen.getByRole('button', { name: 'Next day' }));
     await waitFor(() => expect(visibleAt()).toBe(addLocalDays(first, 1)));

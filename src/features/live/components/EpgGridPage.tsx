@@ -1065,6 +1065,7 @@ export function EpgGridPage() {
     // made the scroll compete with router updates and programme-buffer replacement.
     if (!recenter && root && laidRoot.current === root && laidTrack.current === trackBase && laidPx.current === pxPerMin && laidRtl.current === rtl) {
       const target = live ? time + nowScroll(now, time, pxPerMin, (viewWidth.current || pageWidth) - channelCol) / pxPerMin * MINUTE : time;
+      if (live) navigationAt.current = floorLocal(target, GRID_SLOT_MIN);
       moveViewTo(target, root, false, true);
     } else {
       if (recenter) setTrackBase(time);
@@ -1374,10 +1375,13 @@ export function EpgGridPage() {
       const time = jump.live
         ? jump.time + nowScroll(now, jump.time, pxPerMin, root.clientWidth - channelCol) / pxPerMin * MINUTE
         : jump.time;
+      // Now shows the slot now is in, not the window's start: the day and 3-hour steps go from it.
+      if (jump.live) navigationAt.current = floorLocal(time, GRID_SLOT_MIN);
       moveViewTo(time, root, false, true);
     } else if (first && viewAtRef.current === baseStart && winAt === null) {
       // The first live view places now inside the track; later remounts keep their last time.
       const time = baseStart + nowScroll(now, baseStart, pxPerMin, root.clientWidth - channelCol) / pxPerMin * MINUTE;
+      navigationAt.current = floorLocal(time, GRID_SLOT_MIN);
       moveViewTo(time, root, false);
     } else if (first || trackChanged || scaleChanged || firstWidth) {
       // Zoom, direction and a deliberate re-centre preserve the time at the viewport edge.
@@ -2782,8 +2786,8 @@ const GuideWindowButton = memo(function GuideWindowButton({ stacked, lang, onJum
       >
         {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
         <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
-          <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
-          <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
+          <span className={stacked ? 'max-w-full truncate text-caption leading-tight text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
+          <span className={stacked ? 'max-w-full truncate text-body-sm leading-tight font-medium' : undefined}>{range}</span>
         </span>
         <span className="sr-only">, {tg('jumpTitle')}</span>
       </button>

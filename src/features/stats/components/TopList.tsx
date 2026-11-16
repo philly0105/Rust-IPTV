@@ -18,7 +18,7 @@ import { Link } from 'react-router';
 
 import type { WatchStatsTop } from '@/api/types';
 
-import { IconButton, Poster, PosterCellWidthContext, cn, itemPath, usePosterWidthBox, useScaledPx } from '../deps';
+import { ChannelName, IconButton, Poster, PosterCellWidthContext, cn, itemPath, useDisplayPrefs, usePosterWidthBox, useScaledPx } from '../deps';
 import { formatWatchTime } from '../lib/format';
 
 function TopSection({ title, empty, testId, children }: { title: string; empty: string | null; testId: string; children: ReactNode }) {
@@ -70,10 +70,13 @@ export interface TopChannelsProps {
   /** False when the channel's source is gone or being removed: no Play button then. */
   canPlay: (item: WatchStatsTop) => boolean;
   onPlay: (item: WatchStatsTop) => void;
+  /** Each row's source, only when more than one is set up (the header rule). */
+  showSource: boolean;
 }
 
-export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
+export function TopChannels({ items, canPlay, onPlay, showSource }: TopChannelsProps) {
   const { t, i18n } = useTranslation('stats');
+  const { stripCountryPrefix } = useDisplayPrefs();
   const most = items[0]?.seconds ?? 0;
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
   return (
@@ -98,11 +101,12 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
           </span>
           {/* Narrow list: name (two lines at most), time, source. From @sm the time moves to the end of the name's line. */}
           <div className="grid min-w-0 flex-1 grid-cols-1 items-baseline @sm:grid-cols-[minmax(0,1fr)_auto] @sm:gap-x-3">
-            <p className={NAME} title={item.title}>
-              {item.title}
+            {/* The provider's place tag after the name, quiet ("ESPN2 FHD US"), as everywhere a channel is named. */}
+            <p className="min-w-0 font-medium">
+              <ChannelName name={item.title} strip={stripCountryPrefix} title={item.title} className="block truncate" />
             </p>
             <span className="whitespace-nowrap text-sm tabular-nums text-fg-muted">{formatWatchTime(item.seconds, i18n.language)}</span>
-            {item.sourceName && <p className="truncate text-xs text-fg-subtle @sm:col-span-2">{item.sourceName}</p>}
+            {showSource && item.sourceName && <p className="truncate text-xs text-fg-subtle @sm:col-span-2">{item.sourceName}</p>}
             <Meter seconds={item.seconds} most={most} />
           </div>
           {canPlay(item) ? (
@@ -125,7 +129,7 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
   );
 }
 
-export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
+export function TopTitles({ items, showSource }: { items: readonly WatchStatsTop[]; showSource: boolean }) {
   const { t, i18n } = useTranslation('stats');
   const most = items[0]?.seconds ?? 0;
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
@@ -152,7 +156,7 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
                 {item.title}
               </span>
               <span className="whitespace-nowrap text-sm tabular-nums text-fg-muted">{formatWatchTime(item.seconds, i18n.language)}</span>
-              {item.sourceName && <span className="block truncate text-xs text-fg-subtle @sm:col-span-2">{item.sourceName}</span>}
+              {showSource && item.sourceName && <span className="block truncate text-xs text-fg-subtle @sm:col-span-2">{item.sourceName}</span>}
               <Meter seconds={item.seconds} most={most} />
             </span>
             {/* Where a channel row has Play: says the row opens, and keeps the meters to one edge. */}

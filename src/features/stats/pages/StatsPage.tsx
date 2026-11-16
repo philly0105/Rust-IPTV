@@ -179,8 +179,8 @@ export function StatsPage() {
       <div className="flex flex-col gap-8">
         <DayChart days={data.days} today={today} />
         <div className="grid gap-8 md:grid-cols-2">
-          <TopChannels items={data.topChannels} canPlay={(item) => sourceById.has(item.ref.sourceId)} onPlay={play} />
-          <TopTitles items={data.topTitles} />
+          <TopChannels items={data.topChannels} canPlay={(item) => sourceById.has(item.ref.sourceId)} onPlay={play} showSource={sourceById.size > 1} />
+          <TopTitles items={data.topTitles} showSource={sourceById.size > 1} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divider pt-4">
           <p className="text-sm text-fg-subtle">{t('localNote')}</p>

@@ -13,3 +13,5 @@ export { useShortcut } from '@/shell/shortcuts';
 export { useVisibleSources } from '@/shell/useVisibleSources';
 export { itemPath } from '@/shell/dashboard/cards';
 export { playItem } from '@/features/player/store';
+export { ChannelName } from '@/features/live/components/ChannelLogo';
+export { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';

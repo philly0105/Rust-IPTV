@@ -10,9 +10,9 @@
  */
 
 import { Copy, Download, ExternalLink, Heart, History, Link2, Play } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { isDesktop } from '@/api/transport';
 import type { Channel, EpgProgram, Source } from '@/api/types';
@@ -69,6 +69,11 @@ function plain(a: MenuItem, hints: boolean): MenuItem {
 export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOptions): MenuEntry[] {
   const { t } = useTranslation('live');
   const navigate = useNavigate();
+  // The archive's Back returns to the page the menu was opened on (Live TV or the guide). Read at
+  // the press, so the page's own URL updates (the guide's time) do not rebuild the menu.
+  const here = useLocation();
+  const location = useRef(here);
+  location.current = here;
   const { stripCountryPrefix } = useDisplayPrefs();
   const name = channel ? displayChannelName(channel.name, stripCountryPrefix) : '';
   // C4: radio has no picture, so a station gets no multi-view entry.
@@ -134,7 +139,7 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
         : []),
       // guide: the channel's catch-up archive browser.
       ...(src && canBrowseArchive(ch, src.kind)
-        ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref)) }]
+        ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref), { state: { from: location.current.pathname + location.current.search } }) }]
         : []),
       // External players run only in the desktop app; the server answers `unsupported` (as InlinePlayer gates them).
       ...(isDesktop && src

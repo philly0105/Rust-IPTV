@@ -519,6 +519,12 @@ export function ShellLayout() {
             <ContextPanel inline={wide} />
           </div>
           {player && <player.ExternalPlaybackFooter />}
+          {/*
+            A phone's mini player bar floats over the bottom of the outlet (PlayerDock writes its
+            height to --player-bar-inset): the outlet gives up that much room, so every page and
+            every scroller inside one ends above the bar instead of under it.
+          */}
+          {phone && <div aria-hidden className="shrink-0" style={{ height: 'var(--player-bar-inset, 0px)' }} data-player-bar-spacer="" />}
           {phone && <TabBar />}
         </div>
         {player && <player.PlayerDock />}

@@ -39,7 +39,7 @@ const MARGIN = 16;
 /**
  * A phone's mini player bar (below sm, over the tab bar): its height, in rem against the 15 px
  * root like the tab bar's, so it follows the UI scale and not density. While it shows,
- * `--player-bar-inset` on <html> holds it, for the page to keep its last row clear of it.
+ * `--player-bar-inset` on <html> holds it, and the shell's outlet gives up that much room above the tab bar.
  */
 export const PLAYER_BAR_HEIGHT = 'calc(64rem / 15)';
 /** A finger moved this far before the bar follows it down (px), and this far closes it. */

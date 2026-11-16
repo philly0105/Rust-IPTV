@@ -1250,9 +1250,10 @@ describe('B7 review round 2', () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const src = readFileSync(join(__dirname, '..', 'dashboard', 'DashboardRail.tsx'), 'utf8');
-    // The two scroll arrows; the hand-built heading row's See all takes the kit's SEE_ALL_LINK,
-    // which carries the pressed state for it and for SectionHeader's link.
-    expect(src.match(/active:text-accent-pressed/g)).toHaveLength(2);
+    // The two scroll arrows share STEP_BUTTON; the hand-built heading row's See all takes the kit's
+    // SEE_ALL_LINK, which carries the pressed state for it and for SectionHeader's link.
+    expect(src.match(/active:text-accent-pressed/g)).toHaveLength(1);
+    expect(src.match(/className=\{STEP_BUTTON\}/g)).toHaveLength(2);
     expect(src).toContain('className={cn(SEE_ALL_LINK');
     const { SEE_ALL_LINK } = await import('@/ui');
     expect(SEE_ALL_LINK).toContain('active:text-accent-pressed');

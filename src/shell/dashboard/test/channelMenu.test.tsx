@@ -147,6 +147,17 @@ afterEach(() => {
 });
 
 describe('dashboard channel card menu', () => {
+  it("the favourites rail's Remove from favorites, also from the card's visible menu button, removes the favourite", async () => {
+    renderRoutes(routes(), '/dashboard');
+    const card = await newsCard();
+    const more = card.parentElement!.querySelector<HTMLElement>('[data-card-menu]')!;
+    expect(more.getAttribute('aria-label')).toBe('More actions for News 24');
+    fireEvent.click(more);
+    const menu = await screen.findByRole('menu', { name: 'News 24' });
+    fireEvent.click(await within(menu).findByRole('menuitem', { name: 'Remove from favorites' }));
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'favorites.remove').map((c) => c.args)).toEqual([{ ref: newsRef }]));
+  });
+
   it('right click opens the channel menu with the Live entries, and Hide hides the channel', async () => {
     renderRoutes(routes(), '/dashboard');
     const card = await newsCard();
@@ -154,7 +165,8 @@ describe('dashboard channel card menu', () => {
 
     const menu = await screen.findByRole('menu', { name: 'News 24' });
     await waitFor(() => expect(itemNames(menu)).toContain('Hide channel'));
-    expect(itemNames(menu)).toEqual(['Play', 'Add to multi-view', 'Add to list…', 'Rename…', 'Hide channel']);
+    // The favourites rail adds its own Remove after the channel's entries.
+    expect(itemNames(menu)).toEqual(['Play', 'Add to multi-view', 'Add to list…', 'Rename…', 'Hide channel', 'Remove from favorites']);
     expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Play' }));
 
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Hide channel/ }));

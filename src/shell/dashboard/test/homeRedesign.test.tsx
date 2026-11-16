@@ -528,9 +528,11 @@ describe('quiet state and trending', () => {
     };
     renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-tmdb-trending');
-    const found = await within(rail).findByRole('link', { name: /Far Shore.*Night Portal/ });
+    const found = await within(rail).findByRole('link', { name: /Far Shore.*2026/ });
     expect(found.getAttribute('href')).toBe('/s/s1/movie/fs');
-    expect(found.textContent).toContain('Night Portal');
+    // One source: the caption gives the year, not the source's name (it names it with two or more).
+    expect(found.textContent).toContain('2026');
+    expect(found.textContent).not.toContain('Night Portal');
     expect(found.querySelector('svg.lucide-search')).toBeNull();
     // Not in the catalog: still a search, and it says so.
     expect(within(rail).getByRole('link', { name: 'Find Elsewhere in your sources' }).getAttribute('href')).toBe('/search?q=Elsewhere');

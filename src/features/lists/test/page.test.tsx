@@ -588,9 +588,12 @@ describe('Home rails', () => {
       },
     ]);
     const sports = await screen.findByTestId('dashboard-rail-list-L1');
-    fireEvent.contextMenu(await within(sports).findByRole('button', { name: /CNN/ }), { clientX: 40, clientY: 40 });
+    // The card itself, not its visible "More actions for CNN" button beside it.
+    fireEvent.contextMenu(await within(sports).findByRole('button', { name: /^Play.*CNN/ }), { clientX: 40, clientY: 40 });
     const menu = await screen.findByRole('menu');
     expect(within(menu).getByRole('menuitem', { name: /Add to list/ })).toBeTruthy();
+    // The list's rail offers to take the channel out of the list.
+    expect(within(menu).getByRole('menuitem', { name: 'Remove from this list' })).toBeTruthy();
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^Play/ }));
     await waitFor(() => expect(played.map((p) => p.channel.name)).toEqual(['CNN']));
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });

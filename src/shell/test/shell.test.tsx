@@ -281,11 +281,12 @@ describe('ShellLayout', () => {
     const palette = await screen.findByTestId('command-palette');
     const input = within(palette).getByPlaceholderText('Type a command or search');
     fireEvent.change(input, { target: { value: 'zzqx nothing' } });
-    // Nothing else matches: one quiet line says so, just above the search row (not a tall block).
+    // Nothing else matches: one quiet line says so, just above the search row (not a tall block),
+    // once the library and the guide have answered; until then it says they are still searching.
     const empty = await within(palette).findByTestId('palette-empty');
-    expect(empty.textContent).toBe('No matching commands');
+    await waitFor(() => expect(empty.textContent).toBe('Nothing found'));
     expect(empty.className).not.toMatch(/\bpy-10\b/);
-    fireEvent.click(await within(palette).findByText('Search for "zzqx nothing"'));
+    fireEvent.click(await within(palette).findByText('See all results for "zzqx nothing"'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
     expect(router.state.location.search).toBe('?q=zzqx%20nothing');
   });
@@ -819,7 +820,7 @@ describe('polish pass (B7)', () => {
     act(() => useShellStore.getState().setPaletteOpen(true));
     const palette = await screen.findByTestId('command-palette');
     fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'navx' } });
-    expect(await within(palette).findByText('Search for "navx"')).toBeTruthy();
+    expect(await within(palette).findByText('See all results for "navx"')).toBeTruthy();
     expect(within(palette).queryByText('Favorites')).toBeNull();
   });
 
@@ -843,10 +844,12 @@ describe('polish pass (B7)', () => {
     await screen.findByText('favorites page');
     act(() => useShellStore.getState().setHelpOpen(true));
     const overlay = await screen.findByTestId('shortcut-overlay');
-    for (const combo of ['c', 'pageup', 'pagedown', 'mod+b', 'digit', '/']) expect(overlay.querySelector(`[data-combo="${combo}"]`), combo).toBeTruthy();
+    for (const combo of ['c', 'pageup', 'pagedown', 'mod+b', 'digit']) expect(overlay.querySelector(`[data-combo="${combo}"]`), combo).toBeTruthy();
+    // Ctrl+F and "/" are one rule everywhere (this page's search, or everything): one row.
+    const searchRow = [...overlay.querySelectorAll('[data-combos]')].find((el) => el.getAttribute('data-combos')!.split(' ').includes('/'));
+    expect(searchRow?.getAttribute('data-combos')!.split(' ')).toContain('mod+f');
     expect(within(overlay).getByText('Back 10 seconds')).toBeTruthy();
     expect(within(overlay).getByText('Exit picture in picture')).toBeTruthy();
-    expect(within(overlay).getByText('Search channels')).toBeTruthy();
     // Enter and Down do the same there: one row with both keys.
     const toList = within(overlay).getAllByText('In the search box: move to the list');
     expect(toList).toHaveLength(1);
@@ -1600,7 +1603,7 @@ describe('L2 shell header', () => {
     fireEvent.click(trigger);
     const palette = await screen.findByTestId('command-palette');
     fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'harbor' } });
-    fireEvent.click(await within(palette).findByText('Search for "harbor"'));
+    fireEvent.click(await within(palette).findByText('See all results for "harbor"'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
     expect(router.state.location.search).toBe('?q=harbor');
 

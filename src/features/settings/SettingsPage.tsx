@@ -23,6 +23,7 @@ import { Link, Navigate, NavLink, useLocation, useNavigate, useParams } from 're
 import { isDesktop } from '@/api/transport';
 import { ParentalSection } from '@/features/parental/ParentalSection';
 import { useShell } from '@/shell';
+import { settingTarget } from '@/shell/settingTargets';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { Page } from '@/ui';
 import { SaveFeedback, SectionError, SectionSkeleton, type SaveState } from './components';
@@ -183,6 +184,59 @@ export function SettingsNav({ current, variant = 'sidebar' }: { current?: Sectio
   );
 }
 
+/** How long a group opened at one of its settings (`#<setting>`) stays marked. */
+const MARK_MS = 1000;
+/**
+ * The mark: the selected fill, spread a little past the group's edges by a shadow of the same
+ * colour, so it frames the title and rows without moving them. It fades out (`MARK_FADE` stays).
+ */
+const MARK = ['bg-selected', 'shadow-[0_0_0_0.5rem_var(--color-selected)]'];
+const MARK_FADE = ['rounded-lg', 'motion-safe:transition-[background-color,box-shadow]', 'motion-safe:duration-(--duration-slow)'];
+
+/**
+ * `#<setting>` in the URL (the palette's single-setting entries, `src/shell/settingTargets.ts`):
+ * scrolls to the group that holds the setting and marks it for a moment. The group is found by
+ * an element with that id, else by the label the setting's row (or the group's heading) draws,
+ * so the link holds wherever the setting moves. A section fills in over a few frames, so it
+ * looks for up to 1.5 s.
+ */
+function useSettingAnchor(ready: boolean) {
+  const { hash, key } = useLocation();
+  const { i18n } = useTranslation();
+  useEffect(() => {
+    const id = decodeURIComponent(hash.slice(1));
+    if (!ready || !id) return;
+    const target = settingTarget(id);
+    const label = target ? i18n.t(target.label) : undefined;
+    const find = (): HTMLElement | null => {
+      const page = document.querySelector('[data-testid="settings-page"]');
+      const own = document.getElementById(id);
+      const byId = own && page?.contains(own) ? own : undefined;
+      const el = byId ?? (label ? [...(page?.querySelectorAll<HTMLElement>('h3, label') ?? [])].find((n) => n.textContent?.trim() === label) : undefined);
+      return el ? (el.closest<HTMLElement>('[data-settings-group]') ?? el) : null;
+    };
+    const deadline = Date.now() + 1500;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let marked: HTMLElement | null = null;
+    const step = () => {
+      marked = find();
+      if (!marked) {
+        if (Date.now() < deadline) timer = setTimeout(step, 50);
+        return;
+      }
+      marked.scrollIntoView({ block: 'start' });
+      marked.classList.add(...MARK_FADE, ...MARK);
+      const el = marked;
+      timer = setTimeout(() => el.classList.remove(...MARK), MARK_MS);
+    };
+    step();
+    return () => {
+      clearTimeout(timer);
+      marked?.classList.remove(...MARK);
+    };
+  }, [ready, hash, key, i18n]);
+}
+
 /** How long the "Saved" confirmation stays up after the last successful save. */
 export const SAVED_VISIBLE_MS = 2000;
 
@@ -265,6 +319,7 @@ export function SettingsPage() {
   // A phone shows one section at a time: the header names it and holds the way back to the list.
   const phoneSection = phone && valid;
   const fromList = (location.state as { fromSettingsList?: boolean } | null)?.fromSettingsList === true;
+  useSettingAnchor(valid && !!query.data);
 
   useEffect(() => {
     if (phoneSection) {

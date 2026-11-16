@@ -339,10 +339,12 @@ describe('MovieDetailPage', () => {
     expect(await screen.findByRole('button', { name: 'Resume from 12:34' })).toBeTruthy();
     const actor = await screen.findByRole('link', { name: /Timothee Chalamet/ });
     expect(actor.getAttribute('href')).toBe(`/s/src1/actor/${ACTOR_ID}`);
-    // The other copy is listed under the hero and offered in the More menu, beside Start over (VL-hero-actions).
+    // The other copy is listed under the hero and offered in the More menu (VL-hero-actions); Start
+    // over has its own button beside Resume (vod-detail-07).
     expect(await screen.findByTestId('vod-other-sources')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy();
     const menu = await openHeroMenu();
-    expect(within(menu).getByRole('menuitem', { name: 'Start over' })).toBeTruthy();
+    expect(within(menu).queryByRole('menuitem', { name: 'Start over' })).toBeNull();
     expect(within(menu).getByRole('menuitem', { name: '1 other source' })).toBeTruthy();
     expect(callsOf('tmdb.movie')[0]!.args).toMatchObject({ title: 'Dune: Part Two', year: 2007 });
   });
@@ -451,7 +453,8 @@ describe('SeriesDetailPage', () => {
     expect(await screen.findByRole('button', { name: 'Resume S01E02' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Season 1/ })).toBeTruthy();
     // Phone-sized here: the row's facts leave the percent to the thumbnail's bar, and its play button says it.
-    expect(screen.getByRole('button', { name: 'Resume S01E02 Episode 1.2, 20% watched' })).toBeTruthy();
+    // The episode Resume points at is marked Up next (vod-detail-06).
+    expect(screen.getByRole('button', { name: 'Resume S01E02 Episode 1.2, Up next, 20% watched' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: /Season 2/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Play S02E01 Episode 2.1' }));
     await waitFor(() => expect(played).toHaveLength(1));

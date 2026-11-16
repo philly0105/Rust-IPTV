@@ -1,4 +1,4 @@
-import { Check, CircleAlert, CircleCheck, Download as DownloadIcon, Heart, LoaderCircle, Pause } from 'lucide-react';
+import { Check, CircleAlert, CircleCheck, CirclePause, Clock, Download as DownloadIcon, HardDriveDownload, Heart, LoaderCircle, Pause } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -13,6 +13,7 @@ import { intlLocale } from '@/lib/intl';
 import { useSetWatched } from '../../hooks/queries';
 import { seriesWatchedTargets, watchedToastId, watchedUndoAll } from '../../lib/seriesWatched';
 import { Button, IconButton, Tooltip, buttonClass, cn, useToast, errorDescription } from '@/ui';
+import { GHOST_ICON } from '@/ui/Button';
 import { HeroIcon } from './DetailHero';
 
 /** Adds the title to favorites or takes it off, with the toast. */
@@ -66,44 +67,28 @@ export function FavoriteButton({ itemRef, snapshot, isFavorite, round }: { itemR
   );
 }
 
-/**
- * Toggles watched for a movie (no `episodeIds`) or a set of episodes, and with `series` the
- * series-level row too (`lib/seriesWatched` works out which episodes; they may be none).
- */
-export function WatchedButton({
-  itemRef,
-  episodeIds,
-  series,
-  watched,
-  compact,
-  round,
-  size = 'lg',
-  labels,
-  name,
-  disabled,
-}: {
+interface WatchedTarget {
   itemRef: ItemRef;
-  /** Height of the labelled button: `lg` in a hero, `sm` beside a section heading. */
-  size?: 'sm' | 'lg';
   episodeIds?: string[];
   /** With `episodeIds`: also set the series-level row to the new state. */
   series?: boolean;
   watched: boolean;
-  compact?: boolean;
-  /** The detail hero's icon button, pressed while watched (VL-hero-actions). */
-  round?: boolean;
   /** Overrides for the two button labels (season-level wording). */
   labels?: { mark: string; unmark: string };
   /** What the toast says was marked ("Season 2", the series title). */
   name?: string;
-  /** Not pressable yet: what a press marks is still loading (a series' episodes). */
-  disabled?: boolean;
-}) {
+}
+
+/**
+ * The watched toggle behind {@link WatchedButton}, for a control of another shape (the phone's
+ * season menu): what a press does, in words, and the press itself with its toast and Undo.
+ */
+export function useWatchedToggle({ itemRef, episodeIds, series, watched, labels, name }: WatchedTarget) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
   const setWatched = useSetWatched();
   const label = watched ? (labels?.unmark ?? t('markUnwatched')) : (labels?.mark ?? t('markWatched'));
-  const onClick = async () => {
+  const toggle = async () => {
     const next = !watched;
     const targets = episodeIds ? seriesWatchedTargets(itemRef, { episodeIds, series: !!series }) : [{ ref: itemRef }];
     // The rows about to change, so Undo can put them back; without them the toast has no Undo.
@@ -130,6 +115,30 @@ export function WatchedButton({
       },
     );
   };
+  return { label, toggle: () => void toggle(), pending: setWatched.isPending };
+}
+
+/**
+ * Toggles watched for a movie (no `episodeIds`) or a set of episodes, and with `series` the
+ * series-level row too (`lib/seriesWatched` works out which episodes; they may be none).
+ */
+export function WatchedButton({
+  compact,
+  round,
+  size = 'lg',
+  disabled,
+  ...target
+}: WatchedTarget & {
+  /** Height of the labelled button: `lg` in a hero, `sm` beside a section heading. */
+  size?: 'sm' | 'lg';
+  compact?: boolean;
+  /** The detail hero's icon button, pressed while watched (VL-hero-actions). */
+  round?: boolean;
+  /** Not pressable yet: what a press marks is still loading (a series' episodes). */
+  disabled?: boolean;
+}) {
+  const { watched } = target;
+  const { label, toggle, pending } = useWatchedToggle(target);
   const icon = <CircleCheck aria-hidden size={18} className={cn(watched && 'text-success')} />;
   if (round) {
     return (
@@ -140,17 +149,17 @@ export function WatchedButton({
         icon={icon}
         // Watched is a state, so it reads as pressed (neutral), with the green tick; the label says what a press does.
         className={cn(watched && 'bg-selected text-fg')}
-        onClick={() => void onClick()}
-        disabled={disabled || setWatched.isPending}
+        onClick={toggle}
+        disabled={disabled || pending}
         data-testid="vod-watched-button"
       />
     );
   }
   if (compact) {
-    return <IconButton label={label} icon={icon} onClick={() => void onClick()} disabled={disabled || setWatched.isPending} />;
+    return <IconButton label={label} icon={icon} onClick={toggle} disabled={disabled || pending} />;
   }
   return (
-    <Button size={size} variant="ghost" icon={icon} loading={setWatched.isPending} disabled={disabled} onClick={() => void onClick()}>
+    <Button size={size} variant="ghost" icon={icon} loading={pending} disabled={disabled} onClick={toggle}>
       {label}
     </Button>
   );
@@ -198,10 +207,12 @@ export function DownloadButton({
   if (round) return <RoundDownloadButton download={download} pending={pending} onStart={onStart} downloadedHref={downloadedHref} />;
 
   if (status === 'completed') {
+    // The file-on-disk glyph the row's facts use, in the quiet icon tone: a green tick here sat
+    // beside the green watched tick and read as a second one (vod-detail-02).
     return compact ? (
       <Tooltip content={t('downloaded')} describe={false}>
-        <Link to={downloadedHref} aria-label={`${t('downloaded')}${ctx}`} className={buttonClass('ghost', 'sm', 'w-8 px-0 text-success')}>
-          <Check aria-hidden size={16} />
+        <Link to={downloadedHref} aria-label={`${t('downloaded')}${ctx}`} className={buttonClass('ghost', 'sm', cn(COMPACT_SLOT, GHOST_ICON))}>
+          <HardDriveDownload aria-hidden size={16} />
         </Link>
       </Tooltip>
     ) : (
@@ -215,8 +226,9 @@ export function DownloadButton({
   if (status === 'paused') {
     return (
       <Tooltip content={compact ? t('downloadPaused') : null} describe={false}>
-        <Link to="/downloads" aria-label={`${t('downloadPaused')}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? 'w-8 px-0' : undefined)}>
-          <Pause aria-hidden size={compact ? 14 : 18} />
+        <Link to="/downloads" aria-label={`${t('downloadPaused')}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? cn(COMPACT_SLOT, GHOST_ICON) : undefined)}>
+          {/* A paused state, not a Pause button: the glyph in a circle, in the quiet tone. */}
+          {compact ? <CirclePause aria-hidden size={16} /> : <Pause aria-hidden size={18} />}
           {!compact && t('downloadPaused')}
         </Link>
       </Tooltip>
@@ -228,6 +240,7 @@ export function DownloadButton({
     return (
       <IconButton
         size="sm"
+        className={COMPACT_SLOT}
         label={`${text}${ctx}`}
         icon={failed ? <CircleAlert aria-hidden size={16} className="text-danger" /> : <DownloadIcon aria-hidden size={16} />}
         disabled={pending}
@@ -242,16 +255,31 @@ export function DownloadButton({
   );
 }
 
-/** {@link DownloadButton} while its row is queued or coming in: the percent from the live sample. */
+/**
+ * The compact control's box, the same in every state, so the watched toggle beside it keeps its
+ * place down the episode list while a download spins, waits or pauses (vod-detail-03).
+ */
+const COMPACT_SLOT = 'w-14 px-0 justify-center';
+
+/**
+ * {@link DownloadButton} while its row is queued or coming in: the percent from the live sample.
+ * Only a download under way spins and shows the percent; a queued one waits under a clock, so it
+ * does not look like a transfer stuck at 0 %.
+ */
 function DownloadingLink({ download, compact, ctx }: { download: Download; compact: boolean | undefined; ctx: string }) {
   const { t } = useTranslation('vod');
   const pct = useDownloadPercent(download);
-  const text = pct !== undefined ? t('downloadingPercent', { percent: pct }) : download.status === 'queued' ? t('downloadQueuedShort') : t('downloading');
+  const queued = download.status === 'queued';
+  const text = queued ? t('downloadQueuedShort') : pct !== undefined ? t('downloadingPercent', { percent: pct }) : t('downloading');
   return (
     <Tooltip content={compact ? text : null} describe={false}>
-      <Link to="/downloads" aria-label={`${text}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', compact ? 'sm' : 'lg', compact ? 'w-auto px-2 text-xs' : undefined)}>
-        <LoaderCircle aria-hidden size={compact ? 14 : 18} className="motion-safe:animate-spin" />
-        {compact ? (pct !== undefined ? `${pct}%` : null) : text}
+      <Link to="/downloads" aria-label={`${text}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', compact ? 'sm' : 'lg', compact ? cn(COMPACT_SLOT, 'gap-1 text-xs', queued && GHOST_ICON) : undefined)}>
+        {queued ? (
+          <Clock aria-hidden size={compact ? 14 : 18} />
+        ) : (
+          <LoaderCircle aria-hidden size={compact ? 14 : 18} className="motion-safe:animate-spin" />
+        )}
+        {compact ? (!queued && pct !== undefined ? `${pct}%` : null) : text}
       </Link>
     </Tooltip>
   );
@@ -351,7 +379,8 @@ function RoundDownloadState({ download, downloadedHref }: { download: Download; 
             ? t('downloadQueuedShort')
             : t('downloading');
   let icon: ReactNode;
-  if (status === 'completed') icon = <Check aria-hidden size={18} className="text-success" />;
+  // The file on disk, as the episode rows draw it; the green tick is the watched mark's (vod-detail-02).
+  if (status === 'completed') icon = <HardDriveDownload aria-hidden size={18} />;
   else if (pct !== undefined) {
     icon = (
       <>

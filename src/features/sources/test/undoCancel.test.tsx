@@ -613,7 +613,7 @@ describe('review round 1', () => {
     const empty = (card: HTMLElement) => within(card).getAllByTestId('source-stat').filter((e) => e.dataset['empty'] === '').map((e) => e.dataset['stat']);
     expect(empty(m!)).toEqual(['movies', 'series']);
     expect(empty(a!)).toEqual([]);
-    for (const slot of [...within(m!).getAllByTestId('source-stat'), ...within(a!).getAllByTestId('source-stat')]) expect(slot.className).toContain('w-14');
+    for (const slot of [...within(m!).getAllByTestId('source-stat'), ...within(a!).getAllByTestId('source-stat')]) expect(slot.className).toContain('min-w-16');
     // The same three action places on every card (Refresh, Edit, More), so they line up down the list.
     expect(within(m!).getByTestId('source-actions').children).toHaveLength(3);
     expect(within(a!).getByTestId('source-actions').children).toHaveLength(3);

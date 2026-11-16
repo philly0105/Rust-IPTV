@@ -11,7 +11,7 @@ import { sourceHomePath } from '@/shell/railLinks';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { Badge, Button, IconButton, Menu, MetaLine, Tooltip, type MenuItem } from '@/ui';
 import { baseName } from '../lib/files';
-import { absoluteTime, formatCount, relativeTime } from '../lib/format';
+import { absoluteTime, formatCount, formatStatCount, relativeTime } from '../lib/format';
 import { useSourceGuide } from '../lib/epgRefresh';
 import { isRunningPhase, useImportProgressStore, useSourceProgress } from '../lib/progress';
 import { redactText } from '../lib/redact';
@@ -416,18 +416,34 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
           </dl>
         </div>
 
-        {/* The list's shared columns, each a fixed slot, so a column holds one kind of count down
-            the list; a count this source lacks (always 0) is a quiet dash. */}
-        <dl className="hidden shrink-0 items-center gap-3 @3xl:flex" data-testid="source-stats">
+        {/* The list's shared columns, each a slot of the same least width, so a column holds one
+            kind of count down the list; a count this source lacks (always 0) is a quiet dash. From
+            10,000 a count is compact ("57K", the exact number in its tooltip and for screen
+            readers), and a slot grows rather than run into the next one. */}
+        <dl className="hidden shrink-0 items-center gap-4 @3xl:flex" data-testid="source-stats">
           {(props.statColumns ?? own).map((key) => {
             const st = stat(key);
             const has = own.includes(key);
+            const exact = formatCount(st.value, lang);
+            const short = formatStatCount(st.value, lang);
             return (
-              <div key={key} className="flex w-14 flex-col-reverse items-end" data-testid="source-stat" data-stat={key} data-empty={has ? undefined : ''}>
+              <div
+                key={key}
+                className="flex min-w-16 flex-col-reverse items-end"
+                title={has && short !== exact ? exact : undefined}
+                data-testid="source-stat"
+                data-stat={key}
+                data-empty={has ? undefined : ''}
+              >
                 <dt className="max-w-full truncate text-caption text-fg-muted">{st.label}</dt>
-                <dd className={clsx('text-title-sm tabular-nums', has ? 'text-fg' : 'text-fg-subtle')}>
-                  {has ? (
-                    formatCount(st.value, lang)
+                <dd className={clsx('whitespace-nowrap text-title-sm tabular-nums', has ? 'text-fg' : 'text-fg-subtle')}>
+                  {has && short === exact ? (
+                    exact
+                  ) : has ? (
+                    <>
+                      <span aria-hidden>{short}</span>
+                      <span className="sr-only">{exact}</span>
+                    </>
                   ) : (
                     <>
                       <span aria-hidden>–</span>

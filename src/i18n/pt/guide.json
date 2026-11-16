@@ -80,5 +80,6 @@
   "previewNext": "A seguir",
   "genreFilterOn": "Filtrado por {{genre}}. Programas correspondentes: {{count, number}}",
   "genreFilterOff": "Filtro de género desativado",
+  "genreNoneInView": "Nada à vista está marcado como {{genre}}. Muitos guias não indicam géneros.",
   "allGenres": "Todos os géneros"
 }

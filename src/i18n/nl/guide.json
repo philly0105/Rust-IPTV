@@ -79,5 +79,6 @@
   "previewNext": "Hierna",
   "genreFilterOn": "Gefilterd op {{genre}}. Overeenkomende programma's: {{count, number}}",
   "genreFilterOff": "Genrefilter uit",
+  "genreNoneInView": "Niets in beeld heeft het genre {{genre}}. Veel gidsen geven geen genres op.",
   "allGenres": "Alle genres"
 }

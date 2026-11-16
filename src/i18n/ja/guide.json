@@ -78,5 +78,6 @@
   "previewNext": "次",
   "genreFilterOn": "{{genre}}で絞り込み中。該当する番組: {{count, number}}件",
   "genreFilterOff": "ジャンルの絞り込みを解除しました",
+  "genreNoneInView": "表示中に{{genre}}の番組はありません。ジャンルを付けていない番組表も多くあります。",
   "allGenres": "すべてのジャンル"
 }

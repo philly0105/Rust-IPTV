@@ -79,5 +79,6 @@
   "previewNext": "Next",
   "genreFilterOn": "Filtered to {{genre}}. Matching programmes: {{count, number}}",
   "genreFilterOff": "Genre filter off",
+  "genreNoneInView": "Nothing in view is tagged {{genre}}. Many guides don't tag genres.",
   "allGenres": "All genres"
 }

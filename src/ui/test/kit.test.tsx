@@ -545,6 +545,38 @@ describe('page scaffold', () => {
 describe('Dialog sheet and header row', () => {
   const classes = () => screen.getByRole('dialog').className.split(/\s+/);
 
+  it('stands a sheet on the on-screen keyboard while it is open (iPhone Safari keeps the layout viewport)', () => {
+    const vv = Object.assign(new EventTarget(), { height: 844, offsetTop: 0, scale: 1 });
+    const had = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const height = window.innerHeight;
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: vv });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    try {
+      render(
+        <Dialog open onClose={() => {}} title="Add a source">
+          <input aria-label="URL" />
+        </Dialog>,
+      );
+      const layer = () => screen.getByRole('dialog').parentElement!;
+      expect(layer().style.getPropertyValue('--kb-inset')).toBe('0px');
+      act(() => {
+        vv.height = 500;
+        vv.dispatchEvent(new Event('resize'));
+      });
+      expect(layer().style.getPropertyValue('--kb-inset')).toBe('344px');
+      // Pinch zoom shrinks the visual viewport too; the sheet stays where it is.
+      act(() => {
+        vv.scale = 2;
+        vv.dispatchEvent(new Event('resize'));
+      });
+      expect(layer().style.getPropertyValue('--kb-inset')).toBe('0px');
+    } finally {
+      if (had) Object.defineProperty(window, 'visualViewport', had);
+      else delete (window as { visualViewport?: unknown }).visualViewport;
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+    }
+  });
+
   it("`sheet` makes a bottom sheet below sm, and a caller's max-sm height cap wins over the sheet's", () => {
     const { rerender } = render(
       <Dialog open onClose={() => {}} title="Sort and filter" sheet>
@@ -555,16 +587,16 @@ describe('Dialog sheet and header row', () => {
       expect.arrayContaining([
         'max-sm:fixed',
         'max-sm:inset-x-0',
-        'max-sm:bottom-0',
+        'max-sm:bottom-[var(--kb-inset,0px)]',
         'max-sm:rounded-b-none',
-        'max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))]',
+        'max-sm:max-h-[calc(100dvh-var(--kb-inset,0px)-max(1.5rem,var(--toast-reserve,0px)))]',
         'max-sm:motion-safe:animate-sheet-in',
         // A narrower gutter on a phone, for the header, body and footer alike.
         'max-sm:[--dialog-gutter:1rem]',
       ]),
     );
     // The floating card's phone height cap gives way to the sheet's, not the other way round.
-    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))]']);
+    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[calc(100dvh-var(--kb-inset,0px)-max(1.5rem,var(--toast-reserve,0px)))]']);
     rerender(
       <Dialog open onClose={() => {}} title="Sort and filter" sheet className="max-sm:max-h-[70dvh]">
         <p>Body</p>

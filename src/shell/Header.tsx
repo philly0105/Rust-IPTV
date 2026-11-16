@@ -73,9 +73,9 @@ export const Header = memo(function Header({
           label={t('showRail')}
           icon={<PanelLeftOpen size={18} className="rtl:-scale-x-100" />}
           onClick={() => {
-            // This button goes as the rail comes back: focus moves on to the rail's Hide button.
+            // This button goes as the rail comes back: focus moves on to the rail's Expand button.
             flushSync(toggleRailHidden);
-            document.querySelector<HTMLElement>('[data-rail-hide]')?.focus();
+            document.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
           }}
           className="-ms-2 shrink-0"
           data-testid="rail-show"

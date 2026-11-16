@@ -75,11 +75,17 @@ export interface ShellStore {
    * Wider windows ignore it, so the rail never goes missing on a desktop.
    */
   railHidden: boolean;
+  /**
+   * Below 1024 px, where the rail is docked as icons: the full rail is open over the page for a
+   * moment (Expand sidebar), until a link is followed, Escape, a press outside or Collapse.
+   */
+  railPeek: boolean;
   setPaletteOpen(open: boolean): void;
   setHelpOpen(open: boolean): void;
   setPanelOpen(open: boolean): void;
   toggleRail(): void;
   toggleRailHidden(): void;
+  setRailPeek(open: boolean): void;
 }
 
 const RAIL_KEY = 'tsrust.railCollapsed';
@@ -112,6 +118,7 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   helpOpen: false,
   railCollapsed: storedFlag(RAIL_KEY),
   railHidden: storedFlag(RAIL_HIDDEN_KEY),
+  railPeek: false,
   setPaletteOpen: (open) => set({ paletteOpen: open, ...(open ? { helpOpen: false } : {}) }),
   setHelpOpen: (open) => set({ helpOpen: open, ...(open ? { paletteOpen: false } : {}) }),
   setPanelOpen: (open) => set({ panelOpen: open }),
@@ -123,8 +130,9 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   toggleRailHidden: () => {
     const next = !get().railHidden;
     storeFlag(RAIL_HIDDEN_KEY, next);
-    set({ railHidden: next });
+    set({ railHidden: next, railPeek: false });
   },
+  setRailPeek: (open) => set({ railPeek: open }),
 }));
 
 export interface ShellApi {

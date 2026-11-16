@@ -66,9 +66,9 @@ vi.mock('@/features/player', () => ({
   ExternalPlaybackFooter: () => null,
 }));
 
-const { ShellLayout } = await import('../ShellLayout');
+const { ROUTE_ANNOUNCE_DELAY_MS, ShellLayout } = await import('../ShellLayout');
 const { shellRoutes } = await import('../routes');
-const { useShell, useShellStore } = await import('../store');
+const { useShell, useShellHeader, useShellStore } = await import('../store');
 const { sharedRailError } = await import('../dashboard/DashboardPage');
 const { RpcError } = await import('@/api/transport');
 const { useEffect, useState } = await import('react');
@@ -141,7 +141,7 @@ beforeEach(() => {
   baseHandlers();
   playerMock.playItem.mockClear();
   events.clear();
-  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false });
+  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false, railPeek: false });
   useThemeStore.setState({ theme: 'dark' });
   useToastStore.setState({ toasts: [] });
   localStorage.clear();
@@ -448,15 +448,47 @@ describe('phone layout (below 1024 px)', () => {
     window.matchMedia = matchMedia;
   });
 
-  it('the rail can be hidden and shown again, and focus moves to the button that brings it back', async () => {
+  it('the icon rail opens over the page with its names, and closes on a link, Escape or a press beside it', async () => {
     narrowWindow(true);
+    act(() => useShellStore.setState({ railPeek: false }));
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(nav.getAttribute('data-collapsed')).toBe('true');
+    // Docked, the footer offers Expand; Hide comes with the open rail.
+    expect(within(nav).queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
+    const expand = within(nav).getByRole('button', { name: 'Expand sidebar' });
+    fireEvent.click(expand);
+    // The same rail, now labelled and over the page, with the button kept under focus.
+    expect(nav.getAttribute('data-peek')).toBe('true');
+    expect(nav.getAttribute('data-collapsed')).toBeNull();
+    expect(nav.className).toContain('fixed');
+    expect(within(nav).getByText('Favorites')).toBeTruthy();
+    expect(expand.getAttribute('aria-label') ?? expand.textContent).toContain('Collapse sidebar');
+    expect(expand.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(nav.getAttribute('data-peek')).toBeNull();
+
+    fireEvent.click(expand);
+    fireEvent.mouseDown(document.querySelector('[data-rail-scrim]')!);
+    expect(nav.getAttribute('data-peek')).toBeNull();
+
+    fireEvent.click(expand);
+    fireEvent.click(within(nav).getByRole('link', { name: 'Recently watched' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
+    await waitFor(() => expect(nav.getAttribute('data-peek')).toBeNull());
+  });
+
+  it('the rail can be hidden from the open rail and shown again, and focus moves to the button that brings it back', async () => {
+    narrowWindow(true);
+    act(() => useShellStore.setState({ railPeek: false }));
     renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
-    // Below lg the rail never expands: its toggle hides it instead.
-    expect(within(nav).queryByRole('button', { name: 'Expand sidebar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
 
+    fireEvent.click(within(nav).getByRole('button', { name: 'Expand sidebar' }));
     fireEvent.click(within(nav).getByRole('button', { name: 'Hide sidebar' }));
     expect(screen.queryByRole('navigation', { name: 'Main navigation' })).toBeNull();
     const show = screen.getByRole('button', { name: 'Show sidebar' });
@@ -465,7 +497,9 @@ describe('phone layout (below 1024 px)', () => {
 
     fireEvent.click(show);
     const back = screen.getByRole('navigation', { name: 'Main navigation' });
-    expect(document.activeElement).toBe(within(back).getByRole('button', { name: 'Hide sidebar' }));
+    // Back docked, not open: focus lands on Expand.
+    expect(back.getAttribute('data-peek')).toBeNull();
+    expect(document.activeElement).toBe(within(back).getByRole('button', { name: 'Expand sidebar' }));
     expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
     expect(localStorage.getItem('tsrust.railHidden')).toBe('0');
   });
@@ -479,6 +513,69 @@ describe('phone layout (below 1024 px)', () => {
     expect(within(nav).getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy();
     expect(within(nav).queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
+  });
+});
+
+describe('route announcements and the skip link', () => {
+  function Titled({ title, children }: { title: string; children?: React.ReactNode }) {
+    useShellHeader({ title }, [title]);
+    return <Page>{children}</Page>;
+  }
+  const titledRoutes = () => [
+    {
+      path: '/',
+      element: <ShellLayout />,
+      children: [
+        { path: 'favorites', element: <Titled title="Favorites">favorites page</Titled> },
+        {
+          path: 'recent',
+          element: (
+            <Titled title="Recently watched">
+              <div data-skip-target="" tabIndex={-1}>
+                <button type="button" tabIndex={-1}>
+                  first row
+                </button>
+                <button type="button" tabIndex={0}>
+                  current row
+                </button>
+              </div>
+            </Titled>
+          ),
+        },
+      ],
+    },
+  ];
+  const settle = () => act(() => new Promise((r) => setTimeout(r, ROUTE_ANNOUNCE_DELAY_MS + 50)));
+
+  it('names the page a link opened, but not the first page or a page Back returned to', async () => {
+    const { router } = renderRoutes(titledRoutes(), '/favorites');
+    await screen.findByText('favorites page');
+    const region = document.querySelector('[data-route-announcer]')!;
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    await settle();
+    expect(region.textContent).toBe('');
+    await act(() => router.navigate('/recent'));
+    await waitFor(() => expect(region.textContent).toBe('Recently watched'));
+    // Focus stays where it was: the announcement does the telling.
+    await act(() => router.navigate(-1));
+    await screen.findByText('favorites page');
+    await settle();
+    expect(region.textContent).toBe('');
+  });
+
+  it("the skip link lands on the item of the page's marked target that takes Tab, and adds no history entry", async () => {
+    const { router } = renderRoutes(titledRoutes(), '/recent');
+    await screen.findByText('current row');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'current row' }));
+    expect(router.state.location.hash).toBe('');
+  });
+
+  it('without a marked target the skip link focuses main', async () => {
+    renderRoutes(titledRoutes(), '/favorites');
+    await screen.findByText('favorites page');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(document.getElementById('main'));
   });
 });
 

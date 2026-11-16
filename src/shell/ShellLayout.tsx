@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Outlet, useLocation, useNavigate, useNavigationType } from 'react-router';
 
 import type { Settings } from '@/api/types';
 import { isDesktop } from '@/api/transport';
@@ -258,6 +258,7 @@ function GlobalShortcuts() {
       if (s.paletteOpen) return s.setPaletteOpen(false);
       if (s.helpOpen) return s.setHelpOpen(false);
       if (s.panelOpen) return s.setPanelOpen(false);
+      if (s.railPeek) return s.setRailPeek(false);
       // Leaves a search or text field; a focused link, card or button keeps focus (and the Tab position).
       const active = document.activeElement;
       if (active instanceof HTMLElement && isTextEntry(active)) active.blur();
@@ -265,6 +266,18 @@ function GlobalShortcuts() {
     { description: t('scEscape'), area, allowInInput: true },
   );
   return null;
+}
+
+/**
+ * The skip link's target: the page's `[data-skip-target]` (its main list or grid), at the item in
+ * it that takes Tab (the roving row or cell), else `main#main` itself. Exported for tests.
+ */
+export function skipToContent(): void {
+  const main = document.getElementById('main');
+  const target = main?.querySelector<HTMLElement>('[data-skip-target]');
+  const into = target?.querySelector<HTMLElement>('[tabindex="0"]') ?? target;
+  into?.focus();
+  if (!into || document.activeElement !== into) main?.focus();
 }
 
 const NON_TEXT_INPUTS = new Set(['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'color', 'file', 'image']);
@@ -295,9 +308,55 @@ function ShellNavigationEffects() {
     if (s.paletteOpen) s.setPaletteOpen(false);
     if (s.helpOpen) s.setHelpOpen(false);
     if (s.panelOpen) s.setPanelOpen(false);
+    if (s.railPeek) s.setRailPeek(false);
   }, [key]);
   useOutletScrollMemory();
   return null;
+}
+
+/** How long after a new page opens the announcer names it: its header is set by then. */
+export const ROUTE_ANNOUNCE_DELAY_MS = 400;
+
+/**
+ * Names the page that opened, for screen readers: a page change by a link, the palette or a key
+ * changes only document.title, which they do not read, and focus rightly stays where it was (the
+ * rail link). A polite live region gets the page's title (the header's, as the window shows it)
+ * a moment after each new pathname; not on the first load, not for a query-only change, and not
+ * on Back or Forward, where focus goes back to where it was on that page and says enough.
+ */
+function RouteAnnouncer() {
+  const { pathname } = useLocation();
+  const navigationType = useNavigationType();
+  const popRef = useRef(false);
+  popRef.current = navigationType === 'POP';
+  const last = useRef(pathname);
+  const [text, setText] = useState('');
+  useEffect(() => {
+    if (last.current === pathname) return;
+    last.current = pathname;
+    setText('');
+    if (popRef.current) return;
+    let unsubscribe: (() => void) | undefined;
+    const announce = (): boolean => {
+      const header = useShellStore.getState().header;
+      const title = header?.documentTitle || header?.title;
+      if (title) setText(title);
+      return !!title;
+    };
+    // A page that names itself late (its title waits for data) is named when it does.
+    const timer = window.setTimeout(() => {
+      if (!announce()) unsubscribe = useShellStore.subscribe(() => announce() && unsubscribe?.());
+    }, ROUTE_ANNOUNCE_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe?.();
+    };
+  }, [pathname]);
+  return (
+    <p className="sr-only" aria-live="polite" aria-atomic="true" data-route-announcer="">
+      {text}
+    </p>
+  );
 }
 
 // SH-1 (performance audit): the shell's router and settings readers live in these leaves. The
@@ -399,7 +458,7 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
             {Array.from({ length: 5 }, (_, i) => (
               <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
                 <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
-                <Skeleton className="h-2 w-10" />
+                <Skeleton className="h-2.5 w-10" />
               </div>
             ))}
           </div>
@@ -438,10 +497,17 @@ export function ShellLayout() {
   const wide = useMediaQuery('(min-width: 1440px)');
   // Below sm the tab bar replaces the rail (CB-PHONE-NAV).
   const phone = useMediaQuery(PHONE_QUERY);
-  const collapsed = railPref || narrow;
   // Hiding the rail is a narrow-window choice: from 1024 px up it always shows, and on a phone
   // there is no rail to show.
   const railHidden = useShellStore((s) => s.railHidden) && narrow && !phone;
+  // Below 1024 px the icon rail opens over the page (Expand sidebar), only while it is docked.
+  const railPeekPref = useShellStore((s) => s.railPeek);
+  const railPeek = railPeekPref && narrow && !phone && !railHidden;
+  const collapsed = !railPeek && (railPref || narrow);
+  // A window widened past the narrow range (or narrowed to a phone) leaves no peek to come back to.
+  useEffect(() => {
+    if (railPeekPref && !railPeek) useShellStore.getState().setRailPeek(false);
+  }, [railPeekPref, railPeek]);
 
   useParentalEvents();
   const player = usePlayerModule();
@@ -490,12 +556,18 @@ export function ShellLayout() {
       <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
         <a
           href="#main"
+          // Past the page's toolbar to what it is about (the channel list, the guide grid) when the
+          // page marks it, and without a #main history entry that the next Back would only strip.
+          onClick={(e) => {
+            e.preventDefault();
+            skipToContent();
+          }}
           className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
         >
           {t('skipToContent')}
         </a>
         <GlobalShortcuts />
-        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
+        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} peek={railPeek} />}
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <Header panelInline={wide} railHidden={railHidden} phone={phone} />
           <ConnectionBanner />
@@ -516,9 +588,16 @@ export function ShellLayout() {
               <Outlet />
             </main>
             <ShellNavigationEffects />
+            <RouteAnnouncer />
             <ContextPanel inline={wide} />
           </div>
           {player && <player.ExternalPlaybackFooter />}
+          {/*
+            A phone's mini player bar floats over the bottom of the outlet (PlayerDock writes its
+            height to --player-bar-inset): the outlet gives up that much room, so every page and
+            every scroller inside one ends above the bar instead of under it.
+          */}
+          {phone && <div aria-hidden className="shrink-0" style={{ height: 'var(--player-bar-inset, 0px)' }} data-player-bar-spacer="" />}
           {phone && <TabBar />}
         </div>
         {player && <player.PlayerDock />}

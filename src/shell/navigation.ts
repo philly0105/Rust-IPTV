@@ -58,6 +58,8 @@ export interface NavLinkDef {
   notInRail?: boolean;
   /** One of Library's less used pages: the rail folds it under the group's More row. */
   more?: boolean;
+  /** What runs away from the page that the row marks while it runs (activityMarks.tsx). */
+  activity?: 'downloads' | 'recording';
 }
 
 /**
@@ -106,10 +108,10 @@ export const LIBRARY_LINKS: readonly NavLinkDef[] = [
   { to: '/lists', labelKey: 'lists:title', icon: ListOrdered, noSourceNeeded: true },
   { to: '/recent', labelKey: 'navRecent', icon: History },
   // The rest are visited now and then, not every evening: the rail folds them under More.
-  { to: '/downloads', labelKey: 'navDownloads', icon: Download, more: true },
+  { to: '/downloads', labelKey: 'navDownloads', icon: Download, more: true, activity: 'downloads' },
   { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive, more: true },
   // recording:
-  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock, more: true },
+  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock, more: true, activity: 'recording' },
   { to: '/stats', labelKey: 'stats:title', icon: ChartColumn, more: true },
 ];
 

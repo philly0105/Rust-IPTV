@@ -151,9 +151,9 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
             </Badge>
           ) : null}
         </div>
-        <span className="flex min-w-0 gap-3 text-xs text-fg-muted">
+        <span className="flex min-w-0 flex-wrap gap-x-3 text-xs text-fg-muted">
           {f.title && f.channelName ? (
-            <span dir="auto" className="min-w-0 truncate">
+            <span dir="auto" className="min-w-0 max-w-full truncate">
               {f.channelName}
             </span>
           ) : null}
@@ -169,7 +169,7 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
             href={`/api/recordings/${encodeURIComponent(f.id)}`}
             download={f.fileName}
             aria-label={t('recSaveToDevice', { name: f.fileName })}
-            className={buttonClass('ghost', 'md', 'w-10 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)]')}
+            className={buttonClass('ghost', 'md', 'w-10 shrink-0 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)]')}
             data-testid="recording-save"
           >
             <DownloadIcon size={16} aria-hidden />

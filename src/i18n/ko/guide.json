@@ -78,5 +78,6 @@
   "previewNext": "다음",
   "genreFilterOn": "{{genre}} 필터 적용됨. 일치하는 프로그램: {{count, number}}개",
   "genreFilterOff": "장르 필터 해제됨",
+  "genreNoneInView": "화면에 {{genre}}(으)로 분류된 프로그램이 없습니다. 장르를 표시하지 않는 편성표가 많습니다.",
   "allGenres": "모든 장르"
 }

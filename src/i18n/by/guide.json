@@ -81,5 +81,6 @@
   "previewNext": "Далей",
   "genreFilterOn": "Фільтр: {{genre}}. Адпаведных перадач: {{count, number}}",
   "genreFilterOff": "Фільтр па жанры выключаны",
+  "genreNoneInView": "Нічога на экране не пазначана як {{genre}}. Многія праграмы перадач не пазначаюць жанры.",
   "allGenres": "Усе жанры"
 }

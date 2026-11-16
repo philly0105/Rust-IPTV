@@ -79,5 +79,6 @@
   "previewNext": "Következő",
   "genreFilterOn": "Szűrés: {{genre}}. Egyező műsorok: {{count, number}}",
   "genreFilterOff": "Műfajszűrő kikapcsolva",
+  "genreNoneInView": "A látható részen semmi sincs {{genre}} címkével. Sok műsorújság nem jelöl műfajt.",
   "allGenres": "Minden műfaj"
 }

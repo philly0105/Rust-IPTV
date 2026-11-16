@@ -16,8 +16,8 @@ import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/record
 
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName } from '../lib/channelName';
-import { MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
+import { displayChannelName, splitPlaceTag } from '../lib/channelName';
+import { CELL_TEXT_MIN_PX, MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
 import type { GuideHydrator, HydrationTicket } from './hydration';
@@ -63,7 +63,7 @@ export const GUIDE_MOVING_ATTR = 'data-guide-moving';
  */
 export function createStickyTitleManager() {
   type Cell = { el: HTMLElement; left: number; width: number };
-  type Row = { cells: Cell[]; sticky: Cell[] };
+  type Row = { cells: Cell[]; sticky: Cell[]; capped: Cell | null };
   const pins = new Set<HTMLElement>();
   let moving = false;
   let pinX = 0;
@@ -77,6 +77,24 @@ export function createStickyTitleManager() {
   // Sticky positioning on hundreds of such cells makes WebKit's scroll paint costly.
   const minStickyWidth = 64;
   const rows = new Map<HTMLElement, Row>();
+  // A sticky title cannot pass its cell's end, so with only a sliver of the cell left it slid
+  // back under the channel column and lost its first letters ("nside the NBA"). At rest the
+  // cut title is narrowed to the part of its cell that shows (its own truncation adds the
+  // ellipsis) and hidden when that is too narrow to read, which leaves a plain block. The cell
+  // sits at left + 1 with 8 px padding and its title sticks 8 px past the edge: 17 px of the
+  // cell are not text room. While moving, the title is left alone (no style write per frame).
+  const setCap = ({ el, left, width }: Cell, scroll: number) => {
+    const full = width - 18;
+    const room = Math.floor(Math.min(left + width - scroll - 17, full));
+    const max = `${Math.max(0, room)}px`;
+    const visibility = room < Math.min(CELL_TEXT_MIN_PX, full) ? 'hidden' : '';
+    if (el.style.maxWidth !== max) el.style.maxWidth = max;
+    if (el.style.visibility !== visibility) el.style.visibility = visibility;
+  };
+  const clearCap = (cell: Cell) => {
+    if (cell.el.style.maxWidth) cell.el.style.maxWidth = '';
+    if (cell.el.style.visibility) cell.el.style.visibility = '';
+  };
   const updateRow = (row: Row, scroll: number) => {
     // Programme cells are in time order and do not overlap. Find the first one whose
     // end reaches the visible edge, then prime its immediate neighbours too.
@@ -89,6 +107,10 @@ export function createStickyTitleManager() {
       else hi = mid;
     }
     const covering = lo < row.cells.length && row.cells[lo]!.left <= scroll;
+    const cap = !moving && covering ? row.cells[lo]! : null;
+    if (row.capped && row.capped !== cap) clearCap(row.capped);
+    if (cap) setCap(cap, scroll);
+    row.capped = cap;
     // At rest only the title the edge cuts sticks: the page turns motion on (and with it the
     // neighbours) before a sideways move it can see coming, so a primed title would only be
     // one more composited layer for every frame of a vertical scroll.
@@ -113,7 +135,7 @@ export function createStickyTitleManager() {
         width: Number(el.dataset.padWidth),
       })).filter((cell) => cell.width >= minStickyWidth);
       if (cells.length === 0) return () => {};
-      const entry: Row = { cells, sticky: [] };
+      const entry: Row = { cells, sticky: [], capped: null };
       rows.set(row, entry);
       updateRow(entry, scroll);
       return () => {
@@ -121,6 +143,7 @@ export function createStickyTitleManager() {
         if (rows.get(row) !== entry) return;
         rows.delete(row);
         for (const cell of entry.sticky) cell.el.classList.remove('sticky');
+        if (entry.capped) clearCap(entry.capped);
       };
     },
     update(scroll: number) {
@@ -326,9 +349,21 @@ export const GuideRow = memo(function GuideRow({
             )}
           >
             {compact ? (
-              // Phones: the logo over the number; the name is the button's label and tooltip.
+              // Phones: the logo over the number; the name is the button's label and tooltip. A
+              // channel with no logo shows its name instead: three "ES" monograms could not tell
+              // ESPN HD, ESPNU HD and ESPNews apart.
               <>
-                <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
+                <ChannelLogo
+                  src={ch.logoUrl}
+                  name={chName}
+                  size={32}
+                  sourceId={ch.ref.sourceId}
+                  fallback={
+                    <span aria-hidden dir="auto" data-testid="guide-compact-name" className="line-clamp-2 max-w-full text-center text-caption leading-tight break-words text-fg">
+                      {splitPlaceTag(chName).name}
+                    </span>
+                  }
+                />
                 <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <span className="sr-only">{playing ? `${chName}, ${labels.playingNow}` : chName}</span>
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
@@ -339,11 +374,13 @@ export const GuideRow = memo(function GuideRow({
                 <span className={cn('w-7 shrink-0 text-end font-numeric text-sm tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                 {/* Named as Live TV's list names it: the country tag after the name, quiet, so a
-                    narrow column cuts the tag, not what tells ESPN2 from ESPNU. */}
+                    narrow column cuts the tag, not what tells ESPN2 from ESPNU. Two lines: the row
+                    has room for them, and an event channel's matchup comes after its number. */}
                 <ChannelName
                   name={ch.name}
                   strip={stripCountryPrefix}
-                  className={cn('min-w-0 flex-1 truncate text-body-sm text-match-parent text-fg', playing && 'font-semibold')}
+                  twoLines
+                  className={cn('min-w-0 flex-1 text-body-sm leading-tight text-match-parent text-fg', playing && 'font-semibold')}
                 />
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
                 {playing ? (
@@ -504,9 +541,12 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
         const catchupOk = ch ? canCatchUp(p, ch, kind, now) : false;
         const range = formatRange(p, lang);
         const genre = genreOf(p.category);
-        // Filtered to a genre: the others step back to plain text on no fill.
+        // Filtered to a genre: the others step back to a faint box with quiet text.
         const muted = !!genreFilter && genre !== genreFilter;
         const isPlaying = p.start === playingProgramStart;
+        // Under 40 px (a 5-minute show at the default scale) no text fits: a clean narrow block
+        // rather than a lone ellipsis. The tooltip, the preview band and its name still say it.
+        const tiny = b.width < 40;
         return (
           <button
             key={p.start}
@@ -534,7 +574,10 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
             // Clip shifted labels at the programme boundary without creating a scroll container.
             // Flat fills with 2 px gutters, no outlines: a wall of boxed cells read as a spreadsheet.
             className={cn(
-              'absolute top-1 bottom-1 overflow-clip rounded-md px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus',
+              'absolute top-1 bottom-1 overflow-clip rounded-md py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus',
+              tiny ? 'px-0.5' : 'px-2',
+              // The cell whose detail is open (set by the page): a neutral edge, not the focus ring.
+              'data-selected:inset-ring-2 data-selected:inset-ring-fg-muted',
               // Every cell a now line can cross is opaque: the line (drawn before the rows)
               // shows only in the gutters, the ruler and the airing cell's foot, so it never
               // strikes through a title or a time. A see-through airing cell let it through
@@ -542,22 +585,37 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
               isPlaying
                 ? 'bg-selected font-medium text-fg ring-1 ring-accent-mark ring-inset hover:bg-selected'
                 : muted
-                ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
-                  'bg-bg text-fg-subtle hover:bg-surface'
+                ? // Filtered to another genre: quiet text in an outlined box of the page's own
+                  // colour (opaque, so the now line stays off it). Plain text with no edge turned a
+                  // guide without genre tags into loose words with no cells.
+                  'bg-bg text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-2'
                 : // On now: the raised cell (white with a shadow in light, the next surface step
                   // in dark), never a grey or amber wash. Light rows sit on the grey page:
-                  // there a cell is the white panel; dark keeps the lifted surface step.
+                  // there a cell is the white panel; dark keeps the lifted surface step. Later
+                  // and ended cells in light are 1.05:1 against the page, so an inset edge
+                  // draws them; dark's surface steps separate on their own.
                   b.when === 'now'
                   ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
                   : b.when === 'past'
-                    ? 'bg-surface-2 text-fg-subtle hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3'
-                    : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
+                    ? 'bg-surface-2 text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3'
+                    : 'bg-surface-2 text-fg inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3',
             )}
             style={{ ...inlineStart(b.left - chunk.left + 1, rtl), width: Math.max(2, b.width - 2) }}
           >
             {/* CB-GUIDE-GENRE: the bucket's stripe on the inline start. */}
             {genre && !muted && !isPlaying ? (
               <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
+            ) : null}
+            {/* The aired part of the airing programme, faintly shaded, so the time left reads
+                without the ruler. Another clock marker: it moves with the foot's progress. */}
+            {b.when === 'now' && !muted ? (
+              <span
+                aria-hidden
+                data-testid="cell-elapsed"
+                data-guide-clock=""
+                className="absolute inset-y-0 start-0 rounded-s-md bg-fg/[0.06]"
+                style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
+              />
             ) : null}
             {/* The airing programme's progress along its foot (LG-18): the accent's mark tone, a mark of progress. */}
             {b.when === 'now' && !muted ? (
@@ -576,7 +634,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 aria-hidden
                 data-testid="cell-now-tick"
                 data-guide-clock=""
-                className="absolute bottom-0 h-1.5 w-0.5 bg-live"
+                className="absolute bottom-0 h-1.5 w-0.5 bg-live-solid"
                 style={{ insetInlineStart: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 2}px))` }}
               />
             ) : null}
@@ -584,7 +642,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 those titles with native scrolling, and the cell clips them at its end. A
                 sticky title paints above every cell (z-index), so the cells between two
                 titles do not need a composited layer of their own. */}
-            <span
+            {tiny ? null : <span
               data-testid="cell-text"
               className="z-[1] block w-max max-w-full"
               style={{ insetInlineStart: channelCol + 8 }}
@@ -600,7 +658,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
               </span>
               <span className={cn('block truncate text-caption tabular-nums', !muted && b.when !== 'past' && 'text-fg-muted')}>{range}</span>
-            </span>
+            </span>}
           </button>
         );
       })}

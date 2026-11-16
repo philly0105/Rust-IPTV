@@ -79,5 +79,6 @@
   "previewNext": "Danach",
   "genreFilterOn": "Gefiltert nach {{genre}}. Passende Sendungen: {{count, number}}",
   "genreFilterOff": "Genrefilter aus",
+  "genreNoneInView": "Nichts im sichtbaren Bereich ist als {{genre}} markiert. Viele Programmführer geben keine Genres an.",
   "allGenres": "Alle Genres"
 }

@@ -111,7 +111,7 @@ import { createGuideWheelScroller, guideWheelMotionAllowed, isWheelStep } from '
 import { GENRES, genreColor, genreOf, storedGenreFilter, storeGenreFilter, type Genre } from '../guide/genre';
 import { GuidePreview, storedPreviewOpen, storePreviewOpen } from '../guide/GuidePreview';
 import { useStable } from '../guide/useStable';
-import { clampGuideZoom, GUIDE_ZOOM_SLOT_PX, storedGuideZoom, storeGuideZoom } from '../guide/zoom';
+import { clampGuideZoom, GUIDE_ZOOM_DEFAULT, GUIDE_ZOOM_SLOT_PX, storedGuideZoom, storeGuideZoom } from '../guide/zoom';
 import { guideViewParam, parseGuideView, useGuideViewChannels, type GuideView } from '../guide/viewChannels';
 import { prefetchProgramDescription, useProgramDescription } from '../guide/programDescription';
 
@@ -623,6 +623,10 @@ export function EpgGridPage() {
   // What the filter did, for screen readers: the cells only dim, which they do not see. The count
   // is of the window's programmes in the rows whose guide is in.
   const [genreNote, setGenreNote] = useState('');
+  // A filter that matched nothing in the window it was chosen in says so on screen too: many
+  // guides tag no genres, and a grid of faint cells looked like a broken filter. Kept with that
+  // window, so it goes once the view moves.
+  const [genreEmpty, setGenreEmpty] = useState<{ genre: Genre; at: Span } | null>(null);
   const setGenreFilter = useStable((g: Genre | null) => {
     storeGenreFilter(g);
     setGenreFilterState(g);
@@ -639,7 +643,11 @@ export function EpgGridPage() {
       }
     }
     setGenreNote(tg('genreFilterOn', { genre: tg(`genre_${g}`), count: matching }));
+    setGenreEmpty(matching === 0 ? { genre: g, at: shownTime } : null);
   });
+  const genreHint = genreEmpty && genreEmpty.genre === genreFilter && genreEmpty.at === shownTime
+    ? tg('genreNoneInView', { genre: tg(`genre_${genreEmpty.genre}`) })
+    : undefined;
   // The cells name their genre (CB-GUIDE-GENRE), so a filtered guide reads as it looks.
   const genreNames = useMemo(() => Object.fromEntries(GENRES.map((g) => [g, tg(`genre_${g}`)])) as Record<Genre, string>, [tg]);
   // The strings every render of the grid shows, translated once (a t() call is not free, and the
@@ -1057,6 +1065,7 @@ export function EpgGridPage() {
     // made the scroll compete with router updates and programme-buffer replacement.
     if (!recenter && root && laidRoot.current === root && laidTrack.current === trackBase && laidPx.current === pxPerMin && laidRtl.current === rtl) {
       const target = live ? time + nowScroll(now, time, pxPerMin, (viewWidth.current || pageWidth) - channelCol) / pxPerMin * MINUTE : time;
+      if (live) navigationAt.current = floorLocal(target, GRID_SLOT_MIN);
       moveViewTo(target, root, false, true);
     } else {
       if (recenter) setTrackBase(time);
@@ -1366,10 +1375,13 @@ export function EpgGridPage() {
       const time = jump.live
         ? jump.time + nowScroll(now, jump.time, pxPerMin, root.clientWidth - channelCol) / pxPerMin * MINUTE
         : jump.time;
+      // Now shows the slot now is in, not the window's start: the day and 3-hour steps go from it.
+      if (jump.live) navigationAt.current = floorLocal(time, GRID_SLOT_MIN);
       moveViewTo(time, root, false, true);
     } else if (first && viewAtRef.current === baseStart && winAt === null) {
       // The first live view places now inside the track; later remounts keep their last time.
       const time = baseStart + nowScroll(now, baseStart, pxPerMin, root.clientWidth - channelCol) / pxPerMin * MINUTE;
+      navigationAt.current = floorLocal(time, GRID_SLOT_MIN);
       moveViewTo(time, root, false);
     } else if (first || trackChanged || scaleChanged || firstWidth) {
       // Zoom, direction and a deliberate re-centre preserve the time at the viewport edge.
@@ -1521,6 +1533,16 @@ export function EpgGridPage() {
   });
 
   const [selection, setSelection] = useState<Selection | null>(null);
+  // The cell whose detail is open is marked (GuideRow styles `data-selected`): a popover kept
+  // inside the window can sit well away from it. Set on the element, so no row re-renders.
+  const selectedCell = selection?.anchor;
+  useLayoutEffect(() => {
+    if (!selectedCell) return;
+    selectedCell.dataset.selected = '';
+    return () => {
+      delete selectedCell.dataset.selected;
+    };
+  }, [selectedCell]);
   /** The cell that opened the popover; focus returns to it when the popover closes. */
   const invoker = useRef<HTMLElement | null>(null);
   const closePopover = () => {
@@ -2025,8 +2047,8 @@ export function EpgGridPage() {
   const goToPlayingStable = useStable(() => goToPlaying?.());
   const canGoToPlaying = !!goToPlaying;
   const phoneActions = useMemo(
-    () => (bar === 'phone' ? <GuidePhoneActions genre={genreFilter} onGenre={setGenreFilter} onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined} /> : undefined),
-    [bar, genreFilter, setGenreFilter, canGoToPlaying, goToPlayingStable],
+    () => (bar === 'phone' ? <GuidePhoneActions genre={genreFilter} onGenre={setGenreFilter} zoom={zoom} onZoom={zoomBy} onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined} /> : undefined),
+    [bar, genreFilter, setGenreFilter, zoom, zoomBy, canGoToPlaying, goToPlayingStable],
   );
 
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
@@ -2108,6 +2130,7 @@ export function EpgGridPage() {
         onZoom={zoomBy}
         genre={genreFilter}
         onGenre={setGenreFilter}
+        genreHint={genreHint}
         previewOpen={bandFits ? previewOpen : undefined}
         onTogglePreview={togglePreview}
         onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined}
@@ -2248,11 +2271,12 @@ export function EpgGridPage() {
                 // Under the sticky channel column (z-10) and time header (z-20), and under the cells:
                 // drawn before the rows, it shows only in the gutters between them, and the opaque
                 // airing cell carries its stub at the foot, so it never strikes through a title or
-                // a time (L3-visual-3). Its head is the time pill in the ruler (GuideHeader), LG-18.
+                // a time (L3-visual-3). Its head is the time pill in the ruler (GuideHeader), LG-18,
+                // and it takes the pill's red, so head and line read as one mark.
                 <div
                   aria-hidden
                   data-testid="epg-now-line"
-                  className="pointer-events-none absolute w-0.5 bg-live"
+                  className="pointer-events-none absolute w-0.5 bg-live-solid"
                   style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: headerH, height: virtualizer.getTotalSize() }}
                 />
               ) : null}
@@ -2545,6 +2569,7 @@ const GuideToolbar = memo(function GuideToolbar({
   onZoom,
   genre,
   onGenre,
+  genreHint,
   previewOpen,
   onTogglePreview,
   onGoToPlaying,
@@ -2570,6 +2595,8 @@ const GuideToolbar = memo(function GuideToolbar({
   /** CB-GUIDE-GENRE: the genre the cells are filtered to. */
   genre: Genre | null;
   onGenre(genre: Genre | null): void;
+  /** Shown after the chips when the chosen genre matched nothing in view. */
+  genreHint?: string | undefined;
   /** The preview band's state; undefined where the band does not fit (no toggle then). */
   previewOpen?: boolean;
   onTogglePreview(): void;
@@ -2677,14 +2704,6 @@ const GuideToolbar = memo(function GuideToolbar({
         <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} className="shrink-0" onClick={onNow}>
           {t('jumpToNow')}
         </Button>
-        {/* The time scale (Ctrl+scroll over the grid too); a phone keeps its row for the times. */}
-        {bar !== 'phone' ? (
-          // One − / + control for the time scale.
-          <div role="group" aria-label={tg('zoom')} className="flex items-center rounded-md border border-edge bg-surface-2 p-0.5">
-            <IconButton size="sm" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} label={tg('zoomOut')} data-testid="guide-zoom-out" className="h-7 w-7" />
-            <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" className="h-7 w-7" />
-          </div>
-        ) : null}
       </div>
       {/* CB-GUIDE-GENRE: filter chips, one per bucket, with the bucket's stripe colour. One at a
           time, like Channels DVR's; a chosen chip is inverted, never amber. */}
@@ -2705,22 +2724,37 @@ const GuideToolbar = memo(function GuideToolbar({
               );
             })}
           </div>
+          {genreHint ? (
+            <span className="max-w-[50%] min-w-0 truncate text-caption text-fg-muted" title={genreHint} data-testid="guide-genre-hint">
+              {genreHint}
+            </span>
+          ) : null}
           {onGoToPlaying ? (
             <Button size="sm" variant="ghost" icon={<LocateFixed className="size-4" />} onClick={onGoToPlaying} className="shrink-0" data-testid="guide-go-to-playing">
               <span className="max-sm:sr-only">{tg('goToPlaying')}</span>
             </Button>
           ) : null}
+          {/* The time scale (Ctrl+scroll over the grid too): one − / + control at the chips' end,
+              so the time controls fit one row beside the group picker on a touch tablet. A phone's
+              is a header action. */}
+          <div role="group" aria-label={tg('zoom')} className="flex shrink-0 items-center rounded-md border border-edge bg-surface-2 p-0.5">
+            <IconButton size="sm" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} label={tg('zoomOut')} data-testid="guide-zoom-out" className="h-7 w-7" />
+            <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" className="h-7 w-7" />
+          </div>
           {previewOpen !== undefined ? (
             // The label says what a press does, so no state as well: "Hide preview, pressed"
-            // contradicted itself.
-            <IconButton
+            // contradicted itself. Named on screen where there is room, like Go to playing: an
+            // unlabeled icon at the row's end hid that the band exists.
+            <Button
               size="sm"
-              label={previewOpen ? tg('hidePreview') : tg('showPreview')}
+              variant="ghost"
               icon={previewOpen ? <PanelTopClose className="size-4" /> : <PanelTopOpen className="size-4" />}
               onClick={onTogglePreview}
               className="shrink-0"
               data-testid="guide-preview-toggle"
-            />
+            >
+              <span className="max-xl:sr-only">{previewOpen ? tg('hidePreview') : tg('showPreview')}</span>
+            </Button>
           ) : null}
         </div>
       )}
@@ -2754,8 +2788,8 @@ const GuideWindowButton = memo(function GuideWindowButton({ stacked, lang, onJum
       >
         {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
         <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
-          <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
-          <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
+          <span className={stacked ? 'max-w-full truncate text-caption leading-tight text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
+          <span className={stacked ? 'max-w-full truncate text-body-sm leading-tight font-medium' : undefined}>{range}</span>
         </span>
         <span className="sr-only">, {tg('jumpTitle')}</span>
       </button>
@@ -2815,8 +2849,8 @@ const GuideWindowDay = memo(function GuideWindowDay({
               </span>
             </span>
             <span className="hidden max-w-full min-w-0 flex-col items-center leading-tight @min-[11rem]:flex">
-              <span className="max-w-full truncate text-[calc(11rem/15)] text-fg-muted">{date}</span>{' '}
-              <span className="max-w-full truncate text-[calc(13rem/15)] font-medium">{range}</span>
+              <span className="max-w-full truncate text-caption leading-tight text-fg-muted">{date}</span>{' '}
+              <span className="max-w-full truncate text-body-sm leading-tight font-medium">{range}</span>
             </span>
           </span>
           <span className="sr-only">, {tg('jumpTitle')}</span>
@@ -2834,10 +2868,15 @@ const GuideWindowDay = memo(function GuideWindowDay({
 const GuidePhoneActions = memo(function GuidePhoneActions({
   genre,
   onGenre,
+  zoom,
+  onZoom,
   onGoToPlaying,
 }: {
   genre: Genre | null;
   onGenre(genre: Genre | null): void;
+  /** The time scale's step: one button switches between the widest view and the default. */
+  zoom: number;
+  onZoom(delta: number): void;
   onGoToPlaying?: () => void;
 }) {
   const { t: tg } = useTranslation('guide');
@@ -2854,6 +2893,12 @@ const GuidePhoneActions = memo(function GuidePhoneActions({
   return (
     <>
       {onGoToPlaying ? <IconButton label={tg('goToPlaying')} icon={<LocateFixed size={18} />} onClick={onGoToPlaying} className="shrink-0" data-testid="guide-go-to-playing" /> : null}
+      {/* A phone shows about an hour at the default scale: zoomed out it shows two. */}
+      {zoom > 0 ? (
+        <IconButton label={tg('zoomOut')} icon={<ZoomOut size={18} />} onClick={() => onZoom(-zoom)} className="shrink-0" data-testid="guide-zoom-out" />
+      ) : (
+        <IconButton label={tg('zoomIn')} icon={<ZoomIn size={18} />} onClick={() => onZoom(GUIDE_ZOOM_DEFAULT)} className="shrink-0" data-testid="guide-zoom-in" />
+      )}
       <ScopePicker
         label={tg('genreFilter')}
         value={genre ?? ''}

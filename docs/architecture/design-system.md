@@ -52,7 +52,7 @@ A chosen filter chip is inverted (`bg-fg text-bg`), not amber. A favourite is a 
 
 | Token | Use |
 | --- | --- |
-| `bg-live-solid text-white` | LIVE pills only, through `LivePill` |
+| `bg-live-solid text-white` | LIVE pills, through `LivePill`; the guide's now line and its stubs take `bg-live-solid` too, the red of the time pill that heads them |
 | `bg-live`, `text-live` | live dots and now-lines; live text |
 | `bg-danger-solid text-white` | destructive buttons (`Button variant="danger"`) |
 | `text-danger`, `bg-danger/15 text-danger` | error text, tinted danger badges |

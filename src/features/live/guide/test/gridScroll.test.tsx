@@ -271,7 +271,7 @@ describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
     );
   }
 
-  it('the channel column shows the logo and number, with the name for screen readers and as a tooltip', async () => {
+  it('the channel column shows the logo (else the name) and number, with the name for screen readers and as a tooltip', async () => {
     phone();
     const at = defaultStart(Date.now());
     rpc.handlers['epg.grid'] = hourly(at);
@@ -280,7 +280,10 @@ describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
     const channel = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
     expect(channel.dataset.compact).toBe('');
     expect(channel.title).toBe('Play Channel 0');
-    expect(screen.getByText('Channel 0').className).toContain('sr-only');
+    expect(within(channel).getAllByText('Channel 0').some((el) => el.className.includes('sr-only'))).toBe(true);
+    // No logo: the name is drawn where the logo goes (three "ES" monograms told nothing apart).
+    expect(within(channel).getByTestId('guide-compact-name').textContent).toBe('Channel 0');
+    expect(channel.querySelector('[data-monogram]')).toBeNull();
     expect((channel.closest('[role="rowheader"]') as HTMLElement).style.width).toBe('72px');
   });
 

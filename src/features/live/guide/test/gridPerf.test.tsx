@@ -200,6 +200,25 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     expect(sticky()).toEqual([false, false, false]);
   });
 
+  it('at rest narrows the cut title to what shows of its cell, and hides it on a sliver (guide-01)', () => {
+    const row = document.createElement('div');
+    row.innerHTML = '<span data-pad-left="0" data-pad-width="300"></span><span data-pad-left="300" data-pad-width="300"></span>';
+    const [a, b] = row.querySelectorAll<HTMLElement>('span');
+    const fitter = createStickyTitleManager();
+    const unregister = fitter.register(row, 100);
+    // 300 - 100 - 17 px of the cut cell show its text; the next cell is untouched.
+    expect([a!.style.maxWidth, a!.style.visibility, b!.style.maxWidth]).toEqual(['183px', '', '']);
+    fitter.update(270);
+    expect([a!.style.maxWidth, a!.style.visibility]).toEqual(['13px', 'hidden']);
+    // Motion leaves the titles to native sticky; rest narrows the one the edge cuts again.
+    fitter.setMoving(true, 270);
+    expect([a!.style.maxWidth, a!.style.visibility]).toEqual(['', '']);
+    fitter.setMoving(false, 350);
+    expect([a!.style.maxWidth, b!.style.maxWidth]).toEqual(['', '233px']);
+    unregister();
+    expect(b!.style.maxWidth).toBe('');
+  });
+
   it('places the pinned channel cells at the scroll position at rest and leaves them to native sticky while moving', () => {
     const pins = createStickyTitleManager();
     const a = document.createElement('div');
@@ -715,7 +734,8 @@ describe('clock ticks (LV-8)', () => {
     const current = markers[0]!.style.getPropertyValue(GRID_NOW_VAR);
     expect(Number.parseFloat(current)).toBeGreaterThan(Number.parseFloat(previous));
     expect(markers.every((marker) => marker.isConnected && marker.style.getPropertyValue(GRID_NOW_VAR) === current)).toBe(true);
-    // The clock value belongs to the two empty marker spans, never to an ancestor of tiles.
+    // The clock value belongs to the empty marker spans (the elapsed shade, the foot's progress
+    // and the now stub), never to an ancestor of tiles.
     const clockOwners = [...grid.querySelectorAll<HTMLElement>('*')].filter((el) => el.style.getPropertyValue(GRID_NOW_VAR));
     expect(clockOwners).toEqual(markers);
     expect(grid.style.getPropertyValue(GRID_NOW_VAR)).toBe('');
@@ -928,7 +948,9 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     expect(cell.className).not.toMatch(/(^|\s)bg-(active|hover|selected)(\s|$)/);
     expect(cell.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
     const tick = within(cell).getByTestId('cell-now-tick');
-    expect(tick.className.split(/\s+/)).toContain('bg-live');
+    // The line, its stubs and the pill that heads them share one red (guide-23).
+    expect(tick.className.split(/\s+/)).toContain('bg-live-solid');
+    expect(line.className.split(/\s+/)).toContain('bg-live-solid');
     // Future cells are opaque too, and so is a cell another genre filter steps back.
     const later = await screen.findByRole('button', { name: /^c1 P1,/ });
     expect(later.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
@@ -952,6 +974,9 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     // An ended cell keeps the later cells' block and steps back by its text tone only.
     expect(ended.className.split(/\s+/)).toEqual(expect.arrayContaining([...fill, 'text-fg-subtle']));
     expect(ended.className.split(/\s+/)).not.toContain('bg-bg');
+    // Light: surface-2 is 1.05:1 on the page, so later and ended cells draw an inset edge; dark's
+    // steps separate without one (guide-09).
+    for (const c of [later, ended]) expect(c.className.split(/\s+/)).toEqual(expect.arrayContaining(['inset-ring', 'inset-ring-edge', 'dark:inset-ring-0']));
     const [title, time] = within(cell).getByTestId('cell-text').children as unknown as HTMLElement[];
     expect(title!.className).toContain('font-semibold');
     expect(time!.className).toContain('text-fg-muted');

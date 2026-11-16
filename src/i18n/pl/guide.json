@@ -81,5 +81,6 @@
   "previewNext": "Następnie",
   "genreFilterOn": "Filtr: {{genre}}. Pasujące programy: {{count, number}}",
   "genreFilterOff": "Filtr gatunku wyłączony",
+  "genreNoneInView": "Nic na ekranie nie ma gatunku {{genre}}. Wiele przewodników nie podaje gatunków.",
   "allGenres": "Wszystkie gatunki"
 }

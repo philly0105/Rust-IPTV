@@ -83,5 +83,6 @@
   "previewNext": "من بعد",
   "genreFilterOn": "مفرّز على {{genre}}. البرامج اللي كيتطابقو: {{count, number}}",
   "genreFilterOff": "الفرز حسب النوع طافي",
+  "genreNoneInView": "حتى حاجة فالعرض ما مصنفة {{genre}}. بزاف ديال الأدلة ما كتصنفش الأنواع.",
   "allGenres": "كاع الأنواع"
 }

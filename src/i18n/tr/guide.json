@@ -79,5 +79,6 @@
   "previewNext": "Sonra",
   "genreFilterOn": "Filtre: {{genre}}. Eşleşen programlar: {{count, number}}",
   "genreFilterOff": "Tür filtresi kapalı",
+  "genreNoneInView": "Görünürde {{genre}} olarak etiketlenmiş bir şey yok. Birçok rehber tür belirtmez.",
   "allGenres": "Tüm türler"
 }

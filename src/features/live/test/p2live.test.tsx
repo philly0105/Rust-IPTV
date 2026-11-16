@@ -229,6 +229,18 @@ describe('opening on the playing channel (P2-LIVE-5)', () => {
 });
 
 describe('logos sharing an address (P2-LIVE-6)', () => {
+  it('draws a fallback instead of the monogram only when there is no logo to show (guide-04)', () => {
+    const view = render(
+      <>
+        <ChannelLogo src={undefined} name="ESPN HD" fallback={<span data-testid="fb">ESPN HD</span>} />
+        <ChannelLogo src="http://logo/espn.png" name="ESPNU HD" fallback={<span data-testid="fb">ESPNU HD</span>} />
+      </>,
+    );
+    expect(view.getAllByTestId('fb').map((el) => el.textContent)).toEqual(['ESPN HD']);
+    expect(view.container.querySelector('[data-monogram]')).toBeNull();
+    expect(view.container.querySelectorAll('img')).toHaveLength(1);
+  });
+
   it('every tile of one address takes the plate its pixels need', () => {
     // Half see-through, in black ink: a wordmark that needs the light plate.
     const data = new Uint8ClampedArray(16 * 16 * 4);

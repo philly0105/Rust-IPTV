@@ -83,5 +83,6 @@
   "previewNext": "التالي",
   "genreFilterOn": "التصفية حسب {{genre}}. البرامج المطابقة: {{count, number}}",
   "genreFilterOff": "تم إيقاف التصفية حسب النوع",
+  "genreNoneInView": "لا شيء في العرض مصنّف ضمن {{genre}}. كثير من الأدلة لا تصنّف الأنواع.",
   "allGenres": "كل الأنواع"
 }

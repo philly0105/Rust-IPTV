@@ -239,7 +239,7 @@ describe('the toolbar at narrow widths', () => {
   it("the genre chips' row fades out at its end, so a chip cut at the edge reads as more to come", async () => {
     pageWidth(560);
     await openGuide();
-    const chips = within(screen.getByTestId('guide-genres')).getByRole('group');
+    const chips = within(screen.getByTestId('guide-genres')).getByRole('group', { name: 'Filter by genre' });
     expect(chips.className).toContain('overflow-x-auto');
     expect(chips.className).toContain('[mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)]');
   });
@@ -267,6 +267,18 @@ describe('the toolbar at narrow widths', () => {
     await waitFor(() => expect(localStorage.getItem('guide.genreFilter')).toBeNull());
   });
 
+  it("a phone's time scale is one header action that switches between the widest view and the default (guide-14)", async () => {
+    localStorage.removeItem('tsrust.guideZoom');
+    pageWidth(318);
+    await openGuide();
+    const actions = await screen.findByTestId('header-actions');
+    fireEvent.click(within(actions).getByRole('button', { name: 'Zoom out' }));
+    await waitFor(() => expect(localStorage.getItem('tsrust.guideZoom')).toBe('0'));
+    fireEvent.click(within(actions).getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => expect(localStorage.getItem('tsrust.guideZoom')).toBe('2'));
+    expect(within(actions).getByRole('button', { name: 'Zoom out' })).toBeTruthy();
+  });
+
   it('a narrow page stacks the controls but keeps the day buttons', async () => {
     pageWidth(560);
     await openGuide();
@@ -285,6 +297,9 @@ describe('the toolbar at narrow widths', () => {
     expect(time.className).toContain('ms-auto');
     expect(screen.getByTestId('guide-window').className).toContain('whitespace-nowrap');
     expect(within(time).getByRole('button', { name: 'Next day' })).toBeTruthy();
+    // The time scale sits at the chips' end, so the time controls fit beside the picker (guide-11).
+    expect(within(time).queryByRole('group', { name: 'Time scale' })).toBeNull();
+    expect(within(screen.getByTestId('guide-genres')).getByRole('group', { name: 'Time scale' })).toBeTruthy();
     // The group picker starts at 9rem and grows to 12rem with the room the time controls leave,
     // so a touch tablet's 44 px time controls stay on its row instead of wrapping onto their own.
     const group = screen.getByTestId('guide-group');

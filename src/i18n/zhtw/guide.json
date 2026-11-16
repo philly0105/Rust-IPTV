@@ -78,5 +78,6 @@
   "previewNext": "接下來",
   "genreFilterOn": "已依{{genre}}篩選。符合的節目：{{count, number}} 個",
   "genreFilterOff": "已關閉類型篩選",
+  "genreNoneInView": "目前畫面中沒有標記為{{genre}}的節目。許多節目表不標註類型。",
   "allGenres": "全部類型"
 }

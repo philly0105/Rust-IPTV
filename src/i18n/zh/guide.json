@@ -78,5 +78,6 @@
   "previewNext": "接下来",
   "genreFilterOn": "已按{{genre}}筛选。匹配的节目：{{count, number}} 个",
   "genreFilterOff": "已关闭类型筛选",
+  "genreNoneInView": "当前视图中没有标记为{{genre}}的节目。许多节目指南不标注类型。",
   "allGenres": "全部类型"
 }

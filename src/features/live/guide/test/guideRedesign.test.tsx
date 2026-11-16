@@ -141,12 +141,19 @@ describe('genre buckets (CB-GUIDE-GENRE)', () => {
     expect(within(chips).getByRole('button', { name: 'Sports' }).getAttribute('aria-pressed')).toBe('true');
     await waitFor(() => expect(within(movie).queryByTestId('cell-genre')).toBeNull());
     expect(movie.className).toContain('text-fg-subtle');
+    // A cell of another genre stays a (faint) box: a guide without genre tags would otherwise
+    // lose every cell edge (guide-05).
+    expect(movie.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-bg', 'inset-ring', 'inset-ring-edge']));
+    expect(screen.queryByTestId('guide-genre-hint')).toBeNull();
     expect(within(sports).getByTestId('cell-genre')).toBeTruthy();
     // Remembered for the next visit; pressing the chosen chip again shows everything.
     expect(localStorage.getItem('guide.genreFilter')).toBe('sports');
     fireEvent.click(within(chips).getByRole('button', { name: 'Sports' }));
     await waitFor(() => expect(within(movie).getByTestId('cell-genre')).toBeTruthy());
     expect(localStorage.getItem('guide.genreFilter')).toBeNull();
+    // A genre with nothing in view says so on screen, not only to screen readers.
+    fireEvent.click(within(chips).getByRole('button', { name: 'Series & shows' }));
+    expect((await screen.findByTestId('guide-genre-hint')).textContent).toBe("Nothing in view is tagged Series & shows. Many guides don't tag genres.");
   });
 
   it('names each cell’s genre and says what a filter did, for screen readers (review round 2)', async () => {
@@ -364,13 +371,13 @@ describe('the preview band (CB-GUIDE-PREVIEW)', () => {
 
     // The toggle's name says what a press does, with no pressed or expanded state beside it.
     const toggle = screen.getByTestId('guide-preview-toggle');
-    expect(toggle.getAttribute('aria-label')).toBe('Hide preview');
+    expect(toggle.textContent).toBe('Hide preview');
     expect(toggle.hasAttribute('aria-pressed')).toBe(false);
     expect(toggle.hasAttribute('aria-expanded')).toBe(false);
     fireEvent.click(toggle);
     expect(screen.queryByTestId('guide-preview')).toBeNull();
     expect(localStorage.getItem('guide.preview')).toBe('0');
-    expect(screen.getByTestId('guide-preview-toggle').getAttribute('aria-label')).toBe('Show preview');
+    expect(screen.getByTestId('guide-preview-toggle').textContent).toBe('Show preview');
   });
 
   it('starts hidden on a window under 1000 px tall until the user opens it (review round 2)', async () => {

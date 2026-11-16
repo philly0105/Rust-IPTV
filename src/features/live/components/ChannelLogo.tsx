@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState, type SyntheticEvent } from 'react';
+import { memo, useCallback, useEffect, useState, type ReactNode, type SyntheticEvent } from 'react';
 
 import { TINT_THEME, cn, gateImage, tintVars, useImageChain } from '@/ui';
 
@@ -111,6 +111,7 @@ export const ChannelLogo = memo(function ChannelLogo({
   size = 36,
   sourceId,
   className,
+  fallback,
   onHue,
 }: {
   src?: string;
@@ -118,6 +119,8 @@ export const ChannelLogo = memo(function ChannelLogo({
   size?: number;
   sourceId?: string;
   className?: string;
+  /** Drawn instead of the monogram when there is no logo to show (none, or none that loads). */
+  fallback?: ReactNode;
   /**
    * Told the hue of what the tile shows: the monogram's, or the loaded logo's (null while it
    * loads, or when it has no colour to read). The idle stage tints its glow with it.
@@ -153,6 +156,7 @@ export const ChannelLogo = memo(function ChannelLogo({
   const radius = size >= 56 ? 'rounded-lg' : size >= 28 ? 'rounded-md' : 'rounded-sm';
   const style = { width: size, height: size };
   if (!url) {
+    if (fallback !== undefined) return fallback;
     return (
       <span
         aria-hidden
@@ -215,6 +219,8 @@ export interface ChannelNameProps {
   tagClassName?: string | undefined;
   title?: string | undefined;
   testId?: string | undefined;
+  /** Up to two lines instead of one (the guide's channel column, whose row has room for them). */
+  twoLines?: boolean | undefined;
 }
 
 /**
@@ -230,12 +236,12 @@ export interface ChannelNameProps {
  * strip setting on, the tag is gone as before. Callers truncate through `className`: this span has
  * `dir="auto"`, which puts an RTL name's ellipsis at its own end.
  */
-export function ChannelName({ name, strip, className, tagClassName, title, testId }: ChannelNameProps) {
+export function ChannelName({ name, strip, className, tagClassName, title, testId, twoLines }: ChannelNameProps) {
   const raw = name ?? '';
   const split = strip ? undefined : splitPlaceTag(raw);
   if (!split?.tag) {
     return (
-      <span dir="auto" className={className} title={title} data-testid={testId}>
+      <span dir="auto" className={cn(className, twoLines && 'line-clamp-2 break-words')} title={title} data-testid={testId}>
         {strip ? stripCountryPrefix(raw) : raw}
       </span>
     );
@@ -247,8 +253,9 @@ export function ChannelName({ name, strip, className, tagClassName, title, testI
           below its own width (up to the whole line), so its ellipsis means it is cut; shrinking
           the tag first by flex-shrink weights also took a fraction of a pixel from the name, and
           that was enough to draw an ellipsis on a complete one. */}
-      <span aria-hidden className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
-        <span className="max-w-full shrink-0 truncate">{split.name}</span>
+      {/* Two lines: the name wraps onto the second, and a tag that no longer fits goes the same way. */}
+      <span aria-hidden className={cn('flex min-w-0 flex-wrap items-baseline overflow-hidden', twoLines ? 'max-h-[2lh]' : 'h-[1lh]')}>
+        <span className={cn('max-w-full shrink-0', twoLines ? 'line-clamp-2 break-words' : 'truncate')}>{split.name}</span>
         <span
           className={cn('ms-1.5 whitespace-nowrap text-caption font-medium tracking-wide text-fg-subtle', tagClassName)}
           data-testid="channel-name-tag"

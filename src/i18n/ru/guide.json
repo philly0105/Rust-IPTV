@@ -81,5 +81,6 @@
   "previewNext": "Далее",
   "genreFilterOn": "Фильтр: {{genre}}. Подходящих передач: {{count, number}}",
   "genreFilterOff": "Фильтр по жанру выключен",
+  "genreNoneInView": "Ничего на экране не отмечено как {{genre}}. Многие телепрограммы не указывают жанры.",
   "allGenres": "Все жанры"
 }

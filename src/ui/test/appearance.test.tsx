@@ -90,6 +90,27 @@ describe('applyAppearanceToDocument (C1)', () => {
     expect(html.style.getPropertyValue('--ui-scale')).toBe('1.25');
   });
 
+  it('enlarges the interface by half on a 4K screen at 100 %, and leaves ultrawides alone', () => {
+    const size = (w: number, h: number) => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: h });
+    };
+    const [w, h] = [window.innerWidth, window.innerHeight];
+    try {
+      size(3840, 2160);
+      applyAppearanceToDocument({ ...DEFAULT_APPEARANCE, uiScale: 1.1 }, 'dark');
+      expect(html.style.getPropertyValue('--ui-scale')).toBe('1.65');
+      expect(useScaleStore.getState().uiScale).toBe(1.65);
+      size(3440, 1440);
+      applyAppearanceToDocument({ ...DEFAULT_APPEARANCE, uiScale: 1.1 }, 'dark');
+      expect(html.style.getPropertyValue('--ui-scale')).toBe('1.1');
+      // The saved setting is the user's own scale, not the enlarged one.
+      expect(useAppearanceStore.getState().appearance.uiScale).toBe(1);
+    } finally {
+      size(w, h);
+    }
+  });
+
   it('an accent change swaps every colour in one frame', async () => {
     applyAppearanceToDocument({ ...DEFAULT_APPEARANCE, accent: 'amber' }, 'dark');
     await waitFor(() => expect(html.dataset['themeSwitching']).toBeUndefined());

@@ -760,6 +760,34 @@ describe('icon stroke (DS-ICON-STROKE)', () => {
   });
 });
 
+describe('touch text fields (phone-02)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  // The selector of the rule inside the coarse-pointer block that sets the 16 px floor.
+  const block = /@media \(pointer: coarse\)\s*\{\s*([^{}]+)\{\s*font-size:\s*max\(16px, 1rem\);\s*\}/.exec(globals);
+  const selector = (block?.[1] ?? '').trim();
+
+  it('keeps every text field at 16 px or more on touch, so iPhone Safari does not zoom on focus', () => {
+    expect(selector).not.toBe('');
+    const { container } = render(
+      <>
+        <input data-f="text" />
+        <input data-f="search" type="search" />
+        <input data-f="password" type="password" />
+        <textarea data-f="area" />
+        <Select data-f="select" options={[{ value: 'a', label: 'A' }]} className="w-auto" />
+        <input data-f="check" type="checkbox" />
+        <input data-f="range" type="range" />
+      </>,
+    );
+    const el = (k: string) => container.querySelector(`[data-f="${k}"]`)!;
+    for (const k of ['text', 'search', 'password', 'area', 'select']) expect(el(k).matches(selector)).toBe(true);
+    // The select's invisible sizer grows with it, or the wider label would be cut.
+    expect(container.querySelector('[data-select-sizer]')!.matches(selector)).toBe(true);
+    expect(el('check').matches(selector)).toBe(false);
+    expect(el('range').matches(selector)).toBe(false);
+  });
+});
+
 describe('features use the kit controls (DS-DUPLICATE-CONTROLS)', () => {
   const ROOT = join(__dirname, '..', '..');
   function sources(dir: string): string[] {

@@ -197,10 +197,32 @@ export function applyThemeToDocument(resolved: ResolvedTheme, reducedMotion: boo
   else delete html.dataset['reducedMotion'];
 }
 
+/** The window size at which {@link viewportScaleFactor} enlarges the interface: a 4K screen at 100 %. */
+export const BIG_SCREEN = { width: 3000, height: 1600, factor: 1.5 } as const;
+
+/**
+ * A 4K screen at 100 % (a PC on a TV, a TV browser that reports 3840 CSS px) drew the app at
+ * desktop size, unreadable from a sofa: 15 px text on a 3840 px row. From 3000 CSS px wide and
+ * 1600 tall the interface grows by half on top of the user's UI scale. 3440x1440 ultrawides and
+ * 1440p monitors stay as they are. Breakpoints are viewport tests, so they do not move.
+ * public/theme-boot.js repeats this.
+ */
+export function viewportScaleFactor(): number {
+  if (typeof window === 'undefined') return 1;
+  return window.innerWidth >= BIG_SCREEN.width && window.innerHeight >= BIG_SCREEN.height ? BIG_SCREEN.factor : 1;
+}
+
+function subscribeResize(cb: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener('resize', cb);
+  return () => window.removeEventListener('resize', cb);
+}
+
 /**
  * Applies the appearance settings (C1): data-accent, data-oled (only while
- * `resolved` is dark), data-density and --ui-scale. Call after
- * {@link applyThemeToDocument} so OLED follows the theme in effect.
+ * `resolved` is dark), data-density and --ui-scale (the user's scale times
+ * {@link viewportScaleFactor}). Call after {@link applyThemeToDocument} so OLED
+ * follows the theme in effect.
  */
 export function applyAppearanceToDocument(appearance: Appearance, resolved: ResolvedTheme): void {
   if (typeof document === 'undefined') return;
@@ -215,8 +237,9 @@ export function applyAppearanceToDocument(appearance: Appearance, resolved: Reso
   if (oled) html.dataset['oled'] = '';
   else delete html.dataset['oled'];
   html.dataset['density'] = a.density;
-  html.style.setProperty('--ui-scale', String(a.uiScale));
-  setUiScaleState(a.uiScale, a.density);
+  const scale = Math.round(a.uiScale * viewportScaleFactor() * 10000) / 10000;
+  html.style.setProperty('--ui-scale', String(scale));
+  setUiScaleState(scale, a.density);
 }
 
 // Apply the stored theme and appearance as early as this module loads.
@@ -385,11 +408,13 @@ export function ThemeSync({ settingsTheme, appearance }: ThemeSyncProps) {
   const reducedMotion = useReducedMotion();
   const eff = useAppearance();
   const [effAccent, effOled, effDensity, effScale] = [eff.accent, eff.oledBlack, eff.density, eff.uiScale];
+  // Re-applies when the window crosses the big-screen size (applyAppearanceToDocument reads it).
+  const viewportFactor = useSyncExternalStore(subscribeResize, viewportScaleFactor, () => 1);
   useEffect(() => {
     const resolved = resolveTheme(theme, prefersDark);
     applyThemeToDocument(resolved, reducedMotion);
     applyAppearanceToDocument({ accent: effAccent, oledBlack: effOled, density: effDensity, uiScale: effScale }, resolved);
     syncWindowTheme(theme === 'system' ? null : resolved);
-  }, [theme, prefersDark, reducedMotion, effAccent, effOled, effDensity, effScale]);
+  }, [theme, prefersDark, reducedMotion, effAccent, effOled, effDensity, effScale, viewportFactor]);
   return null;
 }

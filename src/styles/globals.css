@@ -484,6 +484,24 @@
 }
 
 /*
+ * iPhone Safari zooms the page into a text field whose text is under 16 px when it takes focus,
+ * and leaves it zoomed, so after a search the whole app stayed magnified. On a touch screen every
+ * text field is at least 16 px (1rem from a 107 % UI scale up). Unlayered, so it outranks the
+ * text-sm on kit fields and on fields a feature builds itself; the Select's invisible sizer
+ * (data-select-sizer) follows, or the wider text would be cut.
+ */
+@media (pointer: coarse) {
+  :where(
+      input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset']),
+      textarea,
+      select,
+      [data-select-sizer]
+    ) {
+    font-size: max(16px, 1rem);
+  }
+}
+
+/*
  * Reduced motion. `motion-safe:` utilities already respect the media query;
  * html[data-reduced-motion] (set by the theme provider) is the hard stop for
  * anything that slipped through, including rail and grid smooth scrolling.

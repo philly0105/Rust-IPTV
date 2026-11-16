@@ -2,7 +2,8 @@
 // before the app's module script; CSP is script-src 'self', so it cannot be
 // inline). Mirrors src/shell/theme.tsx, which stays the source of truth once
 // it loads: same localStorage keys, 'system' resolves dark unless the OS asks
-// for light, OLED only while dark, UI scale clamped to 0.9-1.25.
+// for light, OLED only while dark, UI scale clamped to 0.9-1.25 and enlarged
+// by half on a 4K screen at 100 %.
 (function () {
   var html = document.documentElement;
   // index.html has one theme-color per OS colour scheme; both get the app's colour, so the one
@@ -31,9 +32,10 @@
     if (oled) html.setAttribute('data-oled', '');
     if (/^(amber|teal|violet|rose|lime|sky|coral)$/.test(a.accent)) html.setAttribute('data-accent', a.accent);
     if (a.density === 'comfortable' || a.density === 'compact') html.setAttribute('data-density', a.density);
-    if (typeof a.uiScale === 'number' && isFinite(a.uiScale)) {
-      html.style.setProperty('--ui-scale', String(Math.min(1.25, Math.max(0.9, a.uiScale))));
-    }
+    // A 4K screen at 100 % (3000x1600 CSS px and up) grows by half on top (theme.tsx BIG_SCREEN).
+    var big = window.innerWidth >= 3000 && window.innerHeight >= 1600 ? 1.5 : 1;
+    var scale = typeof a.uiScale === 'number' && isFinite(a.uiScale) ? Math.min(1.25, Math.max(0.9, a.uiScale)) : 1;
+    if (scale !== 1 || big !== 1) html.style.setProperty('--ui-scale', String(Math.round(scale * big * 10000) / 10000));
   } catch (e) {
     // Storage blocked: the dark default in index.html stands.
   }

@@ -67,6 +67,7 @@
   "resumeEpisode": "{{code}} fortsetzen",
   "nowPlaying": "Wird wiedergegeben",
   "closePlayer": "Player schließen",
+  "backToDetails": "Zurück zu den Details",
   "playFailed": "Die Wiedergabe konnte nicht gestartet werden",
   "playsFrom": "Wird abgespielt von {{source}}",
   "about": "Info",

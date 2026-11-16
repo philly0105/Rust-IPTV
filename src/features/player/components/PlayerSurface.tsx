@@ -9,6 +9,7 @@ import { cn } from '../cn';
 import { bindInputModality, focusFromPointer, focusIfPlayerOwnsFocus, focusIsLost, formatTime, pressKeepsFocus, SEEK_STEP_JL } from '../format';
 import { showOsd, UP_NEXT_SECONDS, useMediaStore } from '../media';
 import { consumeMenuDismiss } from '../menuDismiss';
+import { useStageEndedAction } from '../stage';
 import { exitPip, usePipStore } from '../pip';
 import {
   cancelUpNext,
@@ -16,6 +17,7 @@ import {
   MIN_RESUME_SECONDS,
   playUpNextNow,
   replay,
+  resumeFits,
   selectEnded,
   setPaused,
   usePlayerStore,
@@ -141,9 +143,14 @@ function OsdReadout({ primary, secondary, locked = false, short }: { primary: st
       aria-live="polite"
       data-testid="player-osd"
       // Within the player, whatever its size: long lines (file names, reasons) wrap, never clip.
+      // PV-06: words sit on a glass plate, so "Forward 10 seconds" reads over a bright picture; a
+      // channel number keeps the tuner's big digits with only a shadow.
       className={cn(
-        'player-osd player-chrome pointer-events-none absolute z-20 max-w-[min(40rem,calc(100%-3rem))] [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]',
+        'player-osd player-chrome pointer-events-none absolute z-20 max-w-[min(40rem,calc(100%-3rem))] [overflow-wrap:anywhere]',
         short ? 'inset-x-0 top-1/2 mx-auto w-fit -translate-y-1/2 text-center' : 'top-5 end-6 text-end',
+        digits
+          ? '[text-shadow:0_2px_12px_rgb(0_0_0/0.8)]'
+          : 'rounded-lg border border-glass-border bg-glass-strong px-3 py-2 text-on-glass shadow-2',
       )}
       style={top === undefined || short ? undefined : { top }}
     >
@@ -286,15 +293,43 @@ function UpNextCard({ variant = 'overlay', compact = false, short = false }: { v
 /**
  * Over the DOM video once a VOD item finished: one big replay button (the controls stay usable).
  * Under the title bar, and centred in the room above the control bar; a short player (a phone's
- * 16:9) gets the small disc without its label, which the bar's own Replay already names.
+ * 16:9) gets the small disc without its label, which the bar's own Replay already names. A stage
+ * with a way out (a detail page's watch stage) says the item finished and offers it beside Replay,
+ * so a finished movie is not a dead end (PV-09).
  */
 function EndedOverlay({ compact, short = false }: { compact: boolean; short?: boolean }) {
   const { t } = useTranslation('player');
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
   const fullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
+  const action = useStageEndedAction();
   if (!ended || upNext) return null;
   const small = compact || short;
+  if (action && !compact) {
+    return (
+      <div
+        data-testid="ended-overlay"
+        role="status"
+        className={cn(
+          'player-chrome absolute inset-0 z-[8] flex flex-col items-center justify-center bg-black/55 motion-safe:animate-fade-in',
+          short ? 'gap-2 pb-12' : fullscreen ? 'gap-4 pb-36' : 'gap-3 pb-20',
+        )}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <p className={cn('font-medium text-on-glass [text-shadow:0_1px_3px_rgb(0_0_0/0.6)]', short ? 'text-body-sm' : 'text-title-sm')}>{t('playbackFinished')}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button type="button" onClick={replay} className={glassButton('secondary', short ? 'sm' : 'md')}>
+            <RotateCcw aria-hidden />
+            {t('replay')}
+          </button>
+          <button type="button" onClick={action.onClick} className={glassButton('primary', short ? 'sm' : 'md')}>
+            {action.label}
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       data-testid="ended-overlay"
@@ -898,15 +933,18 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
     if (host) host.dataset['idle'] = String(!chromeVisible);
   }, [chromeVisible]);
 
-  // Resume notice for VOD.
+  // Resume notice for VOD, once the file's length is known: a saved spot past its end is not
+  // applied (InlinePlayer), so it says playback starts at the beginning instead of "Resumed at".
   const resumedFrom = source?.resumeSeconds;
+  const lengthKnown = usePlayerStore((s) => !!s.durationSeconds && Number.isFinite(s.durationSeconds));
   useEffect(() => {
-    if (source?.url && resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
-      showOsd(t('resumedAt', { time: formatTime(resumedFrom) }));
+    if (source?.url && lengthKnown && resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
+      const length = usePlayerStore.getState().durationSeconds ?? 0;
+      showOsd(resumeFits(resumedFrom, length) ? t('resumedAt', { time: formatTime(resumedFrom) }) : t('resumePastEnd'));
     }
-    // Only when a new item starts.
+    // Only when a new item starts and its length is known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source?.url]);
+  }, [source?.url, lengthKnown]);
 
   // Chrome that follows the stores itself, made once per change of what it is given: the surface
   // re-renders for each step of a zap (the next channel's title, the loading and playing status),

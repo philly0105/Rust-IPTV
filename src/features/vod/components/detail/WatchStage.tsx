@@ -35,9 +35,13 @@ export function WatchStage({ title, subtitle, onClose, aside }: { title: string;
             heads it with the title, so the player leaves out its own (PL-DUPLICATE-CHROME). */}
         <PlayerStage
           showTitle={false}
+          endedAction={{ label: t('backToDetails'), onClick: onClose }}
           className="aspect-video max-h-[72vh] w-full max-w-[calc(72vh*16/9)] min-w-0 flex-1 overflow-hidden rounded-lg bg-black shadow-2"
         />
-        {aside}
+        {/* PV-02: at xl the rail's column takes the stage's height (the rail sits absolute inside it and
+            scrolls), so a long Up next list no longer stretches the stage into letterbox bands.
+            empty:hidden drops the column when the rail renders nothing. */}
+        {aside && <div className="min-w-0 empty:hidden xl:relative xl:w-[340px] xl:shrink-0">{aside}</div>}
       </div>
     </section>
   );

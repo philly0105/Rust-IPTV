@@ -67,6 +67,7 @@
   "resumeEpisode": "{{code}} folytatása",
   "nowPlaying": "Lejátszás alatt",
   "closePlayer": "Lejátszó bezárása",
+  "backToDetails": "Vissza a részletekhez",
   "playFailed": "Nem sikerült elindítani a lejátszást",
   "playsFrom": "Lejátszás forrása: {{source}}",
   "about": "Leírás",

@@ -144,8 +144,11 @@ export async function catchupSource(channel: Channel, kind: SourceKind, program:
 
 async function catchupPlaybackSource(channel: Channel, kind: SourceKind, program: EpgProgram, now: number, displayName?: string): Promise<PlayerSource> {
   const src = await catchupSource(channel, kind, program, now);
+  const length = Math.max(0, (ms(program.end) - ms(program.start)) / 1000);
   return {
     ...src,
+    // An archive that plays on into live has no length of its own: the bar still names the programme's.
+    ...(src.durationSeconds === undefined && length > 0 ? { catchupProgramSeconds: length } : {}),
     title: displayName || src.title || channel.name,
     subtitle: program.title,
     catchupProgramStart: program.start,

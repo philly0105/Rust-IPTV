@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
 import type { PlayerSource } from '@/api/types';
 import { archivePath } from '@/features/live/lib/archive';
 
-import type { ZapContext } from './store';
+import { usePlayerStore, type ZapContext } from './store';
 
 const targets: HTMLElement[] = [];
 const listeners = new Set<() => void>();
@@ -48,6 +48,27 @@ function subscribe(l: () => void): () => void {
 
 export function useStageTarget(): HTMLElement | null {
   return useSyncExternalStore(subscribe, current, () => null);
+}
+
+/** What a stage offers once its item has finished, beside Replay (a detail page: back to its hero). */
+export interface StageEndedAction {
+  label: string;
+  onClick(): void;
+}
+
+const endedActions = new WeakMap<HTMLElement, StageEndedAction>();
+
+/** Set before the stage is pushed, so the dock's first render there already finds it. */
+export function setStageEndedAction(el: HTMLElement, action: StageEndedAction | undefined): void {
+  if (action) endedActions.set(el, action);
+  else endedActions.delete(el);
+}
+
+/** The ended action of the stage the player is in, if it has one. */
+export function useStageEndedAction(): StageEndedAction | undefined {
+  const target = useStageTarget();
+  const inStage = usePlayerStore((s) => s.dock === 'stage');
+  return inStage && target ? endedActions.get(target) : undefined;
 }
 
 /**

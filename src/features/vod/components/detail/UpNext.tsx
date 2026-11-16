@@ -53,12 +53,12 @@ export function UpNextRail({
   const thumbWidth = usePosterWidthBox(useScaledPx(THUMB_PX, true));
   if (episodes.length === 0) return null;
   return (
-    <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:w-[340px] xl:shrink-0">
-      <h2 className="text-sm text-fg-muted">{t('upNext')}</h2>
+    <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:absolute xl:inset-0">
+      <h2 className="text-title-sm text-fg">{t('upNext')}</h2>
       <ol
         ref={fades.ref}
         style={fades.style}
-        className="flex gap-3 overflow-x-auto pb-2 scrollbar-none xl:max-h-[calc(72vh-2rem)] xl:flex-col xl:overflow-x-hidden xl:overflow-y-auto"
+        className="flex gap-3 overflow-x-auto pb-2 scrollbar-none xl:min-h-0 xl:flex-1 xl:flex-col xl:overflow-x-hidden xl:overflow-y-auto"
       >
         {episodes.map((ep) => {
           const fraction = progressFraction(positions.get(ep.id));
@@ -143,7 +143,7 @@ export function NextEpisodeCard({
       <span role="status" aria-live="polite" className="sr-only">
         {`${autoplay ? t('nextEpisodeIn', { seconds: AUTOPLAY_SECONDS }) : t('nextEpisode')}: ${code} ${next.title}`}
       </span>
-      <SkipForward aria-hidden size={18} className="text-accent" />
+      <SkipForward aria-hidden size={18} className="text-fg-muted" />
       <div aria-hidden className="min-w-0 flex-1">
         <div className="tabular text-sm text-fg-muted">
           {autoplay ? t('nextEpisodeIn', { seconds: left }) : t('nextEpisode')}

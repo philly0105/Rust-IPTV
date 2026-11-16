@@ -79,6 +79,7 @@
   "resumeEpisode": "كمّل {{code}}",
   "nowPlaying": "كيتشغل دابا",
   "closePlayer": "سد المشغل",
+  "backToDetails": "رجع للتفاصيل",
   "playFailed": "ما قدرناش نبداو التشغيل",
   "playsFrom": "كيتشغل من {{source}}",
   "about": "حول",

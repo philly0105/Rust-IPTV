@@ -212,7 +212,7 @@ export function SeriesDetailPage() {
   // The source is named only when there are others (useShowSourceName); the About facts always name it.
   const headerSource = useShowSourceName() ? source.data?.name : undefined;
   const header = watch.active
-    ? { title: t('series'), documentTitle: pageTitle }
+    ? { title: t('series'), documentTitle: pageTitle, back: { onClick: goBack } }
     : { title: pageTitle, subtitle: headerSource, section: t('series'), back: { onClick: goBack } };
   usePageHeader(header, [watch.active, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
@@ -227,7 +227,7 @@ export function SeriesDetailPage() {
 
   // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
   const playEpisode = (ep: Episode, fromStart = false) => {
-    const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), fromStart };
+    const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title, snapshot.title), fromStart };
     // VL-offline-play, per episode: a finished download whose file is on disk plays from the file
     // (offline, and past a provider's connection limit); the episodes after it still queue as streams.
     // It resumes at the episode's saved position, the one the Resume label and the row show.
@@ -445,7 +445,7 @@ export function SeriesDetailPage() {
       {watch.active ? (
         <WatchStage
           title={model.titleBase ?? model.title}
-          subtitle={playing ? episodeSubtitle(playing.season, playing.episode, playing.title) : headerSource}
+          subtitle={playing ? episodeSubtitle(playing.season, playing.episode, playing.title, snapshot.title) : headerSource}
           onClose={playback.stop}
           aside={
             settings.playerUpNextRail ? (

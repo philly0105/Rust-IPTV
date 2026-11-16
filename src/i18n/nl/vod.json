@@ -67,6 +67,7 @@
   "resumeEpisode": "{{code}} hervatten",
   "nowPlaying": "Nu bezig",
   "closePlayer": "Speler sluiten",
+  "backToDetails": "Terug naar details",
   "playFailed": "Kan het afspelen niet starten",
   "playsFrom": "Speelt af vanaf {{source}}",
   "about": "Over",

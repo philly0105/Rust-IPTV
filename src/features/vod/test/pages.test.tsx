@@ -385,7 +385,8 @@ describe('MovieDetailPage', () => {
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Dune: Part Two']);
     // The header right above it names the section, not the title a second time; the window keeps the title.
     const { useShellStore } = await import('@/shell/store');
-    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Movies', documentTitle: 'Dune: Part Two' }));
+    // Back stays, so leaving the page keeps playback going in the mini player (PV-10).
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Movies', documentTitle: 'Dune: Part Two', back: { onClick: expect.any(Function) } }));
     act(() => {
       fireEvent.keyDown(document.body, { key: 'Escape' });
     });
@@ -459,7 +460,7 @@ describe('SeriesDetailPage', () => {
     // Watching, the stage's bar names the series; the header names the section, the window the series.
     await screen.findByTestId('player-stage');
     const { useShellStore } = await import('@/shell/store');
-    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Series', documentTitle: 'Severance' }));
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Series', documentTitle: 'Severance', back: { onClick: expect.any(Function) } }));
   });
 });
 

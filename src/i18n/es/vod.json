@@ -70,6 +70,7 @@
   "resumeEpisode": "Reanudar {{code}}",
   "nowPlaying": "Reproduciendo ahora",
   "closePlayer": "Cerrar reproductor",
+  "backToDetails": "Volver a los detalles",
   "playFailed": "No se pudo iniciar la reproducción",
   "playsFrom": "Se reproduce desde {{source}}",
   "about": "Información",

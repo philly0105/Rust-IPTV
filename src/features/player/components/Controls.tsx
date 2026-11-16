@@ -49,6 +49,7 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
 import { isDesktop, rpc } from '@/api/transport';
+import { itemKey } from '@/api/types';
 import { intlLocale } from '@/lib/intl';
 
 import { comboKeys, Kbd } from '@/ui/Misc';
@@ -57,7 +58,7 @@ import { Tooltip } from '@/ui/Tooltip';
 import { errorDescription } from '@/ui/States';
 import { cn } from '../cn';
 import { focusFromPointer, formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, pressKeepsFocus, SEEK_STEP_JL } from '../format';
-import { setHistoryOpen, useHistoryStore } from '../history';
+import { playHistoryEntry, setHistoryOpen, useHistoryStore } from '../history';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { useMediaStore, type TimeRange } from '../media';
 import { noteMenuDismissed } from '../menuDismiss';
@@ -838,9 +839,14 @@ function OptionsMenu({
     // was left at would hide the new one's header.
     const menu = ref.current;
     if (menu) menu.scrollTop = 0;
-    // The first item that can take focus (Sources may still be loading, the style view holds
-    // fields), else the header's Back: focus must stay in the menu for its arrow keys and Escape.
-    (menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back]):not([data-menu-close])') ?? menu?.querySelector<HTMLElement>('[data-menu-back]'))?.focus();
+    // The current choice of a list (Speed opens on Normal, PV-16), else the first item that can
+    // take focus (Sources may still be loading, the style view holds fields), else the header's
+    // Back: focus must stay in the menu for its arrow keys and Escape.
+    (
+      menu?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]:not(:disabled)') ??
+      menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back]):not([data-menu-close])') ??
+      menu?.querySelector<HTMLElement>('[data-menu-back]')
+    )?.focus();
   }, [view]);
 
   const qualityValue = tracks.qualityAuto ? t('qualityAuto') : (tracks.qualities.find((q) => q.selected)?.label ?? t('qualityAuto'));
@@ -1225,7 +1231,7 @@ function PositionSeekBar({
 function TimeReadout({ shown, duration, tiny }: { shown: boolean; duration: number | undefined; tiny: boolean }) {
   const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
   return (
-    <span className="ms-1 font-numeric text-caption whitespace-nowrap text-on-glass tabular-nums">
+    <span className="ms-1 font-numeric text-caption whitespace-nowrap text-on-glass tabular-nums [[data-big]_&]:text-body">
       {formatTime(position)}
       {!tiny && duration !== undefined && <span className="text-on-glass-muted"> / {formatTime(duration)}</span>}
     </span>
@@ -1241,6 +1247,8 @@ interface BarItem {
   zappable: boolean;
   hasPrev: boolean;
   hasNext: boolean;
+  /** A channel's catch-up programme: the bar offers the channel live (PV-12). */
+  archive: boolean;
 }
 
 function selectBarItem(s: PlayerState): BarItem {
@@ -1255,7 +1263,41 @@ function selectBarItem(s: PlayerState): BarItem {
     zappable: canZap(s),
     hasPrev: at > 0,
     hasNext: at >= 0 && at < s.queue.length - 1,
+    archive: !!src?.catchupProgramStart && !src.isLive && src.ref?.contentType === 'live',
   };
+}
+
+/**
+ * Catch-up playing: back to its channel's live stream, in the spot live TV's LIVE badge takes.
+ * Titled like a zap (the channel's name, what airs now), through the parental gate.
+ */
+function WatchLiveButton({ short, className }: { short: boolean; className?: string | undefined }) {
+  const { t } = useTranslation('player');
+  return (
+    <Tooltip content={short ? t('watchLive') : null} tone="glass" describe={false}>
+      <button
+        type="button"
+        data-ctl="watchlive"
+        onMouseDown={pressKeepsFocus}
+        onClick={() => {
+          const src = usePlayerStore.getState().source;
+          if (!src?.ref) return;
+          void playHistoryEntry({ key: itemKey(src.ref), ref: src.ref, title: src.title, isRadio: false, ...(src.posterUrl ? { posterUrl: src.posterUrl } : {}) }).catch(
+            () => undefined,
+          );
+        }}
+        aria-label={t('watchLive')}
+        className={cn(
+          'ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-caption font-medium text-on-glass ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors [[data-big]_&]:h-9 [[data-big]_&]:px-3.5 [[data-big]_&]:text-body-sm',
+          !short && 'pointer-coarse:h-9',
+          className,
+        )}
+      >
+        <span className="size-2 rounded-full bg-white/50" aria-hidden />
+        {short ? t('live') : t('watchLive')}
+      </button>
+    </Tooltip>
+  );
 }
 
 /**
@@ -1476,6 +1518,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   // a VOD position is known yet only picks the time readout (live shows the badge instead).
   const hasPosition = usePlayerStore((s) => !s.source?.isLive && s.positionSeconds > 0);
   const duration = usePlayerStore((s) => s.durationSeconds);
+  const programmeLength = usePlayerStore((s) => s.source?.catchupProgramSeconds);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const mode = usePlayerStore((s) => s.mode);
@@ -1868,8 +1911,10 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                   {t('radio')}
                 </span>
               ) : showTime && (compact || !showSeek) ? (
-                <TimeReadout shown={visible} duration={duration} tiny={tiny} />
+                // A narrow row keeps the programme's length out: Watch live needs the room.
+                <TimeReadout shown={visible} duration={duration ?? (narrow ? undefined : programmeLength)} tiny={tiny} />
               ) : null}
+              {!panelOwnsError && source.archive && !tiny && <WatchLiveButton short={!!compact || narrow} className={narrow ? NARROW_YIELD_TO_VOLUME : undefined} />}
               {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
               <SleepChip
                 compact={compact || narrow}

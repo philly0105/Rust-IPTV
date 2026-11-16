@@ -19,7 +19,8 @@ vi.mock('@/api/transport', () => ({
 }));
 vi.mock('@/features/player', () => ({ playItem: vi.fn(), playSource: vi.fn() }));
 
-const { catchupSource } = await import('../lib/playback');
+const { catchupSource, playCatchup } = await import('../lib/playback');
+const { playSource } = await import('@/features/player');
 
 const ref = { sourceId: 's1', contentType: 'live' as const, itemId: '10' };
 // 30 minutes, watched an hour after it ended.
@@ -65,5 +66,21 @@ describe('catchupSource for the built-in player (PL-2)', () => {
     expect(src.url).toMatch(/^http:/);
     expect(src.durationSeconds).toBeUndefined();
     expect(src.catchup).toBeUndefined();
+  });
+});
+
+describe('the programme length for an archive with none of its own (PV-01)', () => {
+  it('a shift archive carries the programme length beside the position, not as its end', async () => {
+    await playCatchup(m3u('http://host/live/ch1.ts', { type: 'shift' }), 'm3u', program, NOW);
+    const played = vi.mocked(playSource).mock.calls.at(-1)![0];
+    expect(played.durationSeconds).toBeUndefined();
+    expect(played.catchupProgramSeconds).toBe(1800);
+  });
+
+  it('an archive that ends with the programme keeps its length as the media end only', async () => {
+    await playCatchup(channel(), 'xtream', program, NOW);
+    const played = vi.mocked(playSource).mock.calls.at(-1)![0];
+    expect(played.durationSeconds).toBe(1800);
+    expect(played.catchupProgramSeconds).toBeUndefined();
   });
 });

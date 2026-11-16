@@ -38,6 +38,7 @@ import {
   reportProgress,
   reportStatus,
   reportVolume,
+  resumeFits,
   retryResolve,
   setController,
   usePlayerStore,
@@ -289,7 +290,7 @@ export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className
       const s = usePlayerStore.getState().source;
       if (engineRef.current?.resumes) return;
       if (s && !s.isLive && s.resumeSeconds && (s.kind === 'direct' || s.kind === 'file')) {
-        if (el.duration && s.resumeSeconds < (s.durationSeconds ?? el.duration) - 2) {
+        if (el.duration && resumeFits(s.resumeSeconds, s.durationSeconds ?? el.duration)) {
           const landed = engineRef.current?.seekTo?.(s.resumeSeconds);
           if (landed === undefined || landed === false) el.currentTime = s.resumeSeconds;
         }

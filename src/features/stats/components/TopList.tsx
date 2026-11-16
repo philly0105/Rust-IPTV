@@ -18,7 +18,7 @@ import { Link } from 'react-router';
 
 import type { WatchStatsTop } from '@/api/types';
 
-import { ChannelName, IconButton, Poster, PosterCellWidthContext, cn, itemPath, useDisplayPrefs, usePosterWidthBox, useScaledPx } from '../deps';
+import { ChannelName, IconButton, Poster, PosterCellWidthContext, cn, itemPath, usePosterWidthBox, useScaledPx } from '../deps';
 import { formatWatchTime } from '../lib/format';
 
 function TopSection({ title, empty, testId, children }: { title: string; empty: string | null; testId: string; children: ReactNode }) {
@@ -72,11 +72,12 @@ export interface TopChannelsProps {
   onPlay: (item: WatchStatsTop) => void;
   /** Each row's source, only when more than one is set up (the header rule). */
   showSource: boolean;
+  /** settings.stripCountryPrefix: the names leave the place tag out. */
+  stripCountryPrefix: boolean;
 }
 
-export function TopChannels({ items, canPlay, onPlay, showSource }: TopChannelsProps) {
+export function TopChannels({ items, canPlay, onPlay, showSource, stripCountryPrefix }: TopChannelsProps) {
   const { t, i18n } = useTranslation('stats');
-  const { stripCountryPrefix } = useDisplayPrefs();
   const most = items[0]?.seconds ?? 0;
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
   return (

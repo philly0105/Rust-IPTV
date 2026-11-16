@@ -12,7 +12,8 @@
  * grip float over the row's end on hover or keyboard focus, as Live's do, so they take no width at
  * rest and the time sits at the row's end. On touch a tap on the row already plays or opens it, so
  * the row carries one menu button instead (Play, the moves, remove), and a stray tap at the row's
- * end no longer removes anything. A title stopped part way carries its progress and resumes
+ * end no longer removes anything. A channel's menu, from that button, the strip's ⋮ or a right click,
+ * is Live TV's channel menu, which the page draws (`onChannelMenu`, EntryChannelMenu). A title stopped part way carries its progress and resumes
  * (`resume`); its menu adds the title's page and taking it out of Continue watching.
  */
 

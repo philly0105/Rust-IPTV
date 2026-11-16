@@ -118,18 +118,18 @@ describe('Favorites rows say what is on air', () => {
     expect(time.className).toContain('not-pointer-coarse:in-focus-visible:invisible');
     expect(time.className).toContain('not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible');
     expect(time.className).toMatch(/(^|\s)w-40(\s|$)/);
-    // Touch: one menu button, hidden on a fine pointer, holding Play, the moves and remove.
-    const trigger = within(row).getByRole('button', { name: /Actions for/ });
+    // Touch: one menu button, hidden on a fine pointer (the strip has its own ⋮ before it). A
+    // channel's menu is Live TV's (library-04), with the page's moves among its entries.
+    const trigger = within(row).getAllByRole('button', { name: /Actions for/ }).at(-1)!;
     expect(trigger.className).toContain('not-pointer-coarse:hidden');
     fireEvent.click(trigger);
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent);
-    // The red item says what it does in full: the menu is named for the row, so no title in it
-    // (a long channel name cut a titled label before "from favorites").
-    expect(items).toEqual(['Play', 'Move up', 'Move down', 'Remove from favorites']);
+    expect(items[0]).toBe('Play');
+    expect(items).toEqual(expect.arrayContaining(['Remove from favorites', 'Add to list…', 'Move up', 'Move down']));
     // The first row cannot move up.
-    expect(within(menu).getByRole('menuitem', { name: 'Move up' }).getAttribute('aria-disabled')).toBe('true');
-    expect(within(menu).getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBeNull();
+    expect((within(menu).getByRole('menuitem', { name: 'Move up' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole('menuitem', { name: 'Move down' }) as HTMLButtonElement).disabled).toBe(false);
     // The hover strip's remove button keeps the titled name, for a screen reader on the button alone.
     expect(within(strip).getByRole('button', { name: /^Remove .+ from favorites$/ })).toBeTruthy();
   });

@@ -19,7 +19,7 @@ import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/component
 import { DayChart, LIVE_FILL, VOD_FILL } from '../components/DayChart';
 import { StatsSkeleton } from '../components/StatsSkeleton';
 import { TopChannels, TopTitles } from '../components/TopList';
-import { Button, Dialog, EmptyState, ErrorState, Page, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources, errorDescription } from '../deps';
+import { Button, Dialog, EmptyState, ErrorState, Page, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useDisplayPrefs, useToast, useVisibleSources, errorDescription } from '../deps';
 import { useClearStats, useMonthHasData, useWatchStats } from '../hooks/useWatchStats';
 import { rangeTotals } from '../lib/chart';
 import { formatWatchTime } from '../lib/format';
@@ -56,6 +56,7 @@ export function StatsPage() {
   const { query, today } = useWatchStats(range);
   const data = query.data;
   const sources = useVisibleSources();
+  const { stripCountryPrefix } = useDisplayPrefs();
   // The no-source state stays while its add dialog is open: the new source is listed before its
   // import runs, and leaving the state then would close the dialog mid-import.
   const adding = useNoSourcesAdding();
@@ -179,7 +180,7 @@ export function StatsPage() {
       <div className="flex flex-col gap-8">
         <DayChart days={data.days} today={today} />
         <div className="grid gap-8 md:grid-cols-2">
-          <TopChannels items={data.topChannels} canPlay={(item) => sourceById.has(item.ref.sourceId)} onPlay={play} showSource={sourceById.size > 1} />
+          <TopChannels items={data.topChannels} canPlay={(item) => sourceById.has(item.ref.sourceId)} onPlay={play} showSource={sourceById.size > 1} stripCountryPrefix={stripCountryPrefix} />
           <TopTitles items={data.topTitles} showSource={sourceById.size > 1} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divider pt-4">

@@ -43,7 +43,7 @@ describe('P2-POSTERS-4: top lists', () => {
     const { container } = render(
       <I18nextProvider i18n={h.i18n}>
         <MemoryRouter>
-          <TopChannels items={[h.topItem(h.ref('live', 'c1'), 'News', 600, { posterUrl: 'http://cdn.example.test/news.png' })]} canPlay={() => false} onPlay={() => undefined} showSource={false} />
+          <TopChannels items={[h.topItem(h.ref('live', 'c1'), 'News', 600, { posterUrl: 'http://cdn.example.test/news.png' })]} canPlay={() => false} onPlay={() => undefined} showSource={false} stripCountryPrefix={false} />
           <TopTitles items={[h.topItem(h.ref('movie', 'm1'), 'Heat', 600, { posterUrl: 'http://cdn.example.test/heat.jpg' })]} showSource={false} />
         </MemoryRouter>
       </I18nextProvider>,

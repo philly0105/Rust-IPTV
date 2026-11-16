@@ -1,7 +1,7 @@
 import { useQueries } from '@tanstack/react-query';
 import type { Virtualizer } from '@tanstack/react-virtual';
 import { History, Radio, RotateCw, Search, SearchX, Settings as SettingsIcon, TriangleAlert, X } from 'lucide-react';
-import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useContext, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
@@ -23,7 +23,8 @@ import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/component
 import { useChannelNumberHits } from '@/shell/channelNumberSearch';
 import { SearchEverythingLink } from '@/shell/SearchEverythingLink';
 import { containsWords, SETTING_TARGETS, SETTINGS_SECTIONS } from '@/shell/settingTargets';
-import { joinList } from '@/shell/dashboard/cards';
+import { buttonMenuAnchor, ChannelMenuContext, joinList } from '@/shell/dashboard/cards';
+import { ChannelMenuHost } from '@/shell/dashboard/ChannelCardMenu';
 import { intlLocale, numberFormat } from '@/lib/intl';
 import { snapshotTitle } from '@/lib/title';
 
@@ -462,6 +463,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // Some results arrived but one lookup failed (the library or a portal): say so instead of showing a silently short list.
   const partialError = groups.length > 0 ? (catalog.isError ? catalog.error : stalker.error) : undefined;
 
+  // Settings that match, listed by the search of everything as the palette lists them.
+  const settingRows = useSettingMatches(query, !scoped);
   // The results on screen answer an older query than the field holds, and do not narrow to it
   // (a word replaced or shortened): dimmed until the answer comes, as the guide's panel does.
   const stale = !!draftQuery && draftQuery !== answered && !previewTerms;
@@ -523,18 +526,19 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     body = (
       <EmptyState
         icon={<SearchX size={28} />}
-        title={scoped && scopeName ? t('noResultsInSourceTitle', { query, source: scopeName }) : t('noResultsTitle', { query })}
+        title={t('noResultsTitle', { query })}
         description={t('noResultsHint')}
         // A source's search hands the text to the search of everything.
         action={scoped ? <SearchEverythingLink query={query} /> : undefined}
       />
     );
-    // The search of everything also finds settings, as the palette does.
-    if (!scoped) {
+    // The search of everything also finds settings, as the palette does: when only settings
+    // match, they lead and the no-results note under them is a quiet line, not the page's state.
+    if (settingRows.length > 0) {
       body = (
         <>
-          {body}
-          <SettingsMatches query={query} />
+          <SettingsMatches rows={settingRows} />
+          <EmptyState size="inline" icon={<SearchX />} title={t('noResultsTitle', { query })} description={t('noResultsHint')} />
         </>
       );
     }
@@ -638,18 +642,21 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
           loading={loadingMore}
           onShowMore={() => nextLimit !== undefined && setCap({ key: capKey, limit: nextLimit })}
         />
-        {!scoped && <SettingsMatches query={query} />}
+        <SettingsMatches rows={settingRows} />
       </>
     );
   }
 
   return (
     <div ref={scrollRef} className="h-full overflow-x-hidden overflow-y-auto" data-testid={scoped ? 'vod-search-source' : 'vod-search'}>
-      <Page width="wide" className="flex flex-col gap-6">
-        {/* VL-search-title-dup: the header says "Search" (and the source); the page's h1 is for screen readers. */}
-        <h1 className="sr-only">{t('search')}</h1>
-        {body}
-      </Page>
+      {/* The channel menu (Play, multi-view, lists, edits, locks) for the channel results, as Home's cards have it. */}
+      <ChannelMenuHost>
+        <Page width="wide" className="flex flex-col gap-6">
+          {/* VL-search-title-dup: the header says "Search" (and the source); the page's h1 is for screen readers. */}
+          <h1 className="sr-only">{t('search')}</h1>
+          {body}
+        </Page>
+      </ChannelMenuHost>
     </div>
   );
 }
@@ -944,8 +951,8 @@ const ProgrammeList = memo(function ProgrammeList({
 
 const CHANNEL_MIN_WIDTH = 260;
 const CHANNEL_GAP = 8;
-/** One channel button: 48px logo plus padding and border. Rows are measured after layout; this is the estimate. */
-const CHANNEL_ROW_HEIGHT = 66;
+/** One channel button: its name, what is on and the number over a 48px logo, plus padding and border. Rows are measured after layout; this is the estimate. */
+const CHANNEL_ROW_HEIGHT = 74;
 const POSTER_GAP = 16;
 /** Title (two lines) and meta line under a poster; rows are measured after layout. */
 const POSTER_CAPTION_HEIGHT = 64;
@@ -1322,6 +1329,24 @@ const PosterHitCell = memo(function PosterHitCell({
   );
 });
 
+/** Channel hits whose programme on now their cards name: the first page (one `epg.nowNext` call). */
+const NOW_LIMIT = SEARCH_LIMIT;
+
+/**
+ * What is on now on the first channel hits, by `itemKey`: how a user tells "ESPN HD" from
+ * "ESPN (Backup)", as Live TV's rows and the multi-view picker show it.
+ */
+function useNowTitles(hits: readonly SearchHit[]): Map<string, string> {
+  const { epgOffsetMinutes } = useDisplayPrefs();
+  const refs = useMemo(() => hits.slice(0, NOW_LIMIT).map((h) => (h.item as Channel).ref), [hits]);
+  const q = useRpcQuery('epg.nowNext', { refs, offsetMinutes: epgOffsetMinutes }, { enabled: refs.length > 0, staleTime: 60_000 });
+  return useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const [key, nn] of Object.entries(q.data ?? {})) if (nn.now?.title) titles.set(key, nn.now.title);
+    return titles;
+  }, [q.data]);
+}
+
 /** Channel hits; choosing one plays it. Memoized like PosterGrid. */
 const ChannelGrid = memo(function ChannelGrid({
   hits,
@@ -1337,6 +1362,7 @@ const ChannelGrid = memo(function ChannelGrid({
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
+  const now = useNowTitles(hits);
   return (
     <HitGrid
       hits={hits}
@@ -1345,7 +1371,9 @@ const ChannelGrid = memo(function ChannelGrid({
       rowHeight={() => CHANNEL_ROW_HEIGHT}
       scrollRef={scrollRef}
       testId="vod-search-channels"
-      renderCell={(h, i) => <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={strip} onPlayChannel={onPlayChannel} />}
+      renderCell={(h, i) => (
+        <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={strip} now={now.get(itemKey((h.item as Channel).ref))} onPlayChannel={onPlayChannel} />
+      )}
     />
   );
 });
@@ -1353,28 +1381,48 @@ const ChannelGrid = memo(function ChannelGrid({
 /** The channel logo's box, `w-12`: twelve spacing steps of 3.75 px at 100 % scale. */
 const CHANNEL_LOGO_PX = 45;
 
-/** One channel hit; choosing it plays the channel. The source is quiet text, not an outlined chip. */
+/**
+ * One channel hit; choosing it plays the channel. What is on now comes under the name; the source
+ * is quiet text, not an outlined chip. Right click, Shift+F10 or the context-menu key opens the
+ * channel menu (ChannelMenuHost).
+ */
 function ChannelHitButton({
   hit: h,
   index,
   showBadges,
   strip,
+  now,
   onPlayChannel,
 }: {
   hit: SearchHit;
   index: number;
   showBadges: boolean;
   strip: boolean;
+  /** The programme on now. */
+  now?: string | undefined;
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
   const c = h.item as Channel;
   // The logo's width is known, so it does not read its frame as it mounts (P2-GRID-2).
   const logoWidth = useScaledPx(CHANNEL_LOGO_PX, true);
+  const openMenu = useContext(ChannelMenuContext);
+  const menu = (pos: { x: number; y: number }) => openMenu?.({ pos, channel: c, onPlay: () => onPlayChannel(c, h) });
   return (
     <button
       type="button"
       data-grid-index={index}
       onClick={() => onPlayChannel(c, h)}
+      onContextMenu={(e) => {
+        if (!openMenu) return;
+        e.preventDefault();
+        menu({ x: e.clientX, y: e.clientY });
+      }}
+      onKeyDown={(e) => {
+        if (!openMenu || !((e.key === 'F10' && e.shiftKey) || e.key === 'ContextMenu')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        menu(buttonMenuAnchor(e.currentTarget));
+      }}
       className="flex w-full items-center gap-3 rounded-lg border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors"
     >
       <div className="w-12 shrink-0">
@@ -1384,6 +1432,11 @@ function ChannelHitButton({
       <div className="min-w-0 flex-1">
         {/* As Live TV's list names it: the country tag after the name, quiet, or none with the setting. */}
         <ChannelName name={h.title} strip={strip} title={h.title} className="block truncate text-body-sm font-medium text-fg text-match-parent" />
+        {now && (
+          <p dir="auto" title={now} className="truncate text-caption text-fg-muted" data-testid="search-channel-now">
+            {now}
+          </p>
+        )}
         {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
         <div className="flex min-w-0 gap-1.5 text-caption text-fg-subtle">
           {h.meta && <span className="tabular shrink-0">{h.meta}</span>}
@@ -1466,6 +1519,8 @@ const TopResults = memo(function TopResults({
     [groups, showBadges],
   );
   const live = groups.find((g) => g.kind === 'live');
+  const liveShown = useMemo(() => live?.hits.slice(0, TOP_CHANNELS) ?? [], [live]);
+  const now = useNowTitles(liveShown);
   const sections: TopSection[] = [];
   if (posterGroups.length === 2 && posterGroups.every((p) => p.folded.length <= TOP_SHORT_RAIL)) {
     const hits = posterGroups.reduce((n, p) => n + p.group.hits.length, 0);
@@ -1514,9 +1569,16 @@ const TopResults = memo(function TopResults({
         <section key="live" aria-labelledby="search-top-live" className="flex flex-col gap-3" data-search-section="live">
           <SectionHeader id="search-top-live" title={t('group_live')} count={count(live.hits.length, more.live)} seeAll={{ to: typeHref('live') }} />
           <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_MIN_WIDTH}px, 1fr))` }} role="list">
-            {live.hits.slice(0, TOP_CHANNELS).map((h, i) => (
+            {liveShown.map((h, i) => (
               <div key={h.key} role="listitem" className="min-w-0">
-                <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={stripCountryPrefix} onPlayChannel={onPlayChannel} />
+                <ChannelHitButton
+                  hit={h}
+                  index={i}
+                  showBadges={showBadges}
+                  strip={stripCountryPrefix}
+                  now={now.get(itemKey((h.item as Channel).ref))}
+                  onPlayChannel={onPlayChannel}
+                />
               </div>
             ))}
           </div>
@@ -1607,14 +1669,15 @@ const SETTING_ROWS = 5;
 
 /**
  * Settings whose names or keywords match the query, under the results and in the no-results
- * state of the search of everything: the palette's settings rows, for the phone, where the
+ * state of the search of everything (`useSettingMatches`, `SettingsMatches`): the palette's settings rows, for the phone, where the
  * palette has no way in, and for a desktop user who searched here. The sections ("Settings:
  * Playback") and the single settings ("Interface size", opening the group that holds it), names
  * first, then keyword matches, at most `SETTING_ROWS`.
  */
-function SettingsMatches({ query }: { query: string }) {
+function useSettingMatches(query: string, enabled: boolean): SettingRow[] {
   const { t, i18n } = useTranslation(['shell', 'settings', 'player']);
-  const rows = useMemo(() => {
+  return useMemo(() => {
+    if (!enabled || !query) return [];
     const en = i18n.getFixedT('en', ['shell', 'settings', 'player']);
     const cap = (section: string) => `${section[0]!.toUpperCase()}${section.slice(1)}`;
     const sectionName = (section: string) => t(`settings:section${cap(section)}`);
@@ -1638,7 +1701,18 @@ function SettingsMatches({ query }: { query: string }) {
     const named = all.filter((r) => containsWords(r.title, query));
     const found = all.filter((r) => !named.includes(r) && containsWords(`${r.title} ${r.keywords}`, query));
     return [...named, ...found].slice(0, SETTING_ROWS);
-  }, [query, t, i18n]);
+  }, [query, enabled, t, i18n]);
+}
+
+interface SettingRow {
+  key: string;
+  title: string;
+  to: string;
+  detail: string | undefined;
+}
+
+function SettingsMatches({ rows }: { rows: readonly SettingRow[] }) {
+  const { t } = useTranslation('shell');
   if (rows.length === 0) return null;
   return (
     <section aria-labelledby="search-settings" className="flex flex-col gap-3" data-testid="search-settings">

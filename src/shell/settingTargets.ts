@@ -41,7 +41,6 @@ export interface SettingTarget {
 export const SETTING_TARGETS: readonly SettingTarget[] = [
   { id: 'language', section: 'general', label: 'settings:language', keywords: ['language', 'translation'] },
   { id: 'startup', section: 'general', label: 'settings:startupBehavior', keywords: ['start page', 'startup', 'on startup'] },
-  { id: 'country-tags', section: 'general', label: 'settings:stripCountryPrefix', keywords: ['country prefix', 'country tags'] },
   { id: 'min-rating', section: 'general', label: 'settings:vodMinRating', keywords: ['rating', 'minimum rating'] },
   { id: 'source-refresh', section: 'general', label: 'settings:refreshInterval', keywords: ['refresh', 'auto refresh', 'refresh interval'] },
   { id: 'subtitles', section: 'playback', label: 'player:subtitleStyle.title', keywords: ['subtitles', 'subtitle style', 'subtitle size', 'subtitle color'] },

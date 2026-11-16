@@ -5,22 +5,23 @@
  * ranks, progress, Play and drag handles. The keys below work the same on a focused card or row.
  *
  * Filter by type (pill tabs with counts), sort by the user's order, newest
- * add or title, hide watched titles, and search from the page toolbar; all
- * four live in the URL. The search stays out of the shell header so a
- * phone-width header keeps its room for the page title. In the user's own order each row shows its rank and
+ * add or title, and hide watched titles from the page toolbar, and search from
+ * the shell header, as Favorites and Recently watched do (library-06: on a
+ * phone the toolbar's search took a third line); all four live in the URL. In the user's own order each row shows its rank and
  * can be moved by drag (fine pointers), by the up/down buttons, or with
  * Alt+ArrowUp / Alt+ArrowDown on the focused row; moves inside a filtered
  * view reshuffle only the rows on screen. Enter opens the focused title,
  * Delete removes it (with Undo) and W marks a movie watched or unwatched.
  */
 
-import { SearchX, SquareCheckBig, Tv } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, CircleCheck, Info, Play, SearchX, SquareCheckBig, Trash2, Tv } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { itemKey, sameRef, type ItemKey, type PlaybackPosition, type WatchlistEntry } from '@/api/types';
+import { ContextMenu, type MenuEntry } from '@/features/live/components/ContextMenu';
 import { itemPath } from '@/shell/dashboard/cards';
 import { intlLocale } from '@/lib/intl';
 import { snapshotTitle } from '@/lib/title';
@@ -183,15 +184,30 @@ export function MyListPage() {
   const subtitle = all && view.base.length > 0 ? `${t('count', { count: view.base.length })} · ${t('lead')}` : t('lead');
   const { query: search } = params;
   const onSearch = useCallback((value: string) => setParams({ query: value }), [setParams]);
-  useEffect(() => {
-    setHeader({ title, subtitle });
-  }, [setHeader, title, subtitle]);
 
   /** Enter or ArrowDown in the search box: on to the list's current row. */
   const focusList = useCallback(() => {
     const list = document.querySelector<HTMLElement>('[data-testid="mylist-list"]');
     (list?.querySelector<HTMLElement>('[role="listitem"][tabindex="0"]') ?? list?.querySelector<HTMLElement>('[role="listitem"]'))?.focus();
   }, []);
+  const onSearchKey = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      focusList();
+    },
+    [focusList],
+  );
+  // The search only once there is something to search (as on Favorites): over an empty list the
+  // header keeps its usual Search everything. While the list loads it stays.
+  const searchable = !all || view.base.length > 0 || search !== '';
+  useEffect(() => {
+    setHeader({
+      title,
+      subtitle,
+      ...(searchable ? { search: { value: search, onChange: onSearch, placeholder: t('searchPlaceholder'), onSubmit: focusList, onKeyDown: onSearchKey } } : {}),
+    });
+  }, [setHeader, title, subtitle, searchable, search, onSearch, t, focusList, onSearchKey]);
 
   const open = useCallback((e: WatchlistEntry) => void navigate(itemPath(e.ref)), [navigate]);
   /**
@@ -260,6 +276,46 @@ export function MyListPage() {
       }),
     { description: t('shortcutWatched'), area: title, enabled: rows.length > 0 },
   );
+
+  // library-05/07: a title's menu, the same from a card, a row, a right click, a long press, the
+  // row's ⋮ on touch or Shift+F10 and the context-menu key on the focused one: play or resume, its
+  // page, the watched mark, the moves (in My order) and remove.
+  const [menu, setMenu] = useState<{ entry: WatchlistEntry; pos: { x: number; y: number } } | null>(null);
+  const openMenu = useCallback((entry: WatchlistEntry, pos: { x: number; y: number }) => setMenu({ entry, pos }), []);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const openFocusedMenu = () =>
+    onFocused((r) => {
+      const box = listItemOf(r.key)?.getBoundingClientRect();
+      if (box) openMenu(r.entry, { x: box.left + Math.min(box.width / 2, 24), y: box.top + Math.min(box.height / 2, 120) });
+    });
+  useShortcut('shift+f10', openFocusedMenu, { description: t('vod:shortcutPosterMenu'), area: title, enabled: rows.length > 0 });
+  useShortcut('contextmenu', openFocusedMenu, { description: t('vod:shortcutPosterMenu'), area: title, enabled: rows.length > 0 });
+  const menuItems = useMemo((): MenuEntry[] => {
+    if (!menu) return [];
+    const e = menu.entry;
+    const key = itemKey(e.ref);
+    const saved = resumeByKey.get(key);
+    const index = rows.findIndex((r) => r.key === key);
+    const movie = e.ref.contentType === 'movie';
+    return [
+      // A series with nothing started has no one episode to play: its page picks one.
+      ...(movie || saved ? [{ id: 'play', label: saved ? t('library:rowResume') : t('vod:play'), icon: <Play className="size-4" />, onSelect: () => play(e) }] : []),
+      { id: 'open', label: t('vod:openDetails'), icon: <Info className="size-4" />, onSelect: () => open(e) },
+      ...(movie
+        ? [{ id: 'watched', label: e.watched ? t('vod:markUnwatched') : t('vod:markWatched'), icon: <CircleCheck className="size-4" />, onSelect: () => toggleWatched(e) }]
+        : []),
+      ...(canReorder && index >= 0
+        ? [
+            { id: 'sep-move', type: 'separator' as const },
+            { id: 'up', label: t('library:rowMoveUp'), icon: <ArrowUp className="size-4" />, disabled: index === 0, onSelect: () => move(e, step(-1)) },
+            { id: 'down', label: t('library:rowMoveDown'), icon: <ArrowDown className="size-4" />, disabled: index === rows.length - 1, onSelect: () => move(e, step(1)) },
+          ]
+        : []),
+      { id: 'sep-remove', type: 'separator' as const },
+      { id: 'remove', label: t('menuRemove'), icon: <Trash2 className="size-4" />, danger: true, onSelect: () => remove(e) },
+    ];
+  }, [menu, resumeByKey, rows, canReorder, t, play, open, toggleWatched, move, remove]);
+  const menuTitle = menu ? snapshotTitle(menu.entry.ref, menu.entry.snapshot.title).title : '';
 
   // The reorder handlers read the latest render through this ref, so one object
   // serves every row for the page's lifetime and memoized rows stay put.
@@ -351,6 +407,7 @@ export function MyListPage() {
         onOpen={open}
         onRemove={remove}
         onToggleWatched={toggleWatched}
+        onMenu={openMenu}
         // A series with nothing started has no one episode to play: its page picks one.
         onPlay={e.ref.contentType === 'movie' || saved ? play : undefined}
         progress={fraction}
@@ -361,7 +418,7 @@ export function MyListPage() {
 
   const renderCard = (row: Row) => {
     const { label, fraction } = progressOf(row.key);
-    return <MyListCard entry={row.entry} busy={pending.has(row.key)} progress={fraction} progressLabel={label} onRemove={remove} />;
+    return <MyListCard entry={row.entry} busy={pending.has(row.key)} progress={fraction} progressLabel={label} onRemove={remove} onMenu={openMenu} />;
   };
 
   let body;
@@ -466,9 +523,6 @@ export function MyListPage() {
           hideWatched={params.hideWatched}
           counts={view.counts}
           watchedCount={view.typed.filter((e) => e.watched).length}
-          query={search}
-          onQuery={onSearch}
-          onLeaveSearch={focusList}
           onFilter={(filter) => setParams({ filter })}
           onSort={(sort) => setParams({ sort })}
           onHideWatched={(hideWatched) => setParams({ hideWatched })}
@@ -477,6 +531,13 @@ export function MyListPage() {
         />
       )}
       {body}
+      <ContextMenu
+        pos={menu?.pos ?? null}
+        items={menuItems}
+        label={menuTitle}
+        header={menu ? { title: menuTitle, subtitle: menu.entry.ref.contentType === 'movie' ? t('typeMovie') : t('typeSeries') } : undefined}
+        onClose={closeMenu}
+      />
     </Page>
   );
 }

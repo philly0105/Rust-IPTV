@@ -4,6 +4,8 @@
 import { act, cleanup, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { KeyboardEvent } from 'react';
+
 import type { ItemRef, WatchlistEntry } from '@/api/types';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | { call: (cmd: string, args?: unknown) => Promise<unknown> } }));
@@ -65,16 +67,15 @@ afterEach(() => {
 });
 
 describe('MyListPage: list and header', () => {
-  it('lists every title in the user order with ranks, and sets the header with a count (search stays on the page)', async () => {
+  it('lists every title in the user order with ranks, and sets the header with a count, a purpose and the search', async () => {
     await loaded();
     expect(shownTitles()).toEqual(['Arrival', 'Dark', 'Heat', 'Blade Runner']);
     expect(screen.getAllByTestId('mylist-rank').map((r) => r.textContent)).toEqual(['1', '2', '3', '4']);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('My List');
-    expect(header()).toMatchObject({ title: 'My List', subtitle: '4 titles' });
-    // The search lives in the page toolbar, so a phone-width header keeps its room for the title.
-    expect(header()?.search).toBeUndefined();
-    const search = within(screen.getByTestId('mylist-toolbar')).getByRole('searchbox', { name: 'Search My List' });
-    expect(search.hasAttribute('data-page-search')).toBe(true);
+    expect(header()).toMatchObject({ title: 'My List', subtitle: '4 titles · Movies and series to watch later, in your order' });
+    // The search is in the shell header, as on Favorites and Recently watched (library-06).
+    expect(header()?.search).toMatchObject({ value: '', placeholder: 'Search My List' });
+    expect(within(screen.getByTestId('mylist-toolbar')).queryByRole('searchbox')).toBeNull();
     expect(within(rowOf('Heat')).getByTestId('mylist-watched').textContent).toBe('Watched');
     expect(screen.getByRole('list', { name: 'My List' })).toBeTruthy();
     // Series carry no watched tick (they are marked episode by episode).
@@ -234,25 +235,24 @@ describe('MyListPage: filter, sort, search, Hide watched', () => {
     expect(screen.queryByRole('switch', { name: 'Hide watched' })).toBeNull();
   });
 
-  it('searches from the page toolbar, accent-blind, mirrored in the URL', async () => {
+  it('searches from the header, accent-blind, mirrored in the URL', async () => {
     await loaded([...LIST, h.entry(m('m9'), 'Amélie')]);
-    const search = () => screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search My List' });
-    fireEvent.change(search(), { target: { value: 'amelie' } });
+    act(() => header()!.search!.onChange('amelie'));
     await waitFor(() => expect(shownTitles()).toEqual(['Amélie']));
     expect(h.location.current).toBe('/my-list?q=amelie');
-    expect(search().value).toBe('amelie');
+    await waitFor(() => expect(header()?.search?.value).toBe('amelie'));
   });
 
   it('keeps the search box when it matches nothing, and ArrowDown moves on to the list', async () => {
     h.installCore(rpc, LIST);
     open('/my-list?q=zzz');
     await screen.findByText('Nothing in My List matches “zzz”.');
-    const search = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search My List' });
-    expect(search.value).toBe('zzz');
-    fireEvent.change(search, { target: { value: 'dar' } });
+    expect(header()?.search?.value).toBe('zzz');
+    act(() => header()!.search!.onChange('dar'));
     await waitFor(() => expect(shownTitles()).toEqual(['Dark']));
-    search.focus();
-    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    const preventDefault = vi.fn();
+    act(() => header()!.search!.onKeyDown!({ key: 'ArrowDown', preventDefault } as unknown as KeyboardEvent<HTMLInputElement>));
+    expect(preventDefault).toHaveBeenCalled();
     expect(document.activeElement).toBe(itemOf('Dark'));
   });
 
@@ -260,6 +260,33 @@ describe('MyListPage: filter, sort, search, Hide watched', () => {
     await loaded(LIST, '/my-list?type=movie&sort=title&watched=hide');
     expect(shownTitles()).toEqual(['Arrival', 'Blade Runner']);
     expect(screen.getByRole('switch', { name: 'Hide watched' }).getAttribute('aria-checked')).toBe('true');
+  });
+});
+
+describe('MyListPage: the title menu (library-05)', () => {
+  it('opens on a right click with play, details, the watched mark, the moves and remove', async () => {
+    await loaded();
+    fireEvent.contextMenu(rowOf('Arrival'));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Play',
+      'Open details',
+      'Mark as watched',
+      'Move up',
+      'Move down',
+      'Remove from My List',
+    ]);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Remove from My List' }));
+    await waitFor(() => expect(rpc.callsOf('watchlist.remove')).toHaveLength(1));
+  });
+
+  it('opens from Shift+F10 on the focused title, without the moves in another sort', async () => {
+    await loaded(LIST, '/my-list?sort=title');
+    itemOf('Dark').focus();
+    press(itemOf('Dark'), 'F10', { shiftKey: true });
+    const menu = await screen.findByRole('menu');
+    // A series with nothing started has no one episode to play, and no watched mark here.
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Open details', 'Remove from My List']);
   });
 });
 
@@ -459,15 +486,16 @@ describe('MyListPage: remove and watched', () => {
     await waitFor(() => expect(stale()).toBe(true));
   });
 
-  it('ignores page keys typed into the search box', async () => {
+  it('ignores page keys typed into a search box', async () => {
     await loaded();
-    const input = screen.getByRole('searchbox', { name: 'Search My List' });
+    // The header's field, which this test does not draw.
+    const input = document.body.appendChild(Object.assign(document.createElement('input'), { type: 'search' }));
     input.focus();
     press(input, 'Delete');
     press(input, 'w');
     await act(async () => undefined);
     expect(rpc.callsOf('watchlist.remove')).toHaveLength(0);
-    expect(rpc.callsOf('userstate.setWatched')).toHaveLength(0);
+    expect(rpc.callsOf('userstate.setWatched')).toHaveLength(0);    input.remove();
   });
 
   it('registers its keys for the ? overlay under My List; the move keys only in the user order', async () => {
@@ -482,8 +510,10 @@ describe('MyListPage: remove and watched', () => {
       ['alt+arrowdown', 'Move the focused title down'],
       ['delete', 'Remove the focused title'],
       ['w', 'Mark the focused movie watched or unwatched'],
+      ['shift+f10', 'Open the menu for the title under the cursor'],
+      ['contextmenu', 'Open the menu for the title under the cursor'],
     ]);
     fireEvent.change(screen.getByTestId('mylist-sort'), { target: { value: 'title' } });
-    await waitFor(() => expect(mine().map(([combo]) => combo)).toEqual(['delete', 'w']));
+    await waitFor(() => expect(mine().map(([combo]) => combo)).toEqual(['delete', 'w', 'shift+f10', 'contextmenu']));
   });
 });

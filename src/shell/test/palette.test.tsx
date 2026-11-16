@@ -235,7 +235,7 @@ describe('palette guide programmes (F-SEARCH-PROGRAMMES)', () => {
     const { palette, router } = await openPaletteWith('cafe');
     // The core folds diacritics ("cafe" finds "Café"): the palette keeps its answer.
     const row = await within(palette).findByText('Café Society');
-    expect(within(palette).getByText('Guide programmes')).toBeTruthy();
+    expect(within(palette).getByText('Programmes')).toBeTruthy();
     expect(rpcMock.calls.filter((c) => c.cmd === 'epg.search').map((c) => (c.args as { sourceId: string }).sourceId).sort()).toEqual(['s1', 's2']);
     fireEvent.click(row);
     await waitFor(() => expect(router.state.location.pathname).toBe('/epg'));

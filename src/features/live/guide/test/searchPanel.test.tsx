@@ -49,6 +49,7 @@ beforeEach(() => {
   rpc.reset();
   rpc.handlers['epg.sources'] = () => guideLoaded;
   rpc.handlers['epg.search'] = () => [];
+  rpc.handlers['catalog.channels'] = () => ({ items: [], total: 0, offset: 0, limit: 5 });
   rpc.handlers['reminders.list'] = () => [];
   rpc.handlers['recordings.list'] = () => [];
   rpc.handlers['recordings.rules'] = () => [];
@@ -73,12 +74,13 @@ function NOW_PLUS(delta: number) {
 
 function panel(props: Partial<Parameters<typeof GuideSearchPanel>[0]> = {}) {
   const onSelect = vi.fn();
+  const onSelectChannel = vi.fn();
   const onWatch = vi.fn();
   const onClose = vi.fn();
   renderGuide(
-    <GuideSearchPanel query="news" sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onWatch={onWatch} onClose={onClose} {...props} />,
+    <GuideSearchPanel query="news" sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onSelectChannel={onSelectChannel} onWatch={onWatch} onClose={onClose} {...props} />,
   );
-  return { onSelect, onWatch, onClose, el: () => screen.getByTestId('guide-search-panel') };
+  return { onSelect, onSelectChannel, onWatch, onClose, el: () => screen.getByTestId('guide-search-panel') };
 }
 const state = () => screen.getByTestId('guide-search-panel').getAttribute('data-state');
 
@@ -233,6 +235,46 @@ describe('GuideSearchPanel results', () => {
     }
   });
 
+  it('lists the channels whose name matches first, and choosing one hands it over', async () => {
+    const espn = { ...hit('x', NOW, NOW).ref, itemId: 'e' };
+    rpc.handlers['catalog.channels'] = () => ({
+      items: [{ ref: espn, name: 'US| ESPN HD', number: 1, categoryId: 'g', categoryName: 'Sports', isRadio: false }],
+      total: 1,
+      offset: 0,
+      limit: 5,
+    });
+    const { onSelectChannel } = panel({ query: 'espn' });
+    await waitFor(() => expect(state()).toBe('empty'));
+    expect(rpc.of('catalog.channels')[0]).toMatchObject({ sourceId: 'src1', query: { offset: 0, limit: 5, search: 'espn' } });
+    const channels = await screen.findByTestId('guide-search-channels');
+    // Under a matching channel, the programmes' empty state is one quiet line.
+    expect(screen.getByTestId('guide-search-no-programmes').textContent).toBe('Nothing matches “espn”');
+    fireEvent.click(within(channels).getByTestId('guide-search-channel'));
+    expect(onSelectChannel).toHaveBeenCalledWith(expect.objectContaining({ ref: espn }));
+  });
+
+  it('ends with a link to search everything for the query', async () => {
+    panel({ query: 'zzz' });
+    await waitFor(() => expect(state()).toBe('empty'));
+    expect(screen.getByTestId('guide-search-everything').getAttribute('href')).toBe('/search?q=zzz');
+  });
+
+  it('folds a show airing on several channels at once into one row', async () => {
+    const at = NOW_PLUS(HOUR);
+    rpc.handlers['epg.search'] = () =>
+      ['a', 'b', 'c'].map((id, i) => hit('SportsCenter', at, at + HOUR, { channelName: `Chan ${id}`, channelNumber: i + 1, ref: { sourceId: 'src1', contentType: 'live', itemId: id } }));
+    const { onSelect } = panel({ query: 'sports' });
+    await waitFor(() => expect(state()).toBe('results'));
+    expect(screen.getAllByTestId('guide-search-hit')).toHaveLength(1);
+    expect(screen.getByTestId('guide-search-count').textContent).toBe('1 result');
+    const toggle = screen.getByTestId('guide-search-also-toggle');
+    expect(toggle.textContent).toBe('+2 channels');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(within(screen.getByTestId('guide-search-also')).getByRole('button', { name: /^SportsCenter, Chan c, / }));
+    expect((onSelect.mock.calls[0]![0] as GuideSearchHit).ref.itemId).toBe('c');
+  });
+
   // Review round 1: "05:00 AM" wrapped in the old w-12 column. The time never wraps now and the
   // column is wide enough for a 12-hour clock.
   it('the time column keeps a 12-hour time on one line', async () => {
@@ -255,7 +297,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
     renderGuide(
       <>
         <HeaderSlot />
-        <GuideHeaderSearch title="TV guide" subtitle="Demo" inputRef={inputRef} sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onWatch={onWatch} />
+        <GuideHeaderSearch title="TV guide" subtitle="Demo" inputRef={inputRef} sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onSelectChannel={vi.fn()} onWatch={onWatch} />
       </>,
     );
     const input = screen.getByRole('searchbox', { name: 'Search the guide' }) as HTMLInputElement;
@@ -264,7 +306,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
 
   it('sets the header: title, subtitle and the field, which points at the panel while it shows', async () => {
     const { input } = field();
-    expect(lastHeader()).toMatchObject({ title: 'TV guide', subtitle: 'Demo', search: { placeholder: 'Search guide', label: 'Search the guide' } });
+    expect(lastHeader()).toMatchObject({ title: 'TV guide', subtitle: 'Demo', search: { placeholder: 'Search programmes and channels', label: 'Search the guide' } });
     expect(input.hasAttribute('data-shell-search')).toBe(true);
     expect(input.getAttribute('aria-controls')).toBeNull();
     fireEvent.change(input, { target: { value: 'news' } });
@@ -279,7 +321,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
     renderGuide(
       <>
         <HeaderSlot />
-        <GuideHeaderSearch title="TV guide" inputRef={inputRef} sourceId="" disabled offsetMinutes={0} now={NOW} onSelect={vi.fn()} onWatch={vi.fn()} />
+        <GuideHeaderSearch title="TV guide" inputRef={inputRef} sourceId="" disabled offsetMinutes={0} now={NOW} onSelect={vi.fn()} onSelectChannel={vi.fn()} onWatch={vi.fn()} />
       </>,
     );
     const input = screen.getByRole('searchbox', { name: 'Search the guide' });
@@ -309,9 +351,10 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
     await waitFor(() => expect(document.activeElement).toBe(mains()[0]));
     fireEvent.keyDown(mains()[0]!, { key: 'ArrowDown' });
     expect(document.activeElement).toBe(mains()[1]);
+    // The last row hands the query to the Search page.
     fireEvent.keyDown(mains()[1]!, { key: 'End' });
-    expect(document.activeElement).toBe(mains()[3]);
-    fireEvent.keyDown(mains()[3]!, { key: 'Home' });
+    expect(document.activeElement).toBe(screen.getByTestId('guide-search-everything'));
+    fireEvent.keyDown(mains()[4]!, { key: 'Home' });
     expect(document.activeElement).toBe(mains()[0]);
     // Up from the first hit: back to the field, panel still open.
     fireEvent.keyDown(mains()[0]!, { key: 'ArrowUp' });

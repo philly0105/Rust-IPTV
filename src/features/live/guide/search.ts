@@ -42,15 +42,34 @@ export function displayHits(hits: readonly GuideSearchHit[], offsetMinutes: numb
   return offsetMinutes ? hits.map((h) => ({ ...h, program: shiftProgram(h.program, offsetMinutes) })) : [...hits];
 }
 
-export interface HitDay {
+/** A show at one time, on its first channel, with the other channels airing it then. */
+export type FoldedHit = GuideSearchHit & { first: GuideSearchHit; also: GuideSearchHit[] };
+
+/**
+ * One row per show and start (the title compared without case or outer spaces), on the first
+ * channel the core listed, the others in `also`: the Search page folds programmes the same way,
+ * so "SportsCenter 7:00 AM" on eight channels is one row in both.
+ */
+export function foldHits(hits: readonly GuideSearchHit[]): FoldedHit[] {
+  const rows = new Map<string, FoldedHit>();
+  for (const hit of hits) {
+    const key = `${hit.program.title.trim().toLowerCase()}\u0000${ms(hit.program.start)}`;
+    const row = rows.get(key);
+    if (row) row.also.push(hit);
+    else rows.set(key, { ...hit, first: hit, also: [] });
+  }
+  return [...rows.values()];
+}
+
+export interface HitDay<T extends GuideSearchHit = GuideSearchHit> {
   /** Start of the local day. */
   day: number;
-  hits: GuideSearchHit[];
+  hits: T[];
 }
 
 /** Display-time hits grouped by local day, keeping the core's order (start, then channel number). */
-export function groupHitsByDay(hits: readonly GuideSearchHit[]): HitDay[] {
-  const out: HitDay[] = [];
+export function groupHitsByDay<T extends GuideSearchHit>(hits: readonly T[]): HitDay<T>[] {
+  const out: HitDay<T>[] = [];
   for (const h of hits) {
     const day = localDayStart(ms(h.program.start));
     const last = out[out.length - 1];

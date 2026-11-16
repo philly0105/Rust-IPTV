@@ -28,6 +28,9 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'mod+b', descKey: 'scSidebar', area: 'Live' },
   { combo: 'digit', descKey: 'scDigits', area: 'Live' },
   { combo: '/', descKey: 'live:shortcutFocusSearch', area: 'Live' },
+  // The group column and the channel list hand focus across (CategorySidebar onListKey, ChannelList onKeyDown).
+  { combo: 'arrowleft', descKey: 'live:shortcutColumns', area: 'Live' },
+  { combo: 'arrowright', descKey: 'live:shortcutColumns', area: 'Live' },
   { combo: 'enter', descKey: 'scSearchToList', area: 'Live' },
   { combo: 'arrowdown', descKey: 'scSearchToList', area: 'Live' },
   { combo: 'escape', descKey: 'scSearchClear', area: 'Live' },

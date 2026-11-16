@@ -1,18 +1,19 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ChevronDown, Heart, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Tv } from 'lucide-react';
+import { CalendarClock, ChevronDown, EyeOff, Heart, History, ListPlus, ListTree, Lock, PanelLeftClose, PanelLeftOpen, Radio as RadioIcon, Search, SlidersHorizontal, Tv, X } from 'lucide-react';
 import {
   memo,
   useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
@@ -58,12 +59,14 @@ import { usePortalEpg } from '../hooks/usePortalEpg';
 import { useRemoteBridge } from '../hooks/useRemoteBridge';
 import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
+import { groupRegions, readRegion } from '../lib/groupRegion';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { canCatchUp, MINUTE } from '../lib/epgTime';
 import { playCatchup, playChannel } from '../lib/playback';
 import { needsFallback } from '../lib/shortEpg';
 import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
+import { ChannelLogo, ChannelName } from './ChannelLogo';
 import { ChannelList } from './ChannelList';
 import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from './ChannelRow';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
@@ -79,14 +82,13 @@ import { StageIdle } from './StageIdle';
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
 /**
  * The page width, in rem, under which the groups leave their column for the drawer, whatever the
- * window's width. The channel list takes up to 400 px and the stage has a 300 px floor, so on a
- * page under about 66rem (990 px at 100%) four columns pin the stage near that floor: a 170 px
- * tall strip whose idle card loses all but the channel name and a cut Resume. At 66rem the column
- * comes back only where the stage keeps about 365 px (205 px tall). Beside the expanded rail that
- * is a window of about 1240 px, so 1280 px (a 69rem page) keeps the column and a tablet held
- * sideways (1180 or 1194 px) gets the drawer; beside the icon rail, about 1065 px.
+ * window's width. The stage is the point of the page: the column comes in only where the picture
+ * keeps about 580 px beside it (79rem, 1185 px at 100 %: 225 px of groups, 32 % for the list).
+ * At 66rem a 1280 or 1366 px laptop beside the expanded rail watched a 477 to 535 px picture
+ * while the groups took the room; now they get the drawer and a 700 to 760 px picture, and the
+ * column starts at a 1440 px window (about 1185 px beside the icon rail).
  */
-export const GROUPS_COLUMN_MIN_REM = 66;
+export const GROUPS_COLUMN_MIN_REM = 79;
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /**
  * Typing pauses this long before the list searches. `catalog.channels` answers a 20k list in
@@ -158,6 +160,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   );
   const hiddenCount = useMemo(() => (allCategories.data ?? []).filter((c) => c.hidden).length, [allCategories.data]);
   const category = useMemo(() => groups?.find((c) => c.id === categoryId), [groups, categoryId]);
+  // The group column's region pick (CategorySidebar keeps it): it narrows the groups only, so All
+  // channels and its search say they still cover every region (live-03). Read again on each pick.
+  const regionScope = `${sourceId}:${contentType}`;
+  const [regionPicks, onRegionChange] = useReducer((n: number) => n + 1, 0);
+  const region = useMemo(() => {
+    const tag = readRegion(regionScope);
+    return tag && groups && groupRegions(groups.map((c) => c.name)).some((r) => r.tag === tag) ? tag : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- regionPicks: a pick was stored
+  }, [regionScope, groups, regionPicks]);
 
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -173,7 +184,16 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     setSearch('');
     setDebouncedSearch('');
   }, []);
-  useEffect(() => clearSearch(), [sourceId, routeCategory, clearSearch]);
+  // A new list starts with an empty search, unless the user widened a search to All channels: the
+  // query comes along in the route's state (live-11).
+  const carriedSearch = (useLocation().state as { liveSearch?: string } | null)?.liveSearch;
+  const carried = useRef(carriedSearch);
+  carried.current = carriedSearch;
+  useEffect(() => {
+    const q = carried.current ?? '';
+    setSearch(q);
+    setDebouncedSearch(q);
+  }, [sourceId, routeCategory]);
   // The rail's TV guide link opens the guide on the source browsed here (L4-live-2).
   useEffect(() => rememberGuideSource(sourceId), [sourceId]);
   /** Focus the list cursor once the committed search's rows are on screen. */
@@ -227,6 +247,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const playingChannel = detailRef ? (playingItem.data as Channel | undefined) : undefined;
   // The number finds the playing row outside the loaded pages; mid-burst the details are the previous channel's.
   const playingNumber = playingChannel && playingRef && sameRef(playingChannel.ref, playingRef) ? playingChannel.number : undefined;
+  // A search of digits also finds the channel with that number (search-05): the idle stage says
+  // "type its number", and a channel is often known by it. Shown above the list's matches.
+  const searchNumber = /^\d{1,5}$/.test(debouncedSearch) ? Number(debouncedSearch) : 0;
+  const numberHit = useRpcQuery(
+    'catalog.channelByNumber',
+    { sourceId, number: searchNumber, contentType },
+    { enabled: !!sourceId && searchNumber > 0, staleTime: 60_000 },
+  ).data;
   // ChannelList reports the cursor only once it settles, so a held arrow key doesn't fetch a
   // guide (and flash a skeleton) for every channel passed on the way. The report belongs to the
   // list it came from: once the list changes (search, group, source) or is replaced by a loading,
@@ -417,10 +445,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // narrower window, or a page under GROUPS_COLUMN_MIN_REM, they open as a drawer from the toolbar.
   const pageRef = useRef<HTMLDivElement>(null);
   const roomForGroups = useFitsWidth(pageRef, GROUPS_COLUMN_MIN_REM);
-  const wide = useMediaQuery('(min-width: 1024px)') && roomForGroups;
+  // A window held upright stacks the stage over the list (responsive-01): the groups are a drawer.
+  const portrait = useMediaQuery('(orientation: portrait)', false);
+  const wide = useMediaQuery('(min-width: 1024px)') && !portrait && roomForGroups;
   // Below md the header has no room for its subtitle, so the group is named on the toolbar's
   // groups button instead (on a phone it showed nowhere but the search field's placeholder).
   const groupOnToolbar = !useMediaQuery('(min-width: 768px)');
+  // A tablet held upright gets the phone's order, stage over list, with a full-width picture: beside
+  // the list a 768 px portrait screen played a 396 px wide picture over 700 px of nothing (responsive-01).
+  const stacked = portrait && !groupOnToolbar;
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_KEY) === '1';
@@ -529,8 +562,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const title = isRadio ? t('radio') : t('liveTv');
   // The source is named only when there are others to tell it from (as vod's useShowSourceName).
   const sourceName = (useVisibleSources().data?.length ?? 0) > 1 ? source.data?.name : undefined;
-  const groupName =
-    liveView === 'favorites' ? t('favoritesGroup') : liveView === 'recent' ? t('recentGroup') : category?.name;
+  const recentLabel = isRadio ? t('recentStationsGroup') : t('recentGroup');
+  const groupName = liveView === 'favorites' ? t('favoritesGroup') : liveView === 'recent' ? recentLabel : category?.name;
   // The phone's groups button names the group being browsed, All channels included.
   const groupLabel = groupName ?? (isRadio ? t('allStations') : t('allChannels'));
   // The count always says what it counts ("106 channels"); All channels is the page with no group,
@@ -541,13 +574,16 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // list no longer repeats them over its rows.
   const scope = groupName && countText ? t('groupWithCount', { group: groupName, count: countText }) : groupName || countText;
   const headerSubtitle = sourceName && scope ? t('groupWithCount', { group: sourceName, count: scope }) : sourceName || scope;
+  // A source without radio (normal, not broken: the rail leaves Radio out for it) opened at its
+  // Radio address: one page-level empty state instead of three columns that contradict each other.
+  const noRadio = isRadio && !!source.data && (source.data.radioCount ?? 0) === 0 && paged.total === 0 && !debouncedSearch && !routeCategory;
   // The ribbon's (deferred) copy: the header's link moves with the ribbon, not in a zap's own commit.
-  const headerGuideHref = ribbon.guideHref;
+  const headerGuideHref = noRadio ? '' : ribbon.guideHref;
   useEffect(() => {
     shell.setHeader({
       title,
       ...(headerSubtitle ? { subtitle: headerSubtitle } : {}),
-      actions: (
+      actions: !headerGuideHref ? undefined : (
         <Link
           to={headerGuideHref}
           aria-label={t('openGuide')}
@@ -647,6 +683,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const navigate = useNavigate();
+  const hrefForCategoryRef = useRef((cid?: string) => cid ?? '');
   const menuChannel = menu?.channel ?? null;
   // LG-13: the menu every channel row has (Live, lists, the guide), in three sections.
   const menuItems = useChannelMenuItems(menuChannel, {
@@ -673,6 +710,36 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     : undefined;
   const closeGroupMenu = useCallback(() => setGroupMenu(null), []);
   const openGroupMenu = useCallback((pos: { x: number; y: number }, category: Category) => setGroupMenu({ pos, category }), []);
+  // live-10: a junk group goes from its own menu, as a channel does, with Undo. The hidden set is
+  // read from the cache when the write goes out, so an Undo keeps groups hidden since.
+  const hiddenGroupIds = useCallback(() => {
+    const all = queryClient.getQueryData<Category[]>(rpcKey('catalog.categories', categoriesArgs(sourceId, contentType))) ?? [];
+    return all.filter((c) => c.hidden).map((c) => c.id);
+  }, [queryClient, sourceId, contentType]);
+  const hideGroup = useCallback(
+    async (c: Category) => {
+      try {
+        await rpc('catalog.setCategoriesHidden', { sourceId, contentType, hiddenIds: [...new Set([...hiddenGroupIds(), c.id])] });
+        await invalidate('catalog.');
+      } catch (err) {
+        toast({ title: t('groupsSaveFailed'), description: errorDescription(err), variant: 'error' });
+        return;
+      }
+      if (routeCategory === c.id) void navigate(hrefForCategoryRef.current(undefined));
+      toast({
+        title: t('groupHidden', { group: c.name }),
+        variant: 'success',
+        action: {
+          label: t('undoSwitch'),
+          onClick: () =>
+            void rpc('catalog.setCategoriesHidden', { sourceId, contentType, hiddenIds: hiddenGroupIds().filter((id) => id !== c.id) })
+              .then(() => invalidate('catalog.'))
+              .catch((err: unknown) => toast({ title: t('groupsSaveFailed'), description: errorDescription(err), variant: 'error' })),
+        },
+      });
+    },
+    [sourceId, contentType, hiddenGroupIds, routeCategory, navigate, t, toast],
+  );
   // LG-13: every group has a menu: add the whole group to a list, open it in the guide, and (C2) lock it.
   const groupMenuItems: MenuEntry[] = useMemo(() => {
     if (!groupMenu) return [];
@@ -688,18 +755,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       ...(isRadio
         ? []
         : [{ id: 'group-guide', label: t('openGroupInGuide'), icon: <CalendarClock className="size-4" />, onSelect: () => void navigate(guideLink(sourceId, c.id)) }]),
+      { id: 'sep-hide', type: 'separator' as const },
+      { id: 'group-hide', label: t('hideGroup'), icon: <EyeOff className="size-4" />, onSelect: () => void hideGroup(c) },
+      { id: 'group-manage', label: t('manageCategoriesEllipsis'), icon: <SlidersHorizontal className="size-4" />, onSelect: openManage },
       { id: 'sep-lock', type: 'separator' as const },
       ...groupLockItems,
     ];
-  }, [groupMenu, groupLockItems, sourceId, contentType, isRadio, navigate, t]);
+  }, [groupMenu, groupLockItems, sourceId, contentType, isRadio, navigate, t, hideGroup, openManage]);
 
   // LG-12: Favorites and Recently watched sit above All channels (one array, so the memoised sidebar stays put).
   const pinnedViews = useMemo(
     () => [
       { id: LIVE_VIEW_ID.favorites, label: t('favoritesGroup'), icon: <Heart size={14} /> },
-      { id: LIVE_VIEW_ID.recent, label: t('recentGroup'), icon: <History size={14} /> },
+      { id: LIVE_VIEW_ID.recent, label: recentLabel, icon: <History size={14} /> },
     ],
-    [t],
+    [t, recentLabel],
   );
 
   const hrefForCategory = useCallback(
@@ -709,6 +779,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         : `/s/${encodeURIComponent(sourceId)}/live${cid ? `/${encodeURIComponent(cid)}` : ''}`,
     [isRadio, sourceId],
   );
+  hrefForCategoryRef.current = hrefForCategory;
   const refetchCategories = allCategories.refetch;
   const retryCategories = useCallback(() => void refetchCategories(), [refetchCategories]);
   const onPlayLive = useCallback((c: Channel) => play(c), [play]);
@@ -800,7 +871,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const sidebarVisible = wide && !collapsed;
   const toolbar = useMemo(
     () => (
-      <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
+      // On a phone the groups button's icon and the quality button sit on the page gutter, under
+      // the title's edge, not 8 px from the screen's.
+      <div className="flex items-center gap-1 border-b border-divider px-2 py-2 max-sm:ps-[calc(var(--page-gutter)-0.5rem)] max-sm:pe-(--page-gutter)">
         {groupOnToolbar ? (
           // The group being browsed, as the button that changes it: one press opens the groups.
           <Button
@@ -825,7 +898,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             size="sm"
             label={sidebarVisible || drawerOpen ? t('hideGroups') : t('showGroupsPanel')}
             aria-expanded={sidebarVisible || drawerOpen}
-            icon={<ListTree className="size-4" />}
+            // A panel toggle, as the rail's own collapse button: it opens or closes the column beside it.
+            icon={sidebarVisible || drawerOpen ? <PanelLeftClose className="size-4 rtl:-scale-x-100" /> : <PanelLeftOpen className="size-4 rtl:-scale-x-100" />}
             onClick={toggleSidebar}
             data-testid="live-groups-toggle"
           />
@@ -839,8 +913,12 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           // Clearing (the clear button) commits at once, like Escape.
           onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}
           onKeyDown={(e) => {
+            // The number's channel leads when a search of digits found one (search-05).
             const toList = () =>
-              document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
+              (
+                document.querySelector<HTMLButtonElement>('[data-testid="live-number-hit"]') ??
+                document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')
+              )?.focus();
             if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.nativeEvent.isComposing)) {
               e.preventDefault();
               if (search.trim() !== debouncedSearch) {
@@ -889,6 +967,22 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   }
 
   const hrefFor = hrefForCategory;
+  if (noRadio && !parentalHiding) {
+    return (
+      <div className="flex h-full items-center justify-center" data-testid="radio-page">
+        {heading}
+        <EmptyState
+          icon={<RadioIcon className="size-6" />}
+          title={t('noStations')}
+          action={
+            <Link to={`/s/${encodeURIComponent(sourceId)}/live`} className={buttonClass('secondary', 'sm')}>
+              {t('liveTv')}
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
 
   // Run 2: the Lists group above the groups (C3), and the source's hidden channels below them (C2).
   // Lists hold TV channels: Radio leaves them out.
@@ -909,7 +1003,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onNavigate={closeDrawer}
           totalLabel={isRadio ? t('allStations') : t('allChannels')}
           hideLoneGroup={isRadio}
-          regionScope={`${sourceId}:${contentType}`}
+          regionScope={regionScope}
+          onRegionChange={onRegionChange}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
         />
@@ -932,6 +1027,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         ))}
       </div>
     );
+  } else if (listEmpty && debouncedSearch && numberHit) {
+    // The number's channel above is the answer: no "No channels match" under it.
+    listBody = <div className="flex-1" />;
   } else if (listEmpty && debouncedSearch) {
     listBody = (
       <EmptyState
@@ -939,9 +1037,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         title={t(isRadio ? 'noStationSearchResults' : 'noSearchResults', { query: debouncedSearch })}
         description={category ? t('noSearchResultsInGroup', { group: category.name }) : undefined}
         action={
-          <Button size="sm" onClick={clearSearch}>
-            {t('clearSearch')}
-          </Button>
+          category ? (
+            // The channel is usually in another of the many groups: one press takes the query there.
+            <>
+              <Link to={hrefFor(undefined)} state={{ liveSearch: debouncedSearch }} className={buttonClass('primary', 'sm')} data-testid="live-search-all">
+                {t(isRadio ? 'searchAllStations' : 'searchAllChannels')}
+              </Link>
+              <Button size="sm" onClick={clearSearch}>
+                {t('clearSearch')}
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" onClick={clearSearch}>
+              {t('clearSearch')}
+            </Button>
+          )
         }
       />
     );
@@ -951,8 +1061,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     listBody = (
       <EmptyState
         icon={liveView === 'favorites' ? <Heart className="size-6" /> : <History className="size-6" />}
-        title={liveView === 'favorites' ? t(isRadio ? 'favoritesEmptyStations' : 'favoritesEmpty') : t('recentEmpty')}
-        description={liveView === 'favorites' ? t('favoritesEmptyHint') : t('recentEmptyHint')}
+        title={liveView === 'favorites' ? t(isRadio ? 'favoritesEmptyStations' : 'favoritesEmpty') : t(isRadio ? 'recentEmptyStations' : 'recentEmpty')}
+        description={liveView === 'favorites' ? t('favoritesEmptyHint') : t(isRadio ? 'recentEmptyHintStations' : 'recentEmptyHint')}
         action={
           <Link to={hrefFor(undefined)} className={buttonClass('secondary', 'sm')}>
             {isRadio ? t('allStations') : t('allChannels')}
@@ -1032,16 +1142,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         favoriteOverrides={favOverrides}
         onActiveChange={onActiveChange}
         locks={locks}
+        showGroup={!!debouncedSearch && !categoryId && !liveView}
+        groupId={categoryId}
+        hideFavoriteMark={liveView === 'favorites'}
       />
     );
   }
 
   return (
-    <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
+    <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:landscape:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
       {heading}
       {/* groups: a column where the page has room for it, else a drawer */}
       {sidebarVisible ? (
-        <aside className="flex w-60 shrink-0 flex-col border-e border-divider bg-surface">{sidebar}</aside>
+        // 225 px, growing with a wide window (288 px at 1920) so provider suffixes ("ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        // that tell groups apart stay in view; it only shows where the stage already has room.
+        <aside className="flex w-[clamp(15rem,15vw,19rem)] shrink-0 flex-col border-e border-divider bg-surface">{sidebar}</aside>
       ) : null}
       {!wide && drawerOpen ? (
         <>
@@ -1053,8 +1168,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             aria-label={t('groups')}
             data-testid="groups-drawer"
             onKeyDown={onDrawerKeyDown}
-            className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col border-e border-edge bg-surface shadow-2"
+            className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col border-e border-edge bg-surface pb-[env(safe-area-inset-bottom)] shadow-2"
           >
+            {/* A title and a way out, as every other drawer has (the scrim and Escape were the only ones). */}
+            <div className="flex shrink-0 items-center gap-2 border-b border-divider ps-4 pe-2 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+              <h2 className="min-w-0 flex-1 truncate text-title-sm text-fg">{t('groups')}</h2>
+              <IconButton size="sm" label={t('close')} icon={<X className="size-4" />} onClick={closeDrawer} data-testid="groups-drawer-close" />
+            </div>
             {sidebar}
           </aside>
         </>
@@ -1069,10 +1189,34 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
-        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(300px,32%,400px)] md:min-w-60 md:flex-initial md:border-e"
+        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:landscape:w-[clamp(300px,32%,400px)] md:landscape:min-w-60 md:landscape:flex-initial md:landscape:border-e min-[150rem]:landscape:w-[clamp(300px,24%,560px)]"
         onFocus={onListFocus}
       >
         {toolbar}
+        {region && !categoryId && !liveView ? (
+          <p className="border-b border-divider bg-surface-2 px-3 py-1.5 text-caption text-fg-muted" data-testid="live-region-note">
+            {t('regionNotApplied', { region })}
+          </p>
+        ) : null}
+        {numberHit && searchNumber && !paged.error ? (
+          <button
+            type="button"
+            onClick={() => play(numberHit)}
+            onKeyDown={(e) => {
+              if (e.key !== 'ArrowDown') return;
+              e.preventDefault();
+              document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
+            }}
+            data-testid="live-number-hit"
+            className="flex w-full min-w-0 shrink-0 items-center gap-3 border-b border-divider px-3 py-2 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+          >
+            <ChannelLogo src={numberHit.logoUrl} name={displayChannelName(numberHit.name, prefs.stripCountryPrefix)} size={32} sourceId={numberHit.ref.sourceId} />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-caption text-fg-subtle">{t('channelNumberHit', { number: searchNumber })}</span>
+              <ChannelName name={numberHit.name} strip={prefs.stripCountryPrefix} title={numberHit.name} className="truncate text-body-sm font-medium text-fg" />
+            </span>
+          </button>
+        ) : null}
         {/* The count is in the header; screen readers hear it change as a search narrows the list. */}
         <p className="sr-only" aria-live="polite">
           {countText}
@@ -1081,7 +1225,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       </section>
 
       {isRadio ? (
-        <section aria-label={t('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:order-none md:min-w-[min(300px,40%)] md:flex-1">
+        <section aria-label={t('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:portrait:h-2/5 md:landscape:order-none md:landscape:min-w-[min(300px,40%)] md:landscape:flex-1">
           <RadioStage idle={idle} />
           <DigitOsd state={osd} />
         </section>
@@ -1095,6 +1239,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           overlay={digitOsd}
           stageTestId="live-stage"
           ribbonOnPhone={stageBusy}
+          stacked={stacked}
           ribbon={ribbonElement}
         />
       )}

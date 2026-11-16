@@ -99,7 +99,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
             <p className="max-w-full text-title-sm text-on-glass max-md:text-body-sm max-md:font-medium max-md:text-fg">
               {/* ChannelName's own dir="auto" span truncates, so an RTL name's ellipsis lands at its end.
                   On the dark stage the tag takes the glass's quiet tone; on a phone's idle bar, the theme's. */}
-              <ChannelName name={channel.name} strip={stripPrefix} className="block truncate" tagClassName="text-on-glass-muted max-md:text-fg-subtle" />
+              <ChannelName name={channel.name} strip={stripPrefix} title={channel.name} className="block truncate" tagClassName="text-on-glass-muted max-md:text-fg-subtle" />
             </p>
             {locked ? (
               <p className="mt-1 inline-flex items-center gap-1.5 text-body-sm text-on-glass-muted max-md:mt-0 max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-locked">
@@ -135,7 +135,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
             {t(highlighted ? 'play' : 'resume')}
           </Button>
           <p className={cn('mt-1 text-caption text-on-glass-muted max-md:hidden', LOW_STAGE)} data-testid="stage-idle-hint">
-            {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}
+            {hint ?? <IdleHint radio={kind === 'radio'} />}
           </p>
           {recent && recent.length > 0 && onPlayRef ? (
             <StationShelf
@@ -161,7 +161,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
               {t(kind === 'radio' ? 'radioIdle' : 'stageIdle')}
             </p>
             <p className="text-caption text-on-glass-muted max-md:truncate max-md:text-fg-subtle">
-              {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}
+              {hint ?? <IdleHint radio={kind === 'radio'} />}
             </p>
           </div>
         </div>
@@ -198,5 +198,16 @@ function StationShelf({ heading, items, onPlay }: { heading: string; items: { re
         ))}
       </ul>
     </section>
+  );
+}
+
+/** "Pick a channel, or type its number.", without the number on a touch screen, which has no keys for it. */
+function IdleHint({ radio }: { radio: boolean }) {
+  const { t } = useTranslation('live');
+  return (
+    <>
+      <span className="pointer-coarse:hidden">{t(radio ? 'radioIdleHint' : 'stageIdleHint')}</span>
+      <span className="hidden pointer-coarse:inline">{t(radio ? 'radioIdleHintTouch' : 'stageIdleHintTouch')}</span>
+    </>
   );
 }

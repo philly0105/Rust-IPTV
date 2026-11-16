@@ -297,7 +297,8 @@ describe('groups sidebar', () => {
   it('arrow keys move between groups with one tab stop; Home goes to All channels', () => {
     renderIn('/', [{ path: '/', element: sidebar(cats) }]);
     const links = () => [...document.querySelectorAll<HTMLElement>('[data-cat-index]')];
-    expect(links().filter((l) => l.tabIndex === 0 && l.dataset.catIndex !== 'all')).toHaveLength(1);
+    // One stop for the whole column, All channels included (a11y-keyboard-04): the open link, All here.
+    expect(links().filter((l) => l.tabIndex === 0).map((l) => l.dataset.catIndex)).toEqual(['all']);
     fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filter groups' }), { key: 'ArrowDown' });
     expect(document.activeElement?.textContent).toContain('Group 0');
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
@@ -344,7 +345,7 @@ describe('groups sidebar', () => {
     renderIn('/', [{ path: '/', element: withScope() }]);
     const picker = screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement;
     // Most groups first; a tag on one group only (DE) is not offered.
-    expect([...picker.options].map((o) => o.textContent)).toEqual(['All regions', 'US · 3', 'UK · 2']);
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['All regions', 'US · 3 groups', 'UK · 2 groups']);
     fireEvent.change(picker, { target: { value: 'UK' } });
     expect(names()).toEqual(['UK| SPORT', 'UK| NEWS']);
     expect(localStorage.getItem('tsrust.liveRegion:src1:live')).toBe('UK');
@@ -502,7 +503,7 @@ describe('groups drawer on a narrow page (beside the expanded rail)', () => {
       }
     });
 
-  it('keeps the groups out of a page narrower than 66rem, behind the toolbar toggle, even on a wide window', async () => {
+  it('keeps the groups out of a page narrower than 79rem, behind the toolbar toggle, even on a wide window', async () => {
     // The harness answers every min-width query as matching (a wide window); the page itself is
     // 776 px wide, as beside the expanded rail in a 1024 px window.
     renderIn('/s/src1/live', LIVE);
@@ -528,7 +529,7 @@ describe('groups drawer on a narrow page (beside the expanded rail)', () => {
   it('shows the groups as a column once the page has room for them', async () => {
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
-    reportPageWidth(1100);
+    reportPageWidth(1300);
     expect(screen.getByRole('navigation', { name: 'Groups' })).toBeTruthy();
     expect(screen.queryByTestId('groups-drawer')).toBeNull();
     expect(screen.getByRole('button', { name: 'Hide groups' })).toBeTruthy();
@@ -1197,7 +1198,7 @@ describe('guide ribbon follows the list it came from (round 3)', () => {
     // The idle card and the ribbon follow the cursor together; the card's Play starts it, so the
     // ribbon leaves its own Watch live out.
     await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain(`Channel ${row}`));
-    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
+    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Selected');
     expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe(`Play Channel ${row}`);
     expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();
   };

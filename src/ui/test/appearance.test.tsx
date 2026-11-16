@@ -203,6 +203,7 @@ describe('settings palettes follow the tokens', () => {
         fg: token(body, 'accent-fg'),
         solid: token(body, 'accent-solid'),
         solidFg: token(body, 'accent-solid-fg'),
+        mark: token(body, 'accent-mark'),
       });
       expect(ACCENT_PALETTE[accent], accent).toEqual({ dark: tones(dark), light: tones(light) });
     }

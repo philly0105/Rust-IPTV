@@ -461,6 +461,16 @@
     --rail-item-height: 2.25rem;
   }
 }
+/*
+ * Under a finger the rail's rows meet the kit's 44 px touch floor (TOUCH_TARGET) at any window
+ * height: a tablet's landscape window is short, and 36 px rows with no gap sent taps to the
+ * neighbour. The rail scrolls below its Watch group when that no longer fits. Compact keeps its own.
+ */
+@media (pointer: coarse) {
+  :root:not([data-density='compact']) {
+    --rail-item-height: calc(44rem / 15);
+  }
+}
 
 /*
  * Compact density: every Tailwind spacing step (padding, gaps, control heights)

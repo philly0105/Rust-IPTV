@@ -781,7 +781,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
       <Link
         to="/sources?add=1"
         aria-label={t('addSource')}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
+        // 28 px for the mouse, so the label row keeps its height; 44 px under a finger (TOUCH_TARGET's floor).
+        className="inline-flex size-7 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors pointer-coarse:size-[calc(44rem/15)]"
       >
         <Plus aria-hidden size={16} />
       </Link>

@@ -5,7 +5,7 @@
  */
 
 import { k } from '../lib/keys';
-import { History, Trash } from 'lucide-react';
+import { History, Trash, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
@@ -17,6 +17,7 @@ import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
+import { EntryChannelMenu, addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../components/EntryChannelMenu';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton, type EntryResume } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -72,6 +73,8 @@ export function RecentPage() {
   const [search, setSearch] = useUrlSearch();
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [menu, setMenu] = useState<EntryMenuRequest | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
   // An empty history may be the Live TV quality filter's doing: it leaves out the channels it hides.
   const quality = useLiveQuality();
 
@@ -263,6 +266,18 @@ export function RecentPage() {
     };
   };
 
+  /** A channel's menu is Live TV's (library-04), with Remove from history among Organize. */
+  const openChannelMenu = (e: RecentEntry, pos: { x: number; y: number }) =>
+    setMenu({
+      pos,
+      ref: e.ref,
+      snapshot: e.snapshot,
+      nowTitle: nowOn.get(itemKey(e.ref))?.title,
+      onPlay: () => activate(e),
+      organize: [{ id: 'remove-history', label: t('removeFromHistory'), icon: <Trash2 className="size-4" />, danger: true, onSelect: () => remove(e) }],
+    });
+  const isChannel = (e: RecentEntry) => e.ref.contentType === 'live' || e.ref.contentType === 'radio';
+
   const renderRow = (row: RecentRow) => {
     if (row.kind === 'header') return <SectionHeading title={t(k('bucket', row.bucket))} count={row.count} />;
     const e = row.entry;
@@ -282,6 +297,7 @@ export function RecentPage() {
         resume={resumeOf(e, title)}
         onOpen={() => activate(e)}
         onRemove={() => remove(e)}
+        onChannelMenu={isChannel(e) ? (pos) => openChannelMenu(e, pos) : undefined}
       />
     );
   };
@@ -335,6 +351,13 @@ export function RecentPage() {
           } else if (ev.key === 'Delete') {
             ev.preventDefault();
             remove(r.entry);
+          } else if (isChannel(r.entry) && isMenuKey(ev)) {
+            ev.preventDefault();
+            const box = (ev.target as HTMLElement).getBoundingClientRect();
+            openChannelMenu(r.entry, { x: box.left + 16, y: box.bottom - 8 });
+          } else if (isChannel(r.entry) && isAddToListKey(ev)) {
+            ev.preventDefault();
+            addEntryToList(r.entry.ref, r.entry.snapshot);
           }
         }}
       />
@@ -352,6 +375,7 @@ export function RecentPage() {
         </div>
       ) : null}
       {body}
+      <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
       <ConfirmDialog
         open={confirmClear}
         onClose={() => setConfirmClear(false)}

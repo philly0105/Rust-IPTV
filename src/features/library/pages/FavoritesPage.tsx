@@ -5,7 +5,7 @@
  */
 
 import { k } from '../lib/keys';
-import { Heart } from 'lucide-react';
+import { ArrowDown, ArrowUp, Heart } from 'lucide-react';
 import { useCallback, useMemo, useState, type DragEvent } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -16,6 +16,7 @@ import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types'
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, TEXT_LINK, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
+import { EntryChannelMenu, addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../components/EntryChannelMenu';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -66,6 +67,7 @@ export function FavoritesPage() {
   // An empty page may be the Live TV quality filter's doing: it leaves out the channels it hides.
   const quality = useLiveQuality();
   const [drag, setDrag] = useState<{ key: string; over?: { key: string; where: 'before' | 'after' } } | null>(null);
+  const [menu, setMenu] = useState<EntryMenuRequest | null>(null);
 
   const entries = useMemo(() => sortFavorites(query.data ?? []), [query.data]);
   const rows = useMemo(() => buildFavoriteRows(entries, search), [entries, search]);
@@ -154,6 +156,27 @@ export function FavoritesPage() {
     [args, navigate, sources, t, toast],
   );
 
+  /** A channel's menu is Live TV's (library-04), with this page's moves among Organize. */
+  const openChannelMenu = (row: Extract<FavoriteRow, { kind: 'item' }>, pos: { x: number; y: number }) => {
+    const e = row.entry;
+    const moves = !search;
+    setMenu({
+      pos,
+      ref: e.ref,
+      snapshot: e.snapshot,
+      nowTitle: nowOn.get(itemKey(e.ref))?.title,
+      onPlay: () => open(e),
+      removeFavorite: () => remove(e),
+      organize: moves
+        ? [
+            { id: 'up', label: t('rowMoveUp'), icon: <ArrowUp className="size-4" />, disabled: row.indexInGroup === 0, onSelect: () => move(e.ref, row.indexInGroup - 1) },
+            { id: 'down', label: t('rowMoveDown'), icon: <ArrowDown className="size-4" />, disabled: row.indexInGroup >= row.groupSize - 1, onSelect: () => move(e.ref, row.indexInGroup + 1) },
+          ]
+        : [],
+    });
+  };
+  const closeMenu = useCallback(() => setMenu(null), []);
+
   const moveFocused = (delta: -1 | 1) => {
     const key = focusedRowKey();
     const row = rows.find((r) => r.kind === 'item' && r.key === key);
@@ -219,6 +242,7 @@ export function FavoritesPage() {
           busy={pending.has(refKey(e.ref))}
           onOpen={() => open(e)}
           onRemove={() => remove(e)}
+          onChannelMenu={e.ref.contentType === 'live' || e.ref.contentType === 'radio' ? (pos) => openChannelMenu(row, pos) : undefined}
           reorder={
             search
               ? undefined
@@ -293,12 +317,20 @@ export function FavoritesPage() {
         listClassName="max-w-4xl"
         onRowKeyDown={(r, e) => {
           if (r.kind !== 'item') return;
+          const channel = r.entry.ref.contentType === 'live' || r.entry.ref.contentType === 'radio';
           if (e.key === 'Enter') {
             e.preventDefault();
             open(r.entry);
           } else if (e.key === 'Delete') {
             e.preventDefault();
             remove(r.entry);
+          } else if (channel && isMenuKey(e)) {
+            e.preventDefault();
+            const box = (e.target as HTMLElement).getBoundingClientRect();
+            openChannelMenu(r, { x: box.left + 16, y: box.bottom - 8 });
+          } else if (channel && isAddToListKey(e)) {
+            e.preventDefault();
+            addEntryToList(r.entry.ref, r.entry.snapshot);
           }
         }}
       />
@@ -308,6 +340,7 @@ export function FavoritesPage() {
     <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="favorites-page">
       <PageTitle>{title}</PageTitle>
       {body}
+      <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
     </Page>
   );
 }

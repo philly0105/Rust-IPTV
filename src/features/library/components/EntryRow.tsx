@@ -61,6 +61,11 @@ export interface EntryRowProps {
   resume?: EntryResume | undefined;
   onOpen: () => void;
   onRemove: () => void;
+  /**
+   * A live or radio row's menu is Live TV's channel menu (library-04), drawn by the page
+   * (EntryChannelMenu) at `pos`: a right click, the touch ⋮, or the strip's ⋮ ask for it.
+   */
+  onChannelMenu?: ((pos: { x: number; y: number }) => void) | undefined;
   /** Reorder affordances (favorites only). */
   reorder?: {
     canUp: boolean;
@@ -118,7 +123,7 @@ const HOVER_ACTIONS =
 const HIDE_UNDER_ACTIONS =
   'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible not-pointer-coarse:group-has-[[aria-expanded=true]]:invisible';
 
-function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, menuRemoveLabel, busy, now, resume, onOpen, onRemove, reorder }: EntryRowProps) {
+function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, menuRemoveLabel, busy, now, resume, onOpen, onRemove, onChannelMenu, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
   const playable = type === 'live' || type === 'radio';
@@ -172,6 +177,14 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       onDragOver={reorder?.onDragOver}
       onDrop={reorder?.onDrop}
       onDoubleClick={onOpen}
+      onContextMenu={
+        onChannelMenu
+          ? (e) => {
+              e.preventDefault();
+              onChannelMenu({ x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
     >
       {reorder?.dropTarget && (
         <div
@@ -331,6 +344,17 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         {resume && (
           <Menu items={resumeItems} label={t('entryMenu', { title })} align="end" triggerClassName="h-8 w-8" />
         )}
+        {onChannelMenu && (
+          <IconButton
+            size="sm"
+            tabIndex={-1}
+            label={t('entryMenu', { title })}
+            aria-haspopup="menu"
+            icon={<EllipsisVertical size={14} aria-hidden />}
+            onClick={(e) => onChannelMenu(menuAnchor(e.currentTarget))}
+            data-action="menu"
+          />
+        )}
         <IconButton
           size="sm"
           tabIndex={-1}
@@ -359,22 +383,38 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       {/* Touch: one button at the row's end, and its menu holds every action the hover strip has.
           On a phone it is a bottom sheet, as Live TV's channel menu is, headed by the row it
           covers: the logo or poster, the title and what is on (or what it is). */}
-      <Menu
-        items={menuItems}
-        label={t('entryMenu', { title })}
-        align="end"
-        triggerIcon={<EllipsisVertical aria-hidden size={18} />}
-        triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"
-        sheetHeader={{
-          media: playable ? (
-            <ChannelLogo src={snapshot.posterUrl ?? undefined} name={title} size={28} sourceId={entryRef.sourceId} />
-          ) : undefined,
-          title: playable ? <ChannelName name={title} className="truncate text-match-parent" /> : title,
-          subtitle: now ? now.title : resume?.episode ?? t(k('type', type)),
-        }}
-      />
+      {onChannelMenu ? (
+        <IconButton
+          label={t('entryMenu', { title })}
+          aria-haspopup="menu"
+          icon={<EllipsisVertical aria-hidden size={18} />}
+          onClick={(e) => onChannelMenu(menuAnchor(e.currentTarget))}
+          className="-me-1 shrink-0 not-pointer-coarse:hidden"
+        />
+      ) : (
+        <Menu
+          items={menuItems}
+          label={t('entryMenu', { title })}
+          align="end"
+          triggerIcon={<EllipsisVertical aria-hidden size={18} />}
+          triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"
+          sheetHeader={{
+            media: playable ? (
+              <ChannelLogo src={snapshot.posterUrl ?? undefined} name={title} size={28} sourceId={entryRef.sourceId} />
+            ) : undefined,
+            title: playable ? <ChannelName name={title} className="truncate text-match-parent" /> : title,
+            subtitle: now ? now.title : resume?.episode ?? t(k('type', type)),
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/** Where a menu opened from a button starts: under it, from its inline start (as Live's row menu). */
+export function menuAnchor(el: HTMLElement): { x: number; y: number } {
+  const r = el.getBoundingClientRect();
+  return { x: document.documentElement.dir === 'rtl' ? r.right : r.left, y: r.bottom + 2 };
 }
 
 /**

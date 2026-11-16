@@ -310,11 +310,11 @@ test.describe.serial('multi-view', () => {
     await page.evaluate((k) => localStorage.removeItem(k), WALL_KEY);
     await page.goto('/multiview');
 
-    // An empty wall: the header says what the page is for, the toolbar is there from the start
-    // and says how the wall works where sound and clear go later.
+    // An empty wall: the header counts the wall, the toolbar is there from the start and says
+    // how the wall works where sound and clear go later.
     const toolbar = page.getByTestId('multiview-toolbar');
     await expect(toolbar).toBeVisible();
-    await expect(page.getByTestId('page-subtitle')).toHaveText('Watch up to four channels at once');
+    await expect(page.getByTestId('page-subtitle')).toHaveText('0 of 4 on the wall');
     await expect(toolbar.getByTestId('multiview-toolbar-hint')).toHaveText(
       'Pick two to four live channels. Every tile plays; the one you click has the sound.',
     );

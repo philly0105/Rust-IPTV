@@ -2,7 +2,9 @@ import { Eraser, Maximize2, Minimize2, Plus, Volume1, Volume2, VolumeX } from 'l
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cn, SegmentedControl, Tooltip } from '../deps';
+import '@/features/player/player.css';
+
+import { buttonClass, cn, SegmentedControl, Slider, Tooltip } from '../deps';
 import { layoutFits, LAYOUTS, MAX_TILES } from '../layout';
 import { GLASS_BUTTON } from '../styles';
 import type { MultiviewLayout } from '../types';
@@ -34,16 +36,18 @@ export interface WallToolbarProps {
   onClear(): void;
 }
 
-const toolButton = (overlay: boolean, extra?: string) =>
+/** The touch floor of every kit control (DS-TOUCH-TARGETS), for the glass buttons over the wall. */
+const GLASS_TOUCH = 'pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]';
+
+/**
+ * The kit's small ghost button (30 px, 44 on touch), as tall as the small layout control beside
+ * it; on glass over the wall, the glass button at the same size. `icon`: an icon-only square in
+ * the quieter icon tone, as IconButton draws it.
+ */
+const toolButton = (overlay: boolean, icon = false) =>
   overlay
-    ? cn(GLASS_BUTTON, 'h-9 min-w-9 px-2.5 text-sm', extra)
-    : cn(
-        'inline-flex h-9 min-w-9 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-fg-muted outline-none',
-        'hover:bg-hover hover:text-fg active:bg-active focus-visible:ring-2 focus-visible:ring-focus',
-        'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
-        'motion-safe:transition-colors motion-safe:duration-150',
-        extra,
-      );
+    ? cn(GLASS_BUTTON, 'text-sm', GLASS_TOUCH, icon ? 'px-0' : 'px-2.5')
+    : buttonClass('ghost', 'sm', icon ? cn('w-8 px-0 text-fg-muted hover:text-fg active:text-fg', GLASS_TOUCH) : undefined);
 
 /**
  * The wall's controls: layout, add, the wall's sound, full screen, clear. Wraps onto two
@@ -135,7 +139,7 @@ export function WallToolbar({
           <Tooltip content={muted ? t('unmuteAll') : t('muteAll')} tone={overlay ? 'glass' : 'default'} describe={false}>
             <button
               type="button"
-              className={toolButton(overlay, 'px-0')}
+              className={toolButton(overlay, true)}
               aria-label={muted ? t('unmuteAll') : t('muteAll')}
               aria-pressed={muted}
               onClick={onToggleMute}
@@ -147,28 +151,39 @@ export function WallToolbar({
           <label htmlFor={volumeId} className="sr-only">
             {t('volume')}
           </label>
-          <input
-            id={volumeId}
-            type="range"
-            min={0}
-            max={100}
-            step={5}
-            value={muted ? 0 : percent}
-            aria-valuetext={`${muted ? 0 : percent}%`}
-            onChange={(e) => onVolume(Number(e.currentTarget.value) / 100)}
-            className={cn(
-              'h-9 w-20 cursor-pointer rounded-sm outline-none focus-visible:ring-2 sm:w-28',
-              overlay
-                ? 'accent-[color:var(--color-glass-accent,var(--color-accent,#f5b544))] focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]'
-                : // A neutral fill: amber marks the sound tally on the layout glyph, not a setting's level.
-                  'accent-[color:var(--color-fg-muted,#c8cfdc)] focus-visible:ring-focus',
-            )}
-            data-testid="multiview-volume"
-          />
+          {/* On the page, the kit Slider. Floating over the wall (full screen, a short window), the
+              player's own level slider over video (white on glass, player.css), as its volume is drawn. */}
+          {overlay ? (
+            <input
+              id={volumeId}
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={muted ? 0 : percent}
+              aria-valuetext={`${muted ? 0 : percent}%`}
+              onChange={(e) => onVolume(Number(e.currentTarget.value) / 100)}
+              style={{ ['--fill' as string]: `${muted ? 0 : percent}%` }}
+              className="player-range w-20 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-glass-accent sm:w-28"
+              data-testid="multiview-volume"
+            />
+          ) : (
+            <Slider
+              id={volumeId}
+              min={0}
+              max={100}
+              step={5}
+              value={muted ? 0 : percent}
+              aria-valuetext={`${muted ? 0 : percent}%`}
+              onValueChange={(v) => onVolume(v / 100)}
+              className="w-20 sm:w-28"
+              data-testid="multiview-volume"
+            />
+          )}
           <Tooltip content={fullscreenSupported ? (fullscreen ? t('exitFullscreen') : t('fullscreen')) : t('fullscreenUnavailable')} tone={overlay ? 'glass' : 'default'} describe={!fullscreenSupported}>
             <button
               type="button"
-              className={toolButton(overlay, 'px-0')}
+              className={toolButton(overlay, true)}
               aria-label={fullscreen ? t('exitFullscreen') : t('fullscreen')}
               // A disabled button gets no pointer events in every browser, so its reason stays a native title.
               title={fullscreenSupported ? undefined : t('fullscreenUnavailable')}
@@ -180,8 +195,9 @@ export function WallToolbar({
               {fullscreen ? <Minimize2 aria-hidden className="size-4" /> : <Maximize2 aria-hidden className="size-4" />}
             </button>
           </Tooltip>
-          {!overlay ? (
-            <button type="button" className={toolButton(false)} onClick={onClear} data-testid="multiview-clear">
+          {/* Full screen is for watching; a toolbar floating over a short window keeps Clear. */}
+          {!fullscreen ? (
+            <button type="button" className={toolButton(overlay)} onClick={onClear} data-testid="multiview-clear">
               <Eraser aria-hidden className="size-4" />
               <span className="hidden sm:inline">{t('clearWall')}</span>
               <span className="sr-only sm:hidden">{t('clearWall')}</span>

@@ -1,7 +1,7 @@
 import { LayoutGrid } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
@@ -9,14 +9,14 @@ import { itemKey } from '@/api/types';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
-import { cn, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
+import { cn, ensureUnlocked, ErrorState, playItem, requestPin, Skeleton, toast, useMediaQuery, useShellHeader, useShortcut } from '../deps';
 import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
 import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../types';
-import { focusTileOf } from '../paths';
+import { focusTileOf, liveTvPath } from '../paths';
 import { useQuickPicks, type QuickPick } from '../quickPicks';
 import { useMainPlayerHandoff } from '../useMainPlayerHandoff';
-import { overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
+import { inUse, overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
 import { focusSlot, useWallKeyboard } from '../useWallKeyboard';
 import { useWallFullscreen } from '../useWallFullscreen';
 import { LimitBanners, loadKey, MainPlayingBanner } from './Banners';
@@ -26,6 +26,12 @@ import { Wall } from './Wall';
 
 /** Full screen: the toolbar fades after this long without pointer or key activity. */
 export const CHROME_IDLE_MS = 2_500;
+
+/**
+ * A window this short (a phone on its side) has no height to spare for a toolbar row above the
+ * wall: the toolbar floats over the wall as it does in full screen, and fades when idle.
+ */
+export const SHORT_STAGE_QUERY = '(max-height: 480px)';
 
 const ADD: PickerMode = { kind: 'add' };
 
@@ -109,7 +115,10 @@ export function MultiviewPage() {
 
   const count = tiles.length;
   const { active: fsActive, supported: fsSupported, toggle: fsToggle, exit: fsExit } = useWallFullscreen(stageRef);
-  const chrome = useIdleChrome(fsActive);
+  const shortStage = useMediaQuery(SHORT_STAGE_QUERY);
+  // The toolbar floats over the wall: in full screen, and on a short window once tiles are up.
+  const floating = fsActive || (shortStage && count > 0);
+  const chrome = useIdleChrome(floating);
   const { mainPlaying, stopMain } = useMainPlayerHandoff(count > 0);
   const sources = useSources();
   // The no-source state stays while its add dialog is open: the new source is listed before its
@@ -119,6 +128,8 @@ export function MultiviewPage() {
   const loads = useSourceLoads(tiles, sources.byId, parental.active);
   const over = useMemo(() => overLimit(loads), [loads]);
   const overSet = useMemo(() => new Set(over.map((l) => l.sourceId)), [over]);
+  // Accounts with every stream in use: a quick pick from one may not play (as the picker warns).
+  const atLimit = useMemo(() => new Set(loads.filter((l) => l.max > 0 && inUse(l) >= l.max).map((l) => l.sourceId)), [loads]);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
   const shownOver = over.filter((l) => !dismissed.has(loadKey(l)));
   const missingSources = useMemo(
@@ -133,8 +144,9 @@ export function MultiviewPage() {
   const silent = muted || mainPlaying;
 
   const title = t('title');
-  // An empty wall says what the page is for where the count will go.
-  const subtitle = count > 0 ? t('subtitle', { n: count, max: MAX_TILES }) : t('emptyTitle');
+  // The header's subtitle is the page's scope, a count with its noun ("0 of 4 on the wall"); the
+  // toolbar (or a phone's first frame) says how the wall works.
+  const subtitle = t('subtitle', { n: count, max: MAX_TILES });
   useShellHeader({ title, subtitle }, [title, subtitle]);
 
   // A swap whose tile went away (closed, cleared, replaced from elsewhere) ends.
@@ -266,6 +278,29 @@ export function MultiviewPage() {
 
   const replace = useCallback((key: string) => openPicker({ kind: 'replace', key }), [openPicker]);
 
+  // "Watch in the player": Live TV of the tile's source, playing its channel. Leaving the page
+  // closes the wall's streams; the main player then has the account's connection.
+  const navigate = useNavigate();
+  const watch = useCallback(
+    (key: string) => {
+      const tile = useMultiviewStore.getState().tiles.find((x) => x.key === key);
+      const source = tile && sources.byId.get(tile.ref.sourceId);
+      if (!tile || !source) return;
+      if (fsActive) void fsExit();
+      void navigate(liveTvPath(source.id));
+      playItem({
+        ref: tile.ref,
+        title: tile.title,
+        isLive: true,
+        isRadio: false,
+        sourceKind: source.kind,
+        ...(tile.logo ? { posterUrl: tile.logo } : {}),
+        ...(tile.categoryId ? { categoryId: tile.categoryId } : {}),
+      }).catch(() => toast({ variant: 'error', title: t('errorGenericTitle'), description: t('errorGeneric') }));
+    },
+    [fsActive, fsExit, navigate, sources.byId, t],
+  );
+
   // A quick pick goes up in the slot that offered it (the next free one), through the same checks
   // and parental gate as the picker; focus follows it, since the button that was pressed is gone.
   const pickBusy = useRef(false);
@@ -317,6 +352,33 @@ export function MultiviewPage() {
     [t],
   );
 
+  // "Make large": the tile goes to the large slot of 1+3; doing it again puts the wall back as it
+  // was (the layout, and the tile in its slot). Only the last one is remembered.
+  const [enlarged, setEnlarged] = useState<{ key: string; layout: MultiviewLayout; slot: number } | null>(null);
+  const enlargedKey = enlarged && layout === '1+3' && tiles[0]?.key === enlarged.key ? enlarged.key : null;
+  const enlarge = useCallback(
+    (key: string) => {
+      const s = useMultiviewStore.getState();
+      const index = s.tiles.findIndex((x) => x.key === key);
+      if (index < 0) return;
+      if (key === enlargedKey && enlarged) {
+        const back = s.tiles[enlarged.slot];
+        if (back && back.key !== key) s.swap(key, back.key);
+        setLayout(enlarged.layout);
+        setEnlarged(null);
+        focusSlot(wallRef.current, Math.min(enlarged.slot, useMultiviewStore.getState().tiles.length - 1));
+        return;
+      }
+      // Another tile made large while one already is keeps the layout to go back to.
+      setEnlarged({ key, layout: enlargedKey && enlarged ? enlarged.layout : s.layout, slot: index });
+      if (index > 0) s.swap(key, s.tiles[0]!.key);
+      s.setLayout('1+3');
+      setAnnouncement(t('announceEnlarged', { name: nameOf(key) }));
+      focusSlot(wallRef.current, 0);
+    },
+    [enlarged, enlargedKey, nameOf, t, setLayout],
+  );
+
   const toggleMute = useCallback(() => {
     const a = useMultiviewAudio.getState();
     a.toggleMuted();
@@ -332,6 +394,7 @@ export function MultiviewPage() {
     onSwapStart: swapStart,
     onSwapTarget: swapTarget,
     onSwapCancel: swapCancel,
+    onEnlarge: enlarge,
   });
 
   // Page-wide keys. Keys that act on the focused slot live on the wall (useWallKeyboard).
@@ -388,18 +451,25 @@ export function MultiviewPage() {
     />
   );
 
-  const limitBanners = <LimitBanners over={shownOver} onDismiss={(l) => setDismissed((d) => new Set(d).add(loadKey(l)))} />;
+  const limitBanners = (
+    <LimitBanners
+      over={shownOver}
+      lastTileOf={(id) => tiles.filter((x) => x.ref.sourceId === id).at(-1)}
+      onCloseTile={close}
+      onDismiss={(l) => setDismissed((d) => new Set(d).add(loadKey(l)))}
+    />
+  );
   const banners = (
-    <div className={cn('flex flex-col gap-2', !fsActive && mainPlaying && 'px-3 pt-3 sm:px-4')} data-testid="multiview-banners">
+    <div className={cn('flex flex-col gap-2', !floating && mainPlaying && 'px-3 pt-3 sm:px-4')} data-testid="multiview-banners">
       {mainPlaying ? <MainPlayingBanner onStop={stopMain} /> : null}
-      {/* Full screen: under the toolbar in the overlay, which already floats over the wall. */}
-      {fsActive ? limitBanners : null}
+      {/* A floating toolbar: under it in the overlay, which already floats over the wall. */}
+      {floating ? limitBanners : null}
     </div>
   );
-  // Out of full screen the connection-limit warning lies over the toolbar instead of pushing the
-  // wall down: after a cold load the account's limit can answer after the tiles are up (XB2-32).
-  // The toolbar under it is inert until the warning is dismissed, so focus never hides beneath it.
-  const limitOver = !fsActive && count > 0 && shownOver.length > 0;
+  // Out of full screen the connection-limit warning lies over the top of the wall, just under the
+  // toolbar, instead of pushing the wall down: after a cold load the account's limit can answer
+  // after the tiles are up (XB2-32). The toolbar stays usable beside it.
+  const limitOver = !floating && count > 0 && shownOver.length > 0;
 
   const wall = (
     <Wall
@@ -415,7 +485,9 @@ export function MultiviewPage() {
       missingSources={missingSources}
       programmes={programmes}
       swapFrom={swapFrom}
+      enlargedKey={enlargedKey}
       picks={quick.picks}
+      limitedSources={atLimit}
       picksLoading={quick.loading}
       pendingPick={pendingPick}
       onAdd={() => openPicker(ADD)}
@@ -428,6 +500,8 @@ export function MultiviewPage() {
       onSwapCancel={swapCancel}
       onUnlock={unlock}
       onDropTile={swapWith}
+      onEnlarge={enlarge}
+      onWatch={watch}
       onKeyDown={onWallKeyDown}
     />
   );
@@ -448,25 +522,38 @@ export function MultiviewPage() {
           ref={stageRef}
           data-testid="multiview-stage"
           data-fullscreen={fsActive ? 'true' : 'false'}
-          onPointerMove={fsActive ? chrome.poke : undefined}
-          onPointerDown={fsActive ? chrome.poke : undefined}
-          onKeyDownCapture={fsActive ? chrome.poke : undefined}
-          className={cn('@container/stage relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
+          onPointerMove={floating ? chrome.poke : undefined}
+          onPointerDown={floating ? chrome.poke : undefined}
+          onKeyDownCapture={floating ? chrome.poke : undefined}
+          className={cn('@container/stage relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', floating && !chrome.visible && 'cursor-none')}
         >
           {/* One toolbar from the first visit on, so the layout choice never moves or changes look
               when the first tile goes up. */}
-          {!fsActive ? <div inert={limitOver}>{toolbar(false)}</div> : null}
-          {!fsActive ? (
-            <div
-              data-testid="multiview-limit-layer"
-              className={cn('absolute inset-x-0 top-0 z-40', limitOver && 'bg-surface px-3 py-1 shadow-2 sm:px-4')}
-            >
-              {limitBanners}
+          {!floating ? (
+            <div className="relative z-40">
+              {toolbar(false)}
+              <div
+                data-testid="multiview-limit-layer"
+                className={cn('absolute inset-x-0 top-full', limitOver && 'border-b border-divider bg-surface px-(--page-gutter) py-2 shadow-2')}
+              >
+                {limitBanners}
+              </div>
             </div>
           ) : null}
-          {!fsActive ? banners : null}
-          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size] [container-name:wall]', fsActive ? 'p-0' : 'px-(--page-gutter) py-3 sm:py-4')}>{wall}</div>
-          {fsActive ? (
+          {!floating ? banners : null}
+          <div
+            className={cn(
+              'relative flex min-h-0 flex-1 overflow-y-auto [container-type:size] [container-name:wall]',
+              fsActive ? 'p-0' : floating ? 'p-1' : 'px-(--page-gutter) py-3 sm:py-4',
+              // A full wall sits on black in every theme, as the player's picture does: pale chrome
+              // around video washes it out. Free frames are drawn for the page, so they keep it.
+              count >= capacityOf(layout) && 'bg-black',
+            )}
+            data-testid="multiview-wall-host"
+          >
+            {wall}
+          </div>
+          {floating ? (
             <div
               ref={overlayRef}
               onFocus={onOverlayFocus}

@@ -86,6 +86,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'backspace', descKey: 'multiview:shortcutCloseTile', area: 'Multi-view' },
   { combo: 'r', descKey: 'multiview:shortcutReplaceTile', area: 'Multi-view' },
   { combo: 's', descKey: 'multiview:shortcutSwapTile', area: 'Multi-view' },
+  { combo: 'z', descKey: 'multiview:shortcutEnlargeTile', area: 'Multi-view' },
   { combo: 'escape', descKey: 'scVodBack', area: 'Vod' },
   // Bound by the movie and series grid (CategoryGridPage.tsx) while it shows posters.
   { combo: 's', descKey: 'vod:shortcutMyList', area: 'Vod' },

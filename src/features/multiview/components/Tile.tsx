@@ -1,4 +1,19 @@
-import { ArrowLeftRight, CircleSlash, Ellipsis, LoaderCircle, Lock, Replace, RotateCw, ShieldAlert, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CircleSlash,
+  Ellipsis,
+  LayoutPanelLeft,
+  LoaderCircle,
+  Lock,
+  MonitorPlay,
+  Replace,
+  RotateCw,
+  ShieldAlert,
+  TriangleAlert,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
 import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -38,6 +53,8 @@ export interface TileProps {
   programme?: string | undefined;
   /** Key of the tile being moved, while the wall is in swap mode. */
   swapFrom: string | null;
+  /** This tile was made the large one ("Make large"): its tool puts it back instead. */
+  enlarged: boolean;
   className?: string;
   onListen(key: string): void;
   onClose(key: string): void;
@@ -48,6 +65,10 @@ export interface TileProps {
   onUnlock(tile: MultiviewTile): void;
   onRecheck(): void;
   onDropTile(from: string, to: string): void;
+  /** Make this tile the large one (1+3, slot 1), or put it back where it was. */
+  onEnlarge(key: string): void;
+  /** Watch this tile's channel in the main player (Live TV), which closes the wall. */
+  onWatch(key: string): void;
 }
 
 /** A small spinner; its rotation is decoration, so it stops under reduced motion. */
@@ -118,9 +139,13 @@ const TOOL_NARROW = '[@media(hover:hover)]:@[24rem]/tile:hidden';
 
 /**
  * A tool button fills the tools' pill, which takes the label strip's height, so the two pills'
- * tops line up; a touch screen gets the player's 44 px floor.
+ * tops line up. On a touch screen it keeps the 44 px floor as a see-through hit band around a
+ * 32 px button (the band reaches 6 px past each edge), so a phone's small tiles keep their picture.
  */
-const TOOL_BUTTON = cn(GLASS_BUTTON, 'h-auto min-h-8 px-0 pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]');
+const TOOL_BUTTON = cn(
+  GLASS_BUTTON,
+  "relative h-auto min-h-8 px-0 pointer-coarse:before:absolute pointer-coarse:before:-inset-1.5 pointer-coarse:before:content-['']",
+);
 
 /**
  * Where there is hover the tools stay out of the row and unseen at rest, so the label strip, the
@@ -156,6 +181,7 @@ export const Tile = memo(function Tile({
   overLimit,
   programme,
   swapFrom,
+  enlarged,
   className,
   onListen,
   onClose,
@@ -166,6 +192,8 @@ export const Tile = memo(function Tile({
   onUnlock,
   onRecheck,
   onDropTile,
+  onEnlarge,
+  onWatch,
 }: TileProps) {
   const { t } = useTranslation(['multiview', 'common']);
   const blocked = lock !== 'open' || sourceMissing;
@@ -218,6 +246,8 @@ export const Tile = memo(function Tile({
     const from = e.dataTransfer.getData(TILE_DRAG_TYPE);
     if (from && from !== tile.key) onDropTile(from, tile.key);
   };
+
+  const enlargeLabel = enlarged ? t('restoreLabel', { name }) : t('enlargeLabel', { name });
 
   const mainLabel = isSwapTarget
     ? t('swapHereLabel', { name, slot: number })
@@ -364,22 +394,28 @@ export const Tile = memo(function Tile({
         aria-label={mainLabel}
         aria-keyshortcuts={String(number)}
         onClick={onMainClick}
+        // A double click makes the tile the large one (or puts it back), as Z does.
+        onDoubleClick={() => {
+          if (!swapping) onEnlarge(tile.key);
+        }}
+        // Focus is a white ring inside a dark band, set in from the edge, so it never reads as the
+        // tally (the amber edge of the tile with sound) and a tile with both shows both.
         className={cn(
           'absolute inset-0 cursor-pointer rounded-md outline-none',
-          'focus-visible:shadow-[inset_0_0_0_3px_var(--color-bg,#0c1320),inset_0_0_0_5px_var(--color-focus,#ffc865)]',
+          'focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-[6px] focus-visible:outline-[color:var(--color-on-glass,#f4f6fa)]',
+          'focus-visible:shadow-[inset_0_0_0_8px_rgb(0_0_0/0.55)]',
         )}
       />
 
       {/* A panel is centred in the band above the bottom row (bottom-2 plus the tools' 2.4rem, or
-          about 2.7rem once the programme line shows; on touch the tools' 44 px floor makes the row
-          about 3.3rem), so the strip and the tools, drawn over everything, never cover its buttons;
-          a status pill uses the whole tile. */}
+          about 2.7rem once the programme line shows), so the strip and the tools, drawn over
+          everything, never cover its buttons; a status pill uses the whole tile. */}
       {centre ? (
         <div
           data-testid="multiview-tile-centre"
           className={cn(
             'pointer-events-none absolute z-10 flex items-center justify-center',
-            panel ? cn('inset-x-0 top-0 bottom-12 px-2 pt-2', programme && '@[18rem]/tile:bottom-14', 'pointer-coarse:bottom-16') : 'inset-0 p-3',
+            panel ? cn('inset-x-0 top-0 bottom-12 px-2 pt-2', (programme || tile.caption) && '@[18rem]/tile:bottom-14') : 'inset-0 p-3',
           )}
         >
           {centre}
@@ -413,18 +449,31 @@ export const Tile = memo(function Tile({
           </span>
         </div>
       ) : null}
+      {/* A click on the moving tile or Escape cancels too; the button is the way that shows, and the
+          only one on a touch screen. */}
       {isSwapSource ? (
-        <div aria-hidden className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[color:var(--color-glass,rgb(12_19_32/0.72))]">
-          <span className="px-3 text-center text-sm font-semibold text-balance text-[color:var(--color-on-glass,#f4f6fa)]">{t('swapping')}</span>
+        <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-[color:var(--color-glass,rgb(12_19_32/0.72))]">
+          <span aria-hidden className="px-3 text-center text-sm font-semibold text-balance text-[color:var(--color-on-glass,#f4f6fa)]">
+            {t('swapping')}
+          </span>
+          <Tooltip content={t('swapCancel')} shortcut="escape" tone="glass" describe={false}>
+            <button type="button" data-testid="multiview-swap-cancel" className={cn(PANEL_SECONDARY, 'pointer-events-auto')} onClick={onSwapCancel}>
+              {t('common:cancel')}
+            </button>
+          </Tooltip>
         </div>
       ) : null}
       {dropTarget ? <div aria-hidden className={cn('pointer-events-none absolute inset-0 z-20 rounded-md border-2', GLASS_ACCENT_BORDER)} /> : null}
 
       {/* The bottom row: the label strip (UMD) at the start, the tile's tools at the end. On the
           strip's row the tools never meet a centred panel, which sits above the row. The two pills
-          stretch to the taller one's height, so their tops line up. */}
-      <div className="pointer-events-none absolute inset-x-2 bottom-2 z-30 flex min-w-0 items-stretch justify-between gap-2">
-        <div data-testid="multiview-tile-strip" className={cn(GLASS, 'flex min-w-0 items-center gap-2 rounded-md py-1 ps-1 pe-2.5')}>
+          stretch to the taller one's height, so their tops line up; on touch each keeps its own
+          height, so a one-line strip stays one line tall on a phone's small tile. */}
+      <div className="pointer-events-none absolute inset-x-2 bottom-2 z-30 flex min-w-0 items-stretch justify-between gap-2 pointer-coarse:items-end">
+        <div
+          data-testid="multiview-tile-strip"
+          className={cn(GLASS, 'flex min-w-0 items-center gap-2 rounded-md py-1 ps-1 pe-2.5 @max-[16rem]/tile:py-0.5')}
+        >
           <span
             aria-hidden
             data-testid="multiview-slot-plate"
@@ -433,17 +482,28 @@ export const Tile = memo(function Tile({
               hasSound ? GLASS_ACCENT_FILL : GLASS_STRONG,
             )}
           >
-            {hasSound && audible ? <Volume2 className="size-3.5" /> : null}
+            {/* A muted wall (or the main player playing) silences the tile with sound: it says so. */}
+            {hasSound ? audible ? <Volume2 className="size-3.5" /> : <VolumeX data-testid="multiview-plate-muted" className="size-3.5" /> : null}
             {number}
           </span>
-          <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} className="hidden size-6 @[14rem]/tile:inline-flex" />
+          <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} className="hidden size-6 @[16rem]/tile:inline-flex" />
           <span className="flex min-w-0 flex-col leading-tight">
+            {/* A tile put up from a Sports card leads with the game ("Chargers at Ravens"), since event
+                channels are often named only "NFL 02"; the channel goes on the second line. */}
+            {tile.caption ? (
+              <span dir="auto" data-testid="multiview-tile-caption" className="truncate text-match-parent text-sm font-medium">
+                {tile.caption}
+              </span>
+            ) : null}
             {/* text-match-parent: with dir="auto" a Latin name in an RTL UI keeps to the parent's start edge. */}
-            <span dir="auto" className="truncate text-match-parent text-sm font-medium">
+            <span
+              dir="auto"
+              className={cn('truncate text-match-parent', tile.caption ? cn('hidden text-xs @[18rem]/tile:block', ON_GLASS_MUTED) : 'text-sm font-medium')}
+            >
               {tile.number !== undefined ? <span className="me-1.5 font-numeric tabular-nums opacity-80">{tile.number}</span> : null}
               {name}
             </span>
-            {programme ? (
+            {programme && !tile.caption ? (
               <span dir="auto" className={cn('hidden truncate text-match-parent text-xs @[18rem]/tile:block', ON_GLASS_MUTED)}>
                 {programme}
               </span>
@@ -456,7 +516,9 @@ export const Tile = memo(function Tile({
           data-testid="multiview-tile-tools"
           className={cn(
             GLASS_BLUR,
-            'pointer-events-auto flex shrink-0 items-stretch gap-0.5 rounded-md p-0.5',
+            // On touch the tools never go away, so they are solid like the strip, not a frosted
+            // block that takes the picture's colour.
+            'pointer-events-auto flex shrink-0 items-stretch gap-0.5 rounded-md p-0.5 pointer-coarse:bg-glass-strong pointer-coarse:[backdrop-filter:none]',
             TOOLS_SHOW,
             'motion-safe:transition-opacity motion-safe:duration-150',
             swapping && 'hidden',
@@ -472,6 +534,19 @@ export const Tile = memo(function Tile({
               onClick={listen}
             >
               {hasSound ? <Volume2 aria-hidden className="size-4" /> : <VolumeX aria-hidden className="size-4" />}
+            </button>
+          </Tooltip>
+          <Tooltip content={enlargeLabel} shortcut="z" tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
+              aria-label={enlargeLabel}
+              aria-pressed={enlarged}
+              aria-keyshortcuts="Z"
+              data-testid="multiview-tile-enlarge"
+              onClick={() => onEnlarge(tile.key)}
+            >
+              <LayoutPanelLeft aria-hidden className="size-4" />
             </button>
           </Tooltip>
           <Tooltip content={t('swapLabel', { name })} shortcut="s" tone="glass" describe={false}>
@@ -498,6 +573,17 @@ export const Tile = memo(function Tile({
               <Replace aria-hidden className="size-4" />
             </button>
           </Tooltip>
+          <Tooltip content={t('watchLabel', { name })} tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
+              aria-label={t('watchLabel', { name })}
+              data-testid="multiview-tile-watch"
+              onClick={() => onWatch(tile.key)}
+            >
+              <MonitorPlay aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
           <Tooltip content={t('closeLabel', { name })} shortcut="delete" tone="glass" describe={false}>
             <button
               type="button"
@@ -517,6 +603,12 @@ export const Tile = memo(function Tile({
               trigger={<Ellipsis aria-hidden className="size-4" />}
               triggerClassName={TOOL_BUTTON}
               align="end"
+              // On a phone the menu is a sheet over the lower half of the wall: it names the tile.
+              sheetHeader={{
+                title: tile.caption ?? name,
+                subtitle: [t('tileSheetSubtitle', { slot: number }), tile.caption ? name : programme].filter(Boolean).join(' · '),
+                media: <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} tint="theme" className="size-9 rounded-md" />,
+              }}
               items={[
                 // The tile being heard says so: giving it the sound again would do nothing. On a muted
                 // wall the tile with sound still offers it, since choosing it unmutes the wall.
@@ -528,8 +620,16 @@ export const Tile = memo(function Tile({
                   disabled: audible,
                   onSelect: listen,
                 },
+                {
+                  id: 'enlarge',
+                  label: enlarged ? t('restoreShort') : t('enlargeShort'),
+                  icon: <LayoutPanelLeft aria-hidden className="size-4" />,
+                  hint: <Kbd combo="z" size="sm" />,
+                  onSelect: () => onEnlarge(tile.key),
+                },
                 { id: 'swap', label: t('swapShort'), icon: <ArrowLeftRight aria-hidden className="size-4" />, hint: <Kbd combo="s" size="sm" />, onSelect: () => onSwapStart(tile.key) },
                 { id: 'replace', label: t('replace'), icon: <Replace aria-hidden className="size-4" />, hint: <Kbd combo="r" size="sm" />, onSelect: () => onReplace(tile.key) },
+                { id: 'watch', label: t('watchShort'), icon: <MonitorPlay aria-hidden className="size-4" />, onSelect: () => onWatch(tile.key) },
                 { id: 'close', label: t('common:close'), icon: <X aria-hidden className="size-4" />, hint: <Kbd combo="delete" size="sm" />, onSelect: () => onClose(tile.key) },
               ]}
             />
@@ -537,12 +637,18 @@ export const Tile = memo(function Tile({
         </div>
       </div>
 
-      {/* The tally: an accent edge on the tile with sound. */}
+      {/* The tally: an accent edge on the tile with sound; dimmed to the glass edge while it is silent. */}
       {hasSound ? (
         <div
           aria-hidden
           data-testid="multiview-tally"
-          className="pointer-events-none absolute inset-0 z-40 rounded-sm shadow-[inset_0_0_0_2px_var(--color-glass-accent,var(--color-accent,#f5b544)),inset_0_0_28px_var(--color-glow,rgb(245_181_68/0.28))]"
+          data-muted={audible ? undefined : 'true'}
+          className={cn(
+            'pointer-events-none absolute inset-0 z-40 rounded-sm',
+            audible
+              ? 'shadow-[inset_0_0_0_3px_var(--color-glass-accent,var(--color-accent,#f5b544)),inset_0_0_28px_var(--color-glow,rgb(245_181_68/0.28))]'
+              : 'shadow-[inset_0_0_0_3px_var(--color-glass-border,rgb(255_255_255/0.14))]',
+          )}
         />
       ) : null}
     </div>

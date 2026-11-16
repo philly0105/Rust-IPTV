@@ -12,6 +12,7 @@ import { useNavigate, type NavigateFunction } from 'react-router';
 import { sameRef } from '@/api/types';
 import { toast, type MenuAction } from '@/ui';
 
+import { wallOverLimit } from './accountStatus';
 import { addToWall, wallAccepts } from './addChannel';
 import { MAX_TILES } from './layout';
 import { MULTIVIEW_PATH, type MultiviewLocationState } from './paths';
@@ -34,11 +35,15 @@ export async function addFromMenu(
       // Opening from here focuses the new tile, so a keyboard user lands on what they added.
       const key = tiles.find((x) => sameRef(x.ref, ch.ref))?.key;
       const state: MultiviewLocationState = key ? { focusTile: key } : {};
+      // Past the account's connection limit the tile may not play: the toast says so, not the count.
+      const over = await wallOverLimit(ch.ref.sourceId);
       toast({
         id: 'multiview-add',
-        variant: 'success',
+        variant: over ? 'info' : 'success',
         title: t('toastAdded', { name: ch.title }),
-        description: t('subtitle', { n: tiles.length, max: MAX_TILES }),
+        description: over
+          ? t('limitBody', { count: over.max, tiles: over.tiles, source: over.name })
+          : t('subtitle', { n: useMultiviewStore.getState().tiles.length, max: MAX_TILES }),
         action: { label: t('openMultiview'), onClick: () => void navigate(MULTIVIEW_PATH, { state }) },
       });
       return;
@@ -80,6 +85,7 @@ export function useMultiviewMenuItem(ch: MultiviewChannelInput | null): MenuActi
   const logo = ch?.logo;
   const number = ch?.number;
   const categoryId = ch?.categoryId;
+  const caption = ch?.caption;
 
   return useMemo((): MenuAction => {
     const action: MenuAction = {
@@ -94,6 +100,7 @@ export function useMultiviewMenuItem(ch: MultiviewChannelInput | null): MenuActi
     if (logo !== undefined) input.logo = logo;
     if (number !== undefined) input.number = number;
     if (categoryId !== undefined) input.categoryId = categoryId;
+    if (caption !== undefined) input.caption = caption;
     return { ...action, onSelect: () => void addFromMenu(input, navigate, t) };
-  }, [t, navigate, accepted, sourceId, itemId, contentType, title, logo, number, categoryId]);
+  }, [t, navigate, accepted, sourceId, itemId, contentType, title, logo, number, categoryId, caption]);
 }

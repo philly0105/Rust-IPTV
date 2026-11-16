@@ -43,8 +43,10 @@ describe('layouts', () => {
   });
 
   it('gives every layout its wall classes and spans the large 1+3 slot', () => {
-    for (const l of LAYOUTS) expect(WALL_CLASSES[l]).toContain('@2xl:');
-    expect(slotClass('1+3', 0)).toContain('@5xl:row-span-3');
+    for (const l of LAYOUTS) expect(WALL_CLASSES[l]).toMatch(/@2xl:|@container_wall_\(min-width:42rem\)/);
+    // 1+3 puts the large slot beside the others only on a host wider than 16:9, on top otherwise.
+    expect(slotClass('1+3', 0)).toContain('[@container_wall_(min-width:42rem)_and_(min-aspect-ratio:16/9)]:row-span-3');
+    expect(slotClass('1+3', 0)).toContain('[@container_wall_(min-width:42rem)_and_(not_(min-aspect-ratio:16/9))]:col-span-3');
     expect(slotClass('1+3', 1)).not.toContain('span');
     // Stacked slots keep 16:9 below the container breakpoint.
     expect(slotClass('2x2', 2)).toContain('aspect-video');

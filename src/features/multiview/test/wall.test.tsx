@@ -42,6 +42,7 @@ const h = vi.hoisted(() => {
     rejectIds: new Set<string>(),
     ensureUnlocked: undefined as unknown,
     requestPin: undefined as unknown,
+    played: [] as unknown[],
   };
 });
 
@@ -69,7 +70,8 @@ vi.mock('@/features/player', async () => {
     mode: 'html5',
     stop: () => set({ source: null }),
   }));
-  return { usePlayerStore };
+  const playItem = async (args: unknown) => void h.played.push(args);
+  return { usePlayerStore, playItem };
 });
 
 vi.mock('../parentalGate', () => ({
@@ -166,6 +168,7 @@ beforeEach(() => {
   };
   h.ensureUnlocked = vi.fn(async () => true);
   h.requestPin = vi.fn(async () => true);
+  h.played.length = 0;
 });
 
 afterEach(() => cleanup());
@@ -215,6 +218,9 @@ describe('sound: exactly one tile is unmuted', () => {
     fireEvent.keyDown(window, { key: 'm' });
     expect(unmuted()).toEqual([]);
     expect(screen.getByTestId('multiview-mute').getAttribute('aria-pressed')).toBe('true');
+    // The tile with sound says it is silent: a muted speaker on its plate, its tally dimmed.
+    expect(within(tileEl(1)).getByTestId('multiview-plate-muted')).toBeTruthy();
+    expect(within(tileEl(1)).getByTestId('multiview-tally').dataset['muted']).toBe('true');
     fireEvent.click(screen.getByTestId('multiview-mute'));
     expect(unmuted()).toEqual([videoOf(1)]);
     fireEvent.keyDown(window, { key: 'm' });
@@ -392,12 +398,44 @@ describe('keyboard', () => {
     expect(mainOf(3).getAttribute('aria-label')).toBe('Swap with Channel 3 in slot 3');
     fireEvent.keyDown(mainOf(3), { key: 'Escape' });
     expect(mainOf(3).getAttribute('aria-label')).toBe('Play sound from Channel 3');
+    // The moving tile shows a Cancel button too (touch has no Escape).
+    fireEvent.keyDown(mainOf(1), { key: 's' });
+    fireEvent.click(within(tileEl(1)).getByTestId('multiview-swap-cancel'));
+    expect(mainOf(3).getAttribute('aria-label')).toBe('Play sound from Channel 3');
     fireEvent.keyDown(mainOf(1), { key: 's' });
     fireEvent.click(mainOf(3));
     expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k3', 'k2', 'k1']);
     // The engines follow their channels: nothing was rebuilt by the swap.
     expect(engineFor(1)).toHaveLength(1);
     expect(engineFor(3)).toHaveLength(1);
+  });
+
+  it('Z makes the focused tile the large one, and Z again puts the wall back', async () => {
+    seed([1, 2, 3]);
+    renderPage();
+    await playAll([1, 2, 3]);
+    fireEvent.keyDown(mainOf(3), { key: 'z' });
+    expect(useMultiviewStore.getState().layout).toBe('1+3');
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k3', 'k2', 'k1']);
+    expect(screen.getByTestId('multiview-announcer').textContent).toBe('Channel 3 is the large tile');
+    expect(within(tileEl(3)).getByTestId('multiview-tile-enlarge').getAttribute('aria-label')).toBe('Put Channel 3 back in its slot');
+    fireEvent.keyDown(mainOf(3), { key: 'z' });
+    expect(useMultiviewStore.getState().layout).toBe('2x2');
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1', 'k2', 'k3']);
+    // A double click does the same.
+    fireEvent.doubleClick(mainOf(2));
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k2', 'k1', 'k3']);
+    expect(useMultiviewStore.getState().layout).toBe('1+3');
+  });
+
+  it("puts a tile's channel in the main player on Live TV", async () => {
+    seed([1, 2]);
+    renderPage();
+    await playAll([1, 2]);
+    fireEvent.click(within(tileEl(2)).getByTestId('multiview-tile-watch'));
+    await waitFor(() => expect(h.played).toHaveLength(1));
+    expect(h.played[0]).toMatchObject({ ref: { sourceId: 'm3u1', itemId: 'c2' }, title: 'Channel 2', isLive: true, sourceKind: 'm3u' });
+    expect(screen.getByTestId('location').textContent).toBe('/s/m3u1/live');
   });
 
   it('R opens the picker to replace the focused tile', async () => {
@@ -496,22 +534,27 @@ describe('connection limit', () => {
     expect(screen.queryByTestId('multiview-limit-banner')).toBeNull();
   });
 
-  it('lies over the toolbar instead of pushing the wall down when it arrives late (XB2-32)', async () => {
+  it('lies over the wall under the toolbar instead of pushing the wall down when it arrives late (XB2-32)', async () => {
     seed([1, 2, 3], 'src1');
     renderPage();
-    const toolbarBox = () => screen.getByTestId('multiview-toolbar').parentElement!;
-    expect(toolbarBox().hasAttribute('inert')).toBe(false);
     const banner = await screen.findByTestId('multiview-limit-banner');
-    // Out of the flow: an absolute layer at the top of the stage, not a block above the wall.
+    // Out of the flow: an absolute layer hanging under the toolbar, not a block above the wall.
     const layer = screen.getByTestId('multiview-limit-layer');
     expect(layer.contains(banner)).toBe(true);
-    expect(layer.className).toContain('absolute');
-    expect(layer.parentElement).toBe(screen.getByTestId('multiview-stage'));
+    expect(layer.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'top-full']));
+    expect(layer.parentElement!.contains(screen.getByTestId('multiview-toolbar'))).toBe(true);
     expect(screen.getByTestId('multiview-banners').contains(banner)).toBe(false);
-    // The covered toolbar takes no focus until the warning goes.
-    expect(toolbarBox().hasAttribute('inert')).toBe(true);
-    fireEvent.click(within(banner).getByRole('button', { name: 'Dismiss' }));
-    expect(toolbarBox().hasAttribute('inert')).toBe(false);
+    // The toolbar stays usable while the warning shows.
+    expect(screen.getByTestId('multiview-toolbar').closest('[inert]')).toBeNull();
+  });
+
+  it("offers to close the account's last tile, with Undo", async () => {
+    seed([1, 2, 3], 'src1');
+    renderPage();
+    const banner = await screen.findByTestId('multiview-limit-banner');
+    fireEvent.click(within(banner).getByTestId('multiview-limit-close'));
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1', 'k2']);
+    await waitFor(() => expect(screen.queryByTestId('multiview-limit-banner')).toBeNull());
   });
 
   it('counts only tiles that open a stream: a locked tile uses no connection (L1-live-10)', async () => {
@@ -661,7 +704,12 @@ describe('empty wall', () => {
     expect(hint.className.split(/\s+/)).toContain('@[45rem]/stage:sr-only');
     const slots = screen.getAllByTestId('multiview-empty-slot');
     expect(slots[0]!.getAttribute('aria-describedby')).toBe(hint.id);
-    expect(slots).toHaveLength(4);
+    // Only the next slot is a button: a channel goes there whichever frame is clicked, so the
+    // frames after it are plain numbered frames that only show the layout's shape.
+    expect(slots).toHaveLength(1);
+    const frames = screen.getAllByTestId('multiview-free-frame');
+    expect(frames.map((f) => f.getAttribute('data-slot'))).toEqual(['2', '3', '4']);
+    for (const f of frames) expect(f.querySelector('button')).toBeNull();
     // Nothing recent or favorite (a new user): stacked, the first slot is not a short row but
     // says how the wall works above its plus, since the phone toolbar has no room for it.
     const own = slots[0]!.className.split(/\s+/);
@@ -673,7 +721,8 @@ describe('empty wall', () => {
     expect(screen.getAllByRole('radiogroup', { name: 'Layout' })).toHaveLength(1);
     fireEvent.click(within(screen.getByTestId('multiview-toolbar')).getByTestId('multiview-layout-1x2'));
     expect(useMultiviewStore.getState().layout).toBe('1x2');
-    expect(screen.getAllByTestId('multiview-empty-slot')).toHaveLength(2);
+    expect(screen.getAllByTestId('multiview-empty-slot')).toHaveLength(1);
+    expect(screen.getAllByTestId('multiview-free-frame')).toHaveLength(1);
     // Sound, full screen and clear wait for tiles.
     expect(screen.queryByTestId('multiview-mute')).toBeNull();
     expect(screen.queryByTestId('multiview-clear')).toBeNull();
@@ -797,8 +846,9 @@ describe('empty wall', () => {
       'Add Channel 4 to the wall',
       'Add Channel 5 to the wall',
     ]);
-    // Only the next slot offers them; the one after stays a plain frame.
-    expect(screen.getByRole('button', { name: 'Slot 4: add a channel' })).toBeTruthy();
+    // Only the next slot offers them; the one after is a plain numbered frame.
+    expect(screen.queryByRole('button', { name: 'Slot 4: add a channel' })).toBeNull();
+    expect(screen.getByTestId('multiview-free-frame').getAttribute('data-slot')).toBe('4');
 
     fireEvent.click(within(list).getByRole('button', { name: 'Add Channel 4 to the wall' }));
     await waitFor(() => expect(useMultiviewStore.getState().tiles.map((x) => x.title)).toEqual(['Channel 1', 'Channel 2', 'Channel 4']));
@@ -813,6 +863,22 @@ describe('empty wall', () => {
     // "More channels" opens the picker.
     fireEvent.click(within(next).getByRole('button', { name: 'More channels for slot 4' }));
     expect(await screen.findByRole('dialog', { name: 'Add channels' })).toBeTruthy();
+  });
+
+  it("marks the quick picks of an account whose streams are all in use, as the picker does", async () => {
+    const recent = (i: number, sourceId: string) => ({ ref: channel(i, sourceId).ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: `Channel ${i}`, contentType: 'live' } });
+    handlers['recent.list'] = () => [recent(3, 'src1'), recent(4, 'm3u1')];
+    seed([1, 2], 'src1');
+    renderPage();
+    const slot = await screen.findByRole('group', { name: 'Slot 3: add a channel' });
+    const list = await within(slot).findByTestId('multiview-quick-picks');
+    await waitFor(() =>
+      expect(within(list).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+        'Add Channel 3 to the wall, Connection limit reached',
+        'Add Channel 4 to the wall',
+      ]),
+    );
+    expect(within(list).getAllByTestId('multiview-quick-pick-limit')).toHaveLength(1);
   });
 
   it('keeps a narrow next slot a plain frame, and gives the rows the width past the slot number', async () => {
@@ -904,7 +970,7 @@ describe('stacked wall', () => {
     const classes = wall.className.split(/\s+/);
     expect(classes).toEqual(expect.arrayContaining(['self-start', 'content-start']));
     // A fitted wall's slots fill their grid cells.
-    for (const slot of screen.getAllByTestId('multiview-empty-slot')) {
+    for (const slot of [...screen.getAllByTestId('multiview-empty-slot'), ...screen.getAllByTestId('multiview-free-frame')]) {
       const own = slot.className.split(/\s+/);
       expect(own).toContain('@2xl:min-h-0');
       expect(own).toContain('@2xl:aspect-auto');
@@ -917,7 +983,8 @@ describe('stacked wall', () => {
     await screen.findByTestId('multiview-wall');
     // Nothing recent or favorite: the next slot is a plain frame once both lists answered.
     await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
-    const [next, ...rest] = screen.getAllByTestId('multiview-empty-slot');
+    const [next] = screen.getAllByTestId('multiview-empty-slot');
+    const rest = screen.getAllByTestId('multiview-free-frame');
     expect(next!.getAttribute('data-slot')).toBe('2');
     expect(next!.className.split(/\s+/)).toEqual(expect.arrayContaining(['@max-2xl:aspect-auto', '@max-2xl:h-14', '@max-2xl:flex-row']));
     // The slots after it are drawn only on a fitted wall, where they show the layout's shape.
@@ -974,8 +1041,9 @@ describe('tile panels', () => {
     const centre = within(tileEl(2)).getByTestId('multiview-tile-centre').className.split(/\s+/);
     // bottom-12 clears the bottom row (bottom-2 plus the tools' 2.4rem): neither covers Retry.
     expect(centre).toContain('bottom-12');
-    // On touch the tools' 44 px floor makes the row taller, and the band stops above it there too.
-    expect(centre).toContain('pointer-coarse:bottom-16');
+    // On touch the tools keep their 44 px as a see-through band around a 32 px button, so the row
+    // is as short as under a mouse and the panel keeps the same band.
+    expect(centre.some((c) => c.startsWith('pointer-coarse:bottom'))).toBe(false);
     expect(centre).not.toContain('inset-0');
     // The panel steps up with the tile: the help line only from 26rem.
     const hint = within(tileEl(2)).getByTestId('multiview-tile-error').querySelector('p.text-xs')!;
@@ -1005,7 +1073,7 @@ describe('tile panels', () => {
     expect(tools.parentElement).toBe(strip.parentElement);
     expect(tools.parentElement!.className).toContain('bottom-2');
     // Wide tiles under a mouse show Listen, Swap, Replace and Remove as buttons; elsewhere the menu does.
-    for (const id of ['multiview-tile-listen', 'multiview-tile-swap', 'multiview-tile-replace', 'multiview-tile-close']) {
+    for (const id of ['multiview-tile-listen', 'multiview-tile-enlarge', 'multiview-tile-swap', 'multiview-tile-replace', 'multiview-tile-watch', 'multiview-tile-close']) {
       expect(within(tools).getByTestId(id).className).toContain('[@media(hover:hover)]:@[24rem]/tile:inline-flex');
     }
     expect(within(tools).getByTestId('multiview-tile-more').className).toContain('[@media(hover:hover)]:@[24rem]/tile:hidden');
@@ -1015,12 +1083,24 @@ describe('tile panels', () => {
     // Each item carries its key as a cap after the label: the slot's number gives it the sound.
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
       expect.stringMatching(/^Play sound.*2/),
+      expect.stringMatching(/^Make large.*Z/),
       expect.stringMatching(/^Move to another slot/),
       expect.stringMatching(/^Replace/),
+      expect.stringMatching(/^Watch in the player/),
       expect.stringMatching(/^Close/),
     ]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Close/ }));
     expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1']);
+  });
+
+  it('leads the label strip with a Sports matchup, the channel under it', async () => {
+    seed([1, 2]);
+    useMultiviewStore.setState((s) => ({ tiles: s.tiles.map((t, i) => (i === 1 ? { ...t, caption: 'Chargers at Ravens' } : t)) }));
+    renderPage();
+    const strip = await waitFor(() => within(tileEl(2)).getByTestId('multiview-tile-strip'));
+    expect(within(strip).getByTestId('multiview-tile-caption').textContent).toBe('Chargers at Ravens');
+    expect(strip.textContent).toContain('Channel 2');
+    expect(within(tileEl(1)).queryByTestId('multiview-tile-caption')).toBeNull();
   });
 
   it('gives a tile the sound from its menu, and the tile with sound says it has it', async () => {
@@ -1061,11 +1141,14 @@ describe('tile panels', () => {
     expect(cls).toEqual(expect.arrayContaining(['group-hover/tile:opacity-100', 'group-focus-within/tile:opacity-100', 'has-[[aria-expanded=true]]:opacity-100']));
     expect(cls).not.toContain('absolute');
     expect(cls).not.toContain('opacity-0');
-    // The two pills share the row's height, and touch gets the 44 px floor on every tool.
+    // The two pills share the row's height under a mouse; on touch each keeps its own (a one-line
+    // strip stays short on a phone's tile), and every tool gets the 44 px floor as a see-through
+    // band 6 px past each edge of its 32 px button.
     expect(tools.parentElement!.className).toContain('items-stretch');
+    expect(tools.parentElement!.className).toContain('pointer-coarse:items-end');
     for (const button of within(tools).getAllByRole('button')) {
-      expect(button.className).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
-      expect(button.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+      expect(button.className).toContain('min-h-8');
+      expect(button.className).toContain('pointer-coarse:before:-inset-1.5');
     }
   });
 

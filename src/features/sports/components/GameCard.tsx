@@ -156,6 +156,8 @@ export const GameCard = memo(function GameCard({ game, streams, streamsLoading, 
           ...(wallStream.channel.logoUrl ? { logo: wallStream.channel.logoUrl } : {}),
           ...(wallStream.channel.number !== undefined ? { number: wallStream.channel.number } : {}),
           ...(wallStream.channel.categoryId ? { categoryId: wallStream.channel.categoryId } : {}),
+          // The wall names the game, not just the channel ("NFL 02").
+          caption: title,
         }
       : null,
   );

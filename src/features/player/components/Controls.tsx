@@ -1200,7 +1200,7 @@ function selectBarItem(s: PlayerState): BarItem {
  * Catch-up playing: back to its channel's live stream, in the spot live TV's LIVE badge takes.
  * Titled like a zap (the channel's name, what airs now), through the parental gate.
  */
-function WatchLiveButton({ short }: { short: boolean }) {
+function WatchLiveButton({ short, className }: { short: boolean; className?: string | undefined }) {
   const { t } = useTranslation('player');
   return (
     <Tooltip content={short ? t('watchLive') : null} tone="glass" describe={false}>
@@ -1219,6 +1219,7 @@ function WatchLiveButton({ short }: { short: boolean }) {
         className={cn(
           'ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-caption font-medium text-on-glass ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors [[data-big]_&]:h-9 [[data-big]_&]:px-3.5 [[data-big]_&]:text-body-sm',
           !short && 'pointer-coarse:h-9',
+          className,
         )}
       >
         <span className="size-2 rounded-full bg-white/50" aria-hidden />
@@ -1849,9 +1850,10 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                   {t('radio')}
                 </span>
               ) : showTime && (compact || !showSeek) ? (
-                <TimeReadout shown={visible} duration={duration ?? programmeLength} tiny={tiny} />
+                // A narrow row keeps the programme's length out: Watch live needs the room.
+                <TimeReadout shown={visible} duration={duration ?? (narrow ? undefined : programmeLength)} tiny={tiny} />
               ) : null}
-              {!panelOwnsError && source.archive && !tiny && <WatchLiveButton short={!!compact || narrow} />}
+              {!panelOwnsError && source.archive && !tiny && <WatchLiveButton short={!!compact || narrow} className={narrow ? NARROW_YIELD_TO_VOLUME : undefined} />}
               {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
               <SleepChip
                 compact={compact || narrow}

@@ -34,6 +34,7 @@ import {
 } from '../lib/progress';
 import { flushPendingRemovals, isRemovalPending, removeOnUnload, scheduleRemoval } from '../lib/pendingRemoval';
 import { redactText } from '../lib/redact';
+import { SOURCE_ERROR_KEYS, classifySourceError } from '../lib/sourceError';
 import { useFocusInvalid } from '../lib/useFocusInvalid';
 import { useAutoRefreshHint } from '../lib/useAutoRefreshHint';
 import { useNextFrame } from '../lib/useNextFrame';
@@ -434,6 +435,15 @@ export function AddSourceDialog({
   // The source a refused add duplicates: the error offers to open or refresh it instead.
   const duplicateId = submitError ? duplicateSourceId(submitError) : null;
   const duplicateName = duplicateId && submitError ? (sources.data?.find((s) => s.id === duplicateId)?.name ?? duplicateSourceName(submitError)) : null;
+  // What failed, as the source card says it (naming the host), in place of a summary and a hint
+  // that repeated the field's error. Errors the app does not recognise keep the summary and hint.
+  const submitInfo = submitError && !duplicateId ? classifySourceError(submitError.message, submitError.code) : null;
+  const submitCause =
+    submitInfo && submitInfo.kind !== 'unknown'
+      ? t(submitInfo.kind === 'auth' ? `sourceErrorAuth_${draft.kind}` : SOURCE_ERROR_KEYS[submitInfo.kind], {
+          host: submitInfo.host ?? draftHost(draft) ?? t('sourceErrorHostFallback'),
+        })
+      : null;
   // Leaving the page closes the dialog. Not through onClose: the host clears its `?add` params with a
   // navigation of its own, which would cancel this one. Replace, so Back does not reopen the dialog.
   const openDuplicate = (id: string) => {
@@ -697,8 +707,17 @@ export function AddSourceDialog({
                 ) : (
                   <>
                     <p className="font-medium text-fg">{t('addFailed')}</p>
-                    <p className="text-fg">{t(summaryKey(submitError))}</p>
-                    <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                    {submitCause ? (
+                      // The source card's wording: one line that names the host and what to check.
+                      <p className="text-fg" data-testid="add-source-error-message">
+                        {submitCause}
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-fg">{t(summaryKey(submitError))}</p>
+                        <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                      </>
+                    )}
                     {failed ? (
                       <p className="text-fg-muted" data-testid="add-source-retry-note">
                         {t('addRetryNote', { name: failed.name })}

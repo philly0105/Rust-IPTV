@@ -482,6 +482,21 @@
     outline: 2px solid Highlight !important;
     outline-offset: 2px;
   }
+  /*
+   * The selected fills are backgrounds, which forced colours repaint as Canvas, so the current
+   * page, the playing channel and the settings section kept no mark but the tuning tick (drawn in
+   * Highlight in its utility). The current item takes a hairline in the text colour, and the
+   * palette's highlighted command, whose focus stays in the input, a Highlight outline.
+   */
+  [aria-current='page'],
+  [aria-current='true'] {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  [cmdk-item][data-selected='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 /*
@@ -715,6 +730,13 @@ html[data-page-hidden] [class*='animate-shimmer']::after {
     border-end-end-radius: 3px;
     background: var(--color-accent-mark);
     box-shadow: 0 0 10px var(--color-glow);
+  }
+  /* Forced colours would repaint the bar as Canvas, leaving the current item unmarked. */
+  @media (forced-colors: active) {
+    &::before {
+      forced-color-adjust: none;
+      background: Highlight;
+    }
   }
 }
 

@@ -364,9 +364,12 @@ export const Tile = memo(function Tile({
         aria-label={mainLabel}
         aria-keyshortcuts={String(number)}
         onClick={onMainClick}
+        // Focus is a white ring inside a dark band, set in from the edge, so it never reads as the
+        // tally (the amber edge of the tile with sound) and a tile with both shows both.
         className={cn(
           'absolute inset-0 cursor-pointer rounded-md outline-none',
-          'focus-visible:shadow-[inset_0_0_0_3px_var(--color-bg,#0c1320),inset_0_0_0_5px_var(--color-focus,#ffc865)]',
+          'focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-[6px] focus-visible:outline-[color:var(--color-on-glass,#f4f6fa)]',
+          'focus-visible:shadow-[inset_0_0_0_8px_rgb(0_0_0/0.55)]',
         )}
       />
 
@@ -542,7 +545,7 @@ export const Tile = memo(function Tile({
         <div
           aria-hidden
           data-testid="multiview-tally"
-          className="pointer-events-none absolute inset-0 z-40 rounded-sm shadow-[inset_0_0_0_2px_var(--color-glass-accent,var(--color-accent,#f5b544)),inset_0_0_28px_var(--color-glow,rgb(245_181_68/0.28))]"
+          className="pointer-events-none absolute inset-0 z-40 rounded-sm shadow-[inset_0_0_0_3px_var(--color-glass-accent,var(--color-accent,#f5b544)),inset_0_0_28px_var(--color-glow,rgb(245_181_68/0.28))]"
         />
       ) : null}
     </div>

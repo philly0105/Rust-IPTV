@@ -26,7 +26,7 @@ import { useVisibleSources } from './useVisibleSources';
 const itemClass = (active: boolean, collapsed: boolean, dim = false) =>
   cn(
     'group flex h-(--rail-item-height) items-center gap-3 rounded-md text-sm font-medium outline-offset-[-2px]',
-    'motion-safe:transition-colors motion-safe:duration-150',
+    'motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
     collapsed ? 'justify-center px-0' : 'px-3',
     active
       ? 'tuning-tick bg-selected text-fg active:bg-active'
@@ -521,7 +521,7 @@ function SourceEntry({
           onToggle();
         }}
         className={cn(
-          'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
+          'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
           active ? 'text-fg hover:bg-hover active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
         )}
       >
@@ -631,7 +631,7 @@ function SourceLink({ to, current, children }: { to: string; current: boolean; c
       to={to}
       aria-current={current ? 'page' : undefined}
       className={cn(
-        'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-150',
+        'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
         current ? 'tuning-tick bg-selected font-medium text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
       )}
     >

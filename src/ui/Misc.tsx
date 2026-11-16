@@ -359,7 +359,7 @@ export function ProgressBar({
         <div className={cn('absolute inset-y-0 w-1/3 rounded-full motion-safe:animate-indeterminate', toneClass)} />
       ) : (
         <div
-          className={cn('h-full rounded-full motion-safe:transition-[width] motion-safe:duration-300', toneClass)}
+          className={cn('h-full rounded-full motion-safe:transition-[width] motion-safe:duration-(--duration-slow)', toneClass)}
           style={{ width: `${pct}%` }}
         />
       )}

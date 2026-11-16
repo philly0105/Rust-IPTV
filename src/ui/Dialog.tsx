@@ -341,7 +341,7 @@ export function Dialog({
         drawer
           ? 'items-stretch justify-end'
           : // Below sm, start under the toast stack when it is taller than the 8vh gap (toastReserveFor).
-            'items-start justify-center overflow-y-auto p-6 pt-[8vh] max-sm:pt-[max(8vh,var(--toast-reserve,0px))] motion-safe:transition-[padding-top] motion-safe:duration-150',
+            'items-start justify-center overflow-y-auto p-6 pt-[8vh] max-sm:pt-[max(8vh,var(--toast-reserve,0px))] motion-safe:transition-[padding-top] motion-safe:duration-(--duration-fast)',
       )}
       style={drawer ? undefined : ({ '--toast-reserve': `${toastReserve}px` } as CSSProperties)}
       onKeyDown={onKeyDown}

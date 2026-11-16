@@ -24,7 +24,7 @@ export interface ButtonProps extends ComponentPropsWithRef<'button'> {
 const base =
   'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium select-none ' +
   'disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ' +
-  'motion-safe:transition-[color,background-color,border-color,opacity,translate] motion-safe:duration-150 ' +
+  'motion-safe:transition-[color,background-color,border-color,opacity,translate] motion-safe:duration-(--duration-fast) ' +
   // Pressed: a step darker than hover (per variant below) and, with motion allowed, a one-pixel push.
   'motion-safe:active:translate-y-px disabled:active:translate-y-0 aria-disabled:active:translate-y-0';
 

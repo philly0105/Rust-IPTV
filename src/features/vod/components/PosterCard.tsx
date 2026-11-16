@@ -81,7 +81,7 @@ export interface PosterCardProps {
  */
 const WRAPPER_HOVER_ART = 'group-hover/poster:shadow-2 group-hover/poster:ring-fg-subtle motion-safe:group-hover/poster:-translate-y-0.5';
 const WRAPPER_HOVER_LAYER =
-  'motion-safe:transition-[translate] motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/poster:-translate-y-0.5 motion-safe:group-has-[a:active]/poster:translate-y-0';
+  'motion-safe:transition-[translate] motion-safe:duration-(--duration-fast) motion-safe:ease-enter motion-safe:group-hover/poster:-translate-y-0.5 motion-safe:group-has-[a:active]/poster:translate-y-0';
 
 /**
  * A My List corner that only hover brings up never shows on a screen without hover (Tailwind's
@@ -514,7 +514,7 @@ function GridMyListToggle({
       data-in-list={saved || undefined}
       className={cn(
         'absolute end-1.5 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border shadow-1',
-        'motion-safe:transition-[opacity,background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
+        'motion-safe:transition-[opacity,background-color,color,transform] motion-safe:duration-(--duration-fast) motion-safe:active:scale-95',
         // C5: blur only while the corner is up on one card (hover, or the keyboard cursor).
         // Up on hover or under the keyboard cursor only; the saved state stays visible as the chip on
         // the top-end corner. Touch screens save from the poster's menu (long press) or the title's page.

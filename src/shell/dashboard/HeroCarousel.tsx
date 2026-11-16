@@ -386,7 +386,7 @@ function posterKind(ref: ItemRef): 'movie' | 'live' | 'radio' {
 const GLASS_BUTTON = cn(
   TOUCH_TARGET_SQUARE,
   'inline-flex h-12 shrink-0 items-center justify-center rounded-md border border-glass-border bg-on-glass/10 text-on-glass select-none',
-  'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
+  'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-(--duration-fast) motion-safe:active:translate-y-px',
 );
 
 interface SlideBodyProps {
@@ -498,7 +498,7 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
                 TOUCH_TARGET,
                 'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-glass-accent px-6 text-base font-semibold text-glass-accent-fg shadow-2 select-none max-sm:min-w-0 max-sm:flex-1',
                 'hover:brightness-110 active:brightness-90 disabled:cursor-not-allowed disabled:opacity-50',
-                'motion-safe:transition-[filter,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
+                'motion-safe:transition-[filter,translate] motion-safe:duration-(--duration-fast) motion-safe:active:translate-y-px',
               )}
             >
               <Play aria-hidden size={18} fill="currentColor" />
@@ -767,7 +767,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
                     aria-hidden
                     className={cn(
                       'relative block h-1.5 overflow-hidden rounded-full',
-                      !autoTurn && 'motion-safe:transition-[width,background-color] motion-safe:duration-300',
+                      !autoTurn && 'motion-safe:transition-[width,background-color] motion-safe:duration-(--duration-slow)',
                       on ? 'w-7 bg-on-glass/25' : 'w-1.5 bg-on-glass/45 group-hover/tick:bg-on-glass/80',
                     )}
                   >

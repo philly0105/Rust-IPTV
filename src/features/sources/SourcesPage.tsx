@@ -229,10 +229,12 @@ export function SourcesPage() {
       // Bad credentials or a wrong address will fail the same way again: send the user to the settings.
       action:
         err.code === 'auth' || err.code === 'not_found' || err.code === 'invalid'
-          ? { label: t('checkSettings'), onClick: () => openEdit(s) }
+          ? { label: t('checkSettings'), onClick: () => openEdit(latest(s)) }
           : { label: t('tryAgain'), onClick: () => void refreshOne(s) },
     });
   };
+  // The source as the list has it now, with the error this refresh stored, for Check settings.
+  const latest = (s: Source) => queryClient.getQueryData<Source[]>(rpcKey('sources.list'))?.find((x) => x.id === s.id) ?? s;
 
   // The page reports its own refreshes' failures (one toast per Refresh, one summary for Refresh
   // all), so the shell's "didn't import" toast does not repeat them. A run stays claimed a moment

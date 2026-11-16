@@ -512,7 +512,10 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
     fireEvent.click(manage);
     expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
     act(() => useListsDialogs.setState({ dialog: null }));
-    fireEvent.click(screen.getByRole('button', { name: 'Show lists' }));
+    // The way to the other lists names the list that is open (library-03).
+    const toggle = screen.getByRole('button', { name: 'Show lists: Sports' });
+    expect(toggle.getAttribute('aria-haspopup')).toBe('dialog');
+    fireEvent.click(toggle);
     const drawer = await screen.findByTestId('lists-drawer');
     expect(within(drawer).getByRole('link', { name: /Kids/ })).toBeTruthy();
     // Escape closes it.

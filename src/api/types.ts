@@ -429,6 +429,11 @@ export interface PlayerSource {
   resumeSeconds?: number;
   /** Display-time EPG start of the catch-up programme selected for this stream. */
   catchupProgramStart?: string;
+  /**
+   * The programme's length, for an archive that plays on past it (M3U `shift`) and so has no
+   * `durationSeconds`: shown beside the position, never taken as the media's end (UI only).
+   */
+  catchupProgramSeconds?: number;
   isLive: boolean;
   isRadio: boolean;
   /** ClearKey DRM (UI only; the core never sets it). Such a source plays in the built-in player. */

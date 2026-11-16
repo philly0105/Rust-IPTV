@@ -1446,6 +1446,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   // a VOD position is known yet only picks the time readout (live shows the badge instead).
   const hasPosition = usePlayerStore((s) => !s.source?.isLive && s.positionSeconds > 0);
   const duration = usePlayerStore((s) => s.durationSeconds);
+  const programmeLength = usePlayerStore((s) => s.source?.catchupProgramSeconds);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const mode = usePlayerStore((s) => s.mode);
@@ -1848,7 +1849,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                   {t('radio')}
                 </span>
               ) : showTime && (compact || !showSeek) ? (
-                <TimeReadout shown={visible} duration={duration} tiny={tiny} />
+                <TimeReadout shown={visible} duration={duration ?? programmeLength} tiny={tiny} />
               ) : null}
               {!panelOwnsError && source.archive && !tiny && <WatchLiveButton short={!!compact || narrow} />}
               {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}

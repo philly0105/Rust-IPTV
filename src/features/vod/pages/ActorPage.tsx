@@ -171,7 +171,7 @@ export function ActorPage() {
 
   return (
     <div className="h-full overflow-x-hidden overflow-y-auto" data-testid="vod-actor">
-      <Page width="wide" className="flex flex-col gap-10">
+      <Page width="full" className="flex flex-col gap-10">
         {/* The loaded person renders a visible h1 with their name; every other state keeps one sr-only h1. */}
         {!loaded && <h1 className="sr-only">{pageTitle}</h1>}
         {body}

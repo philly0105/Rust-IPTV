@@ -11,8 +11,10 @@ import { GLASS_FOCUS } from './focus';
  * Page widths (DS-PAGE-FRAME), in rem against the 15 px root so they follow the UI scale:
  *   narrow   56rem  (840 px)  settings, forms, a single column of rows
  *   default  80rem (1200 px)  lists, stats, archive, scheduled
- *   wide    120rem (1800 px)  poster grids and rails
- *   full     no cap           the guide, the player, anything that scrolls sideways
+ *   wide    120rem (1800 px)  poster grids, pages that mix rails with rows of text
+ *   full     no cap           the guide, the player, anything that scrolls sideways (the Movies
+ *                             and Series landings and an actor's page, whose rails take the extra
+ *                             width as cards, as Home's do)
  */
 export type PageWidth = 'narrow' | 'default' | 'wide' | 'full';
 

@@ -338,9 +338,11 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     const { router } = renderRoutes(routes(), '/s/s2/movies');
     const bar = await screen.findByTestId('tab-bar');
     await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s2/live'));
-    // Movies of a source is under More.
-    const more = within(bar).getByRole('button', { name: 'More' });
-    expect(more.className).toContain('before:bg-accent');
+    // Movies of a source is under More, which names it: the tick in the mark tone, the page's own icon and name.
+    const more = within(bar).getByRole('button', { name: 'Movies, More' });
+    expect(more.className).toContain('before:bg-accent-mark');
+    expect(more.querySelector('.truncate')?.textContent).toBe('Movies');
+    expect(more.getAttribute('aria-current')).toBe('true');
     fireEvent.click(more);
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     expect(more.getAttribute('aria-expanded')).toBe('true');
@@ -379,9 +381,9 @@ describe('phone tab bar with no sources', () => {
     fireEvent.click(live);
     await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
     expect(live.getAttribute('aria-current')).toBe('page');
-    expect(within(bar).getByRole('button', { name: 'More' }).getAttribute('aria-current')).toBeNull();
+    expect(within(bar).getByRole('button', { name: /More$/ }).getAttribute('aria-current')).toBeNull();
     // Nor does the sheet's Manage sources row say it is current, as it is not drawn so.
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     const manage = within(sheet).getByRole('link', { name: 'Manage sources' });
     expect(manage.getAttribute('aria-current')).toBeNull();
@@ -395,7 +397,7 @@ describe('phone More sheet with one source', () => {
     handlers([makeSource('s1', { name: 'Night Portal', radioCount: 4 })]);
     const { router } = renderRoutes(routes(), '/s/s1/series');
     const bar = await screen.findByTestId('tab-bar');
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     const watch = within(sheet).getByRole('region', { name: 'Watch' });
     await waitFor(() => expect(within(watch).getAllByRole('link').map((l) => l.textContent)).toEqual(['Radio', 'Movies', 'Series', 'Sports', 'Multi-view']));
@@ -415,7 +417,7 @@ describe('phone More sheet with one source', () => {
     handlers([makeSource('s1', { name: 'Night Portal' })]);
     renderRoutes(routes(), '/s/s1/movie/9');
     const bar = await screen.findByTestId('tab-bar');
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     const watch = within(sheet).getByRole('region', { name: 'Watch' });
     const movies = await within(watch).findByRole('link', { name: 'Movies' });
@@ -454,7 +456,7 @@ describe('the Sources page a Watch row led to, once a source exists', () => {
     const bar = await screen.findByTestId('tab-bar');
     await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live'));
     expect(currentLinks(bar)).toEqual([]);
-    const more = within(bar).getByRole('button', { name: 'More' });
+    const more = within(bar).getByRole('button', { name: /More$/ });
     expect(more.getAttribute('aria-current')).toBe('true');
     fireEvent.click(more);
     const sheet = await screen.findByRole('dialog', { name: 'More' });
@@ -465,7 +467,7 @@ describe('the Sources page a Watch row led to, once a source exists', () => {
     media(...PHONE);
     renderRoutes(routes(), '/sources?for=movies');
     const bar = await screen.findByTestId('tab-bar');
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     await within(sheet).findByRole('list', { name: 'Backup' });
     expect(currentLinks(sheet)).toEqual([within(sheet).getByRole('link', { name: 'Manage sources' })]);

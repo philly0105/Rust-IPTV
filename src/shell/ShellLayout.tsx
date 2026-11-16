@@ -456,7 +456,7 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
             {Array.from({ length: 5 }, (_, i) => (
               <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
                 <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
-                <Skeleton className="h-2 w-10" />
+                <Skeleton className="h-2.5 w-10" />
               </div>
             ))}
           </div>

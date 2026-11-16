@@ -81,7 +81,7 @@
   "origin": "Origin",
 
   "serverUrl": "URL сервера",
-  "serverUrlHint": "Укажыце порт, калі правайдар яго даў, напрыклад http://example.com:8080.",
+  "serverUrlHint": "Укажыце порт, калі правайдар яго даў, напрыклад http://example.com:8080. Ёсць поўная спасылка з username= і password=? Устаўце яе сюды, і палі запоўняцца.",
   "username": "Імя карыстальніка",
   "password": "Пароль",
   "showSecret": "Паказаць пароль",

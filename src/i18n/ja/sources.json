@@ -71,7 +71,7 @@
   "origin": "Origin",
 
   "serverUrl": "サーバーURL",
-  "serverUrlHint": "プロバイダーからポート番号が提供されている場合は含めてください（例：http://example.com:8080）。",
+  "serverUrlHint": "プロバイダーからポート番号が提供されている場合は含めてください（例：http://example.com:8080）。username= と password= を含む完全なリンクがある場合は、ここに貼り付けると各欄に入力されます。",
   "username": "ユーザー名",
   "password": "パスワード",
   "showSecret": "パスワードを表示",

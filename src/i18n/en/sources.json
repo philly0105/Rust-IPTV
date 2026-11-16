@@ -71,7 +71,7 @@
   "origin": "Origin",
 
   "serverUrl": "Server URL",
-  "serverUrlHint": "Include the port if your provider gave one, for example http://example.com:8080.",
+  "serverUrlHint": "Include the port if your provider gave one, for example http://example.com:8080. Got a full link with username= and password=? Paste it here and the fields fill in.",
   "username": "Username",
   "password": "Password",
   "showSecret": "Show password",

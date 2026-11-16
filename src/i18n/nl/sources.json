@@ -71,7 +71,7 @@
   "origin": "Origin",
 
   "serverUrl": "Server-URL",
-  "serverUrlHint": "Vermeld de poort als je provider die heeft opgegeven, bijvoorbeeld http://example.com:8080.",
+  "serverUrlHint": "Vermeld de poort als je provider die heeft opgegeven, bijvoorbeeld http://example.com:8080. Heb je een volledige link met username= en password=? Plak die hier, dan worden de velden ingevuld.",
   "username": "Gebruikersnaam",
   "password": "Wachtwoord",
   "showSecret": "Wachtwoord tonen",

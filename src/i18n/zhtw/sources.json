@@ -71,7 +71,7 @@
   "origin": "Origin",
 
   "serverUrl": "伺服器網址",
-  "serverUrlHint": "若供應商有提供連接埠，請一併填寫，例如 http://example.com:8080。",
+  "serverUrlHint": "若供應商有提供連接埠，請一併填寫，例如 http://example.com:8080。有包含 username= 和 password= 的完整連結？貼到這裡，各欄位會自動填好。",
   "username": "使用者名稱",
   "password": "密碼",
   "showSecret": "顯示密碼",

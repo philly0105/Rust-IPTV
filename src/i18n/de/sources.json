@@ -71,7 +71,7 @@
   "origin": "Origin",
 
   "serverUrl": "Server-URL",
-  "serverUrlHint": "Geben Sie den Port mit an, falls Ihr Anbieter einen genannt hat, zum Beispiel http://example.com:8080.",
+  "serverUrlHint": "Geben Sie den Port mit an, falls Ihr Anbieter einen genannt hat, zum Beispiel http://example.com:8080. Sie haben einen vollständigen Link mit username= und password=? Fügen Sie ihn hier ein, dann füllen sich die Felder.",
   "username": "Benutzername",
   "password": "Passwort",
   "showSecret": "Passwort anzeigen",

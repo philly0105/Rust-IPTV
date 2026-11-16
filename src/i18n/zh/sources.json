@@ -71,7 +71,7 @@
   "origin": "Origin",
 
   "serverUrl": "服务器 URL",
-  "serverUrlHint": "如果提供商提供了端口，请一并填写，例如 http://example.com:8080。",
+  "serverUrlHint": "如果提供商提供了端口，请一并填写，例如 http://example.com:8080。有包含 username= 和 password= 的完整链接？粘贴到这里，各字段会自动填好。",
   "username": "用户名",
   "password": "密码",
   "showSecret": "显示密码",

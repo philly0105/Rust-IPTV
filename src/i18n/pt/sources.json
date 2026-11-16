@@ -76,7 +76,7 @@
   "origin": "Origin",
 
   "serverUrl": "URL do servidor",
-  "serverUrlHint": "Inclua a porta se o provedor tiver informado uma, por exemplo http://example.com:8080.",
+  "serverUrlHint": "Inclua a porta se o provedor tiver informado uma, por exemplo http://example.com:8080. Tem um link completo com username= e password=? Cole aqui e os campos são preenchidos.",
   "username": "Nome de usuário",
   "password": "Senha",
   "showSecret": "Mostrar senha",

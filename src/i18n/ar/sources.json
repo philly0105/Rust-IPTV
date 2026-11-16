@@ -91,7 +91,7 @@
   "origin": "Origin",
 
   "serverUrl": "رابط الخادم",
-  "serverUrlHint": "أضف المنفذ إن أعطاك المزوّد واحدًا، مثل http://example.com:8080.",
+  "serverUrlHint": "أضف المنفذ إن أعطاك المزوّد واحدًا، مثل http://example.com:8080. لديك رابط كامل فيه username= وpassword=؟ الصقه هنا وتُملأ الحقول.",
   "username": "اسم المستخدم",
   "password": "كلمة المرور",
   "showSecret": "إظهار كلمة المرور",

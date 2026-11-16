@@ -91,7 +91,7 @@
   "origin": "Origin",
 
   "serverUrl": "رابط الخادم",
-  "serverUrlHint": "زيد البورت إلا عطاهولك المزود، بحال http://example.com:8080.",
+  "serverUrlHint": "زيد البورت إلا عطاهولك المزود، بحال http://example.com:8080. عندك رابط كامل فيه username= و password=؟ لصقو هنا والخانات كيتعمرو.",
   "username": "اسم المستخدم",
   "password": "كلمة المرور",
   "showSecret": "ورّي كلمة السر",

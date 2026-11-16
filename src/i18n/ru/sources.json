@@ -81,7 +81,7 @@
   "origin": "Origin",
 
   "serverUrl": "URL сервера",
-  "serverUrlHint": "Укажите порт, если провайдер его выдал, например http://example.com:8080.",
+  "serverUrlHint": "Укажите порт, если провайдер его выдал, например http://example.com:8080. Есть полная ссылка с username= и password=? Вставьте её сюда, и поля заполнятся.",
   "username": "Имя пользователя",
   "password": "Пароль",
   "showSecret": "Показать пароль",

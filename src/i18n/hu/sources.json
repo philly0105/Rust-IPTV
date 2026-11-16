@@ -71,7 +71,7 @@
   "origin": "Origin",
 
   "serverUrl": "Kiszolgáló URL-címe",
-  "serverUrlHint": "Adja meg a portot is, ha a szolgáltató megadott egyet, például http://example.com:8080.",
+  "serverUrlHint": "Adja meg a portot is, ha a szolgáltató megadott egyet, például http://example.com:8080. Teljes linket kapott username= és password= résszel? Illessze be ide, és a mezők kitöltődnek.",
   "username": "Felhasználónév",
   "password": "Jelszó",
   "showSecret": "Jelszó megjelenítése",

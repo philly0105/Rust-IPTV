@@ -118,6 +118,13 @@
   /* Loading placeholders (the skeleton-surface utility) and the band their shimmer sweeps. */
   --color-skeleton: var(--color-surface-2);
   --color-skeleton-shine: var(--color-surface-3);
+  /*
+   * Plates behind channel logos (ChannelLogo, the multi-view ChannelMark), chosen by the logo's
+   * own colours rather than the theme: a white logo needs the dark plate on the light page too.
+   * Read as bg-(--color-logo-plate) and bg-(--color-logo-plate-dark).
+   */
+  --color-logo-plate: #eef1f5;
+  --color-logo-plate-dark: #161d2a;
   --color-glow: rgb(245 181 68 / 0.22);
 
   /* Glass (C8): overlays drawn over video or artwork. */
@@ -217,6 +224,8 @@
 
   --color-hover: rgb(238 241 246 / 0.07);
   --color-active: rgb(238 241 246 / 0.11);
+  /* A neutral step off black, not the navy plate. */
+  --color-logo-plate-dark: #151a23;
 
   --color-scrim: rgb(0 0 0 / 0.78);
   --color-glass: rgb(0 0 0 / 0.72);

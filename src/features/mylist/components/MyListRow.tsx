@@ -140,7 +140,7 @@ function MyListRowImpl({
         <div
           aria-hidden
           className={cn(
-            'pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-accent shadow-[0_0_8px_var(--color-glow)]',
+            'pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-accent-mark',
             dropTarget === 'before' ? 'top-0' : 'bottom-0',
           )}
         />

@@ -1045,7 +1045,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       ) : null}
       {!wide && drawerOpen ? (
         <>
-          <div className="fixed inset-0 z-40 bg-black/40" aria-hidden onClick={() => setDrawerOpen(false)} />
+          <div className="fixed inset-0 z-40 bg-scrim" aria-hidden onClick={() => setDrawerOpen(false)} />
           <aside
             ref={drawerRef}
             role="dialog"

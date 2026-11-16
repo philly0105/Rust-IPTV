@@ -16,6 +16,7 @@ import { useShellStore } from './store';
 export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; area: string; desktopOnly?: true }[] = [
   { combo: 'mod+k', descKey: 'scPalette', area: 'Global' },
   { combo: 'mod+f', descKey: 'scSearch', area: 'Global' },
+  { combo: '/', descKey: 'scSearch', area: 'Global' },
   // A browser keeps Ctrl+R for reload (SH-ctrl-r-browser); only the app window binds it.
   { combo: 'mod+r', descKey: 'scRecent', area: 'Global', desktopOnly: true },
   { combo: '?', descKey: 'scHelp', area: 'Global' },
@@ -27,7 +28,6 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'mod+alt+l', descKey: 'parental:shortcutLockNow', area: 'Parental controls' },
   { combo: 'mod+b', descKey: 'scSidebar', area: 'Live' },
   { combo: 'digit', descKey: 'scDigits', area: 'Live' },
-  { combo: '/', descKey: 'live:shortcutFocusSearch', area: 'Live' },
   // The group column and the channel list hand focus across (CategorySidebar onListKey, ChannelList onKeyDown).
   { combo: 'arrowleft', descKey: 'live:shortcutColumns', area: 'Live' },
   { combo: 'arrowright', descKey: 'live:shortcutColumns', area: 'Live' },
@@ -45,8 +45,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   // The focused channel list (ChannelList.tsx onKeyDown): while a live channel plays, plain Page Up/Down zap.
   { combo: 'shift+pageup', descKey: 'scChannelListPage', area: 'Live' },
   { combo: 'shift+pagedown', descKey: 'scChannelListPage', area: 'Live' },
-  // Guide (EpgGridPage.tsx): search and jump to a date and time.
-  { combo: '/', descKey: 'guide:searchLabel', area: 'Guide' },
+  // Guide (EpgGridPage.tsx): jump to a date and time. Its search is the shell's Ctrl+F and "/".
   { combo: 't', descKey: 'guide:jumpTitle', area: 'Guide' },
   // The focused guide grid (EpgGridPage.tsx onGridKey).
   { combo: 'arrowup', descKey: 'scGuideChannel', area: 'Guide' },

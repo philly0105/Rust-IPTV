@@ -311,7 +311,7 @@ describe('Search zero state (critique: search; CB "Search zero state")', () => {
     rememberSearch('harbor');
     renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
     const start = await screen.findByTestId('vod-search-start');
-    expect(within(start).getByText('Search every source')).toBeTruthy();
+    expect(within(start).getByText('Search everything')).toBeTruthy();
     fireEvent.click(within(start).getByRole('button', { name: 'harbor' }));
     await waitFor(() => expect(currentLocation).toBe('/search?q=harbor'));
   });

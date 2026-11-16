@@ -1,13 +1,13 @@
 import { useQueries } from '@tanstack/react-query';
 import type { Virtualizer } from '@tanstack/react-virtual';
-import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, X } from 'lucide-react';
-import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { History, Radio, RotateCw, Search, SearchX, Settings as SettingsIcon, TriangleAlert, X } from 'lucide-react';
+import { memo, useCallback, useContext, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { rpcRaw } from '@/api/transport';
+import { isDesktop, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type GuideSearchHit, type Page as PageOf, type RecentEntry, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
@@ -19,7 +19,12 @@ import { ms } from '@/features/live/lib/epgTime';
 import { clockTime, dayHeading } from '@/features/recording/lib/schedule';
 import { useParentalStatus } from '@/features/parental/status';
 import type { PlayItemArgs } from '@/features/player';
-import { joinList } from '@/shell/dashboard/cards';
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
+import { useChannelNumberHits } from '@/shell/channelNumberSearch';
+import { SearchEverythingLink } from '@/shell/SearchEverythingLink';
+import { containsWords, SETTING_TARGETS, SETTINGS_SECTIONS } from '@/shell/settingTargets';
+import { buttonMenuAnchor, ChannelMenuContext, joinList } from '@/shell/dashboard/cards';
+import { ChannelMenuHost } from '@/shell/dashboard/ChannelCardMenu';
 import { intlLocale, numberFormat } from '@/lib/intl';
 import { snapshotTitle } from '@/lib/title';
 
@@ -31,6 +36,7 @@ import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { useSearchLocks } from '../hooks/useSearchLocks';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useShowSourceName } from '../hooks/useShowSourceName';
 import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { itemLanguage } from '../lib/language';
@@ -55,6 +61,7 @@ import {
   type SearchHit,
   type SearchMore,
   type SourceSearch,
+  withNumberHits,
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
@@ -127,8 +134,12 @@ function focusResult(scroller: HTMLElement, index: number, reveal: boolean, sect
 
 const EMPTY_STALKER = splitStalkerResults([]);
 
-/** Guide programmes the Programmes tab lists for one query (`epg.search`, per source and in all). */
-const PROGRAMME_LIMIT = 50;
+/**
+ * Guide programmes the Programmes tab asks for one query (`epg.search`, per source and in all;
+ * the core allows 200). One airing of a network show on the owner's regional and backup copies
+ * used up 50, so the tab answered "when is it on next" with one time only.
+ */
+const PROGRAMME_LIMIT = 200;
 
 /**
  * Stalker portals keep VOD out of SQLite, so their movies and series are searched on the portal,
@@ -201,6 +212,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   }, [parentalOn]);
 
   const sourcesQ = useSourcesList();
+  const adding = useNoSourcesAdding();
   const scopedSource = useSource(sourceId);
   const allSources = useMemo(() => sourcesQ.data ?? [], [sourcesQ.data]);
   const searchSources = useMemo(
@@ -232,6 +244,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const prefs = useDisplayPrefs();
   const programmeSources = useMemo(() => (facet ? [facet] : searchSources.map((s) => s.id)), [facet, searchSources]);
   const programmes = useProgrammeSearch(programmeSources, query, { enabled: !!query, limit: PROGRAMME_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
+  // A typed channel number ("12") also finds the channel at that number in each searched source.
+  const numbered = useChannelNumberHits(programmeSources, query, !!query);
 
   // While a larger page loads, the previous page stays on screen: cap it by the limit it was fetched with.
   const [settledLimit, setSettledLimit] = useState(limit);
@@ -245,13 +259,13 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const answerGroups = useMemo(
     () =>
       groupSearchResults({
-        result: capped.result,
+        result: withNumberHits(capped.result, numbered.channels),
         extraMovies: stalker.movies,
         extraSeries: stalker.series,
         sources: allSources.length ? allSources : searchSources,
         sourceFilter: facet,
       }),
-    [capped.result, stalker.movies, stalker.series, allSources, searchSources, facet],
+    [capped.result, numbered.channels, stalker.movies, stalker.series, allSources, searchSources, facet],
   );
   // L3-vod-5: the query the results on screen answer (catalog.search keeps the last answer while a
   // newer one loads). While the box holds a longer query than that, the results narrow to it at
@@ -289,8 +303,13 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     [scoped, facetCapped.result, facetCapped.more, stalker.movies, stalker.series, allSources, facetOwn],
   );
 
-  const scopeName = scopedSource.data?.name;
-  const placeholder = scoped && scopeName ? t('searchInSource', { source: scopeName }) : t('searchEverything');
+  // A source is named only when there are others to tell it from (useShowSourceName); with one,
+  // a source's search is "Search this source", as on its landing.
+  const showSourceName = useShowSourceName();
+  const scopeName = showSourceName ? scopedSource.data?.name : undefined;
+  // One name for the global search: the header box that opened it says "Search everything" too.
+  const placeholder = scoped ? (scopeName ? t('searchInSource', { source: scopeName }) : t('searchSource')) : t('searchEverything');
+  const startTitle = scoped ? (scopeName ? t('searchSourceTitle', { source: scopeName }) : t('searchSource')) : t('searchTitle');
   // ArrowDown in the header field moves into the results (when there are any on screen).
   // Reads only refs, so the header the shell holds never calls a stale copy.
   const onFieldKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -317,6 +336,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
           else rememberSearch(v);
         },
         onKeyDown: onFieldKeyDown,
+        // This field is the global search, so the palette's button does not sit beside it.
+        hidePalette: true,
       },
     },
     [draft, placeholder, scopeName],
@@ -369,6 +390,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
   // Programmes are a tab of their own, after the catalog's; the only one when nothing else matched.
   const programmeHits = programmes.hits;
+  // The tab and Top results count shows (rows after folding), not channel-airings: "SportsCenter"
+  // at 7:00 on 50 channels is one row, and "+" says the answer stopped at the limit.
+  const programmeRows = useMemo(() => countProgrammeRows(programmeHits), [programmeHits]);
+  const programmesMore = programmeHits.length >= PROGRAMME_LIMIT;
   // Top results (critique: search): when the answer spans more than one type, the page opens on a
   // slice of each (a rail of movies, of series, the first channels and programmes), each with
   // "See all" to its tab, instead of the first type alone and a mostly empty screen.
@@ -386,7 +411,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   );
   const anyResults = groups.length > 0 || programmeHits.length > 0;
   const showBadges = !scoped && allSources.length > 1;
-  const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
+  const loading = !!query && (catalog.isPending || (groups.length === 0 && (stalker.pending || numbered.pending)));
   // Back from a title: the results open where you left them (same query, type and source in the
   // URL), with focus on the title you opened. A link here (PUSH) is a fresh visit from the top.
   const navigationType = useNavigationType();
@@ -438,10 +463,23 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // Some results arrived but one lookup failed (the library or a portal): say so instead of showing a silently short list.
   const partialError = groups.length > 0 ? (catalog.isError ? catalog.error : stalker.error) : undefined;
 
+  // Settings that match, listed by the search of everything as the palette lists them.
+  const settingRows = useSettingMatches(query, !scoped);
+  // The results on screen answer an older query than the field holds, and do not narrow to it
+  // (a word replaced or shortened): dimmed until the answer comes, as the guide's panel does.
+  const stale = !!draftQuery && draftQuery !== answered && !previewTerms;
+  // With no source there is nothing to search: the shared no-source state, as every page has.
+  const noSources = (sourcesQ.data?.length === 0 || adding) && !scoped;
+
   let body;
   if (scoped && scopedSource.isError && isSourceMissing(scopedSource.error)) {
     // L1-vod-13: the scoped source was removed; nothing to search, so offer the way back instead.
     body = <SourceMissing />;
+  } else if (noSources) {
+    body = <NoSourcesState icon={<Search />} title={t('searchTitle')} description={t('searchNoSources')} />;
+  } else if (!query && normalizeQuery(draft)) {
+    // The first query is on its way: its skeleton, not the start screen under a field that holds it.
+    body = <SearchSkeleton />;
   } else if (!query) {
     body = (
       <SearchStart
@@ -452,12 +490,12 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
           setDraft(q);
           rememberSearch(q);
         }}
-        title={scoped && scopeName ? t('searchSourceTitle', { source: scopeName }) : t('searchTitle')}
+        title={startTitle}
         hint={draft.trim().length === 1 ? t('searchMinLength', { count: 2 }) : t('searchHint')}
         empty={
           <EmptyState
             icon={<Search size={28} />}
-            title={scoped && scopeName ? t('searchSourceTitle', { source: scopeName }) : t('searchTitle')}
+            title={startTitle}
             description={draft.trim().length === 1 ? t('searchMinLength', { count: 2 }) : t('searchHint')}
           />
         }
@@ -485,7 +523,25 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       />
     );
   } else if (!anyResults) {
-    body = <EmptyState icon={<SearchX size={28} />} title={t('noResultsTitle', { query })} description={t('noResultsHint')} />;
+    body = (
+      <EmptyState
+        icon={<SearchX size={28} />}
+        title={t('noResultsTitle', { query })}
+        description={t('noResultsHint')}
+        // A source's search hands the text to the search of everything.
+        action={scoped ? <SearchEverythingLink query={query} /> : undefined}
+      />
+    );
+    // The search of everything also finds settings, as the palette does: when only settings
+    // match, they lead and the no-results note under them is a quiet line, not the page's state.
+    if (settingRows.length > 0) {
+      body = (
+        <>
+          <SettingsMatches rows={settingRows} />
+          <EmptyState size="inline" icon={<SearchX />} title={t('noResultsTitle', { query })} description={t('noResultsHint')} />
+        </>
+      );
+    }
   } else {
     body = (
       <>
@@ -521,52 +577,55 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
               badge: capped.more[g.kind] ? t('searchCountMore', { count: g.hits.length }) : g.hits.length,
             })),
             ...(programmeHits.length > 0
-              ? [{ id: 'programmes', label: t('group_programmes'), badge: programmeHits.length >= PROGRAMME_LIMIT ? t('searchCountMore', { count: programmeHits.length }) : programmeHits.length }]
+              ? [{ id: 'programmes', label: t('group_programmes'), badge: programmesMore ? t('searchCountMore', { count: programmeRows }) : programmeRows }]
               : []),
           ]}
         />
-        {showTop ? (
-          <div {...tabPanelProps('search-results', 'top')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
-            <TopResults
-              groups={groups}
-              more={capped.more}
-              programmes={programmeHits}
-              programmesMore={programmeHits.length >= PROGRAMME_LIMIT}
-              sources={allSources}
-              showBadges={showBadges}
-              stripCountryPrefix={prefs.stripCountryPrefix}
-              resume={resume}
-              locked={lockedHit}
-              typeHref={typeHref}
-              onPlayChannel={playChannel}
-            />
-          </div>
-        ) : showProgrammes ? (
-          <div {...tabPanelProps('search-results', 'programmes')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
-            <ProgrammeList hits={programmeHits} sources={allSources} showSource={showBadges} stripCountryPrefix={prefs.stripCountryPrefix} />
-          </div>
-        ) : activeGroup && (
-          <div
-            {...tabPanelProps('search-results', activeGroup.kind)}
-            onClickCapture={rememberResult}
-            className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            {activeGroup.kind === 'live' ? (
-              <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} strip={prefs.stripCountryPrefix} onPlayChannel={playChannel} scrollRef={scrollRef} />
-            ) : (
-              <PosterGrid
-                key={activeGroup.kind}
-                kind={activeGroup.kind}
-                hits={activeGroup.hits}
+        <div aria-busy={stale || undefined} className={cn('motion-safe:transition-opacity', stale && 'opacity-70')} data-testid="vod-search-results">
+          {showTop ? (
+            <div {...tabPanelProps('search-results', 'top')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+              <TopResults
+                groups={groups}
+                more={capped.more}
+                programmes={programmeHits}
+                programmeRows={programmeRows}
+                programmesMore={programmesMore}
+                sources={allSources}
                 showBadges={showBadges}
-                minWidth={coverWidth}
-                scrollRef={scrollRef}
+                stripCountryPrefix={prefs.stripCountryPrefix}
                 resume={resume}
                 locked={lockedHit}
+                typeHref={typeHref}
+                onPlayChannel={playChannel}
               />
-            )}
-          </div>
-        )}
+            </div>
+          ) : showProgrammes ? (
+            <div {...tabPanelProps('search-results', 'programmes')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+              <ProgrammeList hits={programmeHits} sources={allSources} showSource={showBadges} stripCountryPrefix={prefs.stripCountryPrefix} />
+            </div>
+          ) : activeGroup && (
+            <div
+              {...tabPanelProps('search-results', activeGroup.kind)}
+              onClickCapture={rememberResult}
+              className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              {activeGroup.kind === 'live' ? (
+                <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} strip={prefs.stripCountryPrefix} onPlayChannel={playChannel} scrollRef={scrollRef} />
+              ) : (
+                <PosterGrid
+                  key={activeGroup.kind}
+                  kind={activeGroup.kind}
+                  hits={activeGroup.hits}
+                  showBadges={showBadges}
+                  minWidth={coverWidth}
+                  scrollRef={scrollRef}
+                  resume={resume}
+                  locked={lockedHit}
+                />
+              )}
+            </div>
+          )}
+        </div>
         {partialError && (
           <PartialErrorNotice
             message={partialError.message}
@@ -583,17 +642,21 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
           loading={loadingMore}
           onShowMore={() => nextLimit !== undefined && setCap({ key: capKey, limit: nextLimit })}
         />
+        <SettingsMatches rows={settingRows} />
       </>
     );
   }
 
   return (
     <div ref={scrollRef} className="h-full overflow-x-hidden overflow-y-auto" data-testid={scoped ? 'vod-search-source' : 'vod-search'}>
-      <Page width="wide" className="flex flex-col gap-6">
-        {/* VL-search-title-dup: the header says "Search" (and the source); the page's h1 is for screen readers. */}
-        <h1 className="sr-only">{t('search')}</h1>
-        {body}
-      </Page>
+      {/* The channel menu (Play, multi-view, lists, edits, locks) for the channel results, as Home's cards have it. */}
+      <ChannelMenuHost>
+        <Page width="wide" className="flex flex-col gap-6">
+          {/* VL-search-title-dup: the header says "Search" (and the source); the page's h1 is for screen readers. */}
+          <h1 className="sr-only">{t('search')}</h1>
+          {body}
+        </Page>
+      </ChannelMenuHost>
     </div>
   );
 }
@@ -664,6 +727,15 @@ function PartialErrorNotice({ message, onRetry }: { message: string; onRetry: ()
   );
 }
 
+/** The programme rows `hits` fold into: one per title and start (see {@link programmeDays}). */
+function programmeRowKey(hit: GuideSearchHit): string {
+  return `${hit.program.title.trim().toLowerCase()}\u0000${ms(hit.program.start)}`;
+}
+
+function countProgrammeRows(hits: readonly GuideSearchHit[]): number {
+  return new Set(hits.map(programmeRowKey)).size;
+}
+
 /** Local midnight of the day `at` falls on. */
 function dayStart(at: number): number {
   const d = new Date(at);
@@ -696,7 +768,7 @@ function programmeDays(hits: readonly GuideSearchHit[], limit = Infinity): { day
   const rows = new Map<string, ProgrammeRow>();
   hits.forEach((hit, index) => {
     const at = ms(hit.program.start);
-    const key = `${hit.program.title.trim().toLowerCase()}\u0000${at}`;
+    const key = programmeRowKey(hit);
     const row = rows.get(key);
     if (row) row.also.push({ hit, index });
     else if (rows.size < limit) rows.set(key, { hit, index, at, also: [] });
@@ -879,8 +951,8 @@ const ProgrammeList = memo(function ProgrammeList({
 
 const CHANNEL_MIN_WIDTH = 260;
 const CHANNEL_GAP = 8;
-/** One channel button: 48px logo plus padding and border. Rows are measured after layout; this is the estimate. */
-const CHANNEL_ROW_HEIGHT = 66;
+/** One channel button: its name, what is on and the number over a 48px logo, plus padding and border. Rows are measured after layout; this is the estimate. */
+const CHANNEL_ROW_HEIGHT = 74;
 const POSTER_GAP = 16;
 /** Title (two lines) and meta line under a poster; rows are measured after layout. */
 const POSTER_CAPTION_HEIGHT = 64;
@@ -1257,6 +1329,24 @@ const PosterHitCell = memo(function PosterHitCell({
   );
 });
 
+/** Channel hits whose programme on now their cards name: the first page (one `epg.nowNext` call). */
+const NOW_LIMIT = SEARCH_LIMIT;
+
+/**
+ * What is on now on the first channel hits, by `itemKey`: how a user tells "ESPN HD" from
+ * "ESPN (Backup)", as Live TV's rows and the multi-view picker show it.
+ */
+function useNowTitles(hits: readonly SearchHit[]): Map<string, string> {
+  const { epgOffsetMinutes } = useDisplayPrefs();
+  const refs = useMemo(() => hits.slice(0, NOW_LIMIT).map((h) => (h.item as Channel).ref), [hits]);
+  const q = useRpcQuery('epg.nowNext', { refs, offsetMinutes: epgOffsetMinutes }, { enabled: refs.length > 0, staleTime: 60_000 });
+  return useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const [key, nn] of Object.entries(q.data ?? {})) if (nn.now?.title) titles.set(key, nn.now.title);
+    return titles;
+  }, [q.data]);
+}
+
 /** Channel hits; choosing one plays it. Memoized like PosterGrid. */
 const ChannelGrid = memo(function ChannelGrid({
   hits,
@@ -1272,6 +1362,7 @@ const ChannelGrid = memo(function ChannelGrid({
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
+  const now = useNowTitles(hits);
   return (
     <HitGrid
       hits={hits}
@@ -1280,7 +1371,9 @@ const ChannelGrid = memo(function ChannelGrid({
       rowHeight={() => CHANNEL_ROW_HEIGHT}
       scrollRef={scrollRef}
       testId="vod-search-channels"
-      renderCell={(h, i) => <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={strip} onPlayChannel={onPlayChannel} />}
+      renderCell={(h, i) => (
+        <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={strip} now={now.get(itemKey((h.item as Channel).ref))} onPlayChannel={onPlayChannel} />
+      )}
     />
   );
 });
@@ -1288,28 +1381,48 @@ const ChannelGrid = memo(function ChannelGrid({
 /** The channel logo's box, `w-12`: twelve spacing steps of 3.75 px at 100 % scale. */
 const CHANNEL_LOGO_PX = 45;
 
-/** One channel hit; choosing it plays the channel. The source is quiet text, not an outlined chip. */
+/**
+ * One channel hit; choosing it plays the channel. What is on now comes under the name; the source
+ * is quiet text, not an outlined chip. Right click, Shift+F10 or the context-menu key opens the
+ * channel menu (ChannelMenuHost).
+ */
 function ChannelHitButton({
   hit: h,
   index,
   showBadges,
   strip,
+  now,
   onPlayChannel,
 }: {
   hit: SearchHit;
   index: number;
   showBadges: boolean;
   strip: boolean;
+  /** The programme on now. */
+  now?: string | undefined;
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
   const c = h.item as Channel;
   // The logo's width is known, so it does not read its frame as it mounts (P2-GRID-2).
   const logoWidth = useScaledPx(CHANNEL_LOGO_PX, true);
+  const openMenu = useContext(ChannelMenuContext);
+  const menu = (pos: { x: number; y: number }) => openMenu?.({ pos, channel: c, onPlay: () => onPlayChannel(c, h) });
   return (
     <button
       type="button"
       data-grid-index={index}
       onClick={() => onPlayChannel(c, h)}
+      onContextMenu={(e) => {
+        if (!openMenu) return;
+        e.preventDefault();
+        menu({ x: e.clientX, y: e.clientY });
+      }}
+      onKeyDown={(e) => {
+        if (!openMenu || !((e.key === 'F10' && e.shiftKey) || e.key === 'ContextMenu')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        menu(buttonMenuAnchor(e.currentTarget));
+      }}
       className="flex w-full items-center gap-3 rounded-lg border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors"
     >
       <div className="w-12 shrink-0">
@@ -1319,6 +1432,11 @@ function ChannelHitButton({
       <div className="min-w-0 flex-1">
         {/* As Live TV's list names it: the country tag after the name, quiet, or none with the setting. */}
         <ChannelName name={h.title} strip={strip} title={h.title} className="block truncate text-body-sm font-medium text-fg text-match-parent" />
+        {now && (
+          <p dir="auto" title={now} className="truncate text-caption text-fg-muted" data-testid="search-channel-now">
+            {now}
+          </p>
+        )}
         {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
         <div className="flex min-w-0 gap-1.5 text-caption text-fg-subtle">
           {h.meta && <span className="tabular shrink-0">{h.meta}</span>}
@@ -1367,6 +1485,7 @@ const TopResults = memo(function TopResults({
   groups,
   more,
   programmes,
+  programmeRows,
   programmesMore,
   sources,
   showBadges,
@@ -1379,6 +1498,8 @@ const TopResults = memo(function TopResults({
   groups: SearchGroup[];
   more: SearchMore;
   programmes: readonly GuideSearchHit[];
+  /** Shows the programmes fold into (the tab's count). */
+  programmeRows: number;
   programmesMore: boolean;
   sources: readonly Source[];
   showBadges: boolean;
@@ -1398,6 +1519,8 @@ const TopResults = memo(function TopResults({
     [groups, showBadges],
   );
   const live = groups.find((g) => g.kind === 'live');
+  const liveShown = useMemo(() => live?.hits.slice(0, TOP_CHANNELS) ?? [], [live]);
+  const now = useNowTitles(liveShown);
   const sections: TopSection[] = [];
   if (posterGroups.length === 2 && posterGroups.every((p) => p.folded.length <= TOP_SHORT_RAIL)) {
     const hits = posterGroups.reduce((n, p) => n + p.group.hits.length, 0);
@@ -1446,9 +1569,16 @@ const TopResults = memo(function TopResults({
         <section key="live" aria-labelledby="search-top-live" className="flex flex-col gap-3" data-search-section="live">
           <SectionHeader id="search-top-live" title={t('group_live')} count={count(live.hits.length, more.live)} seeAll={{ to: typeHref('live') }} />
           <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_MIN_WIDTH}px, 1fr))` }} role="list">
-            {live.hits.slice(0, TOP_CHANNELS).map((h, i) => (
+            {liveShown.map((h, i) => (
               <div key={h.key} role="listitem" className="min-w-0">
-                <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={stripCountryPrefix} onPlayChannel={onPlayChannel} />
+                <ChannelHitButton
+                  hit={h}
+                  index={i}
+                  showBadges={showBadges}
+                  strip={stripCountryPrefix}
+                  now={now.get(itemKey((h.item as Channel).ref))}
+                  onPlayChannel={onPlayChannel}
+                />
               </div>
             ))}
           </div>
@@ -1466,7 +1596,7 @@ const TopResults = memo(function TopResults({
           <SectionHeader
             id="search-top-programmes"
             title={t('group_programmes')}
-            count={count(programmes.length, programmesMore)}
+            count={count(programmeRows, programmesMore)}
             seeAll={{ to: typeHref('programmes') }}
           />
           <ProgrammeList hits={programmes} limit={TOP_PROGRAMMES} sources={sources} showSource={showBadges} stripCountryPrefix={stripCountryPrefix} />
@@ -1534,6 +1664,86 @@ function TopPosterRail({
   );
 }
 
+/** Most settings the Search page lists for one query. */
+const SETTING_ROWS = 5;
+
+/**
+ * Settings whose names or keywords match the query, under the results and in the no-results
+ * state of the search of everything (`useSettingMatches`, `SettingsMatches`): the palette's settings rows, for the phone, where the
+ * palette has no way in, and for a desktop user who searched here. The sections ("Settings:
+ * Playback") and the single settings ("Interface size", opening the group that holds it), names
+ * first, then keyword matches, at most `SETTING_ROWS`.
+ */
+function useSettingMatches(query: string, enabled: boolean): SettingRow[] {
+  const { t, i18n } = useTranslation(['shell', 'settings', 'player']);
+  return useMemo(() => {
+    if (!enabled || !query) return [];
+    const en = i18n.getFixedT('en', ['shell', 'settings', 'player']);
+    const cap = (section: string) => `${section[0]!.toUpperCase()}${section.slice(1)}`;
+    const sectionName = (section: string) => t(`settings:section${cap(section)}`);
+    const words = (list: string) => list.split(',').map((w) => w.trim());
+    const all = [
+      ...SETTINGS_SECTIONS.filter((section) => isDesktop || section !== 'players').map((section) => ({
+        key: `settings.${section}`,
+        title: t('settingsSection', { section: sectionName(section) }),
+        to: `/settings/${section}`,
+        detail: undefined as string | undefined,
+        keywords: [section, ...words(t(`settings${cap(section)}Keywords`)), ...words(en(`settings${cap(section)}Keywords`))].join(' '),
+      })),
+      ...SETTING_TARGETS.filter((s) => isDesktop || s.section !== 'players').map((s) => ({
+        key: `setting.${s.id}`,
+        title: t(s.label),
+        to: `/settings/${s.section}#${s.id}`,
+        detail: t('settingsSection', { section: sectionName(s.section) }),
+        keywords: [en(s.label), ...s.keywords].join(' '),
+      })),
+    ];
+    const named = all.filter((r) => containsWords(r.title, query));
+    const found = all.filter((r) => !named.includes(r) && containsWords(`${r.title} ${r.keywords}`, query));
+    return [...named, ...found].slice(0, SETTING_ROWS);
+  }, [query, enabled, t, i18n]);
+}
+
+interface SettingRow {
+  key: string;
+  title: string;
+  to: string;
+  detail: string | undefined;
+}
+
+function SettingsMatches({ rows }: { rows: readonly SettingRow[] }) {
+  const { t } = useTranslation('shell');
+  if (rows.length === 0) return null;
+  return (
+    <section aria-labelledby="search-settings" className="flex flex-col gap-3" data-testid="search-settings">
+      <SectionHeader id="search-settings" title={t('navSettings')} />
+      <ul className="flex flex-col gap-1">
+        {rows.map((r) => (
+          <li key={r.key}>
+            <Link
+              to={r.to}
+              className={cn(
+                'flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-body-sm text-fg outline-none hover:bg-hover active:bg-active focus-visible:ring-2 focus-visible:ring-focus',
+                TOUCH_TARGET,
+              )}
+            >
+              <SettingsIcon aria-hidden size={16} className="shrink-0 text-fg-muted" />
+              <span dir="auto" className="min-w-0 truncate font-medium">
+                {r.title}
+              </span>
+              {r.detail && (
+                <span dir="auto" className="min-w-0 shrink-[2] truncate text-caption text-fg-subtle">
+                  {r.detail}
+                </span>
+              )}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function SearchSkeleton() {
   const { t } = useTranslation('vod');
   return (
@@ -1587,6 +1797,8 @@ function SearchStart({
   const { t } = useTranslation('vod');
   const stored = useRecentSearches();
   const queries = offerRecent ? stored : NO_QUERIES;
+  // The user's own progress on the posters, as the landings' Continue watching draws it.
+  const resume = useResumeLookup();
   const recent = useRpcQuery('recent.list', sourceId ? { sourceId, limit: 60 } : { limit: 60 }, { staleTime: 30_000 });
   const jump = useMemo(
     () => (recent.data ?? []).filter((e) => e.ref.contentType === 'movie' || e.ref.contentType === 'series').slice(0, JUMP_BACK_LIMIT),
@@ -1674,6 +1886,7 @@ function SearchStart({
                 href={detailHref(e.ref) ?? '#'}
                 posterUrl={e.snapshot.posterUrl}
                 meta={e.snapshot.subtitle}
+                progress={resume.get(resumeKey(e.ref))}
                 sourceId={e.ref.sourceId}
                 prefetch={kind ? { ref: e.ref, sourceKind: kind, posterUrl: e.snapshot.posterUrl } : undefined}
               />

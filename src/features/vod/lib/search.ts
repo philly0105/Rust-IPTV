@@ -70,6 +70,17 @@ export function capSearchResult(
   };
 }
 
+/**
+ * The result with the channels a typed number names (`catalog.channelByNumber`) first among its
+ * channels, each listed once; with none, the result itself.
+ */
+export function withNumberHits(result: CatalogSearchResult | undefined, numbered: readonly Channel[]): CatalogSearchResult | undefined {
+  if (numbered.length === 0) return result;
+  const first = new Set(numbered.map((c) => itemKey(c.ref)));
+  const live = result?.live ?? [];
+  return { live: [...numbered, ...live.filter((c) => !first.has(itemKey(c.ref)))], movies: result?.movies ?? [], series: result?.series ?? [] };
+}
+
 export type SearchGroupKind = 'live' | 'movies' | 'series';
 export const SEARCH_GROUP_ORDER: readonly SearchGroupKind[] = ['movies', 'series', 'live'];
 

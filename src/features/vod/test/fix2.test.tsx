@@ -183,7 +183,7 @@ describe('U4-fix2: one h1 per page, matching the shell header title', () => {
 
   it('search, empty and with results', async () => {
     renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
-    await screen.findByText('Search every source');
+    await screen.findByText('Search everything');
     expect(h1Texts()).toEqual(['Search']);
     expect(headerTitle()).toBe('Search');
     cleanup();

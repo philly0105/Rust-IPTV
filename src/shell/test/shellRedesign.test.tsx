@@ -549,7 +549,8 @@ describe('palette and shortcut reference polish', () => {
     expect(within(palette).getByText('Switch to light theme')).toBeTruthy();
     expect(within(palette).queryByText('Settings: Recording')).toBeNull();
     fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'recording' } });
-    expect(await within(palette).findByText('Settings: Recording')).toBeTruthy();
+    // The section, and as their detail the single settings it holds ("Recordings folder").
+    expect((await within(palette).findAllByText('Settings: Recording')).length).toBeGreaterThan(0);
     expect(within(palette).queryByText('Recent channels')).toBeNull();
   });
 

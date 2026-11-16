@@ -92,7 +92,7 @@ The filter applies wherever live channels appear: the channel list and the group
 ## TV guide
 
 - The time window is part of the URL, so Back and Forward step through it and a link opens the same window. T, or the window label, jumps to a date and time.
-- The search box in the header (/ or Ctrl+F; on a phone, the search icon at the top) searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. Global search (Ctrl+F) and the command palette find programmes too, and open the guide at the one you pick.
+- The search box in the header (/ or Ctrl+F; on a phone, the search icon at the top) searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. The Search page (Ctrl+F on a page without a search box of its own) and the command palette find programmes too, and open the guide at the one you pick.
 - "Record series" on a search hit records every airing of that title on that channel (XMLTV programmes only: the provider's own guide cannot feed a rule). Library > Scheduled lists the rules, which can be paused or removed.
 - The group menu also shows your favorites or a custom list, the zoom buttons (or Ctrl+scroll over the grid) change the time scale, and a row's right-click menu has "Match guide channel" and the favorite toggle.
 - When an Xtream channel has nothing in the XMLTV guide, the app shows the provider's own now and next, marked "From the provider's guide". Turn it off in Settings > Guide.
@@ -225,7 +225,7 @@ To use a phone, turn on "Allow phones on this network" under Settings > Remote (
 
 ## Phones and touch screens
 
-Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists Movies, Series, Sports and Multi-view first, then the Library pages, your sources and Settings. The theme switch is then in Settings > Appearance and the command palette. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
+Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists Movies, Series, Sports and Multi-view first, then the Library pages, your sources and Settings. The theme switch is then in Settings > Appearance. The Search tab also finds settings by name ("subtitles", "font size", "pin") below its results. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
 
 ## Appearance, language and startup
 
@@ -244,7 +244,7 @@ Press `?` in the app for the full list. The main ones:
 | Keys | Action |
 | --- | --- |
 | Ctrl+K | Command palette |
-| Ctrl+F | Global search |
+| Ctrl+F or / | Search this page (Live TV's channels, a category, the guide, My List...), or everything on a page without its own search |
 | Ctrl+R | Recently watched (desktop app; in a browser it reloads the page) |
 | Ctrl+Shift+L | Switch light / dark theme |
 | Ctrl+Alt+L | Lock parental controls now (while an unlock is running) |
@@ -252,7 +252,6 @@ Press `?` in the app for the full list. The main ones:
 | F11 | Fullscreen: the player while something plays, otherwise the whole app |
 | ? | Shortcut help |
 | Ctrl+B | Toggle the live TV group sidebar |
-| / | Focus the live TV channel search (in the TV guide: the programme search) |
 | T | Jump to a date and time (TV guide) |
 | 0-9 | Type a channel number to zap; Enter zaps at once instead of waiting |
 | Page Up / Page Down | Previous / next channel (live TV; from a custom list, the list's order) |

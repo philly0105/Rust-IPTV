@@ -682,6 +682,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 className="w-full max-sm:order-1 sm:w-56 sm:@max-4xl:flex-1"
                 // The header's field searches everything; this one says what it narrows.
                 placeholder={categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('searchAllMovies') : t('searchAllSeries')) : t('searchInCategory')}
+                // Ctrl+F and "/" land here (the shell's page-search rule), and the field shows the key.
+                data-page-search=""
+                shortcut="mod+f"
                 onSubmit={focusGrid}
                 onKeyDown={(e) => {
                   // ArrowDown leaves the search box for the posters.

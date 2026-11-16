@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { TOUCH_TARGET } from './Button';
 import { cn } from './cn';
+import { Kbd } from './Misc';
 import { useMergedRef } from './Tooltip';
 
 /**
@@ -525,6 +526,11 @@ export interface SearchInputProps extends Omit<ComponentPropsWithRef<'input'>, '
   /** Accessible name when there is no visible label. Defaults to the placeholder. */
   label?: string;
   size?: 'sm' | 'md';
+  /**
+   * The key that focuses the field (`mod+f`), drawn as compact caps at its end while it rests
+   * empty and unfocused, as the header's field shows it. Display only: bind the key elsewhere.
+   */
+  shortcut?: string;
 }
 
 export function SearchInput({
@@ -535,6 +541,7 @@ export function SearchInput({
   placeholder,
   className,
   size = 'md',
+  shortcut,
   onKeyDown,
   ref,
   ...rest
@@ -567,11 +574,16 @@ export function SearchInput({
           // pe-11 on touch: the clear button grows to 36 px there (end-1 plus 36 px reaches
           // 39.75 px in), so the text stops short of it and a tap at the end of a query moves
           // the caret instead of clearing the search.
-          'ps-9 pe-9 text-sm pointer-coarse:pe-11 [&::-webkit-search-cancel-button]:hidden',
+          'peer ps-9 pe-9 text-sm pointer-coarse:pe-11 [&::-webkit-search-cancel-button]:hidden',
           size === 'sm' ? 'h-8' : 'h-10',
+          // Room for the key hint while it shows; a long placeholder ends in an ellipsis before it.
+          shortcut && 'text-ellipsis pointer-fine:[&:placeholder-shown:not(:focus)]:pe-16',
         )}
         {...rest}
       />
+      {shortcut && !value && (
+        <Kbd combo={shortcut} size="sm" className="pointer-events-none absolute end-1.5 peer-focus:hidden pointer-coarse:hidden" />
+      )}
       {value && (
         <button
           type="button"

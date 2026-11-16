@@ -7,7 +7,7 @@
  */
 
 import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
@@ -91,6 +91,26 @@ function SearchingPage() {
   return <Page>movies page</Page>;
 }
 
+/** A page with its own search field in the page, as Live TV's channel search. */
+function PageSearchPage() {
+  const [v, setV] = useState('');
+  return (
+    <Page>
+      own search page
+      <input aria-label="Search channels" data-page-search="" value={v} onChange={(e) => setV(e.target.value)} />
+    </Page>
+  );
+}
+
+/** The Search page: its field is the global search, so no palette button sits beside it. */
+function GlobalSearchPage() {
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Search', search: { value: '', onChange: () => undefined, placeholder: 'Search everything', hidePalette: true } });
+  }, [shell]);
+  return <Page>search page</Page>;
+}
+
 /** A page whose results hang under the header's field (the guide's search panel). */
 const guideField = { current: null as HTMLInputElement | null };
 const onGuideFocus = vi.fn();
@@ -118,6 +138,9 @@ function routes() {
         { path: 'my-list', element: <Page>my list page</Page> },
         { path: 'searching', element: <SearchingPage /> },
         { path: 'guide-like', element: <GuideLikePage /> },
+        { path: 'global-search', element: <GlobalSearchPage /> },
+        { path: 'page-search', element: <PageSearchPage /> },
+        { path: 'search', element: <Page>search page</Page> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
@@ -262,7 +285,34 @@ describe('the header search slot', () => {
     expect(useShellStore.getState().paletteOpen).toBe(true);
   });
 
-  it("hands a page its field: the ref, focus, a name beyond the placeholder and the results it controls", async () => {
+  it('leaves the palette button out beside the global search field, which keeps its Ctrl F hint', async () => {
+    renderRoutes(routes(), '/global-search');
+    await screen.findByText('search page');
+    const field = screen.getByRole('searchbox', { name: 'Search everything' });
+    expect(field.parentElement!.parentElement!.textContent).toContain('Ctrl');
+    expect(screen.queryByTestId('header-palette')).toBeNull();
+    expect(screen.queryByTestId('open-palette')).toBeNull();
+  });
+
+  it('"/" and Ctrl+F focus the page\'s own search field, and open the Search page where there is none', async () => {
+    const { router } = renderRoutes(routes(), '/page-search');
+    await screen.findByText('own search page');
+    const field = screen.getByRole('textbox', { name: 'Search channels' });
+    fireEvent.keyDown(document.body, { key: '/', code: 'Slash' });
+    expect(document.activeElement).toBe(field);
+    // Typed in a field, "/" is text: nothing moves.
+    fireEvent.keyDown(field, { key: '/', code: 'Slash' });
+    expect(router.state.location.pathname).toBe('/page-search');
+    field.blur();
+    fireEvent.keyDown(document.body, { key: 'f', code: 'KeyF', ctrlKey: true });
+    expect(document.activeElement).toBe(field);
+    await act(() => router.navigate('/favorites'));
+    await screen.findByText('favorites page');
+    fireEvent.keyDown(document.body, { key: '/', code: 'Slash' });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+  });
+
+    it("hands a page its field: the ref, focus, a name beyond the placeholder and the results it controls", async () => {
     renderRoutes(routes(), '/guide-like');
     await screen.findByText('guide page');
     const field = screen.getByRole('searchbox', { name: 'Search the guide' });

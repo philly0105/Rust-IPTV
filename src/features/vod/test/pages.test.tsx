@@ -576,7 +576,7 @@ describe('SearchPage', () => {
 
   it('asks for a query when there is none', async () => {
     renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
-    await screen.findByText('Search every source');
+    await screen.findByText('Search everything');
     expect(callsOf('catalog.search')).toHaveLength(0);
   });
 });

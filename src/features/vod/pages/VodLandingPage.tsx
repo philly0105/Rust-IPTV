@@ -187,15 +187,18 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const sourceLine = sourceName ? (countText ? `${sourceName} · ${countText}` : sourceName) : countText;
 
   // One search entry (L1-visual-13): the header field searches this source. Typing opens the
-  // source's search page with the text so far; the field stays in the header there, so focus and
-  // the caret carry over. Later keystrokes before it opens replace that entry instead of stacking.
+  // source's search page with the text so far, on this section's tab (the others stay a click
+  // away); the field stays in the header there, so focus and the caret carry over. Later
+  // keystrokes before it opens replace that entry instead of stacking.
   const navigate = useNavigate();
   const [searchDraft, setSearchDraft] = useState('');
   const searchStarted = useRef(false);
   const onSearch = (v: string) => {
     setSearchDraft(v);
     if (!v.trim()) return;
-    void navigate(`/s/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(v)}`, { replace: searchStarted.current });
+    void navigate(`/s/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(v)}&type=${kind === 'movie' ? 'movies' : 'series'}`, {
+      replace: searchStarted.current,
+    });
     searchStarted.current = true;
   };
   // Warm the search page while the landing idles, so the first keystroke opens it at once.
@@ -211,10 +214,16 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // VOD starts here: warm hls.js and mpegts.js once the browser is idle (preloadEngines waits for
   // it), so the first movie or episode play does not fetch them after the click.
   useEffect(() => preloadEngines(), []);
-  // With one source the field says "Search this source": short enough for the field on a 1024 px
-  // tablet, where "Search channels, movies, and series" was cut off, and not "Search everything",
-  // the name of the palette's button right beside it.
-  const searchPlaceholder = sourceName ? t('searchInSource', { source: sourceName }) : t('searchSource');
+  // The field names what this page holds ("Search movies"), and the source only when there are
+  // others; "Search everything" is the palette's button right beside it.
+  const searchPlaceholder =
+    kind === 'movie'
+      ? sourceName
+        ? t('searchMoviesInSource', { source: sourceName })
+        : t('searchMovies')
+      : sourceName
+        ? t('searchSeriesInSource', { source: sourceName })
+        : t('searchSeries');
   usePageHeader(
     {
       title,

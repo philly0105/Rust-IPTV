@@ -16,7 +16,7 @@ import { isTypingTarget } from '@/ui/focus';
 import { ConnectionBanner, ConnectionWatcher } from './connection';
 import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
-import { focusSearchWhenReady } from './focusSearch';
+import { focusSearchWhenReady, SEARCH_FIELD } from './focusSearch';
 import { Header, HEADER_SEARCH_WIDTH } from './Header';
 import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
 import { Rail } from './Rail';
@@ -208,22 +208,30 @@ function GlobalShortcuts() {
     },
     { description: t('scPalette'), area, allowInInput: true, allowInModal: true },
   );
+  // Ctrl+F and "/" mean one thing everywhere: this page's search field (the header's, or one the
+  // page marks with data-page-search, as Live TV and a category grid do), else the Search page.
+  const searchThisPage = (e: KeyboardEvent) => {
+    e.preventDefault();
+    useShellStore.getState().setPaletteOpen(false);
+    const field = document.querySelector<HTMLInputElement>(SEARCH_FIELD);
+    if (field) {
+      field.focus();
+      field.select();
+      return;
+    }
+    navigate('/search');
+    focusSearchWhenReady();
+  };
   useShortcut(
     'mod+f',
     (e) => {
       if (navigationKeyBlocked(e)) return;
-      useShellStore.getState().setPaletteOpen(false);
-      const field = document.querySelector<HTMLInputElement>('[data-shell-search], [data-page-search]');
-      if (field && !window.location.pathname.startsWith('/search')) {
-        field.focus();
-        field.select();
-        return;
-      }
-      navigate('/search');
-      focusSearchWhenReady();
+      searchThisPage(e);
     },
     { description: t('scSearch'), area, allowInInput: true, allowInModal: true },
   );
+  // Typed in a field, "/" is text; the registry leaves it to the field.
+  useShortcut('/', searchThisPage, { description: t('scSearch'), area });
   // Desktop only: the app window has no reload, so Ctrl+R is free there. In a browser it is the
   // reload key, and claiming it sent a user refreshing a stuck page to Recently watched instead
   // (SH-ctrl-r-browser); there the palette and the rail lead to it.

@@ -200,6 +200,9 @@
 
   "onboardTitle": "Voeg je eerste bron toe",
   "onboardLead": "Kies het soort login dat je van je provider kreeg. Je kunt er later meer toevoegen.",
+  "onboardLeadLive": "Voor live tv heb je een bron nodig. Kies het soort login dat je van je provider kreeg.",
+  "onboardLeadMovies": "Voor films heb je een bron nodig. Kies het soort login dat je van je provider kreeg.",
+  "onboardLeadSeries": "Voor series heb je een bron nodig. Kies het soort login dat je van je provider kreeg.",
   "onboardM3uTitle": "M3U-afspeellijst",
   "onboardM3uBody": "Een link of bestand met kanalen, meestal eindigend op .m3u.",
   "onboardM3uNeeds": "Een URL, een bestand of de tekst van de afspeellijst",
@@ -215,6 +218,7 @@
   "errorRequired": "Verplicht.",
   "errorUrlInvalid": "Voer een volledig adres in, zoals http://example.com/list.m3u.",
   "errorUrlScheme": "Alleen http- en https-adressen werken hier.",
+  "errorUrlSpaces": "Een adres mag geen spaties bevatten. Kopieer de link opnieuw van je provider.",
   "errorNameTooLong": "Houd de naam korter dan 120 tekens.",
   "errorFileRequired": "Kies een afspeellijstbestand.",
   "errorFileRead": "Kan het bestand niet lezen: {{message}}",

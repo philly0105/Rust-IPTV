@@ -248,6 +248,9 @@
 
   "onboardTitle": "زيد المصدر الأول ديالك",
   "onboardLead": "ختار نوع الدخول اللي عطاك المزود. تقدر تزيد أكثر من بعد.",
+  "onboardLeadLive": "البث المباشر خاصو مصدر. ختار نوع الدخول اللي عطاك المزود.",
+  "onboardLeadMovies": "الأفلام خاصها مصدر. ختار نوع الدخول اللي عطاك المزود.",
+  "onboardLeadSeries": "السلاسل خاصها مصدر. ختار نوع الدخول اللي عطاك المزود.",
   "onboardM3uTitle": "قائمة تشغيل M3U",
   "onboardM3uBody": "رابط ولا ملف فيه لائحة القنوات، غالباً كيسالي بـ .m3u.",
   "onboardM3uNeeds": "URL، ملف، ولا نص قائمة التشغيل",
@@ -263,6 +266,7 @@
   "errorRequired": "ضروري.",
   "errorUrlInvalid": "دخّل عنوان كامل، بحال http://example.com/list.m3u.",
   "errorUrlScheme": "غير عناوين http و https اللي خدامين هنا.",
+  "errorUrlSpaces": "العنوان ما يمكنش يكون فيه فراغات. عاود نسخ الرابط من عند المزود.",
   "errorNameTooLong": "خلي الاسم تحت 120 حرف.",
   "errorFileRequired": "ختار ملف ديال قائمة التشغيل.",
   "errorFileRead": "ما قدرناش نقراو الملف: {{message}}",

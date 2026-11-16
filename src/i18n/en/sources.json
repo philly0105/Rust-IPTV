@@ -200,6 +200,9 @@
 
   "onboardTitle": "Add your first source",
   "onboardLead": "Pick the kind of login your provider gave you. You can add more later.",
+  "onboardLeadLive": "Live TV needs a source. Pick the kind of login your provider gave you.",
+  "onboardLeadMovies": "Movies need a source. Pick the kind of login your provider gave you.",
+  "onboardLeadSeries": "Series need a source. Pick the kind of login your provider gave you.",
   "onboardM3uTitle": "M3U playlist",
   "onboardM3uBody": "A link or file listing channels, usually ending in .m3u.",
   "onboardM3uNeeds": "A URL, a file, or the playlist text",
@@ -215,6 +218,7 @@
   "errorRequired": "Required.",
   "errorUrlInvalid": "Enter a full address, like http://example.com/list.m3u.",
   "errorUrlScheme": "Only http and https addresses work here.",
+  "errorUrlSpaces": "Addresses can't contain spaces. Copy the link again from your provider.",
   "errorNameTooLong": "Keep the name under 120 characters.",
   "errorFileRequired": "Choose a playlist file.",
   "errorFileRead": "Couldn't read the file: {{message}}",

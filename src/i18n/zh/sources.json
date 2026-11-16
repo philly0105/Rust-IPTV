@@ -200,6 +200,9 @@
 
   "onboardTitle": "添加第一个播放源",
   "onboardLead": "选择提供商给你的登录方式。之后还可以添加更多。",
+  "onboardLeadLive": "直播电视需要一个来源。选择提供商给你的登录方式。",
+  "onboardLeadMovies": "电影需要一个来源。选择提供商给你的登录方式。",
+  "onboardLeadSeries": "剧集需要一个来源。选择提供商给你的登录方式。",
   "onboardM3uTitle": "M3U 播放列表",
   "onboardM3uBody": "列出频道的链接或文件，通常以 .m3u 结尾。",
   "onboardM3uNeeds": "URL、文件或播放列表文本",
@@ -215,6 +218,7 @@
   "errorRequired": "必填。",
   "errorUrlInvalid": "请输入完整地址，例如 http://example.com/list.m3u。",
   "errorUrlScheme": "此处仅支持 http 和 https 地址。",
+  "errorUrlSpaces": "地址不能包含空格。请从提供商那里重新复制链接。",
   "errorNameTooLong": "名称不能超过 120 个字符。",
   "errorFileRequired": "请选择播放列表文件。",
   "errorFileRead": "无法读取文件：{{message}}",

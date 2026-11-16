@@ -459,6 +459,35 @@ describe('refresh failures', () => {
     }
   });
 
+  it('Refresh all with one failed source shows one toast naming it, and claims its import error from the shell', async () => {
+    const { importErrorClaimed } = await import('../lib/errors');
+    rpcMock.handlers['sources.list'] = () => [xtream('a', { name: 'Alpha' }), xtream('b', { name: 'Old provider' })];
+    rpcMock.handlers['sources.refresh'] = (a) => {
+      const id = (a as { id: string }).id;
+      // The shell asks while the import runs: the page reports this one itself.
+      expect(importErrorClaimed(id)).toBe(true);
+      if (id === 'b') throw new RpcError('not_found', 'HTTP 404 Not Found');
+      return xtream(id);
+    };
+    renderAt(routes(), '/sources');
+    const btn = await screen.findByTestId('sources-refresh-all');
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn.textContent).toBe('Refresh all'));
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]!.title).toBe("Couldn't refresh Old provider");
+    expect(toasts[0]!.action?.label).toBe('Check settings');
+  });
+
+  it('a card refresh that finishes with an error shows its own toast', async () => {
+    rpcMock.handlers['sources.list'] = () => [xtream('a', { name: 'Alpha' })];
+    rpcMock.handlers['sources.refresh'] = () => xtream('a', { name: 'Alpha', lastError: 'HTTP 401 Unauthorized', lastErrorCode: 'auth' });
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-refresh'));
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0]!.title).toBe("Couldn't refresh Alpha");
+  });
+
   it('a card refresh leaves catalog queries to the core events (ST-5)', async () => {
     const { queryClient, rpcKey } = await import('@/api/query');
     rpcMock.handlers['sources.list'] = () => [xtream('a')];

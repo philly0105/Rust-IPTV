@@ -200,6 +200,9 @@
 
   "onboardTitle": "İlk kaynağınızı ekleyin",
   "onboardLead": "Sağlayıcınızın size verdiği giriş türünü seçin. Daha sonra başka kaynaklar da ekleyebilirsiniz.",
+  "onboardLeadLive": "Canlı TV için bir kaynak gerekir. Sağlayıcınızın size verdiği giriş türünü seçin.",
+  "onboardLeadMovies": "Filmler için bir kaynak gerekir. Sağlayıcınızın size verdiği giriş türünü seçin.",
+  "onboardLeadSeries": "Diziler için bir kaynak gerekir. Sağlayıcınızın size verdiği giriş türünü seçin.",
   "onboardM3uTitle": "M3U oynatma listesi",
   "onboardM3uBody": "Kanalları listeleyen, genellikle .m3u ile biten bir bağlantı veya dosya.",
   "onboardM3uNeeds": "Bir URL, bir dosya veya oynatma listesi metni",
@@ -215,6 +218,7 @@
   "errorRequired": "Zorunlu.",
   "errorUrlInvalid": "Tam bir adres girin, örneğin http://example.com/list.m3u.",
   "errorUrlScheme": "Burada yalnızca http ve https adresleri çalışır.",
+  "errorUrlSpaces": "Adreslerde boşluk olamaz. Bağlantıyı sağlayıcınızdan yeniden kopyalayın.",
   "errorNameTooLong": "Ad 120 karakterden kısa olmalı.",
   "errorFileRequired": "Bir oynatma listesi dosyası seçin.",
   "errorFileRead": "Dosya okunamadı: {{message}}",

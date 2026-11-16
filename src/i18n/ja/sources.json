@@ -200,6 +200,9 @@
 
   "onboardTitle": "最初のソースを追加",
   "onboardLead": "プロバイダーから提供されたログインの種類を選んでください。後から追加することもできます。",
+  "onboardLeadLive": "ライブTVにはソースが必要です。プロバイダーから提供されたログインの種類を選んでください。",
+  "onboardLeadMovies": "映画にはソースが必要です。プロバイダーから提供されたログインの種類を選んでください。",
+  "onboardLeadSeries": "シリーズにはソースが必要です。プロバイダーから提供されたログインの種類を選んでください。",
   "onboardM3uTitle": "M3Uプレイリスト",
   "onboardM3uBody": "チャンネルを記載したリンクまたはファイルです。通常は .m3u で終わります。",
   "onboardM3uNeeds": "URL、ファイル、またはプレイリストのテキスト",
@@ -215,6 +218,7 @@
   "errorRequired": "必須項目です。",
   "errorUrlInvalid": "http://example.com/list.m3u のような完全なアドレスを入力してください。",
   "errorUrlScheme": "使用できるのは http と https のアドレスのみです。",
+  "errorUrlSpaces": "アドレスに空白は使えません。プロバイダーのリンクをもう一度コピーしてください。",
   "errorNameTooLong": "名前は120文字未満にしてください。",
   "errorFileRequired": "プレイリストファイルを選択してください。",
   "errorFileRead": "ファイルを読み込めませんでした：{{message}}",

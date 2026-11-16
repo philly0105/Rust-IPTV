@@ -212,6 +212,9 @@
 
   "onboardTitle": "Añade tu primera fuente",
   "onboardLead": "Elige el tipo de acceso que te dio tu proveedor. Puedes añadir más después.",
+  "onboardLeadLive": "La TV en vivo necesita una fuente. Elige el tipo de acceso que te dio tu proveedor.",
+  "onboardLeadMovies": "Las películas necesitan una fuente. Elige el tipo de acceso que te dio tu proveedor.",
+  "onboardLeadSeries": "Las series necesitan una fuente. Elige el tipo de acceso que te dio tu proveedor.",
   "onboardM3uTitle": "Lista de reproducción M3U",
   "onboardM3uBody": "Un enlace o archivo con la lista de canales, que suele terminar en .m3u.",
   "onboardM3uNeeds": "Una URL, un archivo o el texto de la lista",
@@ -227,6 +230,7 @@
   "errorRequired": "Obligatorio.",
   "errorUrlInvalid": "Introduce una dirección completa, como http://example.com/list.m3u.",
   "errorUrlScheme": "Aquí solo funcionan direcciones http y https.",
+  "errorUrlSpaces": "Las direcciones no pueden tener espacios. Vuelve a copiar el enlace de tu proveedor.",
   "errorNameTooLong": "El nombre debe tener menos de 120 caracteres.",
   "errorFileRequired": "Elige un archivo de lista.",
   "errorFileRead": "No se pudo leer el archivo: {{message}}",

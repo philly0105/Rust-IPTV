@@ -200,6 +200,9 @@
 
   "onboardTitle": "Adja hozzá az első forrást",
   "onboardLead": "Válassza ki, milyen típusú bejelentkezési adatokat kapott a szolgáltatótól. Később további forrásokat is hozzáadhat.",
+  "onboardLeadLive": "Az élő tévéadáshoz forrás kell. Válassza ki, milyen típusú bejelentkezési adatokat kapott a szolgáltatótól.",
+  "onboardLeadMovies": "A filmekhez forrás kell. Válassza ki, milyen típusú bejelentkezési adatokat kapott a szolgáltatótól.",
+  "onboardLeadSeries": "A sorozatokhoz forrás kell. Válassza ki, milyen típusú bejelentkezési adatokat kapott a szolgáltatótól.",
   "onboardM3uTitle": "M3U lejátszási lista",
   "onboardM3uBody": "Csatornákat felsoroló hivatkozás vagy fájl, általában .m3u végződéssel.",
   "onboardM3uNeeds": "URL-cím, fájl vagy a lejátszási lista szövege",
@@ -215,6 +218,7 @@
   "errorRequired": "Kötelező mező.",
   "errorUrlInvalid": "Adjon meg egy teljes címet, például http://example.com/list.m3u.",
   "errorUrlScheme": "Itt csak http és https címek használhatók.",
+  "errorUrlSpaces": "A cím nem tartalmazhat szóközt. Másolja ki újra a linket a szolgáltatótól.",
   "errorNameTooLong": "A név legyen rövidebb 120 karakternél.",
   "errorFileRequired": "Válasszon egy lejátszásilista-fájlt.",
   "errorFileRead": "Nem sikerült beolvasni a fájlt: {{message}}",

@@ -200,6 +200,9 @@
 
   "onboardTitle": "첫 번째 소스 추가",
   "onboardLead": "제공업체에서 받은 로그인 방식을 선택하세요. 나중에 더 추가할 수 있습니다.",
+  "onboardLeadLive": "라이브 TV를 보려면 소스가 필요합니다. 제공업체에서 받은 로그인 방식을 선택하세요.",
+  "onboardLeadMovies": "영화를 보려면 소스가 필요합니다. 제공업체에서 받은 로그인 방식을 선택하세요.",
+  "onboardLeadSeries": "시리즈를 보려면 소스가 필요합니다. 제공업체에서 받은 로그인 방식을 선택하세요.",
   "onboardM3uTitle": "M3U 재생목록",
   "onboardM3uBody": "채널 목록이 담긴 링크나 파일로, 보통 .m3u로 끝납니다.",
   "onboardM3uNeeds": "URL, 파일 또는 재생목록 텍스트",
@@ -215,6 +218,7 @@
   "errorRequired": "필수 항목입니다.",
   "errorUrlInvalid": "전체 주소를 입력하세요. 예: http://example.com/list.m3u",
   "errorUrlScheme": "http 및 https 주소만 사용할 수 있습니다.",
+  "errorUrlSpaces": "주소에는 공백을 넣을 수 없습니다. 제공업체의 링크를 다시 복사하세요.",
   "errorNameTooLong": "이름은 120자 미만으로 입력하세요.",
   "errorFileRequired": "재생목록 파일을 선택하세요.",
   "errorFileRead": "파일을 읽을 수 없습니다: {{message}}",

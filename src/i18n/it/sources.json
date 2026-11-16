@@ -212,6 +212,9 @@
 
   "onboardTitle": "Aggiungi la tua prima sorgente",
   "onboardLead": "Scegli il tipo di accesso che ti ha dato il fornitore. Potrai aggiungerne altre in seguito.",
+  "onboardLeadLive": "Per la TV in diretta serve una sorgente. Scegli il tipo di accesso che ti ha dato il fornitore.",
+  "onboardLeadMovies": "Per i film serve una sorgente. Scegli il tipo di accesso che ti ha dato il fornitore.",
+  "onboardLeadSeries": "Per le serie serve una sorgente. Scegli il tipo di accesso che ti ha dato il fornitore.",
   "onboardM3uTitle": "Playlist M3U",
   "onboardM3uBody": "Un link o un file con l'elenco dei canali, che di solito termina con .m3u.",
   "onboardM3uNeeds": "Un URL, un file o il testo della playlist",
@@ -227,6 +230,7 @@
   "errorRequired": "Obbligatorio.",
   "errorUrlInvalid": "Inserisci un indirizzo completo, ad esempio http://example.com/list.m3u.",
   "errorUrlScheme": "Qui funzionano solo indirizzi http e https.",
+  "errorUrlSpaces": "Gli indirizzi non possono contenere spazi. Copia di nuovo il link dal fornitore.",
   "errorNameTooLong": "Il nome deve avere meno di 120 caratteri.",
   "errorFileRequired": "Scegli un file della playlist.",
   "errorFileRead": "Impossibile leggere il file: {{message}}",

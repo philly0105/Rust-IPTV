@@ -200,6 +200,9 @@
 
   "onboardTitle": "Erste Quelle hinzufügen",
   "onboardLead": "Wählen Sie die Art des Zugangs, den Ihr Anbieter Ihnen gegeben hat. Weitere können Sie später hinzufügen.",
+  "onboardLeadLive": "Für Live-TV brauchen Sie eine Quelle. Wählen Sie die Art des Zugangs, den Ihr Anbieter Ihnen gegeben hat.",
+  "onboardLeadMovies": "Für Filme brauchen Sie eine Quelle. Wählen Sie die Art des Zugangs, den Ihr Anbieter Ihnen gegeben hat.",
+  "onboardLeadSeries": "Für Serien brauchen Sie eine Quelle. Wählen Sie die Art des Zugangs, den Ihr Anbieter Ihnen gegeben hat.",
   "onboardM3uTitle": "M3U-Playlist",
   "onboardM3uBody": "Ein Link oder eine Datei mit einer Senderliste, meist mit der Endung .m3u.",
   "onboardM3uNeeds": "Eine URL, eine Datei oder der Playlist-Text",
@@ -215,6 +218,7 @@
   "errorRequired": "Pflichtfeld.",
   "errorUrlInvalid": "Geben Sie eine vollständige Adresse ein, zum Beispiel http://example.com/list.m3u.",
   "errorUrlScheme": "Hier funktionieren nur http- und https-Adressen.",
+  "errorUrlSpaces": "Adressen dürfen keine Leerzeichen enthalten. Kopieren Sie den Link noch einmal von Ihrem Anbieter.",
   "errorNameTooLong": "Der Name darf höchstens 120 Zeichen lang sein.",
   "errorFileRequired": "Wählen Sie eine Playlist-Datei aus.",
   "errorFileRead": "Die Datei konnte nicht gelesen werden: {{message}}",

@@ -224,6 +224,9 @@
 
   "onboardTitle": "Dodaj pierwsze źródło",
   "onboardLead": "Wybierz rodzaj dostępu, który otrzymałeś od dostawcy. Kolejne źródła możesz dodać później.",
+  "onboardLeadLive": "Telewizja na żywo wymaga źródła. Wybierz rodzaj dostępu, który otrzymałeś od dostawcy.",
+  "onboardLeadMovies": "Filmy wymagają źródła. Wybierz rodzaj dostępu, który otrzymałeś od dostawcy.",
+  "onboardLeadSeries": "Seriale wymagają źródła. Wybierz rodzaj dostępu, który otrzymałeś od dostawcy.",
   "onboardM3uTitle": "Lista odtwarzania M3U",
   "onboardM3uBody": "Link lub plik z listą kanałów, zwykle z końcówką .m3u.",
   "onboardM3uNeeds": "URL, plik lub tekst listy odtwarzania",
@@ -239,6 +242,7 @@
   "errorRequired": "Pole wymagane.",
   "errorUrlInvalid": "Podaj pełny adres, np. http://example.com/list.m3u.",
   "errorUrlScheme": "Działają tu tylko adresy http i https.",
+  "errorUrlSpaces": "Adres nie może zawierać spacji. Skopiuj link od dostawcy jeszcze raz.",
   "errorNameTooLong": "Nazwa może mieć maksymalnie 120 znaków.",
   "errorFileRequired": "Wybierz plik listy odtwarzania.",
   "errorFileRead": "Nie udało się odczytać pliku: {{message}}",

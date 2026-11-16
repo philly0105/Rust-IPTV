@@ -86,4 +86,12 @@ describe('cleanEpisodeTitle', () => {
     expect(cleanEpisodeTitle('Show (US) - S02E03', 'Show (US)', 2, 3)).toBe('');
     expect(cleanEpisodeTitle('Show', 'show', 1, 1)).toBe('');
   });
+
+  it('leaves nothing when only the series name and the code are there (vod-detail-04)', () => {
+    expect(cleanEpisodeTitle('Sunday Night Stories S01E01', 'Sunday Night Stories', 1, 1)).toBe('');
+    expect(cleanEpisodeTitle('sunday night stories 1x03', 'Sunday Night Stories', 1, 3)).toBe('');
+    expect(episodeSubtitle(1, 1, 'Sunday Night Stories S01E01', 'Sunday Night Stories')).toBe('S01E01');
+    // A real title that happens to follow the name is kept.
+    expect(cleanEpisodeTitle('Sunday Night Stories Live S01E01', 'Sunday Night Stories', 1, 1)).toBe('Sunday Night Stories Live');
+  });
 });

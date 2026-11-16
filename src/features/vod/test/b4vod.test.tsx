@@ -25,7 +25,7 @@ import {
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { findIndexLink, installDomStubs, makeSource, openHeroMenu, played, renderAt, settings, usePlayerStore } from './harness';
+import { findIndexLink, installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -266,8 +266,8 @@ describe('SeriesDetailPage (B4-vod-D1, D3, D4, D10)', () => {
   it('D3: a resumable episode also offers "Start over", which plays from 0 and keeps the saved row', async () => {
     renderAt('/s/src1/series/s1', route);
     await screen.findByRole('button', { name: 'Resume S01E02' });
-    // VL-hero-actions: Start over waits in the hero's More menu.
-    fireEvent.click(within(await openHeroMenu()).getByRole('menuitem', { name: 'Start S01E02 over' }));
+    // vod-detail-07: Start over sits beside Resume, one press away, named for the episode.
+    fireEvent.click(screen.getByRole('button', { name: 'Start S01E02 over' }));
     await waitFor(() => expect(played).toHaveLength(1));
     // VL-start-over-unwatches: removing the row first also dropped its watched mark.
     expect(callsOf('positions.remove')).toHaveLength(0);
@@ -286,11 +286,14 @@ describe('SeriesDetailPage (B4-vod-D1, D3, D4, D10)', () => {
     expect((await screen.findAllByText(/Next episode in/)).length).toBeGreaterThan(0);
   });
 
-  it('D10: an untitled episode falls back to its code on the artwork tile', async () => {
-    rpcMock.handlers['xtream.seriesDetail'] = () => ({ ...detail(), seasons: [{ number: 1, episodes: [ep('e11', 1, 1, '')] }] });
+  it('D10: an untitled episode, or one named only for the show, reads "Episode N" (vod-detail-04)', async () => {
+    rpcMock.handlers['xtream.seriesDetail'] = () => ({
+      ...detail(),
+      seasons: [{ number: 1, episodes: [ep('e11', 1, 1, ''), ep('e12', 1, 2, 'Severance S01E02')] }],
+    });
     renderAt('/s/src1/series/s1', route);
     const list = await screen.findByRole('list', { name: 'Episodes' });
-    expect(await within(list).findByText('S0')).toBeTruthy(); // initials of "S01E01"
+    await waitFor(() => expect(within(list).getAllByTestId('episode-title').map((e) => e.textContent)).toEqual(['Episode 1', 'Episode 2']));
   });
 });
 

@@ -348,6 +348,24 @@ describe('Guide (EPG) loads after add and edit', () => {
     await waitFor(() => expect(rpcMock.callsOf('epg.refresh')).toEqual([{ url: added }]));
   });
 
+  it('edit: each guide URL says how it last loaded', async () => {
+    const ok = 'http://epg.example.com/ok.xml';
+    const bad = 'http://epg.example.com/bad.xml';
+    rpcMock.handlers['sources.list'] = () => [makeSource('a', { epg: { detectedUrls: [ok], manualUrls: [bad], disabledUrls: [] } })];
+    rpcMock.handlers['epg.sources'] = () => [
+      { url: ok, status: 'ok', lastFetchAt: new Date(Date.now() - 2 * 3600_000).toISOString(), programCount: 9356, channelCount: 10, enabled: true, origin: 'source' },
+      { url: bad, status: 'error', error: 'HTTP 404 Not Found', programCount: 0, channelCount: 0, enabled: true, origin: 'source' },
+    ];
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Guide' }));
+    const lines = await screen.findAllByTestId('epg-link-status');
+    expect(lines.map((l) => l.textContent?.replace(/·, /g, ' · '))).toEqual([
+      'Guide loaded · 2 hours ago · 9,356 programmes',
+      "Couldn't load the guide · HTTP 404 Not Found",
+    ]);
+  });
+
   it('edit: the guide time shift is saved with the guide links; blank removes it', async () => {
     const before = makeSource('a', { name: 'First', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [], shiftMinutes: 30 } });
     rpcMock.handlers['sources.list'] = () => [before];

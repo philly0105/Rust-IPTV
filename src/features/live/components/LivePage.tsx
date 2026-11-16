@@ -501,11 +501,6 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     e.preventDefault();
     toggleSidebar();
   }, { description: t('shortcutToggleSidebar'), area: shortcutArea });
-  useShortcut('/', (e) => {
-    e.preventDefault();
-    searchRef.current?.focus();
-    searchRef.current?.select();
-  }, { description: t('shortcutFocusSearch'), area: shortcutArea });
   useShortcut('digit', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     setDigitsUsed(true);
@@ -857,6 +852,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             }
           }}
           ref={searchRef}
+          // Ctrl+F and "/" land here (the shell's page-search rule), and the field shows the key.
+          data-page-search=""
+          shortcut="mod+f"
           // On a narrow page the groups button beside it names the group, so the field says only
           // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
           placeholder={

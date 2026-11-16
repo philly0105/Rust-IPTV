@@ -650,6 +650,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 size="sm"
                 className="w-full max-sm:order-1 sm:w-56"
                 placeholder={t('searchInCategory')}
+                // Ctrl+F and "/" land here (the shell's page-search rule), and the field shows the key.
+                data-page-search=""
+                shortcut="mod+f"
                 onSubmit={focusGrid}
                 onKeyDown={(e) => {
                   // ArrowDown leaves the search box for the posters.

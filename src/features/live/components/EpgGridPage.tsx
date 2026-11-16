@@ -1735,20 +1735,10 @@ export function EpgGridPage() {
   const [highlight, setHighlight] = useState<ItemKey | null>(null);
   // Shortcut descriptions, translated once rather than on every render.
   const shortcutText = useMemo(
-    () => ({ area: tg('shortcutArea'), search: tg('searchLabel'), jump: tg('jumpTitle'), digits: tg('shortcutDigits') }),
+    () => ({ area: tg('shortcutArea'), jump: tg('jumpTitle'), digits: tg('shortcutDigits') }),
     [tg],
   );
   const guideArea = shortcutText.area;
-  useShortcut(
-    '/',
-    (e) => {
-      e.preventDefault();
-      // On a phone the header's field is folded into an icon; focus unfolds it.
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    },
-    { description: shortcutText.search, area: guideArea },
-  );
   useShortcut(
     't',
     (e) => {

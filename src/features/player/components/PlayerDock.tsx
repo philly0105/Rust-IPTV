@@ -35,6 +35,8 @@ import { useZapBannerShown, useZapHover } from './zapHooks';
 const MemoSurface = memo(PlayerSurface);
 
 const POS_KEY = 'player.mini.pos';
+/** A phone held sideways: the window is wide but short, under a finger. */
+export const LANDSCAPE_PHONE_QUERY = '(orientation: landscape) and (max-height: 500px) and (pointer: coarse)';
 const MARGIN = 16;
 /**
  * A phone's mini player bar (below sm, over the tab bar): its height, in rem against the 15 px
@@ -140,9 +142,9 @@ function RouterExpand(props: ExpandProps) {
   );
 }
 
-/** The mini header's round buttons: 28 px, 40 px under a coarse pointer (PL-TOUCH-ERGONOMICS). */
+/** The mini header's round buttons: 28 px, 44 px under a coarse pointer (PL-TOUCH-ERGONOMICS). */
 const MINI_BUTTON =
-  'inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg active:bg-active pointer-coarse:size-10';
+  'inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg active:bg-active pointer-coarse:size-[calc(44rem/15)]';
 
 function ExpandBase({ label, onExpand, stretched = false }: ExpandProps & { onExpand(): void }) {
   if (stretched) {
@@ -193,12 +195,34 @@ function selectDockItem(s: PlayerState): { present: boolean; isLive: boolean; ha
 
 const selectTitle = (s: PlayerState): string | undefined => s.source?.title;
 
-/** The mini frame's header line: the title, or during a zap its number and what airs (ZapHeaderLine). */
+/**
+ * The mini frame's header: the title, or during a zap its number and what airs (ZapHeaderLine).
+ * Under the title, quieter, what it plays (the programme on now, a game Sports started, the
+ * episode), as the phone bar's second line says it.
+ */
 function MiniTitle({ miniZap, onPointerEnter, onPointerLeave }: { miniZap: boolean; onPointerEnter(): void; onPointerLeave(): void }) {
   const title = usePlayerStore(selectTitle);
+  const subtitle = usePlayerStore((s) => s.source?.subtitle);
+  const second = !miniZap && subtitle ? subtitle : undefined;
   return (
-    <span className="flex min-w-0 flex-1 text-body-sm font-medium text-fg" title={title} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
-      {miniZap && title !== undefined ? <ZapHeaderLine title={title} /> : <span className="min-w-0 truncate">{title}</span>}
+    <span
+      className={cn('flex min-w-0 flex-1 text-body-sm font-medium text-fg', second && 'flex-col')}
+      title={second ? `${title ?? ''}\n${second}` : title}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+    >
+      {miniZap && title !== undefined ? (
+        <ZapHeaderLine title={title} />
+      ) : (
+        <span dir="auto" className={cn('min-w-0 truncate', second && 'leading-tight')}>
+          {title}
+        </span>
+      )}
+      {second && (
+        <span dir="auto" data-testid="mini-subtitle" className="min-w-0 truncate text-caption leading-tight font-normal text-fg-muted">
+          {second}
+        </span>
+      )}
     </span>
   );
 }
@@ -340,6 +364,62 @@ export const PlayerDock = memo(function PlayerDock() {
     const target = inPip ? pipSlotRef.current : inWindowFill ? windowSlotRef.current : inStage ? stageTarget : miniSlotRef.current;
     if (target && host.parentNode !== target) moveKeepingFocus(host, target);
   }, [inPip, inWindowFill, inStage, stageTarget, host]);
+  // Fill window covers the page, but the page stayed in the Tab order and kept the keys: focus left
+  // on a channel row moved an unseen cursor with the arrows, and Enter tuned what it reached. While
+  // the player fills the window the page under it is inert and the player holds focus; when it
+  // ends, focus goes back where it was. Dialogs and menus portal out of the shell, so they still work.
+  useEffect(() => {
+    const layer = windowSlotRef.current;
+    const shell = layer?.parentElement;
+    if (!inWindowFill || !layer || !shell) return;
+    const before = document.activeElement;
+    const made: HTMLElement[] = [];
+    for (const el of Array.from(shell.children)) {
+      if (el === layer || !(el instanceof HTMLElement) || el.inert || el.hidden) continue;
+      el.inert = true;
+      made.push(el);
+    }
+    if (!(before instanceof Node) || !host.contains(before)) host.querySelector<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
+    return () => {
+      for (const el of made) el.inert = false;
+      const now = document.activeElement;
+      const lost = !now || now === document.body || host.contains(now);
+      if (lost && before instanceof HTMLElement && before.isConnected && !host.contains(before)) before.focus({ preventScroll: true });
+    };
+  }, [inWindowFill, host]);
+  // Fullscreen from the page (F on a channel row) dropped focus to the body: the player takes it.
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const now = document.activeElement;
+    if (!now || !host.contains(now)) host.querySelector<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
+  }, [isFullscreen, host]);
+
+  // A phone turned sideways asks for a bigger picture: a video playing in the page's stage fills
+  // the window (Fill window), and turning it back gives the page back. Leaving Fill window by hand
+  // keeps the page until the phone turns again. Nothing playing, nothing changes.
+  const landscapePhone = useMediaQuery(LANDSCAPE_PHONE_QUERY);
+  const playingVideo = usePlayerStore((s) => s.status === 'playing' && (s.mode === 'inline' || s.mode === 'embedded-mpv'));
+  const autoFilled = useRef(false);
+  const declined = useRef(false);
+  useEffect(() => {
+    if (isWindowFilled || !autoFilled.current) return;
+    autoFilled.current = false;
+    declined.current = landscapePhone;
+  }, [isWindowFilled, landscapePhone]);
+  useEffect(() => {
+    const st = usePlayerStore.getState();
+    if (!landscapePhone) {
+      declined.current = false;
+      if (autoFilled.current && st.isWindowFilled) st.toggleWindowFill();
+      autoFilled.current = false;
+      return;
+    }
+    if (playingVideo && inStage && !pip && !st.isWindowFilled && !st.isFullscreen && !declined.current) {
+      autoFilled.current = true;
+      st.toggleWindowFill();
+    }
+  }, [landscapePhone, playingVideo, inStage, pip]);
+
   // The page showing this stream in its stage: Expand comes back to it for a stream with no page of its own.
   // Followed from the store, so a new stream (each zap) does not re-render the dock.
   useLayoutEffect(() => {
@@ -542,7 +622,7 @@ export const PlayerDock = memo(function PlayerDock() {
         {!bar && (
           <div
             // touch-none: a finger on the header drags the frame instead of scrolling the page.
-            className="flex h-10 shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-divider ps-1.5 pe-1 active:cursor-grabbing pointer-coarse:h-11 pointer-coarse:ps-3"
+            className="flex h-10 shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-divider ps-1.5 pe-1 active:cursor-grabbing pointer-coarse:h-12 pointer-coarse:ps-3"
             onPointerDown={onDragStart}
             onPointerMove={onDragMove}
             onPointerUp={onDragEnd}

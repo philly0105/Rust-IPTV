@@ -40,29 +40,29 @@ export function LimitBanners({
       {over.map((l) => {
         const last = lastTileOf?.(l.sourceId);
         return (
-        <div
-          key={l.sourceId}
-          data-testid="multiview-limit-banner"
-          data-source-id={l.sourceId}
-          className={cn(bannerClass, 'border-warning/40 bg-warning/10 text-fg')}
-        >
-          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning sm:mt-0" />
-          <p className="min-w-0 flex-1">
-            <span className="font-semibold">{t('limitTitle')} </span>
-            <span className="text-fg-muted">
-              {t('limitBody', { count: l.max, tiles: l.tiles, source: l.name || t('limitUnknownSource') })}
-              {l.own > 0 ? ` ${t('limitOwn')}` : null}
-            </span>
-          </p>
-          <div className="-me-1 flex shrink-0 items-center gap-1">
-            {last && onCloseTile ? (
-              <Button size="sm" className="max-w-56 min-w-0" onClick={() => onCloseTile(last.key)} data-testid="multiview-limit-close">
-                <span className="min-w-0 truncate">{t('closeLabel', { name: last.title })}</span>
-              </Button>
-            ) : null}
-            <IconButton size="sm" label={t('limitDismiss')} icon={<X aria-hidden className="size-4" />} onClick={() => onDismiss(l)} />
+          <div
+            key={l.sourceId}
+            data-testid="multiview-limit-banner"
+            data-source-id={l.sourceId}
+            className={cn(bannerClass, 'border-warning/40 bg-warning/10 text-fg')}
+          >
+            <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning sm:mt-0" />
+            <p className="min-w-0 flex-1">
+              <span className="font-semibold">{t('limitTitle')} </span>
+              <span className="text-fg-muted">
+                {t('limitBody', { count: l.max, tiles: l.tiles, source: l.name || t('limitUnknownSource') })}
+                {l.own > 0 ? ` ${t('limitOwn')}` : null}
+              </span>
+            </p>
+            <div className="-me-1 flex shrink-0 items-center gap-1">
+              {last && onCloseTile ? (
+                <Button size="sm" className="max-w-56 min-w-0" onClick={() => onCloseTile(last.key)} data-testid="multiview-limit-close">
+                  <span className="min-w-0 truncate">{t('closeLabel', { name: last.title })}</span>
+                </Button>
+              ) : null}
+              <IconButton size="sm" label={t('limitDismiss')} icon={<X aria-hidden className="size-4" />} onClick={() => onDismiss(l)} />
+            </div>
           </div>
-        </div>
         );
       })}
     </div>

@@ -36,12 +36,12 @@ export interface WallToolbarProps {
   onClear(): void;
 }
 
-/** The touch floor of every kit control (DS-TOUCH-TARGETS), for the glass buttons in full screen. */
+/** The touch floor of every kit control (DS-TOUCH-TARGETS), for the glass buttons over the wall. */
 const GLASS_TOUCH = 'pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]';
 
 /**
  * The kit's small ghost button (30 px, 44 on touch), as tall as the small layout control beside
- * it; on glass in full screen, the glass button at the same size. `icon`: an icon-only square in
+ * it; on glass over the wall, the glass button at the same size. `icon`: an icon-only square in
  * the quieter icon tone, as IconButton draws it.
  */
 const toolButton = (overlay: boolean, icon = false) =>
@@ -151,8 +151,8 @@ export function WallToolbar({
           <label htmlFor={volumeId} className="sr-only">
             {t('volume')}
           </label>
-          {/* On the page, the kit Slider. Over the wall in full screen, the player's own level slider
-              over video (white on glass, player.css), as the player's volume draws it. */}
+          {/* On the page, the kit Slider. Floating over the wall (full screen, a short window), the
+              player's own level slider over video (white on glass, player.css), as its volume is drawn. */}
           {overlay ? (
             <input
               id={volumeId}

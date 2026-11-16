@@ -433,7 +433,9 @@ describe('FavoritesPage', () => {
     expect(screen.queryByTestId('page-search')).toBeNull();
     // One icon per idea: a favourite is the rail's heart, and the copy under it no longer says "Star".
     expect(document.querySelector('svg.lucide-heart')).toBeTruthy();
-    expect(screen.getByText('Add channels, movies, and series from any source to your favorites to collect them here.')).toBeTruthy();
+    // It says how to add one, and where a movie for later goes instead (library-01, library-11).
+    expect(screen.getByText(/Press the heart on a channel or on a title's page, or S on a channel in Live TV/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'My List' }).getAttribute('href')).toBe('/my-list');
     cleanup();
 
     rpc.handlers['favorites.list'] = () => favs;
@@ -561,15 +563,13 @@ describe('RecentPage', () => {
     rpc.handlers['positions.continueWatching'] = () => [p1];
     renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
 
-    // No bar and no time left to show, so the row's end gives the clock the card gave.
+    // No bar and no time left to show; the type line says where it stopped, in words (library-10).
     const resume = await screen.findByTestId('entry-resume');
     expect(within(resume).queryByRole('progressbar')).toBeNull();
-    const left = within(resume).getByTestId('entry-left');
-    expect(left.getAttribute('title')).toBe('Resume at 30:00');
-    expect(within(left).getByText('Resume at 30:00')).toBeTruthy();
-    expect(within(left).getByText('30:00')).toBeTruthy();
+    expect(within(resume).getByTestId('entry-stopped').textContent).toBe('·Stopped at 30:00');
+    expect(within(resume).queryByTestId('entry-left')).toBeNull();
     // The other row is plain history: no clock.
-    expect(screen.getAllByTestId('entry-left')).toHaveLength(1);
+    expect(screen.getAllByTestId('entry-stopped')).toHaveLength(1);
   });
 
   it('empty while the quality filter is on, says it may be hiding channels', async () => {

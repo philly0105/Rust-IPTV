@@ -143,7 +143,7 @@ describe('sidebar section', () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
     const first = h.renderAt('/live', routes);
     await screen.findByTestId('lists-sidebar');
-    const fold = screen.getByRole('button', { name: 'Lists' });
+    const fold = screen.getByRole('button', { name: 'Channel lists' });
     expect(fold.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(fold);
     expect(fold.getAttribute('aria-expanded')).toBe('false');

@@ -16,6 +16,7 @@ export {
   ErrorState,
   IconButton,
   Input,
+  Page,
   SearchInput,
   Select,
   Skeleton,

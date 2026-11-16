@@ -16,7 +16,7 @@ This guide covers the desktop app for Windows and macOS and the same interface i
 - [Multi-view](#multi-view)
 - [Recording and reminders](#recording-and-reminders)
 - [Downloads](#downloads)
-- [My List, custom lists and watch stats](#my-list-custom-lists-and-watch-stats)
+- [My List, favorites, channel lists and watch stats](#my-list-favorites-channel-lists-and-watch-stats)
 - [Parental controls](#parental-controls)
 - [Remote control](#remote-control)
 - [Phones and touch screens](#phones-and-touch-screens)
@@ -180,15 +180,30 @@ See [recording.md](architecture/recording.md).
 - Downloads go to `downloads/` in the app data folder unless you choose another downloads folder. In the browser they always go to `<data dir>/downloads` on the server.
 - My videos plays what you downloaded, also offline. The Downloads page and My videos have their own keys; see [Keyboard shortcuts](#keyboard-shortcuts).
 
-## My List, custom lists and watch stats
+## My List, favorites, channel lists and watch stats
+
+Four places in the side rail's Library keep things for you. Which one?
+
+- My List: movies and series to watch later, in the order you choose.
+- Favorites: channels, movies and series you come back to (the heart).
+- Channel lists: your own groups of live channels, such as Sports or Kids.
+- Recently watched: everything you played, newest first, kept for you.
 
 ### My List
 
 My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. It opens as posters; the View switch turns it into a ranked list, and the app remembers the choice. Reorder it by dragging or with the arrow buttons in the list, or with Alt+Up/Down in either view, mark movies watched with W, and remove the focused title with Delete.
 
-### Custom lists
+### Favorites
 
-Custom lists hold live channels from any of your sources. Press L on a channel or choose "Add to list…" in its right-click menu. Lists are in the side rail (`/lists`) and at the top of the live group sidebar, and a channel played from a list zaps through the list in its order (Page Up / Page Down). Manage lists renames, reorders (also with Alt+Up/Down) and deletes them with Undo, and a list can show as a rail on the dashboard. A channel the provider drops stays in the list, marked unavailable. Channels the [quality filter](#filtering-by-quality) hides leave the list until you change the filter; a list that shows nothing while the filter is on says the filter may be hiding channels and offers "Show all qualities".
+Favorites (`/favorites`) hold the channels, movies and series you mark with the heart: on a channel's row or menu, on a title's page, or with S on a channel in Live TV. They are grouped into live and radio, movies and series; reorder each group by dragging, with the arrows on a row, or with Alt+Up/Down, and remove one with Delete or its menu (Undo brings it back). A channel's menu here is the one Live TV has, so you can add a favourite to a channel list or to multi-view from here. A source's own favorites are at `/s/<source>/favorites`.
+
+### Recently watched
+
+Recently watched (`/recent`) lists every channel, movie and episode you played, newest first, grouped by day. A movie or series you stopped part way shows where it stopped and how much is left, and pressing it resumes; its menu opens the title's page or clears the progress. Remove one entry with Delete or its menu, or empty the whole history with Clear history (it asks first, and Undo brings it back).
+
+### Channel lists
+
+Channel lists hold live channels from any of your sources. Press L on a channel or choose "Add to list…" in its right-click menu. Lists are in the side rail (`/lists`) and at the top of the live group sidebar, and a channel played from a list zaps through the list in its order (Page Up / Page Down). Manage lists renames, reorders (also with Alt+Up/Down) and deletes them with Undo, and a list can show as a rail on the dashboard. A channel the provider drops stays in the list, marked unavailable. Channels the [quality filter](#filtering-by-quality) hides leave the list until you change the filter; a list that shows nothing while the filter is on says the filter may be hiding channels and offers "Show all qualities".
 
 ### Watch stats
 

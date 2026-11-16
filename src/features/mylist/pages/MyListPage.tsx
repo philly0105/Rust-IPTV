@@ -179,11 +179,12 @@ export function MyListPage() {
 
   const title = t('title');
   // An empty list says so in the page; "0 titles" in the header adds nothing.
-  const subtitle = all && view.base.length > 0 ? t('count', { count: view.base.length }) : undefined;
+  // After the count, what the page is for (library-01): a movie saved for later, not a favourite.
+  const subtitle = all && view.base.length > 0 ? `${t('count', { count: view.base.length })} · ${t('lead')}` : t('lead');
   const { query: search } = params;
   const onSearch = useCallback((value: string) => setParams({ query: value }), [setParams]);
   useEffect(() => {
-    setHeader({ title, ...(subtitle ? { subtitle } : {}) });
+    setHeader({ title, subtitle });
   }, [setHeader, title, subtitle]);
 
   /** Enter or ArrowDown in the search box: on to the list's current row. */

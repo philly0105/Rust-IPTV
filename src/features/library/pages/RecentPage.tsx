@@ -233,7 +233,8 @@ export function RecentPage() {
   const searchable = !query.data || count > 0 || search !== '';
   usePageHeader(
     title,
-    query.data && count > 0 ? t('recentCount', { count }) : undefined,
+    // After the count, what the page is for (library-01), as on Favorites and My List.
+    query.data && count > 0 ? `${t('recentCount', { count })} · ${t('recentLead')}` : t('recentLead'),
     headerActions,
     searchable ? { value: search, onChange: setSearch, placeholder: t('searchRecent') } : undefined,
   );

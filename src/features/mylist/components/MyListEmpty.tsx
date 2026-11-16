@@ -1,18 +1,17 @@
 /**
- * The empty My List: three unset preset slots, numbered like the ranks the
- * list gives saved titles, above the one thing to do next. The slots are
- * static outlines (no shimmer), so the page never reads as still loading.
+ * The empty My List: the kit's empty state, as Favorites and Recently watched draw theirs, with the
+ * way to save a title and where channels go instead (Favorites or a channel list), since the three
+ * collections sit side by side in the rail.
  */
 
 import { BookmarkPlus } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Source } from '@/api/types';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
-import { intlLocale, numberFormat } from '@/lib/intl';
 
-import { buttonClass, cn } from '../deps';
+import { EmptyState, TEXT_LINK, buttonClass } from '../deps';
 
 export interface MyListEmptyProps {
   /** Visible sources; `undefined` while they load (no action is offered yet). */
@@ -29,15 +28,13 @@ export function browseTarget(sources: readonly Source[], kind: 'movie' | 'series
 }
 
 export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
-  const { t, i18n } = useTranslation('mylist');
-  const nf = numberFormat(intlLocale(i18n.language));
+  const { t } = useTranslation('mylist');
   const adding = useNoSourcesAdding();
   const movies = sources ? browseTarget(sources, 'movie') : undefined;
   const series = sources ? browseTarget(sources, 'series') : undefined;
   const noVod = sources !== undefined && !movies && !series;
 
-  // With no source the page says what every page says then; the numbered slots would only push it
-  // down the window. It stays while its add dialog is open, which the new source's listing would
+  // With no source the page says what every page says then. It stays while its add dialog is open, which the new source's listing would
   // otherwise close mid-import.
   if (sources && (sources.length === 0 || adding)) {
     return <NoSourcesState icon={<BookmarkPlus />} title={t('emptyTitle')} description={t('emptyNoSources')} testId="mylist-empty-add-source" stateTestId="mylist-empty" />;
@@ -67,31 +64,22 @@ export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-2 py-10" data-testid="mylist-empty">
-      <div aria-hidden className="mb-8 flex w-full max-w-sm flex-col gap-3">
-        {[1, 2, 3].map((n, i) => (
-          <div key={n} className={cn('flex items-center gap-4', i === 1 && 'opacity-70', i === 2 && 'opacity-40')}>
-            <span className="w-8 text-end font-numeric text-3xl leading-none font-semibold tabular text-fg-subtle/60">{nf.format(n)}</span>
-            <span
-              className={cn(
-                'flex h-[60px] w-10 shrink-0 items-center justify-center rounded-md border border-dashed',
-                i === 0 ? 'border-accent/70 text-accent' : 'border-divider text-transparent',
-              )}
-            >
-              <BookmarkPlus size={16} />
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col gap-2">
-              <span className="h-2.5 w-3/4 rounded-full bg-surface-3" />
-              <span className="h-2 w-1/3 rounded-full bg-surface-2" />
-            </span>
-          </div>
-        ))}
-      </div>
-      <h2 className="text-center text-title text-fg">{t('emptyTitle')}</h2>
-      <p className="mt-2 max-w-md text-center text-sm text-fg-muted">
-        {noVod ? t('emptyNoVod') : t('emptyBody')}
-      </p>
-      {actions && <div className="mt-6 flex flex-wrap items-center justify-center gap-3">{actions}</div>}
+    <div className="flex flex-col" data-testid="mylist-empty">
+      <EmptyState
+        icon={<BookmarkPlus />}
+        title={t('emptyTitle')}
+        description={
+          <>
+            {noVod ? t('emptyNoVod') : t('emptyBody')}{' '}
+            <Trans
+              t={t}
+              i18nKey="channelsElsewhere"
+              components={{ fav: <Link to="/favorites" className={TEXT_LINK} />, lists: <Link to="/lists" className={TEXT_LINK} /> }}
+            />
+          </>
+        }
+        action={actions && <div className="flex flex-wrap items-center justify-center gap-3">{actions}</div>}
+      />
     </div>
   );
 }

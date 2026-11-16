@@ -7,14 +7,14 @@
 import { k } from '../lib/keys';
 import { Heart } from 'lucide-react';
 import { useCallback, useMemo, useState, type DragEvent } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router';
+import { Trans, useTranslation } from 'react-i18next';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, TEXT_LINK, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -165,7 +165,9 @@ export function FavoritesPage() {
 
   const title = source ? t('sourceFavoritesTitle', { source: source.name }) : t('favoritesTitle');
   // An empty page says so itself; "0 favorites" above it adds nothing (as on My Videos).
-  const subtitle = query.data && entries.length > 0 ? t('favoritesCount', { count: entries.length }) : undefined;
+  // After the count, what the page is for (library-01): Favorites, My List, the channel lists and
+  // Recently watched sit side by side in the rail, and one-word names did not tell them apart.
+  const subtitle = query.data && entries.length > 0 ? `${t('favoritesCount', { count: entries.length })} · ${t('favoritesLead')}` : t('favoritesLead');
   // The page search only once there is something to search: over an empty list the header keeps
   // its usual Search everything. While the list loads it stays, so a full list does not swap it.
   const searchable = !query.data || entries.length > 0 || search !== '';
@@ -245,7 +247,17 @@ export function FavoritesPage() {
       <EmptyState
         icon={<Heart size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
-        description={sourceId ? t('favoritesEmptySourceBody') : (sources.size === 0 || adding) && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
+        description={
+          !sourceId && (sources.size === 0 || adding) && !sourcesLoading ? (
+            t('emptyNoSourcesBody')
+          ) : (
+            <>
+              {sourceId ? t('favoritesEmptySourceBody') : t('favoritesEmptyBody')}{' '}
+              {/* A movie for later belongs in My List (library-01): the two sit side by side in the rail. */}
+              <Trans t={t} i18nKey="favoritesEmptyMyList" components={{ mylist: <Link to="/my-list" className={TEXT_LINK} /> }} />
+            </>
+          )
+        }
         action={
           <>
             <BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />

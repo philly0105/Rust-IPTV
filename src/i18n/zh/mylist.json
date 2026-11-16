@@ -1,6 +1,7 @@
 {
   "title": "我的片单",
   "count_other": "{{count, number}} 部",
+  "lead": "稍后要看的电影和剧集，按你的顺序",
   "seeAll": "查看全部",
   "loading": "正在加载我的片单",
   "errorHint": "我的片单由应用保存，而不是由提供商保存。请重试；如果一直失败，请重启应用。",
@@ -52,6 +53,7 @@
   "emptyBody": "用海报或详情页上的书签把电影和剧集存起来以后看。它们会按你排好的顺序列在这里。",
   "emptyNoSources": "请先添加播放源，然后保存想以后观看的电影和剧集。",
   "emptyNoVod": "你的播放源里还没有电影或剧集。我的片单只收藏这些内容，不包括直播频道。",
+  "channelsElsewhere": "频道请放进<fav>收藏</fav>或<lists>频道列表</lists>。",
   "browseMovies": "浏览电影",
   "browseSeries": "浏览剧集",
   "emptyMoviesTitle": "我的片单里没有电影",

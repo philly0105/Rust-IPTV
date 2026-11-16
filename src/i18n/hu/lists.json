@@ -1,5 +1,6 @@
 {
-  "title": "Listák",
+  "title": "Csatornalisták",
+  "lead": "Saját csatornacsoportjai",
   "newList": "Új lista",
   "newListName": "Az új lista neve",
   "createList": "Lista létrehozása",

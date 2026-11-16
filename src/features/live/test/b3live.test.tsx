@@ -273,14 +273,16 @@ describe('Live list: states', () => {
 });
 
 describe('Live list: keyboard', () => {
-  it('"/" jumps to search; Escape clears it, a second Escape returns to the list cursor', async () => {
+  it('the search field is the page search ("/" and Ctrl+F); Escape clears it, a second Escape returns to the list cursor', async () => {
     renderAt('/s/src1/live', ROUTE);
     await screen.findByText('Channel 0');
     rowButton(0)!.focus();
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     await waitFor(() => expect(cursorIndex()).toBe(1));
 
-    fireEvent.keyDown(window, { key: '/', code: 'Slash' });
+    // The shell's "/" and Ctrl+F focus the page's data-page-search field (shell tests cover the keys).
+    expect(searchBox().hasAttribute('data-page-search')).toBe(true);
+    searchBox().focus();
     expect(document.activeElement).toBe(searchBox());
     fireEvent.change(searchBox(), { target: { value: 'abc' } });
     fireEvent.keyDown(searchBox(), { key: 'Escape' });

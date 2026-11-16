@@ -200,7 +200,7 @@ const CATALOG_DEBOUNCE_MS = 120;
 /**
  * Channels, movies and series from the whole library (`catalog.search`), so the palette that the
  * header calls "Search everything" finds a channel nobody has favourited or watched yet. It asks
- * with the Search page's own first-page arguments, so "Search for" opens on an answer already in
+ * with the Search page's own first-page arguments, so "See all results" opens on an answer already in
  * the cache, after a pause in typing and only while the palette is open. The core caps every type
  * at that limit (57k channels or not); the palette shows the first few that still match what is
  * typed, skipping items the favourites and recent group already lists (`skip`, by `itemKey`).
@@ -380,7 +380,7 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
 const PROGRAMME_LIMIT = 5;
 /**
  * Hits asked of each source: the Search page's own Programmes limit (`PROGRAMME_LIMIT` in
- * SearchPage.tsx), so "Search for" opens on answers already in the cache, and enough that five
+ * SearchPage.tsx), so "See all results" opens on answers already in the cache, and enough that five
  * distinct shows remain after a show on many channels at once folds into one row.
  */
 const PROGRAMME_REQUEST_LIMIT = 200;

@@ -220,6 +220,8 @@ describe('B4-vod-D12: earlier episodes are in the queue, so Prev works', () => {
   it('earlier entries are URL-less placeholders the player resolves on Prev', async () => {
     const ph = placeholderFor(ctxFor('xtream'), ORDER[0]!);
     expect(ph).toMatchObject({ url: '', ref: sref, episodeId: 'e11', title: 'Severance', subtitle: 'S01E01 · Episode 1.1', isLive: false });
+    // PV-04: an episode titled only with the series name is subtitled with its code alone.
+    expect(placeholderFor(ctxFor('xtream'), ep('e11', 1, 1, 'Severance')).subtitle).toBe('S01E01');
     playing('e12');
     await startEpisodeQueue(ctxFor('xtream'), 'e12');
     const q = queueOf();

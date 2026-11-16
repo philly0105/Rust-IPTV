@@ -734,7 +734,8 @@ describe('clock ticks (LV-8)', () => {
     const current = markers[0]!.style.getPropertyValue(GRID_NOW_VAR);
     expect(Number.parseFloat(current)).toBeGreaterThan(Number.parseFloat(previous));
     expect(markers.every((marker) => marker.isConnected && marker.style.getPropertyValue(GRID_NOW_VAR) === current)).toBe(true);
-    // The clock value belongs to the two empty marker spans, never to an ancestor of tiles.
+    // The clock value belongs to the empty marker spans (the elapsed shade, the foot's progress
+    // and the now stub), never to an ancestor of tiles.
     const clockOwners = [...grid.querySelectorAll<HTMLElement>('*')].filter((el) => el.style.getPropertyValue(GRID_NOW_VAR));
     expect(clockOwners).toEqual(markers);
     expect(grid.style.getPropertyValue(GRID_NOW_VAR)).toBe('');
@@ -947,7 +948,9 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     expect(cell.className).not.toMatch(/(^|\s)bg-(active|hover|selected)(\s|$)/);
     expect(cell.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
     const tick = within(cell).getByTestId('cell-now-tick');
-    expect(tick.className.split(/\s+/)).toContain('bg-live');
+    // The line, its stubs and the pill that heads them share one red (guide-23).
+    expect(tick.className.split(/\s+/)).toContain('bg-live-solid');
+    expect(line.className.split(/\s+/)).toContain('bg-live-solid');
     // Future cells are opaque too, and so is a cell another genre filter steps back.
     const later = await screen.findByRole('button', { name: /^c1 P1,/ });
     expect(later.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
@@ -971,6 +974,9 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     // An ended cell keeps the later cells' block and steps back by its text tone only.
     expect(ended.className.split(/\s+/)).toEqual(expect.arrayContaining([...fill, 'text-fg-subtle']));
     expect(ended.className.split(/\s+/)).not.toContain('bg-bg');
+    // Light: surface-2 is 1.05:1 on the page, so later and ended cells draw an inset edge; dark's
+    // steps separate without one (guide-09).
+    for (const c of [later, ended]) expect(c.className.split(/\s+/)).toEqual(expect.arrayContaining(['inset-ring', 'inset-ring-edge', 'dark:inset-ring-0']));
     const [title, time] = within(cell).getByTestId('cell-text').children as unknown as HTMLElement[];
     expect(title!.className).toContain('font-semibold');
     expect(time!.className).toContain('text-fg-muted');

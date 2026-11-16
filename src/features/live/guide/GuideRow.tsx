@@ -541,9 +541,12 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
         const catchupOk = ch ? canCatchUp(p, ch, kind, now) : false;
         const range = formatRange(p, lang);
         const genre = genreOf(p.category);
-        // Filtered to a genre: the others step back to plain text on no fill.
+        // Filtered to a genre: the others step back to a faint box with quiet text.
         const muted = !!genreFilter && genre !== genreFilter;
         const isPlaying = p.start === playingProgramStart;
+        // Under 40 px (a 5-minute show at the default scale) no text fits: a clean narrow block
+        // rather than a lone ellipsis. The tooltip, the preview band and its name still say it.
+        const tiny = b.width < 40;
         return (
           <button
             key={p.start}
@@ -571,7 +574,10 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
             // Clip shifted labels at the programme boundary without creating a scroll container.
             // Flat fills with 2 px gutters, no outlines: a wall of boxed cells read as a spreadsheet.
             className={cn(
-              'absolute top-1 bottom-1 overflow-clip rounded-md px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus',
+              'absolute top-1 bottom-1 overflow-clip rounded-md py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus',
+              tiny ? 'px-0.5' : 'px-2',
+              // The cell whose detail is open (set by the page): a neutral edge, not the focus ring.
+              'data-selected:inset-ring-2 data-selected:inset-ring-fg-muted',
               // Every cell a now line can cross is opaque: the line (drawn before the rows)
               // shows only in the gutters, the ruler and the airing cell's foot, so it never
               // strikes through a title or a time. A see-through airing cell let it through
@@ -579,22 +585,37 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
               isPlaying
                 ? 'bg-selected font-medium text-fg ring-1 ring-accent-mark ring-inset hover:bg-selected'
                 : muted
-                ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
-                  'bg-bg text-fg-subtle hover:bg-surface'
+                ? // Filtered to another genre: quiet text in an outlined box of the page's own
+                  // colour (opaque, so the now line stays off it). Plain text with no edge turned a
+                  // guide without genre tags into loose words with no cells.
+                  'bg-bg text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-2'
                 : // On now: the raised cell (white with a shadow in light, the next surface step
                   // in dark), never a grey or amber wash. Light rows sit on the grey page:
-                  // there a cell is the white panel; dark keeps the lifted surface step.
+                  // there a cell is the white panel; dark keeps the lifted surface step. Later
+                  // and ended cells in light are 1.05:1 against the page, so an inset edge
+                  // draws them; dark's surface steps separate on their own.
                   b.when === 'now'
                   ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
                   : b.when === 'past'
-                    ? 'bg-surface-2 text-fg-subtle hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3'
-                    : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
+                    ? 'bg-surface-2 text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3'
+                    : 'bg-surface-2 text-fg inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3',
             )}
             style={{ ...inlineStart(b.left - chunk.left + 1, rtl), width: Math.max(2, b.width - 2) }}
           >
             {/* CB-GUIDE-GENRE: the bucket's stripe on the inline start. */}
             {genre && !muted && !isPlaying ? (
               <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
+            ) : null}
+            {/* The aired part of the airing programme, faintly shaded, so the time left reads
+                without the ruler. Another clock marker: it moves with the foot's progress. */}
+            {b.when === 'now' && !muted ? (
+              <span
+                aria-hidden
+                data-testid="cell-elapsed"
+                data-guide-clock=""
+                className="absolute inset-y-0 start-0 rounded-s-md bg-fg/[0.06]"
+                style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
+              />
             ) : null}
             {/* The airing programme's progress along its foot (LG-18): the accent's mark tone, a mark of progress. */}
             {b.when === 'now' && !muted ? (
@@ -613,7 +634,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 aria-hidden
                 data-testid="cell-now-tick"
                 data-guide-clock=""
-                className="absolute bottom-0 h-1.5 w-0.5 bg-live"
+                className="absolute bottom-0 h-1.5 w-0.5 bg-live-solid"
                 style={{ insetInlineStart: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 2}px))` }}
               />
             ) : null}
@@ -621,7 +642,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 those titles with native scrolling, and the cell clips them at its end. A
                 sticky title paints above every cell (z-index), so the cells between two
                 titles do not need a composited layer of their own. */}
-            <span
+            {tiny ? null : <span
               data-testid="cell-text"
               className="z-[1] block w-max max-w-full"
               style={{ insetInlineStart: channelCol + 8 }}
@@ -637,7 +658,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
               </span>
               <span className={cn('block truncate text-caption tabular-nums', !muted && b.when !== 'past' && 'text-fg-muted')}>{range}</span>
-            </span>
+            </span>}
           </button>
         );
       })}

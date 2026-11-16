@@ -1521,6 +1521,16 @@ export function EpgGridPage() {
   });
 
   const [selection, setSelection] = useState<Selection | null>(null);
+  // The cell whose detail is open is marked (GuideRow styles `data-selected`): a popover kept
+  // inside the window can sit well away from it. Set on the element, so no row re-renders.
+  const selectedCell = selection?.anchor;
+  useLayoutEffect(() => {
+    if (!selectedCell) return;
+    selectedCell.dataset.selected = '';
+    return () => {
+      delete selectedCell.dataset.selected;
+    };
+  }, [selectedCell]);
   /** The cell that opened the popover; focus returns to it when the popover closes. */
   const invoker = useRef<HTMLElement | null>(null);
   const closePopover = () => {
@@ -2246,11 +2256,12 @@ export function EpgGridPage() {
                 // Under the sticky channel column (z-10) and time header (z-20), and under the cells:
                 // drawn before the rows, it shows only in the gutters between them, and the opaque
                 // airing cell carries its stub at the foot, so it never strikes through a title or
-                // a time (L3-visual-3). Its head is the time pill in the ruler (GuideHeader), LG-18.
+                // a time (L3-visual-3). Its head is the time pill in the ruler (GuideHeader), LG-18,
+                // and it takes the pill's red, so head and line read as one mark.
                 <div
                   aria-hidden
                   data-testid="epg-now-line"
-                  className="pointer-events-none absolute w-0.5 bg-live"
+                  className="pointer-events-none absolute w-0.5 bg-live-solid"
                   style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: headerH, height: virtualizer.getTotalSize() }}
                 />
               ) : null}

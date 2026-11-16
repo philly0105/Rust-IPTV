@@ -426,8 +426,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
           onChange={(m) => void setMode(m)}
           itemClassName="pointer-coarse:min-w-[calc(40rem/15)]"
           options={[
-            { value: 'timeline', label: t('timelineView'), content: <ChartGantt aria-hidden className="size-4" /> },
-            { value: 'list', label: t('listView'), content: <LayoutList aria-hidden className="size-4" /> },
+            // The glyphs alone read poorly as "timeline" and "list": a wide card names them too.
+            { value: 'timeline', label: t('timelineView'), content: <SegmentContent icon={<ChartGantt aria-hidden className="size-4" />} label={t('timelineView')} /> },
+            { value: 'list', label: t('listView'), content: <SegmentContent icon={<LayoutList aria-hidden className="size-4" />} label={t('listView')} /> },
           ]}
         />
         {props.guideHref ? (
@@ -436,8 +437,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
               to={props.guideHref}
               aria-label={t('openGuide')}
               // The icon buttons' 44 px touch square, so the row reads 44 px across on a touch screen.
+              // From md the shell header's labelled TV guide button is a little above: one is enough.
               className={cn(
-                'inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus',
+                'inline-flex size-8 md:hidden items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus',
                 TOUCH_TARGET,
                 'pointer-coarse:min-w-[calc(44rem/15)]',
               )}
@@ -570,7 +572,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
         playingProgramStart={playingProgramStart}
         playbackAt={playbackAt}
         watchingLive={props.watchingLive}
-        resetKey={channel.ref.itemId}
+        // A phone's folded ribbon keeps the timeline mounted but hidden (no width), where its scroll
+        // to now does nothing: unfolding scrolls it again, or it showed the start of its range.
+        resetKey={`${channel.ref.itemId}${details && phoneOpen ? ':open' : ''}`}
         onActivate={activate}
         onFocusProgram={pick}
         onPreview={preview}
@@ -598,6 +602,16 @@ export function EpgRibbon(props: EpgRibbonProps) {
       </div>
       {showUpNext ? <UpNext programs={list} now={now} guideTime={playbackAt} after={timelineEnd} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
     </section>
+  );
+}
+
+/** A view segment's glyph, with its name beside it once the Now card is wide enough to spare it. */
+function SegmentContent({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {icon}
+      <span className="hidden @[48rem]/now:inline">{label}</span>
+    </span>
   );
 }
 
@@ -793,7 +807,7 @@ function Timeline(
                     One the scroll has cut at the edge ("M" of "5:00 PM") steps aside. */}
                 <span
                   className={cn(
-                    'absolute top-0 start-0.5 rounded-xs bg-surface px-0.5 text-[calc(11rem/15)] whitespace-nowrap text-fg-subtle tabular-nums',
+                    'absolute top-0 start-0.5 rounded-xs bg-surface px-0.5 text-caption whitespace-nowrap text-fg-subtle tabular-nums',
                     x < view.left && 'invisible',
                   )}
                   data-testid="ribbon-hour-label"
@@ -946,7 +960,7 @@ const TimelineBlock = memo(function TimelineBlock({
           <ScheduleMarkView index={schedule} channelRef={channel.ref} program={p} />
         </span>
         {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
-        <span className={`relative block truncate text-[calc(11rem/15)] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
+        <span className={`relative block truncate text-caption tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
           {formatClock(ms(p.start), i18n.language)}
         </span>
       </span>
@@ -1010,7 +1024,7 @@ function ProgramList(props: ViewProps) {
               >
                 <span className="flex w-24 shrink-0 flex-col text-xs tabular-nums text-fg-muted">
                   {day ? (
-                    <span className="truncate text-[calc(11rem/15)] font-medium text-fg" data-testid="ribbon-list-day">
+                    <span className="truncate text-caption font-medium text-fg" data-testid="ribbon-list-day">
                       {day}
                     </span>
                   ) : null}

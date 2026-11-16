@@ -2,12 +2,13 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgProgram } from '@/api/types';
+import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { cn } from '@/ui/cn';
 import { useRowHeight } from '@/ui/scale';
 // recording:
 import { ProgramActionsView, ScheduleMarkView, useProgramActionsShared } from '@/features/recording';
 
-import { durationMinutes, formatClock, formatDay, localDayKey, ms } from '../lib/epgTime';
+import { durationMinutes, formatClock, localDayKey, ms } from '../lib/epgTime';
 
 /** One Up next row at 100 % (h-11). */
 export const UP_NEXT_ROW_PX = 44;
@@ -17,6 +18,11 @@ const LABEL_PX = 32;
 export const UP_NEXT_MAX = 5;
 /** Rows drawn before the box is measured (and in tests, where nothing is). */
 const UNMEASURED_ROWS = 3;
+
+/** The short weekday ("Tue"): the list spans hours, so the day's name tells it apart. */
+function weekday(at: number, lang: string): string {
+  return dateTimeFormat(intlLocale(lang), { weekday: 'short' }).format(at);
+}
 
 /** How many rows of `rowPx` fit a box `height` px tall under the label (0: hide the list). */
 export function upNextRows(height: number, rowPx: number = UP_NEXT_ROW_PX): number {
@@ -77,7 +83,8 @@ export function UpNext({ programs, now, guideTime = now, after, channel, channel
             <h3 id="up-next-h" className="px-2 pb-1 text-caption font-medium text-fg-muted">
               {t('upNext')}
             </h3>
-            <ul className="flex flex-col">
+            {/* A reading width: on a wide stage the length sat a whole window away from its title. */}
+            <ul className="flex max-w-3xl flex-col">
               {upcoming.map((p) => {
                 const at = ms(p.start);
                 const isShown = !!shown && shown.start === p.start && shown.title === p.title;
@@ -93,8 +100,13 @@ export function UpNext({ programs, now, guideTime = now, after, channel, channel
                       aria-current={isShown ? 'true' : undefined}
                       className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-md px-2 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
                     >
-                      <span className="w-16 shrink-0 font-numeric text-sm whitespace-nowrap tabular-nums text-fg-muted">
-                        {otherDay ? <span className="sr-only">{formatDay(at, lang)} </span> : null}
+                      {/* Late in the evening the list runs past midnight: those rows say their day. */}
+                      <span className="flex w-16 shrink-0 flex-col font-numeric text-sm whitespace-nowrap tabular-nums text-fg-muted">
+                        {otherDay ? (
+                          <span className="font-sans text-2xs leading-none text-fg-subtle" data-testid="up-next-day">
+                            {weekday(at, lang)}{' '}
+                          </span>
+                        ) : null}
                         {formatClock(at, lang)}
                       </span>
                       <span dir="auto" className="min-w-0 flex-1 truncate text-body-sm font-medium text-match-parent text-fg">

@@ -107,7 +107,9 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
           align="end"
           items={items}
           triggerClassName="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg active:bg-active focus-visible:outline-2 focus-visible:outline-focus"
-          trigger={<Circle className={`size-4 ${running ? 'fill-live text-live motion-safe:animate-pulse' : ''}`} aria-hidden />}
+          // The guide's record mark, a red dot (an empty circle read as a radio button); it pulses while recording.
+          tooltip={running ? t('recordingNow') : t('record')}
+          trigger={<Circle className={`size-4 fill-live text-live ${running ? 'motion-safe:animate-pulse' : ''}`} aria-hidden />}
         />
       ) : null}
       <RecordSeriesDialog target={seriesTarget} onClose={() => setSeriesTarget(null)} />

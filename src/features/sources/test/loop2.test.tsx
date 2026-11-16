@@ -24,7 +24,12 @@ const { useToastStore } = await import('@/ui');
 const { resetProgressForTests } = await import('../lib/progress');
 const { resetPendingRemovalsForTests } = await import('../lib/pendingRemoval');
 
-const routes = () => [...sourcesRoutes, { path: '/', element: <div>home page</div> }, { path: 's/:id/live', element: <div>live page</div> }];
+const routes = () => [
+  ...sourcesRoutes,
+  { path: '/', element: <div>home page</div> },
+  { path: 's/:id/live', element: <div>live page</div> },
+  { path: 's/:id/series', element: <div>series page</div> },
+];
 const dialog = () => screen.getByRole('dialog');
 const type = (label: string | RegExp, value: string) =>
   fireEvent.change(within(dialog()).getByLabelText(label, { selector: 'input,textarea' }), { target: { value } });
@@ -89,6 +94,25 @@ describe('return after a first add (L2-sources-home-12)', () => {
     const { router } = await addSample('/sources?add=1&kind=m3u&from=%2F');
     expect(await screen.findByText('live page')).toBeTruthy();
     expect(router.state.location.pathname).toBe('/s/new/live');
+  });
+
+  it('opens the first source added on the Sources page itself, on the section whose rail row led there', async () => {
+    const plain = await addSample('/sources?add=&kind=m3u');
+    expect(await screen.findByText('live page')).toBeTruthy();
+    expect(plain.router.state.location.pathname).toBe('/s/new/live');
+    cleanup();
+
+    rpcMock.reset();
+    rpcMock.handlers['sources.add'] = () => makeSource('new', { name: 'Sample', seriesCount: 40 });
+    const series = await addSample('/sources?for=series&add=&kind=m3u');
+    expect(await screen.findByText('series page')).toBeTruthy();
+    expect(series.router.state.location.pathname).toBe('/s/new/series');
+  });
+
+  it('says which section needs the source when a rail row led to the empty page', async () => {
+    rpcMock.handlers['sources.list'] = () => [];
+    renderAt(routes(), '/sources?for=live');
+    expect(await screen.findByText('Live TV needs a source. Pick the kind of login your provider gave you.')).toBeTruthy();
   });
 
   it('goes back to the page that opened Add when sources already existed', async () => {

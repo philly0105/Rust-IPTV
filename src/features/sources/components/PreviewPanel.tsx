@@ -45,7 +45,8 @@ export function PreviewPanel({ state }: { state: PreviewState }) {
                 {formatCount(state.preview.channelCount, i18n.language)}
               </span>
               <span className="text-sm text-fg-muted">
-                {t('previewChannels', { count: state.preview.channelCount })}
+                {/* The noun alone: the number is the large figure before it. */}
+                {t('statChannels', { count: state.preview.channelCount })}
                 {state.truncated ? ` ${t('previewTruncated')}` : ''}
               </span>
             </p>

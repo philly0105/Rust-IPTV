@@ -61,10 +61,10 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the header', () => {
-  it('shows the count as a bare number, not "3 sources" after "Sources"', async () => {
+  it('shows the count with its noun, as every header does', async () => {
     renderAt(sourcesRoutes, '/sources');
     await screen.findAllByTestId('source-card');
-    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('3'));
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('3 sources'));
     expect(useShellStore.getState().header?.title).toBe('Sources');
   });
 
@@ -104,6 +104,15 @@ describe('on a phone', () => {
     // Refresh all waits in More.
     fireEvent.click(within(actions).getByRole('button', { name: 'More source actions' }));
     expect(await screen.findByRole('menuitem', { name: 'Refresh all' })).toBeTruthy();
+  });
+
+  it("names the source once in a card's menu, with plain Refresh and Edit items", async () => {
+    phoneWindow(true);
+    renderAt(sourcesRoutes, '/sources');
+    const [alpha] = await screen.findAllByTestId('source-card');
+    fireEvent.click(within(alpha!).getByRole('button', { name: 'More actions for Alpha' }));
+    expect(await screen.findByRole('menuitem', { name: 'Refresh' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeTruthy();
   });
 
   it('opens the Add dialog from the header', async () => {
@@ -146,6 +155,16 @@ describe('the toolbar on a wider window', () => {
     expect(group.className).toContain('pe-2');
     expect(group.className).toContain('@2xl:pe-3');
     expect(within(group).getByRole('button', { name: 'More source actions' })).toBeTruthy();
+  });
+});
+
+describe('refresh times', () => {
+  it('says "just now" under a minute, not "now"', async () => {
+    const at = new Date().toISOString();
+    rpcMock.handlers['sources.list'] = () => [makeSource('a', { name: 'Alpha', lastRefreshAt: at, lastError: 'HTTP 404', lastErrorAt: at })];
+    renderAt(sourcesRoutes, '/sources');
+    expect((await screen.findByTestId('source-refreshed')).textContent).toBe('Refreshed just now');
+    expect(screen.getByTestId('source-failed-at').textContent).toBe('Failed just now');
   });
 });
 

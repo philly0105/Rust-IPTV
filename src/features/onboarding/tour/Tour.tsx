@@ -339,7 +339,15 @@ export function Tour({ onClose, coach: startCoach = false }: TourProps) {
             {t(current.titleKey)}
           </h2>
           <p id={textId} className="mt-1.5 text-body-sm text-fg-muted">
-            {t(current.textKey)}
+            {current.touchTextKey ? (
+              // The same coarse-pointer rule as the key hints below.
+              <>
+                <span className="pointer-coarse:hidden">{t(current.textKey)}</span>
+                <span className="hidden pointer-coarse:inline">{t(current.touchTextKey)}</span>
+              </>
+            ) : (
+              t(current.textKey)
+            )}
           </p>
           {current.anchor === 'search' && (
             // Keyboard hints mean nothing on a phone or tablet: hidden when the main pointer is a

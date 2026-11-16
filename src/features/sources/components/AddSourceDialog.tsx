@@ -34,6 +34,7 @@ import {
 } from '../lib/progress';
 import { flushPendingRemovals, isRemovalPending, removeOnUnload, scheduleRemoval } from '../lib/pendingRemoval';
 import { redactText } from '../lib/redact';
+import { SOURCE_ERROR_KEYS, classifySourceError } from '../lib/sourceError';
 import { useFocusInvalid } from '../lib/useFocusInvalid';
 import { useAutoRefreshHint } from '../lib/useAutoRefreshHint';
 import { useNextFrame } from '../lib/useNextFrame';
@@ -158,16 +159,15 @@ export function AddSourceDialog({
    */
   const claimRef = useRef<{ failedId: string | null; knownAtSubmit: Set<string> | null }>({ failedId: null, knownAtSubmit: null });
 
-  // Reset whenever the dialog opens with a (possibly new) initial request.
+  // Reset whenever the dialog opens with a (possibly new) initial request. The state resets while
+  // rendering, so the form is the requested kind on the dialog's first open render: the Dialog
+  // focuses that kind's address field. Reset in an effect, a host that keeps the dialog mounted
+  // (the Sources page) had the previous kind's field focused, then unmounted, and focus fell to
+  // <body>, out of reach of Escape and the focus trap.
   const initialKey = JSON.stringify(initial ?? null);
-  useEffect(
-    () => () => {
-      runRef.current += 1;
-    },
-    [open, initialKey],
-  );
-  useEffect(() => {
-    if (!open) return;
+  const [openedFor, setOpenedFor] = useState<string | null>(open ? initialKey : null);
+  if (open && openedFor !== initialKey) {
+    setOpenedFor(initialKey);
     setDraft(initialDraft(initial));
     setErrors({});
     setNameTouched(Boolean(initial?.name));
@@ -177,6 +177,17 @@ export function AddSourceDialog({
     setIdsAtSubmit([]);
     setFailed(null);
     setCancelled(false);
+  } else if (!open && openedFor !== null) {
+    setOpenedFor(null);
+  }
+  useEffect(
+    () => () => {
+      runRef.current += 1;
+    },
+    [open, initialKey],
+  );
+  useEffect(() => {
+    if (!open) return;
     cancelIdRef.current = null;
     claimRef.current = { failedId: null, knownAtSubmit: null };
   }, [open, initialKey]);
@@ -229,8 +240,12 @@ export function AddSourceDialog({
   }, [submitting]);
 
   // On a short window the progress (and its Cancel) sits below the fold: bring it into view as the run starts.
+  // Enter in a field starts the run, and the fields step aside: focus goes to the progress rather
+  // than fall to <body>, out of reach of Escape and the focus trap.
   useEffect(() => {
     if (!submitting) return;
+    const panel = bodyRef.current?.closest<HTMLElement>('[role="dialog"]');
+    if (panel && !panel.contains(document.activeElement)) progressRef.current?.focus({ preventScroll: true });
     scrollFrame(() => progressRef.current?.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }));
   }, [submitting, scrollFrame]);
 
@@ -424,6 +439,15 @@ export function AddSourceDialog({
   // The source a refused add duplicates: the error offers to open or refresh it instead.
   const duplicateId = submitError ? duplicateSourceId(submitError) : null;
   const duplicateName = duplicateId && submitError ? (sources.data?.find((s) => s.id === duplicateId)?.name ?? duplicateSourceName(submitError)) : null;
+  // What failed, as the source card says it (naming the host), in place of a summary and a hint
+  // that repeated the field's error. Errors the app does not recognise keep the summary and hint.
+  const submitInfo = submitError && !duplicateId ? classifySourceError(submitError.message, submitError.code) : null;
+  const submitCause =
+    submitInfo && submitInfo.kind !== 'unknown'
+      ? t(submitInfo.kind === 'auth' ? `sourceErrorAuth_${draft.kind}` : SOURCE_ERROR_KEYS[submitInfo.kind], {
+          host: submitInfo.host ?? draftHost(draft) ?? t('sourceErrorHostFallback'),
+        })
+      : null;
   // Leaving the page closes the dialog. Not through onClose: the host clears its `?add` params with a
   // navigation of its own, which would cancel this one. Replace, so Back does not reopen the dialog.
   const openDuplicate = (id: string) => {
@@ -523,8 +547,9 @@ export function AddSourceDialog({
           disabled={submitting}
           maxLength={120}
           // The name a submit uses when this is left empty, as a placeholder so it never lands in the middle of
-          // what the user is typing.
-          placeholder={defaultName(draft, t('originPasted')) || t('sourceNamePlaceholder')}
+          // what the user is typing. None before there is an address: an invented example name read
+          // as the one the source would get.
+          placeholder={defaultName(draft, t('originPasted')) || undefined}
           value={draft.name}
           // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
           onFocus={(e) => {
@@ -593,7 +618,10 @@ export function AddSourceDialog({
             <Tabs items={kinds} value={draft.kind} label={t('sourceType')} onChange={(id) => setKind(id as SourceKind)} />
           </div>
 
-          {draft.kind === 'm3u' ? (
+          {/* While the import runs the fields step aside (they come back as they were when it ends):
+              a disabled copy of the form pushed the progress, the one thing to watch, under a
+              phone's footer. The progress heading names the source, its line the host. */}
+          {!submitting && draft.kind === 'm3u' ? (
             <M3uForm
               mode="add"
               autoFocusAddress
@@ -610,7 +638,7 @@ export function AddSourceDialog({
               }}
             />
           ) : null}
-          {draft.kind === 'xtream' ? (
+          {!submitting && draft.kind === 'xtream' ? (
             <XtreamForm
               value={draft.xtream}
               onChange={(xtream) => setDraft((d) => ({ ...d, xtream }))}
@@ -622,7 +650,7 @@ export function AddSourceDialog({
               showHeaders={false}
             />
           ) : null}
-          {draft.kind === 'stalker' ? (
+          {!submitting && draft.kind === 'stalker' ? (
             <StalkerForm
               value={draft.stalker}
               onChange={(stalker) => setDraft((d) => ({ ...d, stalker }))}
@@ -635,20 +663,29 @@ export function AddSourceDialog({
             />
           ) : null}
 
-          {nameField}
+          {submitting ? null : (
+            <>
+              {nameField}
 
-          <Toggle
-            checked={draft.autoRefresh && !isTextOrigin}
-            disabled={submitting || isTextOrigin}
-            onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
-            label={t('autoRefresh')}
-            description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
-          />
+              <Toggle
+                checked={draft.autoRefresh && !isTextOrigin}
+                disabled={isTextOrigin}
+                onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
+                label={t('autoRefresh')}
+                description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
+              />
 
-          <HeadersFields value={draft[draft.kind].headers} onChange={setHeaders} errors={errors} prefix={`${draft.kind}.headers`} disabled={submitting} />
+              <HeadersFields value={draft[draft.kind].headers} onChange={setHeaders} errors={errors} prefix={`${draft.kind}.headers`} />
+            </>
+          )}
 
           {submitting ? (
-            <div ref={progressRef} className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4" data-testid="add-source-progress">
+            <div
+              ref={progressRef}
+              tabIndex={-1}
+              className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4 outline-none"
+              data-testid="add-source-progress"
+            >
               <p className="flex items-center gap-2 text-body-sm font-medium text-fg">
                 <LoaderCircle aria-hidden size={16} className="shrink-0 text-accent motion-safe:animate-spin" />
                 <span className="min-w-0 truncate" dir="auto">
@@ -687,8 +724,17 @@ export function AddSourceDialog({
                 ) : (
                   <>
                     <p className="font-medium text-fg">{t('addFailed')}</p>
-                    <p className="text-fg">{t(summaryKey(submitError))}</p>
-                    <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                    {submitCause ? (
+                      // The source card's wording: one line that names the host and what to check.
+                      <p className="text-fg" data-testid="add-source-error-message">
+                        {submitCause}
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-fg">{t(summaryKey(submitError))}</p>
+                        <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                      </>
+                    )}
                     {failed ? (
                       <p className="text-fg-muted" data-testid="add-source-retry-note">
                         {t('addRetryNote', { name: failed.name })}

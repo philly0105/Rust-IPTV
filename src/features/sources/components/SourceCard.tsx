@@ -11,7 +11,7 @@ import { sourceHomePath } from '@/shell/railLinks';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { Badge, Button, IconButton, Menu, MetaLine, Tooltip, type MenuItem } from '@/ui';
 import { baseName } from '../lib/files';
-import { absoluteTime, formatCount, relativeTime } from '../lib/format';
+import { absoluteTime, formatCount, formatStatCount, relativeTime } from '../lib/format';
 import { useSourceGuide } from '../lib/epgRefresh';
 import { isRunningPhase, useImportProgressStore, useSourceProgress } from '../lib/progress';
 import { redactText } from '../lib/redact';
@@ -83,7 +83,7 @@ function sourceHost(s: Source): string | undefined {
  */
 const ERROR_TEXT = 'min-w-0 grow basis-48 text-fg';
 
-function SourceErrorText({ source }: { source: Source }) {
+export function SourceErrorText({ source }: { source: Source }) {
   const { t } = useTranslation('sources');
   const raw = source.lastError ?? '';
   const info = classifySourceError(raw, source.lastErrorCode);
@@ -252,6 +252,9 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   const stat = (key: StatKey) => ({ key, value: counts[key], label: t(STAT_LABEL[key], { count: counts[key] }) });
   const own = statKeysOf(s);
   const stats = own.map(stat);
+  // Never imported (a first import that failed or still runs): no count is known yet, so every
+  // column is a dash rather than "0 channels", which reads as an empty provider.
+  const imported = Boolean(s.lastRefreshAt);
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     // Alt+Arrow anywhere on the card, or plain arrows on the grip, move it.
@@ -274,6 +277,11 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
 
   const refreshed = relativeTime(s.lastRefreshAt, lang);
   const failed = s.lastError ? relativeTime(s.lastErrorAt, lang) : undefined;
+  // Under a minute, "Refreshed now" and "Failed now" read like commands.
+  const justNow = (iso: string | undefined) => {
+    const at = iso ? Date.parse(iso) : NaN;
+    return Math.abs(Date.now() - at) < 60_000;
+  };
   const next = s.autoRefresh && props.schedule && !busy ? nextRefreshText(props.schedule, lang, t) : undefined;
   const origin = sourceOrigin(s, t);
 
@@ -281,12 +289,12 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
     // With an error and no good refresh yet, the error strip says it all; "Not refreshed yet" beside it reads as a contradiction.
     refreshed || !s.lastError ? (
       <span key="refreshed" className="whitespace-nowrap" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
-        {refreshed ? t('refreshedAgo', { when: refreshed }) : t('neverRefreshed')}
+        {refreshed ? (justNow(s.lastRefreshAt) ? t('refreshedJustNow') : t('refreshedAgo', { when: refreshed })) : t('neverRefreshed')}
       </span>
     ) : null,
     failed ? (
       <span key="failed" className="whitespace-nowrap text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
-        {t('failedAgo', { when: failed })}
+        {justNow(s.lastErrorAt) ? t('failedJustNow') : t('failedAgo', { when: failed })}
       </span>
     ) : null,
     next ? (
@@ -300,8 +308,9 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   const refreshLabel = t(text ? 'reimportSource' : 'refreshSource', { name: s.name });
   const menu: MenuItem[] = [];
   if (phone) {
-    menu.push({ id: 'refresh', label: refreshLabel, icon: <RefreshCw aria-hidden size={16} />, disabled: busy, onSelect: () => props.onRefresh(s) });
-    menu.push({ id: 'edit', label: t('editSource', { name: s.name }), icon: <Pencil aria-hidden size={16} />, onSelect: () => props.onEdit(s) });
+    // Plain verbs, as the menu's other items: the sheet's header names the source once.
+    menu.push({ id: 'refresh', label: t(text ? 'reimport' : 'refresh'), icon: <RefreshCw aria-hidden size={16} />, disabled: busy, onSelect: () => props.onRefresh(s) });
+    menu.push({ id: 'edit', label: t('common:edit'), icon: <Pencil aria-hidden size={16} />, onSelect: () => props.onEdit(s) });
   }
   if (hasAccountInfo(s) && props.onAccount) {
     menu.push({ id: 'account', label: t('accountMenu'), icon: <IdCard aria-hidden size={16} />, onSelect: () => props.onAccount?.(s) });
@@ -401,38 +410,61 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
             ) : null}
           </div>
           {/* Narrow cards: the counts as one line of text. */}
-          <dl className="col-span-full row-start-3 flex flex-wrap gap-x-4 gap-y-0.5 @3xl:hidden" data-testid="source-stats-line">
-            {stats.map((st) => (
-              <div key={st.key} className="flex items-baseline gap-1 text-body-sm">
-                <dt className="sr-only">{st.label}</dt>
-                <dd className="flex items-baseline gap-1">
-                  <span className="font-semibold tabular-nums text-fg">{formatCount(st.value, lang)}</span>
-                  <span aria-hidden className="text-fg-muted">
-                    {st.label}
-                  </span>
-                </dd>
-              </div>
-            ))}
-          </dl>
+          {imported ? (
+            <dl className="col-span-full row-start-3 flex flex-wrap gap-x-4 gap-y-0.5 @3xl:hidden" data-testid="source-stats-line">
+              {stats.map((st) => (
+                <div key={st.key} className="flex items-baseline gap-1 text-body-sm">
+                  <dt className="sr-only">{st.label}</dt>
+                  <dd className="flex items-baseline gap-1">
+                    <span className="font-semibold tabular-nums text-fg">{formatCount(st.value, lang)}</span>
+                    <span aria-hidden className="text-fg-muted">
+                      {st.label}
+                    </span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
         </div>
 
-        {/* The list's shared columns, each a fixed slot, so a column holds one kind of count down
-            the list; a count this source lacks (always 0) is a quiet dash. */}
-        <dl className="hidden shrink-0 items-center gap-3 @3xl:flex" data-testid="source-stats">
+        {/* The list's shared columns, each a slot of the same least width, so a column holds one
+            kind of count down the list; a count this source lacks (always 0) is a quiet dash. From
+            10,000 a count is compact ("57K", the exact number in its tooltip and for screen
+            readers), and a slot grows rather than run into the next one. */}
+        <dl className="hidden shrink-0 items-center gap-4 @3xl:flex" data-testid="source-stats">
           {(props.statColumns ?? own).map((key) => {
             const st = stat(key);
-            const has = own.includes(key);
+            const has = imported && own.includes(key);
+            const exact = formatCount(st.value, lang);
+            const short = formatStatCount(st.value, lang);
             return (
-              <div key={key} className="flex w-14 flex-col-reverse items-end" data-testid="source-stat" data-stat={key} data-empty={has ? undefined : ''}>
+              <div
+                key={key}
+                className="flex min-w-16 flex-col-reverse items-end"
+                title={has && short !== exact ? exact : undefined}
+                data-testid="source-stat"
+                data-stat={key}
+                data-empty={has ? undefined : ''}
+              >
                 <dt className="max-w-full truncate text-caption text-fg-muted">{st.label}</dt>
-                <dd className={clsx('text-title-sm tabular-nums', has ? 'text-fg' : 'text-fg-subtle')}>
-                  {has ? (
-                    formatCount(st.value, lang)
-                  ) : (
+                <dd className={clsx('whitespace-nowrap text-title-sm tabular-nums', has ? 'text-fg' : 'text-fg-subtle')}>
+                  {has && short === exact ? (
+                    exact
+                  ) : has ? (
                     <>
-                      <span aria-hidden>–</span>
-                      <span className="sr-only">{formatCount(st.value, lang)}</span>
+                      <span aria-hidden>{short}</span>
+                      <span className="sr-only">{exact}</span>
                     </>
+                  ) : (
+                    imported ? (
+                      <>
+                        <span aria-hidden>–</span>
+                        <span className="sr-only">{exact}</span>
+                      </>
+                    ) : (
+                      // Nothing imported yet: no count to give (the times line or the error says why).
+                      '–'
+                    )
                   )}
                 </dd>
               </div>
@@ -454,7 +486,7 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
               <IconButton label={t('editSource', { name: s.name })} icon={<Pencil aria-hidden size={16} />} onClick={() => props.onEdit(s)} data-testid="source-edit" />
             </>
           )}
-          <Menu label={t('moreActionsFor', { name: s.name })} items={menu} />
+          <Menu label={t('moreActionsFor', { name: s.name })} items={menu} sheetHeader={{ title: s.name }} />
         </div>
       </div>
 

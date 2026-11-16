@@ -220,7 +220,8 @@ describe('add failure offers a retry', () => {
     type(/^Playlist URL/, 'http://lists.example.com/tv.m3u');
     fireEvent.click(screen.getByTestId('add-source-submit'));
     const alert = await screen.findByTestId('add-source-error');
-    expect(alert.textContent).toContain("The server didn't answer in time.");
+    // The source card's wording, naming the host (sources-onboarding-07).
+    expect(alert.textContent).toContain("lists.example.com didn't answer in time.");
     fireEvent.click(within(alert).getByTestId('add-source-retry'));
     await waitFor(() => expect(rpcMock.callsOf('sources.add')).toHaveLength(2));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -303,8 +304,11 @@ describe('wrong URL (stream, web page, oversized download)', () => {
     type(/^Playlist URL/, 'http://tv.example.com/live/1.ts');
     fireEvent.click(screen.getByTestId('add-source-submit'));
     const alert = await screen.findByTestId('add-source-error');
-    expect(alert.textContent).toContain("That address doesn't lead to a channel list.");
+    // The field says what is wrong; the box says it as the source card does, once.
+    expect(alert.textContent).toContain("tv.example.com didn't send a channel list.");
     expect(alert.textContent).toContain('Use the playlist URL from your provider');
+    expect(alert.textContent).not.toContain("That address doesn't lead to a channel list.");
+    expect(dialog().textContent).toContain("That address doesn't lead to a channel list.");
     const url = input(/^Playlist URL/);
     expect(url.getAttribute('aria-invalid')).toBe('true');
     await waitFor(() => expect(document.activeElement).toBe(url));
@@ -459,6 +463,35 @@ describe('refresh failures', () => {
     }
   });
 
+  it('Refresh all with one failed source shows one toast naming it, and claims its import error from the shell', async () => {
+    const { importErrorClaimed } = await import('../lib/errors');
+    rpcMock.handlers['sources.list'] = () => [xtream('a', { name: 'Alpha' }), xtream('b', { name: 'Old provider' })];
+    rpcMock.handlers['sources.refresh'] = (a) => {
+      const id = (a as { id: string }).id;
+      // The shell asks while the import runs: the page reports this one itself.
+      expect(importErrorClaimed(id)).toBe(true);
+      if (id === 'b') throw new RpcError('not_found', 'HTTP 404 Not Found');
+      return xtream(id);
+    };
+    renderAt(routes(), '/sources');
+    const btn = await screen.findByTestId('sources-refresh-all');
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn.textContent).toBe('Refresh all'));
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]!.title).toBe("Couldn't refresh Old provider");
+    expect(toasts[0]!.action?.label).toBe('Check settings');
+  });
+
+  it('a card refresh that finishes with an error shows its own toast', async () => {
+    rpcMock.handlers['sources.list'] = () => [xtream('a', { name: 'Alpha' })];
+    rpcMock.handlers['sources.refresh'] = () => xtream('a', { name: 'Alpha', lastError: 'HTTP 401 Unauthorized', lastErrorCode: 'auth' });
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-refresh'));
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0]!.title).toBe("Couldn't refresh Alpha");
+  });
+
   it('a card refresh leaves catalog queries to the core events (ST-5)', async () => {
     const { queryClient, rpcKey } = await import('@/api/query');
     rpcMock.handlers['sources.list'] = () => [xtream('a')];
@@ -484,6 +517,38 @@ describe('refresh failures', () => {
     await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'p' }]));
   });
 });
+
+describe('edit dialog for a failed source', () => {
+  it('Check settings shows what failed and marks the field to fix', async () => {
+    rpcMock.handlers['sources.list'] = () => [
+      makeSource('m', { name: 'Old provider', lastError: 'HTTP 404 Not Found', lastErrorCode: 'not_found' }),
+    ];
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByRole('button', { name: 'Check settings' }));
+    const note = await screen.findByTestId('edit-source-last-error');
+    expect(note.textContent).toContain("The address wasn't found on the server.");
+    // A short title; the long name is one line under it.
+    expect(within(dialog()).getByRole('heading').textContent).toBe('Edit source');
+    expect(dialog().textContent).toContain('Old provider');
+    const url = input(/^Playlist URL/);
+    expect(url.getAttribute('aria-invalid')).toBe('true');
+    await waitFor(() => expect(document.activeElement).toBe(url));
+  });
+
+  it('the read-only Account tab only offers Close', async () => {
+    rpcMock.handlers['sources.list'] = () => [xtream('a', { name: 'Alpha' })];
+    rpcMock.handlers['xtream.accountInfo'] = () => pendingForever();
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    expect(screen.getByTestId('edit-source-save')).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Account' }));
+    expect(screen.queryByTestId('edit-source-save')).toBeNull();
+    fireEvent.click(screen.getByTestId('edit-source-close'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+});
+
+const pendingForever = () => new Promise<never>(() => undefined);
 
 describe('source card error strip', () => {
   it('ties each Try again to its source, so several failed cards stay distinguishable', async () => {

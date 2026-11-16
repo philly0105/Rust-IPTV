@@ -82,6 +82,7 @@
   "noteGuideSmoothText": "A műsorújság sok csatornánál is simán görget, és az XMLTV-adatok hiányait Xtream-fiókja saját műsorújságával pótolja.",
   "tourCoachTitle": "A forrás készen áll",
   "tourCoachText": "A keresés minden forrásban megtalálja a csatornákat, filmeket és sorozatokat. A parancspaletta bárhová máshová elviszi.",
+  "tourCoachTextTouch": "A keresés minden forrásban megtalálja a csatornákat, filmeket és sorozatokat.",
   "tourShowAround": "Körbevezetés",
   "tourGotIt": "Rendben"
 }

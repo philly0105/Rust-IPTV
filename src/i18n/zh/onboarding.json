@@ -82,6 +82,7 @@
   "noteGuideSmoothText": "频道很多时节目指南也能流畅滚动，并用你 Xtream 账户自带的节目指南补全 XMLTV 节目单中的空缺。",
   "tourCoachTitle": "播放源已就绪",
   "tourCoachText": "搜索可在所有播放源中查找频道、电影和剧集。其他任何地方都可通过命令面板前往。",
+  "tourCoachTextTouch": "搜索可在所有播放源中查找频道、电影和剧集。",
   "tourShowAround": "带我看看",
   "tourGotIt": "知道了"
 }

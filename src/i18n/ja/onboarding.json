@@ -82,6 +82,7 @@
   "noteGuideSmoothText": "チャンネル数が多くても番組表がスムーズにスクロールし、XMLTVの番組情報の抜けをXtreamアカウント独自の番組表で補います。",
   "tourCoachTitle": "ソースの準備ができました",
   "tourCoachText": "検索ですべてのソースのチャンネル、映画、シリーズが見つかります。そのほかの場所へはコマンドパレットから移動できます。",
+  "tourCoachTextTouch": "検索ですべてのソースのチャンネル、映画、シリーズが見つかります。",
   "tourShowAround": "ツアーを見る",
   "tourGotIt": "OK"
 }

@@ -266,7 +266,7 @@ describe('an Add left unnamed still adds (the name is optional)', () => {
     fireEvent.blur(field(/^Playlist URL/));
     expect(field(/^Name/).placeholder).toBe('sports');
     fireEvent.click(within(dialog()).getByRole('tab', { name: 'Xtream Codes' }));
-    expect(field(/^Name/).placeholder).toBe('Living room provider');
+    expect(field(/^Name/).placeholder).toBe('');
     fireEvent.change(field(/^Server URL/), { target: { value: 'http://xtream.example.com:8080' } });
     expect(field(/^Name/).placeholder).toBe('xtream.example.com');
     fireEvent.change(field(/^Username/), { target: { value: 'u' } });

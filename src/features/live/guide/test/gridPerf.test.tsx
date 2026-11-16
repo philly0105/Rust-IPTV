@@ -200,6 +200,25 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     expect(sticky()).toEqual([false, false, false]);
   });
 
+  it('at rest narrows the cut title to what shows of its cell, and hides it on a sliver (guide-01)', () => {
+    const row = document.createElement('div');
+    row.innerHTML = '<span data-pad-left="0" data-pad-width="300"></span><span data-pad-left="300" data-pad-width="300"></span>';
+    const [a, b] = row.querySelectorAll<HTMLElement>('span');
+    const fitter = createStickyTitleManager();
+    const unregister = fitter.register(row, 100);
+    // 300 - 100 - 17 px of the cut cell show its text; the next cell is untouched.
+    expect([a!.style.maxWidth, a!.style.visibility, b!.style.maxWidth]).toEqual(['183px', '', '']);
+    fitter.update(270);
+    expect([a!.style.maxWidth, a!.style.visibility]).toEqual(['13px', 'hidden']);
+    // Motion leaves the titles to native sticky; rest narrows the one the edge cuts again.
+    fitter.setMoving(true, 270);
+    expect([a!.style.maxWidth, a!.style.visibility]).toEqual(['', '']);
+    fitter.setMoving(false, 350);
+    expect([a!.style.maxWidth, b!.style.maxWidth]).toEqual(['', '233px']);
+    unregister();
+    expect(b!.style.maxWidth).toBe('');
+  });
+
   it('places the pinned channel cells at the scroll position at rest and leaves them to native sticky while moving', () => {
     const pins = createStickyTitleManager();
     const a = document.createElement('div');

@@ -17,7 +17,7 @@ import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/record
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName } from '../lib/channelName';
-import { MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
+import { CELL_TEXT_MIN_PX, MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
 import type { GuideHydrator, HydrationTicket } from './hydration';
@@ -63,7 +63,7 @@ export const GUIDE_MOVING_ATTR = 'data-guide-moving';
  */
 export function createStickyTitleManager() {
   type Cell = { el: HTMLElement; left: number; width: number };
-  type Row = { cells: Cell[]; sticky: Cell[] };
+  type Row = { cells: Cell[]; sticky: Cell[]; capped: Cell | null };
   const pins = new Set<HTMLElement>();
   let moving = false;
   let pinX = 0;
@@ -77,6 +77,24 @@ export function createStickyTitleManager() {
   // Sticky positioning on hundreds of such cells makes WebKit's scroll paint costly.
   const minStickyWidth = 64;
   const rows = new Map<HTMLElement, Row>();
+  // A sticky title cannot pass its cell's end, so with only a sliver of the cell left it slid
+  // back under the channel column and lost its first letters ("nside the NBA"). At rest the
+  // cut title is narrowed to the part of its cell that shows (its own truncation adds the
+  // ellipsis) and hidden when that is too narrow to read, which leaves a plain block. The cell
+  // sits at left + 1 with 8 px padding and its title sticks 8 px past the edge: 17 px of the
+  // cell are not text room. While moving, the title is left alone (no style write per frame).
+  const setCap = ({ el, left, width }: Cell, scroll: number) => {
+    const full = width - 18;
+    const room = Math.floor(Math.min(left + width - scroll - 17, full));
+    const max = `${Math.max(0, room)}px`;
+    const visibility = room < Math.min(CELL_TEXT_MIN_PX, full) ? 'hidden' : '';
+    if (el.style.maxWidth !== max) el.style.maxWidth = max;
+    if (el.style.visibility !== visibility) el.style.visibility = visibility;
+  };
+  const clearCap = (cell: Cell) => {
+    if (cell.el.style.maxWidth) cell.el.style.maxWidth = '';
+    if (cell.el.style.visibility) cell.el.style.visibility = '';
+  };
   const updateRow = (row: Row, scroll: number) => {
     // Programme cells are in time order and do not overlap. Find the first one whose
     // end reaches the visible edge, then prime its immediate neighbours too.
@@ -89,6 +107,10 @@ export function createStickyTitleManager() {
       else hi = mid;
     }
     const covering = lo < row.cells.length && row.cells[lo]!.left <= scroll;
+    const cap = !moving && covering ? row.cells[lo]! : null;
+    if (row.capped && row.capped !== cap) clearCap(row.capped);
+    if (cap) setCap(cap, scroll);
+    row.capped = cap;
     // At rest only the title the edge cuts sticks: the page turns motion on (and with it the
     // neighbours) before a sideways move it can see coming, so a primed title would only be
     // one more composited layer for every frame of a vertical scroll.
@@ -113,7 +135,7 @@ export function createStickyTitleManager() {
         width: Number(el.dataset.padWidth),
       })).filter((cell) => cell.width >= minStickyWidth);
       if (cells.length === 0) return () => {};
-      const entry: Row = { cells, sticky: [] };
+      const entry: Row = { cells, sticky: [], capped: null };
       rows.set(row, entry);
       updateRow(entry, scroll);
       return () => {
@@ -121,6 +143,7 @@ export function createStickyTitleManager() {
         if (rows.get(row) !== entry) return;
         rows.delete(row);
         for (const cell of entry.sticky) cell.el.classList.remove('sticky');
+        if (entry.capped) clearCap(entry.capped);
       };
     },
     update(scroll: number) {

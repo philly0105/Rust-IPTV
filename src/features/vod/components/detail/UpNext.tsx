@@ -53,12 +53,12 @@ export function UpNextRail({
   const thumbWidth = usePosterWidthBox(useScaledPx(THUMB_PX, true));
   if (episodes.length === 0) return null;
   return (
-    <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:w-[340px] xl:shrink-0">
+    <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:absolute xl:inset-0">
       <h2 className="text-sm text-fg-muted">{t('upNext')}</h2>
       <ol
         ref={fades.ref}
         style={fades.style}
-        className="flex gap-3 overflow-x-auto pb-2 scrollbar-none xl:max-h-[calc(72vh-2rem)] xl:flex-col xl:overflow-x-hidden xl:overflow-y-auto"
+        className="flex gap-3 overflow-x-auto pb-2 scrollbar-none xl:min-h-0 xl:flex-1 xl:flex-col xl:overflow-x-hidden xl:overflow-y-auto"
       >
         {episodes.map((ep) => {
           const fraction = progressFraction(positions.get(ep.id));

@@ -395,6 +395,10 @@ describe('keyboard', () => {
     expect(mainOf(3).getAttribute('aria-label')).toBe('Swap with Channel 3 in slot 3');
     fireEvent.keyDown(mainOf(3), { key: 'Escape' });
     expect(mainOf(3).getAttribute('aria-label')).toBe('Play sound from Channel 3');
+    // The moving tile shows a Cancel button too (touch has no Escape).
+    fireEvent.keyDown(mainOf(1), { key: 's' });
+    fireEvent.click(within(tileEl(1)).getByTestId('multiview-swap-cancel'));
+    expect(mainOf(3).getAttribute('aria-label')).toBe('Play sound from Channel 3');
     fireEvent.keyDown(mainOf(1), { key: 's' });
     fireEvent.click(mainOf(3));
     expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k3', 'k2', 'k1']);
@@ -499,22 +503,27 @@ describe('connection limit', () => {
     expect(screen.queryByTestId('multiview-limit-banner')).toBeNull();
   });
 
-  it('lies over the toolbar instead of pushing the wall down when it arrives late (XB2-32)', async () => {
+  it('lies over the wall under the toolbar instead of pushing the wall down when it arrives late (XB2-32)', async () => {
     seed([1, 2, 3], 'src1');
     renderPage();
-    const toolbarBox = () => screen.getByTestId('multiview-toolbar').parentElement!;
-    expect(toolbarBox().hasAttribute('inert')).toBe(false);
     const banner = await screen.findByTestId('multiview-limit-banner');
-    // Out of the flow: an absolute layer at the top of the stage, not a block above the wall.
+    // Out of the flow: an absolute layer hanging under the toolbar, not a block above the wall.
     const layer = screen.getByTestId('multiview-limit-layer');
     expect(layer.contains(banner)).toBe(true);
-    expect(layer.className).toContain('absolute');
-    expect(layer.parentElement).toBe(screen.getByTestId('multiview-stage'));
+    expect(layer.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'top-full']));
+    expect(layer.parentElement!.contains(screen.getByTestId('multiview-toolbar'))).toBe(true);
     expect(screen.getByTestId('multiview-banners').contains(banner)).toBe(false);
-    // The covered toolbar takes no focus until the warning goes.
-    expect(toolbarBox().hasAttribute('inert')).toBe(true);
-    fireEvent.click(within(banner).getByRole('button', { name: 'Dismiss' }));
-    expect(toolbarBox().hasAttribute('inert')).toBe(false);
+    // The toolbar stays usable while the warning shows.
+    expect(screen.getByTestId('multiview-toolbar').closest('[inert]')).toBeNull();
+  });
+
+  it("offers to close the account's last tile, with Undo", async () => {
+    seed([1, 2, 3], 'src1');
+    renderPage();
+    const banner = await screen.findByTestId('multiview-limit-banner');
+    fireEvent.click(within(banner).getByTestId('multiview-limit-close'));
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1', 'k2']);
+    await waitFor(() => expect(screen.queryByTestId('multiview-limit-banner')).toBeNull());
   });
 
   it('counts only tiles that open a stream: a locked tile uses no connection (L1-live-10)', async () => {
@@ -664,7 +673,12 @@ describe('empty wall', () => {
     expect(hint.className.split(/\s+/)).toContain('@[45rem]/stage:sr-only');
     const slots = screen.getAllByTestId('multiview-empty-slot');
     expect(slots[0]!.getAttribute('aria-describedby')).toBe(hint.id);
-    expect(slots).toHaveLength(4);
+    // Only the next slot is a button: a channel goes there whichever frame is clicked, so the
+    // frames after it are plain numbered frames that only show the layout's shape.
+    expect(slots).toHaveLength(1);
+    const frames = screen.getAllByTestId('multiview-free-frame');
+    expect(frames.map((f) => f.getAttribute('data-slot'))).toEqual(['2', '3', '4']);
+    for (const f of frames) expect(f.querySelector('button')).toBeNull();
     // Nothing recent or favorite (a new user): stacked, the first slot is not a short row but
     // says how the wall works above its plus, since the phone toolbar has no room for it.
     const own = slots[0]!.className.split(/\s+/);
@@ -676,7 +690,8 @@ describe('empty wall', () => {
     expect(screen.getAllByRole('radiogroup', { name: 'Layout' })).toHaveLength(1);
     fireEvent.click(within(screen.getByTestId('multiview-toolbar')).getByTestId('multiview-layout-1x2'));
     expect(useMultiviewStore.getState().layout).toBe('1x2');
-    expect(screen.getAllByTestId('multiview-empty-slot')).toHaveLength(2);
+    expect(screen.getAllByTestId('multiview-empty-slot')).toHaveLength(1);
+    expect(screen.getAllByTestId('multiview-free-frame')).toHaveLength(1);
     // Sound, full screen and clear wait for tiles.
     expect(screen.queryByTestId('multiview-mute')).toBeNull();
     expect(screen.queryByTestId('multiview-clear')).toBeNull();
@@ -800,8 +815,9 @@ describe('empty wall', () => {
       'Add Channel 4 to the wall',
       'Add Channel 5 to the wall',
     ]);
-    // Only the next slot offers them; the one after stays a plain frame.
-    expect(screen.getByRole('button', { name: 'Slot 4: add a channel' })).toBeTruthy();
+    // Only the next slot offers them; the one after is a plain numbered frame.
+    expect(screen.queryByRole('button', { name: 'Slot 4: add a channel' })).toBeNull();
+    expect(screen.getByTestId('multiview-free-frame').getAttribute('data-slot')).toBe('4');
 
     fireEvent.click(within(list).getByRole('button', { name: 'Add Channel 4 to the wall' }));
     await waitFor(() => expect(useMultiviewStore.getState().tiles.map((x) => x.title)).toEqual(['Channel 1', 'Channel 2', 'Channel 4']));
@@ -816,6 +832,22 @@ describe('empty wall', () => {
     // "More channels" opens the picker.
     fireEvent.click(within(next).getByRole('button', { name: 'More channels for slot 4' }));
     expect(await screen.findByRole('dialog', { name: 'Add channels' })).toBeTruthy();
+  });
+
+  it("marks the quick picks of an account whose streams are all in use, as the picker does", async () => {
+    const recent = (i: number, sourceId: string) => ({ ref: channel(i, sourceId).ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: `Channel ${i}`, contentType: 'live' } });
+    handlers['recent.list'] = () => [recent(3, 'src1'), recent(4, 'm3u1')];
+    seed([1, 2], 'src1');
+    renderPage();
+    const slot = await screen.findByRole('group', { name: 'Slot 3: add a channel' });
+    const list = await within(slot).findByTestId('multiview-quick-picks');
+    await waitFor(() =>
+      expect(within(list).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+        'Add Channel 3 to the wall, Connection limit reached',
+        'Add Channel 4 to the wall',
+      ]),
+    );
+    expect(within(list).getAllByTestId('multiview-quick-pick-limit')).toHaveLength(1);
   });
 
   it('keeps a narrow next slot a plain frame, and gives the rows the width past the slot number', async () => {
@@ -907,7 +939,7 @@ describe('stacked wall', () => {
     const classes = wall.className.split(/\s+/);
     expect(classes).toEqual(expect.arrayContaining(['self-start', 'content-start']));
     // A fitted wall's slots fill their grid cells.
-    for (const slot of screen.getAllByTestId('multiview-empty-slot')) {
+    for (const slot of [...screen.getAllByTestId('multiview-empty-slot'), ...screen.getAllByTestId('multiview-free-frame')]) {
       const own = slot.className.split(/\s+/);
       expect(own).toContain('@2xl:min-h-0');
       expect(own).toContain('@2xl:aspect-auto');
@@ -920,7 +952,8 @@ describe('stacked wall', () => {
     await screen.findByTestId('multiview-wall');
     // Nothing recent or favorite: the next slot is a plain frame once both lists answered.
     await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
-    const [next, ...rest] = screen.getAllByTestId('multiview-empty-slot');
+    const [next] = screen.getAllByTestId('multiview-empty-slot');
+    const rest = screen.getAllByTestId('multiview-free-frame');
     expect(next!.getAttribute('data-slot')).toBe('2');
     expect(next!.className.split(/\s+/)).toEqual(expect.arrayContaining(['@max-2xl:aspect-auto', '@max-2xl:h-14', '@max-2xl:flex-row']));
     // The slots after it are drawn only on a fitted wall, where they show the layout's shape.

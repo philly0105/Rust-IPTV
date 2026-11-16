@@ -1,7 +1,8 @@
 import { MonitorPlay, TriangleAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { cn, Tooltip } from '../deps';
+import { Button, cn, IconButton } from '../deps';
+import type { MultiviewTile } from '../types';
 import type { SourceLoad } from '../useWallData';
 
 const bannerClass =
@@ -17,14 +18,28 @@ export function loadKey(l: SourceLoad): string {
  * main player) outnumber their connections. Providers refuse (or cut) streams past the
  * limit, so tiles of that account may fail; the banner says which account and by how much.
  * Dismissed per situation (the page keeps which, `loadKey`): adding another tile of that
- * account, or a recording starting on it, shows it again.
+ * account, or a recording starting on it, shows it again. The fix is nearly always closing one of
+ * the account's tiles, so the banner offers to close its last one (with Undo, like any close).
  */
-export function LimitBanners({ over, onDismiss }: { over: readonly SourceLoad[]; onDismiss(l: SourceLoad): void }) {
+export function LimitBanners({
+  over,
+  lastTileOf,
+  onCloseTile,
+  onDismiss,
+}: {
+  over: readonly SourceLoad[];
+  /** The account's last tile on the wall, which the banner offers to close. */
+  lastTileOf?(sourceId: string): MultiviewTile | undefined;
+  onCloseTile?(key: string): void;
+  onDismiss(l: SourceLoad): void;
+}) {
   const { t } = useTranslation('multiview');
   // A polite live region that exists before any banner (empty, it takes no room), so additions are announced.
   return (
     <div role="status" aria-live="polite" className="flex flex-col gap-2">
-      {over.map((l) => (
+      {over.map((l) => {
+        const last = lastTileOf?.(l.sourceId);
+        return (
         <div
           key={l.sourceId}
           data-testid="multiview-limit-banner"
@@ -39,18 +54,17 @@ export function LimitBanners({ over, onDismiss }: { over: readonly SourceLoad[];
               {l.own > 0 ? ` ${t('limitOwn')}` : null}
             </span>
           </p>
-          <Tooltip content={t('limitDismiss')} describe={false}>
-            <button
-              type="button"
-              aria-label={t('limitDismiss')}
-              onClick={() => onDismiss(l)}
-              className="-me-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <X aria-hidden className="size-4" />
-            </button>
-          </Tooltip>
+          <div className="-me-1 flex shrink-0 items-center gap-1">
+            {last && onCloseTile ? (
+              <Button size="sm" className="max-w-56 min-w-0" onClick={() => onCloseTile(last.key)} data-testid="multiview-limit-close">
+                <span className="min-w-0 truncate">{t('closeLabel', { name: last.title })}</span>
+              </Button>
+            ) : null}
+            <IconButton size="sm" label={t('limitDismiss')} icon={<X aria-hidden className="size-4" />} onClick={() => onDismiss(l)} />
+          </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

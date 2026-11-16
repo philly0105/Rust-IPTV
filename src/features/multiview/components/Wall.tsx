@@ -34,6 +34,8 @@ export interface WallProps extends TileHandlers {
   swapFrom: string | null;
   /** Recent and favorite live channels not on the wall, offered in the next free slot. */
   picks: readonly QuickPick[];
+  /** Accounts with every stream in use: their quick picks carry the picker's warning. */
+  limitedSources: ReadonlySet<string>;
   picksLoading: boolean;
   /** Key of the quick pick being put up. */
   pendingPick: string | null;
@@ -68,6 +70,7 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
     programmes,
     swapFrom,
     picks,
+    limitedSources,
     picksLoading,
     pendingPick,
     onAdd,
@@ -106,6 +109,7 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
               next={slot === tiles.length}
               intro={tiles.length === 0}
               picks={picks}
+              limitedSources={limitedSources}
               picksLoading={picksLoading}
               pending={pendingPick}
               onAdd={onAdd}

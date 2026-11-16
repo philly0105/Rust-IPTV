@@ -16,7 +16,7 @@ import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../t
 import { focusTileOf } from '../paths';
 import { useQuickPicks, type QuickPick } from '../quickPicks';
 import { useMainPlayerHandoff } from '../useMainPlayerHandoff';
-import { overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
+import { inUse, overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
 import { focusSlot, useWallKeyboard } from '../useWallKeyboard';
 import { useWallFullscreen } from '../useWallFullscreen';
 import { LimitBanners, loadKey, MainPlayingBanner } from './Banners';
@@ -128,6 +128,8 @@ export function MultiviewPage() {
   const loads = useSourceLoads(tiles, sources.byId, parental.active);
   const over = useMemo(() => overLimit(loads), [loads]);
   const overSet = useMemo(() => new Set(over.map((l) => l.sourceId)), [over]);
+  // Accounts with every stream in use: a quick pick from one may not play (as the picker warns).
+  const atLimit = useMemo(() => new Set(loads.filter((l) => l.max > 0 && inUse(l) >= l.max).map((l) => l.sourceId)), [loads]);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
   const shownOver = over.filter((l) => !dismissed.has(loadKey(l)));
   const missingSources = useMemo(
@@ -142,8 +144,9 @@ export function MultiviewPage() {
   const silent = muted || mainPlaying;
 
   const title = t('title');
-  // An empty wall says what the page is for where the count will go.
-  const subtitle = count > 0 ? t('subtitle', { n: count, max: MAX_TILES }) : t('emptyTitle');
+  // The header's subtitle is the page's scope, a count with its noun ("0 of 4 on the wall"); the
+  // toolbar (or a phone's first frame) says how the wall works.
+  const subtitle = t('subtitle', { n: count, max: MAX_TILES });
   useShellHeader({ title, subtitle }, [title, subtitle]);
 
   // A swap whose tile went away (closed, cleared, replaced from elsewhere) ends.
@@ -397,7 +400,14 @@ export function MultiviewPage() {
     />
   );
 
-  const limitBanners = <LimitBanners over={shownOver} onDismiss={(l) => setDismissed((d) => new Set(d).add(loadKey(l)))} />;
+  const limitBanners = (
+    <LimitBanners
+      over={shownOver}
+      lastTileOf={(id) => tiles.filter((x) => x.ref.sourceId === id).at(-1)}
+      onCloseTile={close}
+      onDismiss={(l) => setDismissed((d) => new Set(d).add(loadKey(l)))}
+    />
+  );
   const banners = (
     <div className={cn('flex flex-col gap-2', !floating && mainPlaying && 'px-3 pt-3 sm:px-4')} data-testid="multiview-banners">
       {mainPlaying ? <MainPlayingBanner onStop={stopMain} /> : null}
@@ -405,9 +415,9 @@ export function MultiviewPage() {
       {floating ? limitBanners : null}
     </div>
   );
-  // Out of full screen the connection-limit warning lies over the toolbar instead of pushing the
-  // wall down: after a cold load the account's limit can answer after the tiles are up (XB2-32).
-  // The toolbar under it is inert until the warning is dismissed, so focus never hides beneath it.
+  // Out of full screen the connection-limit warning lies over the top of the wall, just under the
+  // toolbar, instead of pushing the wall down: after a cold load the account's limit can answer
+  // after the tiles are up (XB2-32). The toolbar stays usable beside it.
   const limitOver = !floating && count > 0 && shownOver.length > 0;
 
   const wall = (
@@ -425,6 +435,7 @@ export function MultiviewPage() {
       programmes={programmes}
       swapFrom={swapFrom}
       picks={quick.picks}
+      limitedSources={atLimit}
       picksLoading={quick.loading}
       pendingPick={pendingPick}
       onAdd={() => openPicker(ADD)}
@@ -464,13 +475,15 @@ export function MultiviewPage() {
         >
           {/* One toolbar from the first visit on, so the layout choice never moves or changes look
               when the first tile goes up. */}
-          {!floating ? <div inert={limitOver}>{toolbar(false)}</div> : null}
           {!floating ? (
-            <div
-              data-testid="multiview-limit-layer"
-              className={cn('absolute inset-x-0 top-0 z-40', limitOver && 'bg-surface px-3 py-1 shadow-md sm:px-4')}
-            >
-              {limitBanners}
+            <div className="relative z-40">
+              {toolbar(false)}
+              <div
+                data-testid="multiview-limit-layer"
+                className={cn('absolute inset-x-0 top-full', limitOver && 'border-b border-divider bg-surface px-(--page-gutter) py-2 shadow-md')}
+              >
+                {limitBanners}
+              </div>
             </div>
           ) : null}
           {!floating ? banners : null}
@@ -478,7 +491,11 @@ export function MultiviewPage() {
             className={cn(
               'relative flex min-h-0 flex-1 overflow-y-auto [container-type:size] [container-name:wall]',
               fsActive ? 'p-0' : floating ? 'p-1' : 'px-(--page-gutter) py-3 sm:py-4',
+              // A full wall sits on black in every theme, as the player's picture does: pale chrome
+              // around video washes it out. Free frames are drawn for the page, so they keep it.
+              count >= capacityOf(layout) && 'bg-black',
             )}
+            data-testid="multiview-wall-host"
           >
             {wall}
           </div>

@@ -320,7 +320,7 @@ function Backdrop({ backdropUrl, posterUrl, sourceId, title }: { backdropUrl?: s
           On a phone the text column is the full width, so no side of the art is left clear for it: the
           fade starts at the top and is nearly the page by the meta line, and the muted meta and the
           resume caption keep 4.5:1 on warm or pale art (vod-detail-01). */}
-      <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-transparent from-25% via-bg/75 via-60% to-bg max-sm:from-bg/10 max-sm:from-0% max-sm:via-bg/85 max-sm:via-35%" />
+      <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-transparent from-25% via-bg/75 via-60% to-bg max-sm:from-bg/10 max-sm:from-0% max-sm:via-bg/90 max-sm:via-30%" />
       {/* The leading edge darkens behind the text column only; the far side of the artwork stays clear. */}
       <div className="pointer-events-none absolute inset-0 bg-linear-to-r from-bg/90 via-bg/50 via-40% to-transparent to-75% max-sm:hidden rtl:bg-linear-to-l" />
     </div>

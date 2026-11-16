@@ -161,7 +161,9 @@ describe('persistence', () => {
 
   it("keeps a tile's caption (a Sports matchup) through a reload, and drops it with a replace", () => {
     store().add({ ...input(1), caption: ' Chargers at Ravens ' });
+    const saved = localStorage.getItem(STORAGE_KEY)!;
     useMultiviewStore.setState({ tiles: [], layout: '2x2', audioKey: null });
+    localStorage.setItem(STORAGE_KEY, saved);
     __reloadMultiviewForTests();
     expect(store().tiles[0]!.caption).toBe('Chargers at Ravens');
     store().replace(store().tiles[0]!.key, input(2));

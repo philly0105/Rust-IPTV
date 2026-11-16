@@ -443,7 +443,8 @@ export const Tile = memo(function Tile({
               hasSound ? GLASS_ACCENT_FILL : GLASS_STRONG,
             )}
           >
-            {hasSound && audible ? <Volume2 className="size-3.5" /> : null}
+            {/* A muted wall (or the main player playing) silences the tile with sound: it says so. */}
+            {hasSound ? audible ? <Volume2 className="size-3.5" /> : <VolumeX data-testid="multiview-plate-muted" className="size-3.5" /> : null}
             {number}
           </span>
           <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} className="hidden size-6 @[16rem]/tile:inline-flex" />
@@ -565,12 +566,18 @@ export const Tile = memo(function Tile({
         </div>
       </div>
 
-      {/* The tally: an accent edge on the tile with sound. */}
+      {/* The tally: an accent edge on the tile with sound; dimmed to the glass edge while it is silent. */}
       {hasSound ? (
         <div
           aria-hidden
           data-testid="multiview-tally"
-          className="pointer-events-none absolute inset-0 z-40 rounded-sm shadow-[inset_0_0_0_3px_var(--color-glass-accent,var(--color-accent,#f5b544)),inset_0_0_28px_var(--color-glow,rgb(245_181_68/0.28))]"
+          data-muted={audible ? undefined : 'true'}
+          className={cn(
+            'pointer-events-none absolute inset-0 z-40 rounded-sm',
+            audible
+              ? 'shadow-[inset_0_0_0_3px_var(--color-glass-accent,var(--color-accent,#f5b544)),inset_0_0_28px_var(--color-glow,rgb(245_181_68/0.28))]'
+              : 'shadow-[inset_0_0_0_3px_var(--color-glass-border,rgb(255_255_255/0.14))]',
+          )}
         />
       ) : null}
     </div>

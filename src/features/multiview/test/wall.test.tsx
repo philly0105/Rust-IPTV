@@ -215,6 +215,9 @@ describe('sound: exactly one tile is unmuted', () => {
     fireEvent.keyDown(window, { key: 'm' });
     expect(unmuted()).toEqual([]);
     expect(screen.getByTestId('multiview-mute').getAttribute('aria-pressed')).toBe('true');
+    // The tile with sound says it is silent: a muted speaker on its plate, its tally dimmed.
+    expect(within(tileEl(1)).getByTestId('multiview-plate-muted')).toBeTruthy();
+    expect(within(tileEl(1)).getByTestId('multiview-tally').dataset['muted']).toBe('true');
     fireEvent.click(screen.getByTestId('multiview-mute'));
     expect(unmuted()).toEqual([videoOf(1)]);
     fireEvent.keyDown(window, { key: 'm' });
@@ -1072,11 +1075,14 @@ describe('tile panels', () => {
     expect(cls).toEqual(expect.arrayContaining(['group-hover/tile:opacity-100', 'group-focus-within/tile:opacity-100', 'has-[[aria-expanded=true]]:opacity-100']));
     expect(cls).not.toContain('absolute');
     expect(cls).not.toContain('opacity-0');
-    // The two pills share the row's height, and touch gets the 44 px floor on every tool.
+    // The two pills share the row's height under a mouse; on touch each keeps its own (a one-line
+    // strip stays short on a phone's tile), and every tool gets the 44 px floor as a see-through
+    // band 6 px past each edge of its 32 px button.
     expect(tools.parentElement!.className).toContain('items-stretch');
+    expect(tools.parentElement!.className).toContain('pointer-coarse:items-end');
     for (const button of within(tools).getAllByRole('button')) {
-      expect(button.className).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
-      expect(button.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+      expect(button.className).toContain('min-h-8');
+      expect(button.className).toContain('pointer-coarse:before:-inset-1.5');
     }
   });
 

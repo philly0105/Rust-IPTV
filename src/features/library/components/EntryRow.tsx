@@ -227,8 +227,9 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
             />
           </span>
         ) : resume ? (
-          // A title stopped part way reads as a channel's programme does: what it is with the time
-          // left at the end, and a bar under them, amber because it is the user's own progress.
+          // A title stopped part way says so in words (library-10): what it is and where it stopped
+          // ("Movie · Stopped at 30:00"), "60m left" at the end, where a channel row's bare "60m" is the
+          // programme's time, and a bar under them, amber because it is the user's own progress.
           <span className="flex w-full min-w-0 flex-col" data-testid="entry-resume">
             <span className="flex w-full min-w-0 items-baseline gap-2 text-caption text-fg-muted">
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -239,22 +240,20 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
                     {resume.episode}
                   </span>
                 )}
+                {resume.at !== undefined && (
+                  <span className="shrink-0 tabular-nums" data-testid="entry-stopped">
+                    <span aria-hidden className="me-1.5 text-fg-subtle">
+                      ·
+                    </span>
+                    {t('stoppedAt', { time: resume.at })}
+                  </span>
+                )}
               </span>
-              {resume.minutesLeft !== undefined ? (
+              {resume.minutesLeft !== undefined && (
                 <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: resume.minutesLeft })} data-testid="entry-left">
-                  <span aria-hidden>{t('minutesLeftShort', { count: resume.minutesLeft })}</span>
+                  <span aria-hidden>{t('minutesLeftShortResume', { count: resume.minutesLeft })}</span>
                   <span className="sr-only">{t('minutesLeft', { count: resume.minutesLeft })}</span>
                 </span>
-              ) : (
-                // No duration, so no time left and no bar: where it stopped, as the Continue watching
-                // card said it, so the row still reads as one that resumes (My Videos' cards mark it so).
-                resume.at !== undefined && (
-                  <span className="inline-flex shrink-0 items-center gap-1 tabular-nums text-fg-subtle" title={t('resumeAt', { time: resume.at })} data-testid="entry-left">
-                    <Play size={10} aria-hidden className="fill-current" />
-                    <span aria-hidden>{resume.at}</span>
-                    <span className="sr-only">{t('resumeAt', { time: resume.at })}</span>
-                  </span>
-                )
               )}
             </span>
             {resume.fraction !== undefined && (

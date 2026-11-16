@@ -260,15 +260,15 @@ describe('library removals can be undone', () => {
 
     await screen.findByTestId('entry-resume');
     fireEvent.click(screen.getAllByRole('button', { name: 'Actions for Continue p1' })[0]!);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
-    await waitFor(() => expect(lastToast()?.title).toMatch(/^Removed .* from continue watching$/));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear progress' }));
+    await waitFor(() => expect(lastToast()?.title).toMatch(/^Cleared progress on /));
     lastToast()!.action!.onClick();
     await waitFor(() =>
       expect(rpc.callsOf('positions.set')).toEqual([{ ref: pos.ref, positionSeconds: 600, durationSeconds: 2400, snapshot: pos.snapshot, updatedAt: pos.updatedAt }]),
     );
   });
 
-  it('a keyboard user resumes with Enter and reaches Remove from continue watching through the row menu', async () => {
+  it('a keyboard user resumes with Enter and reaches Clear progress through the row menu', async () => {
     const [p1, p2] = [makePosition('p1', 600, 2400), makePosition('p2', 300, 2400)];
     rpc.handlers['recent.list'] = () => [p1, p2].map((p) => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! }));
     // The saved spots as the core keeps them, so the removed one is gone from the refetch.
@@ -291,7 +291,7 @@ describe('library removals can be undone', () => {
     const trigger = within(screen.getAllByTestId('entry-actions')[0]!).getByRole('button', { name: 'Actions for Continue p1' });
     expect(trigger.tabIndex).toBe(0);
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear progress' }));
     await waitFor(() => expect(rpc.callsOf('positions.remove')).toHaveLength(1));
     expect((rpc.callsOf('positions.remove')[0] as { ref: { itemId: string } }).ref.itemId).toBe('p1');
     // The history entry stays; only its saved spot went, and the strip's menu with it.

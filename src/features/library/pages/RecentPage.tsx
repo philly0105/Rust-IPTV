@@ -162,7 +162,7 @@ export function RecentPage() {
       const removed = await removeContinueCard(p, positionCalls);
       const label = p.snapshot ? snapshotTitle(p.ref, p.snapshot.title).title : '';
       toast({
-        title: t('continueRemoved', { title: label }),
+        title: t('progressCleared', { title: label }),
         variant: 'info',
         action: {
           label: t('undo'),

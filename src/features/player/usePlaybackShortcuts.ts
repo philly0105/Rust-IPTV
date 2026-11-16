@@ -134,8 +134,12 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
       }),
     );
   };
+  // The bar's rule: an item with a known length, or a window of at least 30 s (live rewind, or an
+  // archive that plays on into live and has no length). Otherwise J/L would claim a seek that
+  // never happens (PV-11).
   const seekWindow = (): boolean => {
-    if (seekable) return true;
+    const d = s().durationSeconds;
+    if (seekable && !!d && Number.isFinite(d)) return true;
     const w = useMediaStore.getState().seekable;
     return !!w && w.end - w.start >= 30;
   };

@@ -91,6 +91,18 @@ describe('arrow-key seek readout', () => {
     key('ArrowLeft');
     expect(useMediaStore.getState().osd).toBeUndefined();
   });
+
+  it('says seeking is unavailable on an archive with no length or window, and never "/ 0:00" (PV-11)', () => {
+    const archive = { ...vod, catchupProgramStart: '2026-11-16T10:00:00Z' };
+    act(() => usePlayerStore.setState({ source: archive, mode: 'inline', status: 'playing', dock: 'stage', positionSeconds: 6, durationSeconds: undefined }));
+    render(<Shortcuts />);
+    key('l');
+    expect(usePlayerStore.getState().positionSeconds).toBe(6);
+    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Seeking is not available on this stream' });
+    act(() => useMediaStore.setState({ seekable: { start: 0, end: 120 } }));
+    key('l');
+    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Forward 10 seconds', secondary: '0:16' });
+  });
 });
 
 describe('page keys while the player is only the mini dock', () => {
@@ -235,6 +247,7 @@ describe('positionReadout', () => {
     expect(positionReadout(t, { position: 65, duration: 3600 })).toBe('1:05 / 1:00:00');
     expect(positionReadout(t, { position: 99, liveEnd: 100 })).toBe('Live');
     expect(positionReadout(t, { position: 40, liveEnd: 100 })).toBe('1:00 behind');
+    expect(positionReadout(t, { position: 16 })).toBe('0:16');
   });
 });
 

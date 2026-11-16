@@ -33,7 +33,8 @@ export function positionReadout(
     const behind = Math.max(0, p.liveEnd - p.position);
     return behind < (p.edgeSlack ?? LIVE_EDGE_SLACK) ? t('live') : t('behindLive', { time: formatTime(behind) });
   }
-  return `${formatTime(p.position)} / ${formatTime(p.duration)}`;
+  // No length (an archive that plays on into live): the position alone, not "0:16 / 0:00".
+  return p.duration && Number.isFinite(p.duration) ? `${formatTime(p.position)} / ${formatTime(p.duration)}` : formatTime(p.position);
 }
 
 let lastPointerAt = 0;

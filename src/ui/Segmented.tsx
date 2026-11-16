@@ -61,7 +61,17 @@ export const SEGMENT_TRACK: Record<SegmentedTone, string> = {
 export type SegmentedSize = 'sm' | 'md';
 
 const SM_TRACK = 'gap-0.5 p-0.5';
-const SM_SEGMENT = 'min-h-7 px-2';
+const SM_SEGMENT = 'min-h-7 px-2 pointer-coarse:before:-inset-y-0.5';
+
+/**
+ * On a touch screen the track is 44 px, but its padding left each segment 36 px to hit. An
+ * invisible band over the padding above and below (the track's p-1, or p-0.5 for glass and `sm`)
+ * takes the segment's target to the track's full height, and the thumb keeps its inset look.
+ */
+const SEGMENT_TOUCH_BAND: Record<SegmentedTone, string> = {
+  default: 'relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-1',
+  glass: 'relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-0.5',
+};
 
 export function segmentClass(selected: boolean, tone: SegmentedTone = 'default'): string {
   const tones = SEGMENT_TONES[tone];
@@ -69,6 +79,7 @@ export function segmentClass(selected: boolean, tone: SegmentedTone = 'default')
     'inline-flex min-h-8 min-w-0 items-center justify-center gap-1.5 rounded-sm px-3 text-sm font-medium motion-safe:transition-colors disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
     selected ? cn(tones.thumb, SEGMENT_FORCED) : tones.rest,
     tones.focus,
+    SEGMENT_TOUCH_BAND[tone],
     // A segment that cannot be chosen keeps its resting look under the pointer.
     'aria-disabled:hover:bg-transparent',
     tone === 'default' ? 'aria-disabled:hover:text-fg-muted' : 'aria-disabled:hover:text-white/80',

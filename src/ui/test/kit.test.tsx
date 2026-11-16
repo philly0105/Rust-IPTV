@@ -268,6 +268,13 @@ describe('IconButton tooltip', () => {
     expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain('pointer-coarse:pe-11');
     // The track takes the floor and its segments stretch to fill it.
     expect(screen.getByRole('radiogroup', { name: 'View' }).className).toContain(floor);
+    // A band over the track's padding takes each segment's target to the track's 44 px (an sm
+    // track pads by half a step).
+    const segment = within(screen.getByRole('radiogroup', { name: 'View' })).getByRole('radio', { name: 'A' }).className;
+    expect(segment).toContain('pointer-coarse:before:absolute');
+    expect(segment).toContain('pointer-coarse:before:-inset-y-0.5');
+    expect(segment).not.toContain('pointer-coarse:before:-inset-y-1');
+    expect(within(screen.getByRole('tablist', { name: 'Kind' })).getByRole('tab', { name: 'All' }).className).toContain('pointer-coarse:before:-inset-y-1');
     const pills = screen.getByRole('tablist', { name: 'Kind' });
     expect(pills.className).toContain(floor);
     expect(within(pills).getByRole('tab', { name: 'All' }).className).toContain('pointer-coarse:self-stretch');

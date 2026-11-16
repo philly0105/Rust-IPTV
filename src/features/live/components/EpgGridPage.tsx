@@ -2205,6 +2205,8 @@ export function EpgGridPage() {
               lastFocused.current = e.target as HTMLElement;
             }}
             data-testid="epg-grid"
+            // The shell's skip link lands on the grid's current cell, past the toolbar.
+            data-skip-target=""
             data-view-at={viewAtRef.current}
             // The ring shows only once the grid has held focus for 150 ms: the brief holds of a
             // window shift (16-98 ms) would otherwise flash a frame around the whole grid. It goes

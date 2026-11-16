@@ -66,9 +66,9 @@ vi.mock('@/features/player', () => ({
   ExternalPlaybackFooter: () => null,
 }));
 
-const { ShellLayout } = await import('../ShellLayout');
+const { ROUTE_ANNOUNCE_DELAY_MS, ShellLayout } = await import('../ShellLayout');
 const { shellRoutes } = await import('../routes');
-const { useShell, useShellStore } = await import('../store');
+const { useShell, useShellHeader, useShellStore } = await import('../store');
 const { sharedRailError } = await import('../dashboard/DashboardPage');
 const { RpcError } = await import('@/api/transport');
 const { useEffect, useState } = await import('react');
@@ -479,6 +479,69 @@ describe('phone layout (below 1024 px)', () => {
     expect(within(nav).getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy();
     expect(within(nav).queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
+  });
+});
+
+describe('route announcements and the skip link', () => {
+  function Titled({ title, children }: { title: string; children?: React.ReactNode }) {
+    useShellHeader({ title }, [title]);
+    return <Page>{children}</Page>;
+  }
+  const titledRoutes = () => [
+    {
+      path: '/',
+      element: <ShellLayout />,
+      children: [
+        { path: 'favorites', element: <Titled title="Favorites">favorites page</Titled> },
+        {
+          path: 'recent',
+          element: (
+            <Titled title="Recently watched">
+              <div data-skip-target="" tabIndex={-1}>
+                <button type="button" tabIndex={-1}>
+                  first row
+                </button>
+                <button type="button" tabIndex={0}>
+                  current row
+                </button>
+              </div>
+            </Titled>
+          ),
+        },
+      ],
+    },
+  ];
+  const settle = () => act(() => new Promise((r) => setTimeout(r, ROUTE_ANNOUNCE_DELAY_MS + 50)));
+
+  it('names the page a link opened, but not the first page or a page Back returned to', async () => {
+    const { router } = renderRoutes(titledRoutes(), '/favorites');
+    await screen.findByText('favorites page');
+    const region = document.querySelector('[data-route-announcer]')!;
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    await settle();
+    expect(region.textContent).toBe('');
+    await act(() => router.navigate('/recent'));
+    await waitFor(() => expect(region.textContent).toBe('Recently watched'));
+    // Focus stays where it was: the announcement does the telling.
+    await act(() => router.navigate(-1));
+    await screen.findByText('favorites page');
+    await settle();
+    expect(region.textContent).toBe('');
+  });
+
+  it("the skip link lands on the item of the page's marked target that takes Tab, and adds no history entry", async () => {
+    const { router } = renderRoutes(titledRoutes(), '/recent');
+    await screen.findByText('current row');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'current row' }));
+    expect(router.state.location.hash).toBe('');
+  });
+
+  it('without a marked target the skip link focuses main', async () => {
+    renderRoutes(titledRoutes(), '/favorites');
+    await screen.findByText('favorites page');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(document.getElementById('main'));
   });
 });
 

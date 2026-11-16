@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Outlet, useLocation, useNavigate, useNavigationType } from 'react-router';
 
 import type { Settings } from '@/api/types';
 import { isDesktop } from '@/api/transport';
@@ -267,6 +267,18 @@ function GlobalShortcuts() {
   return null;
 }
 
+/**
+ * The skip link's target: the page's `[data-skip-target]` (its main list or grid), at the item in
+ * it that takes Tab (the roving row or cell), else `main#main` itself. Exported for tests.
+ */
+export function skipToContent(): void {
+  const main = document.getElementById('main');
+  const target = main?.querySelector<HTMLElement>('[data-skip-target]');
+  const into = target?.querySelector<HTMLElement>('[tabindex="0"]') ?? target;
+  into?.focus();
+  if (!into || document.activeElement !== into) main?.focus();
+}
+
 const NON_TEXT_INPUTS = new Set(['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'color', 'file', 'image']);
 
 /** A field that takes typed text: Escape leaves it. */
@@ -298,6 +310,51 @@ function ShellNavigationEffects() {
   }, [key]);
   useOutletScrollMemory();
   return null;
+}
+
+/** How long after a new page opens the announcer names it: its header is set by then. */
+export const ROUTE_ANNOUNCE_DELAY_MS = 400;
+
+/**
+ * Names the page that opened, for screen readers: a page change by a link, the palette or a key
+ * changes only document.title, which they do not read, and focus rightly stays where it was (the
+ * rail link). A polite live region gets the page's title (the header's, as the window shows it)
+ * a moment after each new pathname; not on the first load, not for a query-only change, and not
+ * on Back or Forward, where focus goes back to where it was on that page and says enough.
+ */
+function RouteAnnouncer() {
+  const { pathname } = useLocation();
+  const navigationType = useNavigationType();
+  const popRef = useRef(false);
+  popRef.current = navigationType === 'POP';
+  const last = useRef(pathname);
+  const [text, setText] = useState('');
+  useEffect(() => {
+    if (last.current === pathname) return;
+    last.current = pathname;
+    setText('');
+    if (popRef.current) return;
+    let unsubscribe: (() => void) | undefined;
+    const announce = (): boolean => {
+      const header = useShellStore.getState().header;
+      const title = header?.documentTitle || header?.title;
+      if (title) setText(title);
+      return !!title;
+    };
+    // A page that names itself late (its title waits for data) is named when it does.
+    const timer = window.setTimeout(() => {
+      if (!announce()) unsubscribe = useShellStore.subscribe(() => announce() && unsubscribe?.());
+    }, ROUTE_ANNOUNCE_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe?.();
+    };
+  }, [pathname]);
+  return (
+    <p className="sr-only" aria-live="polite" aria-atomic="true" data-route-announcer="">
+      {text}
+    </p>
+  );
 }
 
 // SH-1 (performance audit): the shell's router and settings readers live in these leaves. The
@@ -490,6 +547,12 @@ export function ShellLayout() {
       <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
         <a
           href="#main"
+          // Past the page's toolbar to what it is about (the channel list, the guide grid) when the
+          // page marks it, and without a #main history entry that the next Back would only strip.
+          onClick={(e) => {
+            e.preventDefault();
+            skipToContent();
+          }}
           className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
         >
           {t('skipToContent')}
@@ -516,6 +579,7 @@ export function ShellLayout() {
               <Outlet />
             </main>
             <ShellNavigationEffects />
+            <RouteAnnouncer />
             <ContextPanel inline={wide} />
           </div>
           {player && <player.ExternalPlaybackFooter />}

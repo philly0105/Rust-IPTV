@@ -408,6 +408,8 @@ export function ChannelList(props: ChannelListProps) {
         role="list"
         aria-label={t('channelList')}
         data-testid="channel-list"
+        // The shell's skip link lands on the list's current row, past the toolbar.
+        data-skip-target=""
         aria-busy={paged.refreshing || undefined}
         // Focusable from script only: it holds focus while the cursor's row is still loading.
         tabIndex={-1}

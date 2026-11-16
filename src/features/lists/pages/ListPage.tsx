@@ -366,7 +366,6 @@ export function ListPage() {
             size="sm"
             icon={<ListOrdered className="size-4" />}
             onClick={() => openEditListItems(list.id)}
-            title={t('editChannels')}
             className="max-sm:hidden"
           >
             {t('editChannels')}
@@ -377,7 +376,6 @@ export function ListPage() {
               size="sm"
               icon={<Settings2 className="size-4" />}
               onClick={() => openManageLists(list.id)}
-              title={t('manageLists')}
             >
               {t('manageLists')}
             </Button>

@@ -8,6 +8,7 @@ import { useRpcQuery } from '@/api/query';
 import type { Source } from '@/api/types';
 import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
+import { ActivityMark, ActivityText } from './activityMarks';
 import { useOffline } from './connection';
 import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
@@ -50,18 +51,24 @@ function RailNavLink({
   tour,
   dim,
   current,
-}: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour'> & { collapsed: boolean; dim?: boolean; tour?: string; current?: boolean }) {
+  activity,
+}: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour' | 'activity'> & { collapsed: boolean; dim?: boolean; tour?: string; current?: boolean }) {
   const { t } = useTranslation('shell');
   const label = t(labelKey);
   // A rest on the link starts the page's code and first data.
   const intent = useRouteIntent(to);
+  // A row with an activity mark names itself in text, which the mark's words then join.
+  const ariaLabel = collapsed && !activity ? label : undefined;
   const content = (active: boolean) => (
     <>
       {/* One 20 px box for every leading glyph (icons and source monograms), so the labels share a column. */}
-      <span aria-hidden className={RAIL_GLYPH}>
-        <Icon size={18} className={cn(active && 'text-accent')} />
+      <span className={cn(RAIL_GLYPH, 'relative')}>
+        <Icon aria-hidden size={18} className={cn(active && 'text-accent')} />
+        {collapsed && activity && <ActivityMark kind={activity} placement="corner" />}
       </span>
-      {!collapsed && <span className="truncate">{label}</span>}
+      {collapsed ? activity && <span className="sr-only">{label}</span> : <span className="truncate">{label}</span>}
+      {!collapsed && activity && <ActivityMark kind={activity} placement="end" />}
+      {activity && <ActivityText kind={activity} />}
     </>
   );
   return (
@@ -72,7 +79,7 @@ function RailNavLink({
           to={to}
           end={end}
           data-tour={tour}
-          aria-label={collapsed ? label : undefined}
+          aria-label={ariaLabel}
           className={({ isActive }) => itemClass(isActive, collapsed, dim)}
         >
           {({ isActive }) => content(isActive)}
@@ -82,7 +89,7 @@ function RailNavLink({
           {...intent}
           to={to}
           data-tour={tour}
-          aria-label={collapsed ? label : undefined}
+          aria-label={ariaLabel}
           aria-current={current ? 'page' : undefined}
           className={itemClass(current, collapsed, dim)}
         >
@@ -95,15 +102,17 @@ function RailNavLink({
 
 /**
  * A group's small label (Watch, Library, Sources). Collapsed, the rail has no room for words:
- * the label stays for screen readers and a short rule marks the break between the groups.
+ * the label stays for screen readers and a short rule marks the break between the groups. Not a
+ * heading: it names its group (role=group, aria-labelledby), and headings here came before every
+ * page's h1 in the outline.
  */
 function GroupLabel({ id, label, collapsed, action }: { id: string; label: string; collapsed: boolean; action?: ReactNode }) {
   if (collapsed) {
     return (
       <>
-        <h2 id={id} className="sr-only">
+        <span id={id} className="sr-only">
           {label}
-        </h2>
+        </span>
         <span aria-hidden className="mx-3 my-1.5 block border-t border-divider" data-rail-group-rule="" />
         {action && <div className="flex justify-center">{action}</div>}
       </>
@@ -119,9 +128,9 @@ function GroupLabel({ id, label, collapsed, action }: { id: string; label: strin
         'after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1.5 after:bg-linear-to-b after:from-surface after:to-transparent',
       )}
     >
-      <h2 id={id} className="truncate text-caption font-medium text-fg-subtle">
+      <p id={id} className="truncate text-caption font-medium text-fg-subtle">
         {label}
-      </h2>
+      </p>
       {action}
     </div>
   );
@@ -152,9 +161,10 @@ function writeLibraryMore(open: boolean): void {
 }
 
 /**
- * The More row: a disclosure in the shape of a link row, quieter at rest (it opens links, it is
- * not a page), with a chevron that says which way it goes. Icon-only in the collapsed rail, where
- * the tooltip names it.
+ * The More row: a disclosure in the shape of a link row, in the rows' own rest tone (the dim one
+ * means a page with nothing to show yet), with a chevron that says which way it goes. Icon-only in
+ * the collapsed rail, where the tooltip names it. Folded, it carries its pages' activity mark, so
+ * a running download or recording shows without opening it.
  */
 function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; controls: string; collapsed: boolean; onToggle(): void }) {
   const { t } = useTranslation('shell');
@@ -166,17 +176,19 @@ function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; co
         type="button"
         aria-expanded={open}
         aria-controls={controls}
-        aria-label={collapsed ? label : undefined}
         onClick={onToggle}
         data-rail-more=""
-        className={cn(itemClass(false, collapsed, true), 'w-full text-start')}
+        className={cn(itemClass(false, collapsed), 'w-full text-start')}
       >
-        <span aria-hidden className={RAIL_GLYPH}>
-          {collapsed && open ? <ChevronUp size={18} /> : <Ellipsis size={18} />}
+        <span className={cn(RAIL_GLYPH, 'relative')}>
+          {collapsed && open ? <ChevronUp aria-hidden size={18} /> : <Ellipsis aria-hidden size={18} />}
+          {collapsed && !open && <ActivityMark kind="any" placement="corner" />}
         </span>
+        {collapsed && <span className="sr-only">{label}</span>}
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1 truncate">{label}</span>
+            {!open && <ActivityMark kind="any" placement="end" />}
             {/* Turned like a source entry's chevron (inline end folded, down open), so the rail's two disclosures read alike. */}
             <ChevronDown
               aria-hidden
@@ -185,6 +197,7 @@ function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; co
             />
           </>
         )}
+        {!open && <ActivityText kind="any" />}
       </button>
     </Tooltip>
   );
@@ -241,6 +254,7 @@ function RailGroup({
         icon={l.icon}
         end={l.end}
         tour={l.tour}
+        activity={l.activity}
         collapsed={collapsed}
         // `dim` is the group's: with no sources, the rows whose pages need one.
         dim={(dim && !l.noSourceNeeded) || l.dim}
@@ -251,9 +265,9 @@ function RailGroup({
   return (
     <div role="group" aria-labelledby={id} data-rail-group={id} className="flex flex-col">
       {collapsed && first ? (
-        <h2 id={id} className="sr-only">
+        <span id={id} className="sr-only">
           {label}
-        </h2>
+        </span>
       ) : (
         <GroupLabel id={id} label={label} collapsed={collapsed} />
       )}
@@ -271,7 +285,9 @@ function RailGroup({
               }}
             />
             {unfolded && (
-              <ul id={moreId} className="mt-0.5 flex flex-col gap-0.5">
+              // In the icon rail the unfolded links sit on one recessed block under their toggle, so
+              // they read as More's and folding it again does not look like rows vanishing.
+              <ul id={moreId} className={cn('mt-0.5 flex flex-col gap-0.5', collapsed && 'rounded-md bg-surface-2 py-0.5')}>
                 {more.map(item)}
               </ul>
             )}

@@ -273,7 +273,7 @@ describe('rail at laptop heights (stage 2)', () => {
     expect(within(nav).getByRole('link', { name: 'My List' })).toBeTruthy();
     expect(within(nav).queryByRole('link', { name: 'Downloads' })).toBeNull();
     const more = within(nav).getByRole('button', { name: 'More' });
-    expect(more.textContent).toBe('');
+    expect(more.querySelector('.truncate')).toBeNull();
     fireEvent.click(more);
     expect(within(nav).getByRole('link', { name: 'Downloads' })).toBeTruthy();
     expect(within(nav).getByRole('link', { name: 'Watch stats' })).toBeTruthy();
@@ -367,6 +367,62 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     fireEvent.click(within(sheet).getByRole('link', { name: 'My List' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/my-list'));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull());
+  });
+});
+
+describe('activity marks for downloads and recordings', () => {
+  const running = () => {
+    rpcMock.handlers['downloads.list'] = () => [{ id: 1, status: 'downloading', createdAt: '2026-01-01', updatedAt: '2026-01-01', title: 'A' }];
+    rpcMock.handlers['recordings.list'] = () => [{ id: 'r1', status: 'recording', start: '2026-01-01T00:00:00Z', end: '2026-01-01T01:00:00Z' }];
+  };
+
+  it('marks the folded More row and, unfolded, the Downloads and Scheduled rows', async () => {
+    running();
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const more = await within(nav).findByRole('button', { name: 'More, 1 downloading, Recording now' });
+    expect(more.querySelector('[data-activity-mark="any"]')).not.toBeNull();
+    fireEvent.click(more);
+    await within(nav).findByRole('link', { name: 'Downloads, 1 downloading' });
+    expect(within(nav).getByRole('link', { name: 'Scheduled, Recording now' })).toBeTruthy();
+    // Unfolded, the rows carry the mark and More no longer repeats it.
+    expect(within(nav).getByRole('button', { name: 'More' }).querySelector('[data-activity-mark]')).toBeNull();
+  });
+
+  it('marks the phone More tab', async () => {
+    running();
+    media(...PHONE);
+    renderRoutes(routes(), '/dashboard');
+    const bar = await screen.findByTestId('tab-bar');
+    await within(bar).findByRole('button', { name: 'More, 1 downloading, Recording now' });
+  });
+
+  it('shows nothing while nothing runs', async () => {
+    rpcMock.handlers['downloads.list'] = () => [];
+    rpcMock.handlers['recordings.list'] = () => [];
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'downloads.list')).toBe(true));
+    expect(within(nav).getByRole('button', { name: 'More' }).querySelector('[data-activity-mark]')).toBeNull();
+  });
+});
+
+describe('phone tab bar on a page in no tab and no tile', () => {
+  it('marks no tab, and More keeps its own name', async () => {
+    media(...PHONE);
+    renderRoutes(routes(), '/s/s1/search');
+    const bar = await screen.findByTestId('tab-bar');
+    const more = await within(bar).findByRole('button', { name: 'More' });
+    expect(more.getAttribute('aria-current')).toBeNull();
+    expect(within(bar).queryAllByRole('link').filter((l) => l.getAttribute('aria-current'))).toEqual([]);
+  });
+
+  it('names Settings on the settings pages', async () => {
+    media(...PHONE);
+    renderRoutes([{ ...routes()[0]!, children: [...routes()[0]!.children, { path: 'settings/*', element: <Page>settings page</Page> }] }], '/settings/playback');
+    const bar = await screen.findByTestId('tab-bar');
+    const more = await within(bar).findByRole('button', { name: 'Settings, More' });
+    expect(more.getAttribute('aria-current')).toBe('true');
   });
 });
 

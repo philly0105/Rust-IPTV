@@ -368,8 +368,10 @@ describe('the rail', () => {
   it("group labels stay in view while their links scroll, and Library's More is a whole row", async () => {
     renderRoutes(routes(), '/dashboard');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    // The labels name their groups; they are not headings, which would come before the page's h1.
+    expect(within(nav).queryAllByRole('heading')).toEqual([]);
     for (const name of ['Library', 'Sources']) {
-      const label = within(nav).getByRole('heading', { name }).parentElement!;
+      const label = document.getElementById(within(nav).getByRole('group', { name }).getAttribute('aria-labelledby')!)!.parentElement!;
       expect(label.className, name).toMatch(/\bsticky\b/);
       expect(label.className, name).toContain('bg-surface');
     }

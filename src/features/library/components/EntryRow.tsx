@@ -343,7 +343,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           data-action="open"
         />
         {resume && (
-          <Menu items={resumeItems} label={t('entryMenu', { title })} align="end" triggerClassName="h-8 w-8" />
+          <Menu items={resumeItems} label={t('entryMenu', { title })} align="end" triggerIcon={<EllipsisVertical size={14} aria-hidden />} triggerClassName="h-8 w-8" />
         )}
         {onChannelMenu && (
           <IconButton

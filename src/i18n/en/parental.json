@@ -71,7 +71,7 @@
   "lockoutActive": "Too many wrong PINs. The PIN can be tried again in {{time}}.",
   "behaviourTitle": "How locks work",
   "behaviourPinNote": "Changes here ask for the PIN.",
-  "modeLabel": "Locked content",
+  "modeLabel": "When something is locked",
   "modeHide": "Hide it",
   "modeAsk": "Ask for the PIN",
   "modeHideText": "Locked groups and titles disappear from lists, search, favorites and Continue watching.",

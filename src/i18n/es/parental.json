@@ -75,7 +75,7 @@
   "lockoutActive": "Demasiados PIN incorrectos. Podrás volver a probar el PIN en {{time}}.",
   "behaviourTitle": "Cómo funcionan los bloqueos",
   "behaviourPinNote": "Los cambios aquí piden el PIN.",
-  "modeLabel": "Contenido bloqueado",
+  "modeLabel": "Cuando algo está bloqueado",
   "modeHide": "Ocultarlo",
   "modeAsk": "Pedir el PIN",
   "modeHideText": "Los grupos y títulos bloqueados desaparecen de las listas, la búsqueda, los favoritos y Seguir viendo.",

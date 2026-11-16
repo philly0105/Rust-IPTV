@@ -105,7 +105,7 @@ Settings, Appearance:
 
 - Theme cards (light, dark, system) whose previews draw the chosen accent and OLED state.
 - OLED black switch; its hint says it applies with the dark theme when the light theme is in effect.
-- Accent picker: seven swatches as a radio group (arrows move and choose, Home and End jump), with a live sample of real chrome (rail item, poster, progress, primary button) drawn with the live tokens.
+- Accent picker: seven swatches as a radio group (arrows move and choose, Home and End jump); the chosen swatch has a check and a ring in its mark tone (`ACCENT_PALETTE[accent][theme].mark`, so it keeps 3:1 on white in light), with a live sample of real chrome (rail item, poster, progress, primary button) drawn with the live tokens.
 - Size and spacing: density (two-way choice) and interface size (slider 90 to 125 % in 5 % steps, live preview, Reset back to 100 %).
 
 `PREVIEW_PALETTE` and `ACCENT_PALETTE` in `AppearanceSection.tsx` copy token values, because each theme card previews its own theme regardless of the active one. Tests keep them equal to `tokens.css` (`src/features/settings/test/b6.test.tsx` for dark and light, `src/ui/test/appearance.test.tsx` for OLED and every accent).

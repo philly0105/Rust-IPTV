@@ -67,7 +67,7 @@
   "lockoutActive": "错误的 PIN 码输入次数过多。{{time}} 后可再次输入 PIN 码。",
   "behaviourTitle": "锁定方式",
   "behaviourPinNote": "在此处更改需要输入 PIN 码。",
-  "modeLabel": "已锁定的内容",
+  "modeLabel": "内容被锁定时",
   "modeHide": "隐藏",
   "modeAsk": "要求输入 PIN 码",
   "modeHideText": "已锁定的分组和标题会从列表、搜索、收藏和“继续观看”中消失。",

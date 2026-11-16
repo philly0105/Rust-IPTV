@@ -67,7 +67,7 @@
   "lockoutActive": "輸入錯誤 PIN 碼的次數過多。{{time}} 後可再次輸入 PIN 碼。",
   "behaviourTitle": "鎖定方式",
   "behaviourPinNote": "在此變更需要輸入 PIN 碼。",
-  "modeLabel": "已鎖定的內容",
+  "modeLabel": "內容被鎖定時",
   "modeHide": "隱藏",
   "modeAsk": "要求輸入 PIN 碼",
   "modeHideText": "已鎖定的群組和標題會從清單、搜尋、我的最愛和「繼續觀看」中消失。",

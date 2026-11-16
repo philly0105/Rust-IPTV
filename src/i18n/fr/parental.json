@@ -75,7 +75,7 @@
   "lockoutActive": "Trop de codes PIN erronés. Le code pourra être saisi à nouveau dans {{time}}.",
   "behaviourTitle": "Fonctionnement des verrous",
   "behaviourPinNote": "Les modifications ici demandent le code PIN.",
-  "modeLabel": "Contenus verrouillés",
+  "modeLabel": "Quand un contenu est verrouillé",
   "modeHide": "Les masquer",
   "modeAsk": "Demander le code PIN",
   "modeHideText": "Les groupes et titres verrouillés disparaissent des listes, de la recherche, des favoris et de « Reprendre la lecture ».",

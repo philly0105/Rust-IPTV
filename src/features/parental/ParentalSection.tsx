@@ -80,7 +80,7 @@ type Dialog =
   | { kind: 'groups'; source: Source };
 
 function ParentalSettings({ status }: { status: ParentalStatus }) {
-  const { t } = useTranslation('parental');
+  const { t } = useTranslation(['parental', 'settings']);
   const durationText = useDurationText();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [busy, setBusy] = useState<'lock' | 'config' | null>(null);
@@ -208,9 +208,16 @@ function ParentalSettings({ status }: { status: ParentalStatus }) {
               </Button>
             )}
           </SettingsRow>
+        </SettingsGroup>
+      ) : null}
+
+      {/* The Settings danger zone, last on the page: a secondary button that opens the PIN
+          confirm, which keeps the solid red (as Reset settings and Clear all guide data do). */}
+      {status.enabled ? (
+        <SettingsGroup title={t('settings:dangerZone')} tone="danger">
           <SettingsRow label={t('turnOff')} description={t('turnOffText')}>
             {() => (
-              <Button variant="danger" icon={<ShieldOff aria-hidden size={16} />} onClick={() => setDialog({ kind: 'disable' })} data-testid="parental-turn-off">
+              <Button variant="secondary" icon={<ShieldOff aria-hidden size={16} />} onClick={() => setDialog({ kind: 'disable' })} data-testid="parental-turn-off">
                 {t('turnOffButton')}
               </Button>
             )}

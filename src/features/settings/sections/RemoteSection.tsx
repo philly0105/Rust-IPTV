@@ -79,8 +79,11 @@ export function RemoteSection({ settings, update }: SectionProps) {
 
   return (
     <SettingsSection title={t('sectionRemote')} testId="settings-remote">
+      {/* In a browser the control page only answers on the server's own computer: say that before
+          the switch, not after it (the panel is then a short callout). */}
+      {isDesktop ? null : <RemoteLanPanel settings={settings} update={update} status={status.data} />}
       <SettingsGroup title={t('remotePageGroup')}>
-        <SwitchRow label={t('remoteEnabled')} description={t('remoteEnabledHint')} checked={enabled} disabled={busy} onChange={(v) => void setEnabled(v)} testId="toggle-remote" />
+        <SwitchRow label={t('remoteEnabled')} description={isDesktop ? t('remoteEnabledHint') : t('remoteEnabledHintServer')} checked={enabled} disabled={busy} onChange={(v) => void setEnabled(v)} testId="toggle-remote" />
         {/* The state sits under the switch it follows, not in a group of its own. With remote
             control off and stopped the switch says it all, so the row stays empty (and out of
             sight) but mounted: it is the live region that announces the change. */}
@@ -152,7 +155,7 @@ export function RemoteSection({ settings, update }: SectionProps) {
       </SettingsGroup>
 
       {/* remote: LAN mode and pairing */}
-      <RemoteLanPanel settings={settings} update={update} status={status.data} />
+      {isDesktop ? <RemoteLanPanel settings={settings} update={update} status={status.data} /> : null}
     </SettingsSection>
   );
 }

@@ -13,7 +13,7 @@ import { Tile, type TileProps } from './Tile';
 
 type TileHandlers = Pick<
   TileProps,
-  'onListen' | 'onClose' | 'onReplace' | 'onSwapStart' | 'onSwapTarget' | 'onSwapCancel' | 'onUnlock' | 'onDropTile'
+  'onListen' | 'onClose' | 'onReplace' | 'onSwapStart' | 'onSwapTarget' | 'onSwapCancel' | 'onUnlock' | 'onDropTile' | 'onEnlarge' | 'onWatch'
 >;
 
 export interface WallProps extends TileHandlers {
@@ -32,6 +32,8 @@ export interface WallProps extends TileHandlers {
   missingSources: ReadonlySet<string>;
   programmes: ReadonlyMap<ItemKey, string>;
   swapFrom: string | null;
+  /** The tile made large with "Make large", while it still is (its Put back undoes it). */
+  enlargedKey: string | null;
   /** Recent and favorite live channels not on the wall, offered in the next free slot. */
   picks: readonly QuickPick[];
   /** Accounts with every stream in use: their quick picks carry the picker's warning. */
@@ -69,6 +71,7 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
     missingSources,
     programmes,
     swapFrom,
+    enlargedKey,
     picks,
     limitedSources,
     picksLoading,
@@ -133,6 +136,7 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
             overLimit={overLimitSources.has(tile.ref.sourceId)}
             programme={programmes.get(itemKey(tile.ref))}
             swapFrom={swapFrom}
+            enlarged={tile.key === enlargedKey}
             {...handlers}
           />
         );

@@ -5,7 +5,8 @@
  * - arrows move focus to the slot that lies that way on screen (any layout, width, direction);
  * - Home and End go to the first and last slot;
  * - Delete (or Backspace) closes the focused tile;
- * - R replaces the focused tile's channel, S starts moving it (swap);
+ * - R replaces the focused tile's channel, S starts moving it (swap), Z makes it the large tile
+ *   (or puts it back);
  * - Escape cancels a swap.
  *
  * Page-wide keys (1 to 4, F, M, L, A) are registered with the shell in the page.
@@ -25,6 +26,7 @@ export interface WallKeyboardOptions {
   onSwapStart(key: string): void;
   onSwapTarget(key: string): void;
   onSwapCancel(): void;
+  onEnlarge(key: string): void;
 }
 
 /**
@@ -64,7 +66,7 @@ function slotOf(target: EventTarget | null): number | null {
 const bareKey = (e: KeyboardEvent): boolean => !e.ctrlKey && !e.metaKey && !e.altKey;
 
 export function useWallKeyboard(o: WallKeyboardOptions): (e: KeyboardEvent<HTMLElement>) => void {
-  const { wallRef, tiles, swapFrom, onClose, onReplace, onSwapStart, onSwapTarget, onSwapCancel } = o;
+  const { wallRef, tiles, swapFrom, onClose, onReplace, onSwapStart, onSwapTarget, onSwapCancel, onEnlarge } = o;
   return useCallback(
     (e: KeyboardEvent<HTMLElement>) => {
       const wall = wallRef.current;
@@ -127,10 +129,16 @@ export function useWallKeyboard(o: WallKeyboardOptions): (e: KeyboardEvent<HTMLE
           else if (swapFrom === tile.key) onSwapCancel();
           else onSwapTarget(tile.key);
           return;
+        case 'z':
+        case 'Z':
+          if (!tile || swapFrom !== null || e.shiftKey) return;
+          claim();
+          onEnlarge(tile.key);
+          return;
         default:
           return;
       }
     },
-    [wallRef, tiles, swapFrom, onClose, onReplace, onSwapStart, onSwapTarget, onSwapCancel],
+    [wallRef, tiles, swapFrom, onClose, onReplace, onSwapStart, onSwapTarget, onSwapCancel, onEnlarge],
   );
 }

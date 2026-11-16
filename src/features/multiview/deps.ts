@@ -31,5 +31,5 @@ export {
 export type { MenuAction } from '@/ui';
 export { useShellHeader, useShortcut } from '@/shell';
 export { useMediaQuery } from '@/shell/useMediaQuery';
-export { usePlayerStore } from '@/features/player';
+export { playItem, usePlayerStore } from '@/features/player';
 export { ensureUnlocked, requestPin } from './parentalGate';

@@ -42,6 +42,7 @@ const h = vi.hoisted(() => {
     rejectIds: new Set<string>(),
     ensureUnlocked: undefined as unknown,
     requestPin: undefined as unknown,
+    played: [] as unknown[],
   };
 });
 
@@ -69,7 +70,8 @@ vi.mock('@/features/player', async () => {
     mode: 'html5',
     stop: () => set({ source: null }),
   }));
-  return { usePlayerStore };
+  const playItem = async (args: unknown) => void h.played.push(args);
+  return { usePlayerStore, playItem };
 });
 
 vi.mock('../parentalGate', () => ({
@@ -166,6 +168,7 @@ beforeEach(() => {
   };
   h.ensureUnlocked = vi.fn(async () => true);
   h.requestPin = vi.fn(async () => true);
+  h.played.length = 0;
 });
 
 afterEach(() => cleanup());
@@ -405,6 +408,34 @@ describe('keyboard', () => {
     // The engines follow their channels: nothing was rebuilt by the swap.
     expect(engineFor(1)).toHaveLength(1);
     expect(engineFor(3)).toHaveLength(1);
+  });
+
+  it('Z makes the focused tile the large one, and Z again puts the wall back', async () => {
+    seed([1, 2, 3]);
+    renderPage();
+    await playAll([1, 2, 3]);
+    fireEvent.keyDown(mainOf(3), { key: 'z' });
+    expect(useMultiviewStore.getState().layout).toBe('1+3');
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k3', 'k2', 'k1']);
+    expect(screen.getByTestId('multiview-announcer').textContent).toBe('Channel 3 is the large tile');
+    expect(within(tileEl(3)).getByTestId('multiview-tile-enlarge').getAttribute('aria-label')).toBe('Put Channel 3 back in its slot');
+    fireEvent.keyDown(mainOf(3), { key: 'z' });
+    expect(useMultiviewStore.getState().layout).toBe('2x2');
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1', 'k2', 'k3']);
+    // A double click does the same.
+    fireEvent.doubleClick(mainOf(2));
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k2', 'k1', 'k3']);
+    expect(useMultiviewStore.getState().layout).toBe('1+3');
+  });
+
+  it("puts a tile's channel in the main player on Live TV", async () => {
+    seed([1, 2]);
+    renderPage();
+    await playAll([1, 2]);
+    fireEvent.click(within(tileEl(2)).getByTestId('multiview-tile-watch'));
+    await waitFor(() => expect(h.played).toHaveLength(1));
+    expect(h.played[0]).toMatchObject({ ref: { sourceId: 'm3u1', itemId: 'c2' }, title: 'Channel 2', isLive: true, sourceKind: 'm3u' });
+    expect(screen.getByTestId('location').textContent).toBe('/s/m3u1/live');
   });
 
   it('R opens the picker to replace the focused tile', async () => {
@@ -1042,7 +1073,7 @@ describe('tile panels', () => {
     expect(tools.parentElement).toBe(strip.parentElement);
     expect(tools.parentElement!.className).toContain('bottom-2');
     // Wide tiles under a mouse show Listen, Swap, Replace and Remove as buttons; elsewhere the menu does.
-    for (const id of ['multiview-tile-listen', 'multiview-tile-swap', 'multiview-tile-replace', 'multiview-tile-close']) {
+    for (const id of ['multiview-tile-listen', 'multiview-tile-enlarge', 'multiview-tile-swap', 'multiview-tile-replace', 'multiview-tile-watch', 'multiview-tile-close']) {
       expect(within(tools).getByTestId(id).className).toContain('[@media(hover:hover)]:@[24rem]/tile:inline-flex');
     }
     expect(within(tools).getByTestId('multiview-tile-more').className).toContain('[@media(hover:hover)]:@[24rem]/tile:hidden');
@@ -1052,8 +1083,10 @@ describe('tile panels', () => {
     // Each item carries its key as a cap after the label: the slot's number gives it the sound.
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
       expect.stringMatching(/^Play sound.*2/),
+      expect.stringMatching(/^Make large.*Z/),
       expect.stringMatching(/^Move to another slot/),
       expect.stringMatching(/^Replace/),
+      expect.stringMatching(/^Watch in the player/),
       expect.stringMatching(/^Close/),
     ]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Close/ }));

@@ -1,4 +1,19 @@
-import { ArrowLeftRight, CircleSlash, Ellipsis, LoaderCircle, Lock, Replace, RotateCw, ShieldAlert, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CircleSlash,
+  Ellipsis,
+  LayoutPanelLeft,
+  LoaderCircle,
+  Lock,
+  MonitorPlay,
+  Replace,
+  RotateCw,
+  ShieldAlert,
+  TriangleAlert,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
 import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -38,6 +53,8 @@ export interface TileProps {
   programme?: string | undefined;
   /** Key of the tile being moved, while the wall is in swap mode. */
   swapFrom: string | null;
+  /** This tile was made the large one ("Make large"): its tool puts it back instead. */
+  enlarged: boolean;
   className?: string;
   onListen(key: string): void;
   onClose(key: string): void;
@@ -48,6 +65,10 @@ export interface TileProps {
   onUnlock(tile: MultiviewTile): void;
   onRecheck(): void;
   onDropTile(from: string, to: string): void;
+  /** Make this tile the large one (1+3, slot 1), or put it back where it was. */
+  onEnlarge(key: string): void;
+  /** Watch this tile's channel in the main player (Live TV), which closes the wall. */
+  onWatch(key: string): void;
 }
 
 /** A small spinner; its rotation is decoration, so it stops under reduced motion. */
@@ -160,6 +181,7 @@ export const Tile = memo(function Tile({
   overLimit,
   programme,
   swapFrom,
+  enlarged,
   className,
   onListen,
   onClose,
@@ -170,6 +192,8 @@ export const Tile = memo(function Tile({
   onUnlock,
   onRecheck,
   onDropTile,
+  onEnlarge,
+  onWatch,
 }: TileProps) {
   const { t } = useTranslation(['multiview', 'common']);
   const blocked = lock !== 'open' || sourceMissing;
@@ -222,6 +246,8 @@ export const Tile = memo(function Tile({
     const from = e.dataTransfer.getData(TILE_DRAG_TYPE);
     if (from && from !== tile.key) onDropTile(from, tile.key);
   };
+
+  const enlargeLabel = enlarged ? t('restoreLabel', { name }) : t('enlargeLabel', { name });
 
   const mainLabel = isSwapTarget
     ? t('swapHereLabel', { name, slot: number })
@@ -368,6 +394,10 @@ export const Tile = memo(function Tile({
         aria-label={mainLabel}
         aria-keyshortcuts={String(number)}
         onClick={onMainClick}
+        // A double click makes the tile the large one (or puts it back), as Z does.
+        onDoubleClick={() => {
+          if (!swapping) onEnlarge(tile.key);
+        }}
         // Focus is a white ring inside a dark band, set in from the edge, so it never reads as the
         // tally (the amber edge of the tile with sound) and a tile with both shows both.
         className={cn(
@@ -506,6 +536,19 @@ export const Tile = memo(function Tile({
               {hasSound ? <Volume2 aria-hidden className="size-4" /> : <VolumeX aria-hidden className="size-4" />}
             </button>
           </Tooltip>
+          <Tooltip content={enlargeLabel} shortcut="z" tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
+              aria-label={enlargeLabel}
+              aria-pressed={enlarged}
+              aria-keyshortcuts="Z"
+              data-testid="multiview-tile-enlarge"
+              onClick={() => onEnlarge(tile.key)}
+            >
+              <LayoutPanelLeft aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
           <Tooltip content={t('swapLabel', { name })} shortcut="s" tone="glass" describe={false}>
             <button
               type="button"
@@ -528,6 +571,17 @@ export const Tile = memo(function Tile({
               onClick={() => onReplace(tile.key)}
             >
               <Replace aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
+          <Tooltip content={t('watchLabel', { name })} tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
+              aria-label={t('watchLabel', { name })}
+              data-testid="multiview-tile-watch"
+              onClick={() => onWatch(tile.key)}
+            >
+              <MonitorPlay aria-hidden className="size-4" />
             </button>
           </Tooltip>
           <Tooltip content={t('closeLabel', { name })} shortcut="delete" tone="glass" describe={false}>
@@ -566,8 +620,16 @@ export const Tile = memo(function Tile({
                   disabled: audible,
                   onSelect: listen,
                 },
+                {
+                  id: 'enlarge',
+                  label: enlarged ? t('restoreShort') : t('enlargeShort'),
+                  icon: <LayoutPanelLeft aria-hidden className="size-4" />,
+                  hint: <Kbd combo="z" size="sm" />,
+                  onSelect: () => onEnlarge(tile.key),
+                },
                 { id: 'swap', label: t('swapShort'), icon: <ArrowLeftRight aria-hidden className="size-4" />, hint: <Kbd combo="s" size="sm" />, onSelect: () => onSwapStart(tile.key) },
                 { id: 'replace', label: t('replace'), icon: <Replace aria-hidden className="size-4" />, hint: <Kbd combo="r" size="sm" />, onSelect: () => onReplace(tile.key) },
+                { id: 'watch', label: t('watchShort'), icon: <MonitorPlay aria-hidden className="size-4" />, onSelect: () => onWatch(tile.key) },
                 { id: 'close', label: t('common:close'), icon: <X aria-hidden className="size-4" />, hint: <Kbd combo="delete" size="sm" />, onSelect: () => onClose(tile.key) },
               ]}
             />

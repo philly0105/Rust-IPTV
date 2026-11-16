@@ -1,7 +1,7 @@
 import { LayoutGrid } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
@@ -9,11 +9,11 @@ import { itemKey } from '@/api/types';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
-import { cn, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useMediaQuery, useShellHeader, useShortcut } from '../deps';
+import { cn, ensureUnlocked, ErrorState, playItem, requestPin, Skeleton, toast, useMediaQuery, useShellHeader, useShortcut } from '../deps';
 import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
 import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../types';
-import { focusTileOf } from '../paths';
+import { focusTileOf, liveTvPath } from '../paths';
 import { useQuickPicks, type QuickPick } from '../quickPicks';
 import { useMainPlayerHandoff } from '../useMainPlayerHandoff';
 import { inUse, overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
@@ -278,6 +278,29 @@ export function MultiviewPage() {
 
   const replace = useCallback((key: string) => openPicker({ kind: 'replace', key }), [openPicker]);
 
+  // "Watch in the player": Live TV of the tile's source, playing its channel. Leaving the page
+  // closes the wall's streams; the main player then has the account's connection.
+  const navigate = useNavigate();
+  const watch = useCallback(
+    (key: string) => {
+      const tile = useMultiviewStore.getState().tiles.find((x) => x.key === key);
+      const source = tile && sources.byId.get(tile.ref.sourceId);
+      if (!tile || !source) return;
+      if (fsActive) void fsExit();
+      void navigate(liveTvPath(source.id));
+      playItem({
+        ref: tile.ref,
+        title: tile.title,
+        isLive: true,
+        isRadio: false,
+        sourceKind: source.kind,
+        ...(tile.logo ? { posterUrl: tile.logo } : {}),
+        ...(tile.categoryId ? { categoryId: tile.categoryId } : {}),
+      }).catch(() => toast({ variant: 'error', title: t('errorGenericTitle'), description: t('errorGeneric') }));
+    },
+    [fsActive, fsExit, navigate, sources.byId, t],
+  );
+
   // A quick pick goes up in the slot that offered it (the next free one), through the same checks
   // and parental gate as the picker; focus follows it, since the button that was pressed is gone.
   const pickBusy = useRef(false);
@@ -329,6 +352,33 @@ export function MultiviewPage() {
     [t],
   );
 
+  // "Make large": the tile goes to the large slot of 1+3; doing it again puts the wall back as it
+  // was (the layout, and the tile in its slot). Only the last one is remembered.
+  const [enlarged, setEnlarged] = useState<{ key: string; layout: MultiviewLayout; slot: number } | null>(null);
+  const enlargedKey = enlarged && layout === '1+3' && tiles[0]?.key === enlarged.key ? enlarged.key : null;
+  const enlarge = useCallback(
+    (key: string) => {
+      const s = useMultiviewStore.getState();
+      const index = s.tiles.findIndex((x) => x.key === key);
+      if (index < 0) return;
+      if (key === enlargedKey && enlarged) {
+        const back = s.tiles[enlarged.slot];
+        if (back && back.key !== key) s.swap(key, back.key);
+        setLayout(enlarged.layout);
+        setEnlarged(null);
+        focusSlot(wallRef.current, Math.min(enlarged.slot, useMultiviewStore.getState().tiles.length - 1));
+        return;
+      }
+      // Another tile made large while one already is keeps the layout to go back to.
+      setEnlarged({ key, layout: enlargedKey && enlarged ? enlarged.layout : s.layout, slot: index });
+      if (index > 0) s.swap(key, s.tiles[0]!.key);
+      s.setLayout('1+3');
+      setAnnouncement(t('announceEnlarged', { name: nameOf(key) }));
+      focusSlot(wallRef.current, 0);
+    },
+    [enlarged, enlargedKey, nameOf, t, setLayout],
+  );
+
   const toggleMute = useCallback(() => {
     const a = useMultiviewAudio.getState();
     a.toggleMuted();
@@ -344,6 +394,7 @@ export function MultiviewPage() {
     onSwapStart: swapStart,
     onSwapTarget: swapTarget,
     onSwapCancel: swapCancel,
+    onEnlarge: enlarge,
   });
 
   // Page-wide keys. Keys that act on the focused slot live on the wall (useWallKeyboard).
@@ -434,6 +485,7 @@ export function MultiviewPage() {
       missingSources={missingSources}
       programmes={programmes}
       swapFrom={swapFrom}
+      enlargedKey={enlargedKey}
       picks={quick.picks}
       limitedSources={atLimit}
       picksLoading={quick.loading}
@@ -448,6 +500,8 @@ export function MultiviewPage() {
       onSwapCancel={swapCancel}
       onUnlock={unlock}
       onDropTile={swapWith}
+      onEnlarge={enlarge}
+      onWatch={watch}
       onKeyDown={onWallKeyDown}
     />
   );

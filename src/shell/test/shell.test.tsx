@@ -834,7 +834,8 @@ describe('polish pass (B7)', () => {
     const palette = await screen.findByTestId('command-palette');
     const input = within(palette).getByPlaceholderText('Type a command or search');
     fireEvent.change(input, { target: { value: 'recording' } });
-    expect(await within(palette).findByText('Settings: Recording')).toBeTruthy();
+    // The section, and as their detail the single settings it holds ("Recordings folder").
+    expect((await within(palette).findAllByText('Settings: Recording')).length).toBeGreaterThan(0);
     fireEvent.change(input, { target: { value: 'scheduled' } });
     expect(await within(palette).findByText('Scheduled')).toBeTruthy();
   });

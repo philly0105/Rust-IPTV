@@ -437,6 +437,9 @@ describe('single settings, numbers and pending answers (search lane, 2026-11-16)
     const { palette } = await openPaletteWith('zzqx');
     const empty = await within(palette).findByTestId('palette-empty');
     await waitFor(() => expect(empty.textContent).toBe('Searching'));
+    // Past the pause the library is asked; still searching until it answers.
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'catalog.search')).toBe(true));
+    expect(within(palette).getByTestId('palette-empty').textContent).toBe('Searching');
     act(() => answer({ live: [], movies: [], series: [] }));
     await waitFor(() => expect(within(palette).getByTestId('palette-empty').textContent).toBe('Nothing found'));
   });

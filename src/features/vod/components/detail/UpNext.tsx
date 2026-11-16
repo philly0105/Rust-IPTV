@@ -54,7 +54,7 @@ export function UpNextRail({
   if (episodes.length === 0) return null;
   return (
     <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:absolute xl:inset-0">
-      <h2 className="text-sm text-fg-muted">{t('upNext')}</h2>
+      <h2 className="text-title-sm text-fg">{t('upNext')}</h2>
       <ol
         ref={fades.ref}
         style={fades.style}
@@ -143,7 +143,7 @@ export function NextEpisodeCard({
       <span role="status" aria-live="polite" className="sr-only">
         {`${autoplay ? t('nextEpisodeIn', { seconds: AUTOPLAY_SECONDS }) : t('nextEpisode')}: ${code} ${next.title}`}
       </span>
-      <SkipForward aria-hidden size={18} className="text-accent" />
+      <SkipForward aria-hidden size={18} className="text-fg-muted" />
       <div aria-hidden className="min-w-0 flex-1">
         <div className="tabular text-sm text-fg-muted">
           {autoplay ? t('nextEpisodeIn', { seconds: left }) : t('nextEpisode')}

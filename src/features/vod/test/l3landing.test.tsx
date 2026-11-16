@@ -109,7 +109,7 @@ describe('round 3: the landing names its source only beside others', () => {
     expect(await screen.findByText('Alpha IPTV · 42 titles')).toBeTruthy();
     const { useShellStore } = await import('@/shell/store');
     await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('Alpha IPTV · 42 titles'));
-    expect(useShellStore.getState().header?.search?.placeholder).toBe(i18n.t('vod:searchInSource', { source: 'Alpha IPTV' }));
+    expect(useShellStore.getState().header?.search?.placeholder).toBe(i18n.t('vod:searchMoviesInSource', { source: 'Alpha IPTV' }));
   });
 
   it('leaves the name out of the line, the header and the search field with one source', async () => {
@@ -119,7 +119,7 @@ describe('round 3: the landing names its source only beside others', () => {
     expect(screen.queryByText(/Alpha IPTV/)).toBeNull();
     const { useShellStore } = await import('@/shell/store');
     await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('42 titles'));
-    expect(useShellStore.getState().header?.search?.placeholder).toBe('Search this source');
+    expect(useShellStore.getState().header?.search?.placeholder).toBe('Search movies');
   });
 });
 

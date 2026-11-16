@@ -91,6 +91,15 @@ function SearchingPage() {
   return <Page>movies page</Page>;
 }
 
+/** The Search page: its field is the global search, so no palette button sits beside it. */
+function GlobalSearchPage() {
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Search', search: { value: '', onChange: () => undefined, placeholder: 'Search everything', hidePalette: true } });
+  }, [shell]);
+  return <Page>search page</Page>;
+}
+
 /** A page whose results hang under the header's field (the guide's search panel). */
 const guideField = { current: null as HTMLInputElement | null };
 const onGuideFocus = vi.fn();
@@ -118,6 +127,7 @@ function routes() {
         { path: 'my-list', element: <Page>my list page</Page> },
         { path: 'searching', element: <SearchingPage /> },
         { path: 'guide-like', element: <GuideLikePage /> },
+        { path: 'global-search', element: <GlobalSearchPage /> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
@@ -260,6 +270,15 @@ describe('the header search slot', () => {
     expect(palette.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(palette);
     expect(useShellStore.getState().paletteOpen).toBe(true);
+  });
+
+  it('leaves the palette button out beside the global search field, which keeps its Ctrl F hint', async () => {
+    renderRoutes(routes(), '/global-search');
+    await screen.findByText('search page');
+    const field = screen.getByRole('searchbox', { name: 'Search everything' });
+    expect(field.parentElement!.parentElement!.textContent).toContain('Ctrl');
+    expect(screen.queryByTestId('header-palette')).toBeNull();
+    expect(screen.queryByTestId('open-palette')).toBeNull();
   });
 
   it("hands a page its field: the ref, focus, a name beyond the placeholder and the results it controls", async () => {

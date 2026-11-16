@@ -453,7 +453,7 @@ describe('SearchPage: states', () => {
 
   it('prompts for a query before searching', async () => {
     renderAt('/search', route);
-    await screen.findByText('Search every source');
+    await screen.findByText('Search everything');
   });
 
   it('shows the no-results state', async () => {

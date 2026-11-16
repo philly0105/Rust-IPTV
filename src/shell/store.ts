@@ -27,6 +27,11 @@ export interface HeaderSearch {
   controls?: string;
   /** The field holds its place but takes no input (the guide before its source is known). */
   disabled?: boolean;
+  /**
+   * The field is the global search itself (the Search page), so the header leaves out the palette
+   * button it otherwise keeps beside a page's own field; Ctrl+K still opens the palette.
+   */
+  hidePalette?: boolean;
 }
 
 /** The header's Back control (the kit BackButton at its leading edge). */

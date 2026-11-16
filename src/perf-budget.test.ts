@@ -194,7 +194,7 @@ function backdropViolations(): Violation[] {
   const out: Violation[] = [];
   for (const f of FILES) {
     if (f.kind === 'ts') {
-      for (const m of f.code.matchAll(/(?<![\w-])backdrop-blur(?:-[^\s'"`]*)?|\b(?:Webkit)?[Bb]ackdropFilter\b|(?<!supports-)\[(?:-webkit-)?backdrop-filter:[^\]]*\]/g)) {
+      for (const m of f.code.matchAll(/(?<![\w-])backdrop-blur(?:-[^\s'"`]*)?|\b(?:Webkit)?[Bb]ackdropFilter\b|(?<!supports-)\[(?:-webkit-)?backdrop-filter:(?!none\])[^\]]*\]/g)) {
         out.push(violation(f, 'backdrop-outside-glass-blur', m.index, m[0]));
       }
       continue;

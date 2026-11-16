@@ -437,9 +437,9 @@ describe('the landing reaches every category from the top', () => {
     const chips = await screen.findByRole('navigation', { name: 'Categories' });
     await waitFor(() => expect(within(chips).getAllByTestId('vod-category-chip')).toHaveLength(CATEGORY_CHIP_LIMIT));
     expect(within(chips).getByRole('link', { name: 'Group 0' }).getAttribute('href')).toBe('/s/src1/movies/c/k0');
-    // Before the rails in the page.
-    const recent = screen.getByRole('heading', { name: /Recently added/ });
-    expect(chips.compareDocumentPosition(recent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Before the rails in the page (Recently added is empty here and draws nothing).
+    const rail = await screen.findByRole('heading', { name: /^Group 0/ });
+    expect(chips.compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Manage is at the top as well.
     expect(within(chips).getByRole('button', { name: 'Manage categories (1 hidden)' })).toBeTruthy();
     const toggle = screen.getByRole('button', { name: 'Browse all categories' });

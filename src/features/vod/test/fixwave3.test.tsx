@@ -109,7 +109,7 @@ describe('R6-r3 F12: poster card accessible name', () => {
     expect(posterCardLabel({ title: 'Arrival', meta: 'Mock Xtream', badgeLabel: 'Big 50k', ratedLabel: rated })).toBe('Arrival, Mock Xtream, Big 50k');
   });
 
-  it('renders the composed label on the link, hides the rating badge, and keeps the full-title tooltip', () => {
+  it('renders the composed label on the link, hides the rating badge, and keeps a tooltip only for a fuller name', () => {
     render(
       <MemoryRouter>
         <PosterCard title="Black Harbor" fullTitle="Black Harbor (2026)" year={2026} rating={8.2} href="/m/1" />
@@ -117,9 +117,17 @@ describe('R6-r3 F12: poster card accessible name', () => {
     );
     const link = screen.getByRole('link');
     expect(link.getAttribute('aria-label')).toBe('Black Harbor (2026), rated 8.2 of 10');
-    expect(link.getAttribute('title')).toBe('Black Harbor (2026)');
+    // The caption and the year line under it say the same: no tooltip repeating them.
+    expect(link.getAttribute('title')).toBeNull();
     const badge = screen.getByText('8.2').closest('div')!;
     expect(badge.getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByText('Black Harbor').getAttribute('dir')).toBe('auto');
+    cleanup();
+    render(
+      <MemoryRouter>
+        <PosterCard title="Black Harbor" fullTitle="EN | Black Harbor 4K (2026)" year={2026} href="/m/1" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('link').getAttribute('title')).toBe('EN | Black Harbor 4K (2026)');
   });
 });

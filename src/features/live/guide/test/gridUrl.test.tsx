@@ -9,6 +9,7 @@ import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@te
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { itemKey, type Category, type Channel, type EpgProgram, type GuideSearchHit, type Page, type PageQuery } from '@/api/types';
+import { SEARCH_FIELD } from '@/shell/focusSearch';
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, GRID_SLOT_MIN, GRID_TRACK_BEFORE, guideDataStart, HIGHLIGHT_MS } from '../../components/EpgGridPage';
@@ -244,11 +245,11 @@ describe('search hits on the grid', () => {
     fireEvent.click(screen.getByRole('button', { name }));
   }
 
-  it('`/` focuses the search field', async () => {
+  it("the search field is the one the shell's `/` and Ctrl+F focus", async () => {
     renderGuide({ path: '/epg', routes: GRID });
     await screen.findByText('Channel 0');
-    fireEvent.keyDown(document.body, { key: '/' });
-    expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search the guide' }));
+    // The key itself is the shell's (ShellLayout, SEARCH_FIELD); the guide only marks its field.
+    expect(screen.getByRole('searchbox', { name: 'Search the guide' }).matches(SEARCH_FIELD)).toBe(true);
   });
 
   it('moves the window to the hit, switches a group without the channel to all channels, and highlights the row', async () => {

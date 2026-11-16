@@ -40,6 +40,8 @@ export interface MenuProps {
   label?: string;
   /** Trigger content; defaults to an ellipsis icon (an IconButton whose tooltip is `label`). */
   trigger?: ReactNode;
+  /** The default trigger's glyph instead of the horizontal ellipsis (a row's ⋮, as Live TV's rows draw it). */
+  triggerIcon?: ReactNode;
   triggerClassName?: string;
   /** Tooltip for a custom icon-only `trigger` (the default trigger already shows `label`). */
   tooltip?: ReactNode;
@@ -157,7 +159,7 @@ export function placeMenu(
  * type-ahead; Escape/Tab close and restore focus to the trigger. On a phone
  * (MENU_SHEET_QUERY) it opens as a bottom sheet with the same items and keys.
  */
-export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltipSide, align = 'end', placement = 'block', sheetHeader, className }: MenuProps) {
+export function Menu({ items, label, trigger, triggerIcon, triggerClassName, tooltip, tooltipSide, align = 'end', placement = 'block', sheetHeader, className }: MenuProps) {
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
   // Decided once per opening, so a rotation while it is up does not swap the menu's shape.
@@ -345,7 +347,7 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
         <IconButton
           ref={triggerRef}
           label={label ?? t('moreActions')}
-          icon={<Ellipsis aria-hidden size={18} />}
+          icon={triggerIcon ?? <Ellipsis aria-hidden size={18} />}
           {...triggerProps}
           className={triggerClassName}
         />

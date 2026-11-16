@@ -17,7 +17,7 @@
  */
 
 import { k } from '../lib/keys';
-import { ArrowDown, ArrowUp, GripVertical, Info, Play, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, EllipsisVertical, GripVertical, Info, Play, Trash2, X } from 'lucide-react';
 import { memo, useRef, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -364,6 +364,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         items={menuItems}
         label={t('entryMenu', { title })}
         align="end"
+        triggerIcon={<EllipsisVertical aria-hidden size={18} />}
         triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"
         sheetHeader={{
           media: playable ? (

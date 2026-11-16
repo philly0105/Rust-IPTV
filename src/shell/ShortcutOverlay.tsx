@@ -45,6 +45,22 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   // Guide (EpgGridPage.tsx): search and jump to a date and time.
   { combo: '/', descKey: 'guide:searchLabel', area: 'Guide' },
   { combo: 't', descKey: 'guide:jumpTitle', area: 'Guide' },
+  // The focused guide grid (EpgGridPage.tsx onGridKey).
+  { combo: 'arrowup', descKey: 'scGuideChannel', area: 'Guide' },
+  { combo: 'arrowdown', descKey: 'scGuideChannel', area: 'Guide' },
+  { combo: 'arrowleft', descKey: 'scGuideProgramme', area: 'Guide' },
+  { combo: 'arrowright', descKey: 'scGuideProgramme', area: 'Guide' },
+  { combo: 'pageup', descKey: 'scGuidePage', area: 'Guide' },
+  { combo: 'pagedown', descKey: 'scGuidePage', area: 'Guide' },
+  { combo: 'home', descKey: 'scGuideNow', area: 'Guide' },
+  { combo: 'mod+home', descKey: 'scGuideFirst', area: 'Guide' },
+  { combo: 'end', descKey: 'scGuideLast', area: 'Guide' },
+  { combo: 'enter', descKey: 'scGuideOpen', area: 'Guide' },
+  { combo: 'shift+f10', descKey: 'scItemMenu', area: 'Guide' },
+  { combo: 'contextmenu', descKey: 'scItemMenu', area: 'Guide' },
+  // Home's rails (DashboardRail.tsx): Left, Right, Home and End move inside a rail (Dialogs and lists).
+  { combo: 'arrowup', descKey: 'scHomeRows', area: 'Home' },
+  { combo: 'arrowdown', descKey: 'scHomeRows', area: 'Home' },
   // Only inside the Manage lists and Edit channels dialogs (SortableList.tsx onKeyDown); the list
   // page and the Lists sidebar reorder through those dialogs, so the text names them.
   { combo: 'alt+arrowup', descKey: 'scListsDialogMoveUp', area: 'Lists' },
@@ -173,6 +189,7 @@ const AREA_ORDER = [
   'Seek bar',
   'Live',
   'Guide',
+  'Home',
   'Multi-view',
   'Vod',
   'Search',
@@ -200,6 +217,7 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   Navigation: 'shell:areaNavigation',
   Live: 'shell:areaLive',
   Guide: 'guide:shortcutArea',
+  Home: 'shell:navDashboard',
   Lists: 'lists:title',
   'Multi-view': 'multiview:shortcutArea',
   Vod: 'shell:areaVod',
@@ -341,7 +359,9 @@ function OpenShortcutOverlay() {
           aria-label={t('shortcutsListLabel')}
           tabIndex={0}
           // Two balanced columns: each area flows into the next, with no gap where a short one sat beside a long one.
-          className="gap-x-10 rounded-md md:columns-2"
+          // Focused, it keeps its top below the sticky filter (scroll-mt), and its ring is drawn
+          // inside it with a little room, as the scroller would clip an outline to two side lines.
+          className="-mx-2 scroll-mt-16 gap-x-10 rounded-md px-2 pt-2 focus-visible:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset md:columns-2"
         >
           {groups.map(([area, list], gi) => (
             // Area names have spaces; an IDREF must not, so the id comes from useId plus the index.

@@ -26,7 +26,7 @@ import { useShell } from '@/shell';
 import { settingTarget } from '@/shell/settingTargets';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { Page } from '@/ui';
-import { SaveFeedback, SectionError, SectionSkeleton, type SaveState } from './components';
+import { SaveFeedback, SectionError, SectionSkeleton, TOUCH_ONLY_QUERY, type SaveState } from './components';
 import type { SettingsPatch } from './lib/patch';
 import { useSettingsQuery, useUpdateSettings } from './lib/useUpdateSettings';
 import { AboutSection } from './sections/AboutSection';
@@ -78,13 +78,8 @@ export const NAV_GROUPS: readonly { id: string; label: string; sections: readonl
   { id: 'system', label: 'navGroupSystem', sections: ['backup', 'about'] },
 ];
 
-/**
- * A device with touch and nothing that hovers: a phone or a tablet without a trackpad. Its nav
- * leaves out Keyboard shortcuts, a list of keys it has no keyboard for. A tablet with a keyboard
- * case or trackpad reports a fine pointer or hover and keeps it. The route itself stays, so a
- * link or the command palette still opens the section.
- */
-export const TOUCH_ONLY_QUERY = '(hover: none) and (pointer: coarse)';
+/** Defined beside the rows, which use it too (Playback's Double-click to play). */
+export { TOUCH_ONLY_QUERY };
 
 /**
  * Below this width Settings is a list of sections that opens one at a time (the phone layout);

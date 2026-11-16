@@ -71,7 +71,7 @@
   "lockoutActive": "Túl sok hibás PIN-kód. Ennyi idő múlva próbálkozhat újra: {{time}}.",
   "behaviourTitle": "Hogyan működnek a zárolások",
   "behaviourPinNote": "Az itteni módosításokhoz PIN-kód kell.",
-  "modeLabel": "Zárolt tartalom",
+  "modeLabel": "Ha valami zárolva van",
   "modeHide": "Elrejtés",
   "modeAsk": "PIN-kód kérése",
   "modeHideText": "A zárolt csoportok és címek eltűnnek a listákból, a keresésből, a kedvencekből és a Lejátszás folytatása sorból.",

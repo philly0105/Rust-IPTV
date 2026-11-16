@@ -71,7 +71,7 @@
   "lockoutActive": "Zu viele falsche PINs. Die PIN kann in {{time}} erneut eingegeben werden.",
   "behaviourTitle": "So wirken Sperren",
   "behaviourPinNote": "Änderungen hier erfordern die PIN.",
-  "modeLabel": "Gesperrte Inhalte",
+  "modeLabel": "Wenn etwas gesperrt ist",
   "modeHide": "Ausblenden",
   "modeAsk": "Nach PIN fragen",
   "modeHideText": "Gesperrte Gruppen und Titel verschwinden aus Listen, Suche, Favoriten und „Weiterschauen“.",

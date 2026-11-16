@@ -79,7 +79,7 @@
   "lockoutActive": "Za dużo błędnych kodów PIN. Kolejna próba będzie możliwa za {{time}}.",
   "behaviourTitle": "Jak działają blokady",
   "behaviourPinNote": "Zmiany tutaj wymagają kodu PIN.",
-  "modeLabel": "Zablokowane treści",
+  "modeLabel": "Gdy coś jest zablokowane",
   "modeHide": "Ukrywaj",
   "modeAsk": "Pytaj o PIN",
   "modeHideText": "Zablokowane grupy i tytuły znikają z list, wyszukiwania, ulubionych i sekcji Kontynuuj oglądanie.",

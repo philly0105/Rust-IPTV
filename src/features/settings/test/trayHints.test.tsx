@@ -50,7 +50,7 @@ describe('Stream format (server mode)', () => {
     renderAt(settingsRoutes, '/settings/playback');
     await screen.findByTestId('settings-playback');
     expect(
-      screen.getByText('Xtream live channels. Auto uses MPEG-TS, which starts faster, when the browser can play it. Choose HLS if channels freeze or you need subtitles.'),
+      screen.getByText('How live channels from Xtream sources are sent. Auto picks the one that starts fastest. Choose HLS if channels freeze or subtitles are missing.'),
     ).toBeTruthy();
     expect(screen.queryByText(/HLS in mpv and VLC/)).toBeNull();
   });

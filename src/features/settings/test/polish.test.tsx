@@ -126,7 +126,7 @@ describe('Dashboard rails', () => {
     current = { ...current, showDashboard: false };
     renderAt(settingsRoutes, '/settings/appearance');
     await screen.findByTestId('settings-appearance');
-    expect(screen.getByText('Turn on the dashboard to use these rows.')).toBeTruthy();
+    expect(screen.getByText('Turn on Show Home to choose its rows.')).toBeTruthy();
     expect((screen.getByTestId('toggle-rail-hero') as HTMLButtonElement).disabled).toBe(true);
   });
 });

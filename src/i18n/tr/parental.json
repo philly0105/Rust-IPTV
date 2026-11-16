@@ -71,7 +71,7 @@
   "lockoutActive": "Çok fazla yanlış PIN girildi. PIN {{time}} sonra tekrar denenebilir.",
   "behaviourTitle": "Kilitler nasıl çalışır",
   "behaviourPinNote": "Buradaki değişiklikler PIN ister.",
-  "modeLabel": "Kilitli içerik",
+  "modeLabel": "Bir şey kilitliyken",
   "modeHide": "Gizle",
   "modeAsk": "PIN iste",
   "modeHideText": "Kilitli gruplar ve başlıklar listelerden, aramadan, favorilerden ve İzlemeye devam et bölümünden kaybolur.",

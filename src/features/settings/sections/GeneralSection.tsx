@@ -34,7 +34,8 @@ function MinRatingRow({ value, update }: { value: number; update: (patch: Settin
   return (
     <SettingsRow label={t('vodMinRating')} description={t('vodMinRatingHint')}>
       {({ id, describedBy }) => (
-        <div className="flex items-center gap-3">
+        // A phone-width column: the slider spans the row like every other control there.
+        <div className="flex w-full items-center gap-3 @md:w-auto">
           <Slider
             id={id}
             min={0}
@@ -47,10 +48,10 @@ function MinRatingRow({ value, update }: { value: number; update: (patch: Settin
             onPointerUp={commit}
             onKeyUp={commit}
             onBlur={commit}
-            className="w-44"
+            className="w-full @md:w-44"
             data-testid="input-vodMinRating"
           />
-          <output htmlFor={id} className="w-14 text-end text-body-sm font-medium tabular-nums text-fg" data-testid="vodMinRating-value">
+          <output htmlFor={id} className="w-14 shrink-0 text-end text-body-sm font-medium tabular-nums text-fg" data-testid="vodMinRating-value">
             {draft > 0 ? draft.toLocaleString(intlLocale(i18n.language), { minimumFractionDigits: 1 }) : t('vodMinRatingAny')}
           </output>
         </div>
@@ -84,7 +85,8 @@ export function GeneralSection({ settings, update }: SectionProps) {
             />
           )}
         </SettingsRow>
-        <SettingsRow label={t('startupBehavior')} description={t('startupBehaviorHint')}>
+        {/* With Home off, "Home" opens the first source (Appearance > Show Home): say so here. */}
+        <SettingsRow label={t('startupBehavior')} description={settings.showDashboard === false ? t('startupBehaviorHintNoHome') : t('startupBehaviorHint')}>
           {({ id }) => (
             <Segmented<StartupBehavior>
               id={id}

@@ -191,7 +191,7 @@ describe('General', () => {
     const labels = within(group)
       .getAllByRole('radio')
       .map((r) => r.textContent ?? '');
-    expect(labels).toEqual(['Home screen', 'Where I left off']);
+    expect(labels).toEqual(['Home', 'Where I left off']);
     for (const l of labels) expect(l.length).toBeLessThanOrEqual(16);
   });
 });

@@ -2,12 +2,13 @@
 
 import { useTranslation } from 'react-i18next';
 
+import { useRpcQuery } from '@/api/query';
 import { isDesktop } from '@/api/transport';
 import type { ReminderAction } from '@/api/types';
 import { Select, type SelectOption } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
-import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
+import { Segmented, SettingsGroup, SettingsNote, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { RecordingsFolderRow } from './RecordingsFolderRow';
 import { parity, type SectionProps } from './types';
 
@@ -21,7 +22,10 @@ export function minuteChoices(choices: readonly number[], current: number): numb
 }
 
 export function RecordingSection({ settings, update }: SectionProps) {
-  const { t, i18n } = useTranslation('settings');
+  const { t, i18n } = useTranslation(['settings', 'library']);
+  // The Scheduled page's query (useRecordingCapabilities), read here without pulling in its module.
+  const caps = useRpcQuery('recordings.capabilities', undefined, { staleTime: 5 * 60_000 });
+  const canRecord = caps.data?.supported !== false;
   const minutes = (n: number) => new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'minute', unitDisplay: 'long' }).format(n);
   const options = (choices: readonly number[], current: number): SelectOption[] =>
     minuteChoices(choices, current).map((n) => ({ value: String(n), label: minutes(n) }));
@@ -36,8 +40,10 @@ export function RecordingSection({ settings, update }: SectionProps) {
       {/* SS-8: the folder sits with the rest of recording, where people look for it. The padding is
           one row with its two minutes side by side, not two label-only rows. */}
       <SettingsGroup title={t('recordingsGroup')}>
+        {/* A server without mpv cannot record: say so, as Scheduled does, and dim the padding. */}
+        {canRecord ? null : <SettingsNote testId="recording-unsupported-note">{t('library:scheduledServerNoMpv')}</SettingsNote>}
         <RecordingsFolderRow value={parity(settings).recordingsDir} update={update} />
-        <SettingsRow label={t('recordingPaddingGroup')} description={t('recordingPaddingHint')}>
+        <SettingsRow label={t('recordingPaddingGroup')} description={t('recordingPaddingHint')} dimmed={!canRecord}>
           {({ id, describedBy }) => (
             // Each select is named by the row and its own short label: "Recording padding, Before".
             // Phone width: a two-column grid, so both selects line up under their labels.
@@ -53,6 +59,7 @@ export function RecordingSection({ settings, update }: SectionProps) {
                   id={id}
                   aria-labelledby={`${id}-label ${id}-before`}
                   aria-describedby={describedBy}
+                  disabled={!canRecord}
                   value={String(before)}
                   options={options(PADDING_BEFORE_CHOICES, before)}
                   onValueChange={(v) => void update({ recordingPaddingBeforeMinutes: Number(v) })}
@@ -67,6 +74,7 @@ export function RecordingSection({ settings, update }: SectionProps) {
                   id={`${id}-a`}
                   aria-labelledby={`${id}-label ${id}-after`}
                   aria-describedby={describedBy}
+                  disabled={!canRecord}
                   value={String(after)}
                   options={options(PADDING_AFTER_CHOICES, after)}
                   onValueChange={(v) => void update({ recordingPaddingAfterMinutes: Number(v) })}
@@ -86,7 +94,9 @@ export function RecordingSection({ settings, update }: SectionProps) {
           onChange={(v) => void update({ remindersEnabled: v })}
           testId="reminders-enabled"
         />
-        <SettingsRow label={t('reminderLead')} description={t('reminderLeadHint')}>
+        {/* Off: say what turning them on opens, and dim the two rows it governs (as Metadata does). */}
+        {enabled ? null : <SettingsNote testId="reminders-off-note">{t('remindersOffNote')}</SettingsNote>}
+        <SettingsRow label={t('reminderLead')} description={t('reminderLeadHint')} dimmed={!enabled}>
           {({ id, describedBy }) => (
             <Select
               id={id}
@@ -99,10 +109,16 @@ export function RecordingSection({ settings, update }: SectionProps) {
             />
           )}
         </SettingsRow>
-        <SettingsRow label={t('reminderAction')} description={action === 'switch' ? t('reminderActionSwitchHint') : t('reminderActionNotifyHint')}>
+        <SettingsRow
+          label={t('reminderAction')}
+          // A browser tab cannot bring itself forward, so the server's hint leaves that out.
+          description={action === 'notify' ? t('reminderActionNotifyHint') : isDesktop ? t('reminderActionSwitchHint') : t('reminderActionSwitchHintServer')}
+          dimmed={!enabled}
+        >
           {({ id }) => (
             <Segmented<ReminderAction>
               id={id}
+              disabled={!enabled}
               label={t('reminderAction')}
               value={action}
               options={[

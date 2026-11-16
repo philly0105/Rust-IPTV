@@ -63,8 +63,8 @@ describe('Guide status rows (SS-20)', () => {
     expect(within(first!).getByTestId('epg-status-state').textContent).toBe('Up to date');
     expect(first!.textContent).toContain('1,200 programmes, 40 channels');
     expect(within(first!).getByTestId('epg-status-url').textContent).toBe('http://xt.example.com/xmltv.php?username=***&password=***');
-    // The switch is named by the source and described by the state and the address.
-    const sw = within(first!).getByRole('switch', { name: 'Northwind' });
+    // The switch is named for what it does with the source's guide, and described by the state and the address.
+    const sw = within(first!).getByRole('switch', { name: 'Use the guide from Northwind' });
     const described = sw.getAttribute('aria-describedby')!.split(' ').map((id) => document.getElementById(id)?.textContent ?? '');
     expect(described.join(' ')).toContain('Up to date');
     expect(described.join(' ')).toContain('xmltv.php');

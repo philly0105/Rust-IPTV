@@ -31,6 +31,13 @@ const SIZE_KEY: Record<SubtitleSize, string> = { small: 'sizeSmall', medium: 'si
 const COLOR_KEY: Record<SubtitleColor, string> = { white: 'colorWhite', yellow: 'colorYellow', cyan: 'colorCyan', green: 'colorGreen' };
 const BG_KEY: Record<SubtitleBackground, string> = { shadow: 'backgroundShadow', box: 'backgroundBox', solid: 'backgroundSolid' };
 
+/**
+ * On the settings page, a narrow column (a phone) lays the choices out as an even grid that spans
+ * the row, so four never wrap to three and an orphan; from @md they sit side by side at their own
+ * width. The player menu keeps its compact row.
+ */
+const PAGE_GRID = { 2: 'grid w-full grid-cols-2 @md:inline-flex @md:w-fit', 3: 'grid w-full grid-cols-3 @md:inline-flex @md:w-fit' } as const;
+
 /** The CSS variables of a style as an inline style object. */
 function varsOf(style: SubtitleStyle): CSSProperties {
   return cueCssVars(style) as CSSProperties;
@@ -87,6 +94,7 @@ export function SizeChoice(props: { id?: string; describedBy?: string; value: Su
       {...props}
       label={t('subtitleStyle.size')}
       testId="subtitle-size"
+      className={props.tone === 'page' ? PAGE_GRID[2] : undefined}
       options={SUBTITLE_SIZES.map((v) => {
         const label = t(`subtitleStyle.${SIZE_KEY[v]}`);
         return {
@@ -115,6 +123,7 @@ export function ColorChoice(props: { id?: string; describedBy?: string; value: S
       {...props}
       label={t('subtitleStyle.color')}
       testId="subtitle-color"
+      className={props.tone === 'page' ? PAGE_GRID[2] : undefined}
       options={SUBTITLE_COLORS.map((v) => {
         const label = t(`subtitleStyle.${COLOR_KEY[v]}`);
         return {
@@ -152,6 +161,7 @@ export function BackgroundChoice(props: {
       tone={props.tone}
       label={t('subtitleStyle.background')}
       testId="subtitle-background"
+      className={props.tone === 'page' ? PAGE_GRID[3] : undefined}
       options={SUBTITLE_BACKGROUNDS.map((v) => {
         const label = t(`subtitleStyle.${BG_KEY[v]}`);
         return {
@@ -215,7 +225,7 @@ export function PositionSlider({
           htmlFor={id}
           aria-live="polite"
           data-testid="subtitle-position-value"
-          className={cn('tabular-nums', tone === 'page' ? 'font-display text-title-sm text-fg' : 'text-caption text-on-glass-muted')}
+          className={cn('tabular-nums', tone === 'page' ? 'text-body-sm font-medium text-fg' : 'text-caption text-on-glass-muted')}
         >
           {readout(draft)}
         </output>

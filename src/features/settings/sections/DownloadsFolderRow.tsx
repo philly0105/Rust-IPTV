@@ -113,8 +113,10 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
           <output
             id={id}
             aria-describedby={describedBy}
-            className="flex h-10 w-full min-w-0 items-center truncate rounded-md border border-edge bg-surface-2 px-3 font-mono text-sm text-fg"
-            title={path}
+            // A value, not a field: it cannot be edited here, so no field frame, and it wraps
+            // rather than cut the path off on a phone (as About's paths do).
+            className="block w-full min-w-0 font-mono text-body-sm break-all text-fg"
+            dir="ltr"
             data-testid="downloads-dir-path"
           >
             {path || t('downloadsFolderUnknown')}

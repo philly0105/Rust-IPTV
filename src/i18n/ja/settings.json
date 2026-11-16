@@ -44,6 +44,8 @@
 
   "downloads": "ダウンロード",
   "downloadsFolder": "ダウンロードフォルダー",
+  "downloadSpeed": "ダウンロード速度",
+  "downloadSpeedHint": "各ダウンロードが使える最大の速度です。個別のダウンロードには、ダウンロード画面のその行から別の制限を設定できます。",
   "downloadConnectionsFor": "{{name}}からのダウンロード1件あたりの接続数",
   "downloadConnectionsHint": "自動では、アカウントの空き接続を使って1つのファイルをダウンロードし、このソースから再生している間は1接続に戻します。プロバイダーが並列ダウンロードを認めない場合は1を選んでください。",
   "downloadConnectionsOne": "1",

@@ -85,9 +85,10 @@ describe('DownloadsPage', () => {
         .getAllByRole('button')
         .map((b) => b.dataset['action'])
         .filter(Boolean);
-    expect(actions('downloading')).toEqual(['pause', 'cancel']);
-    expect(actions('queued')).toEqual(['pause', 'cancel', 'next']);
-    expect(actions('paused')).toEqual(['resume', 'remove']);
+    // Download speed first, so the queue actions keep their places at the row's end.
+    expect(actions('downloading')).toEqual(['speed', 'pause', 'cancel']);
+    expect(actions('queued')).toEqual(['speed', 'pause', 'cancel', 'next']);
+    expect(actions('paused')).toEqual(['speed', 'resume', 'remove']);
     expect(actions('failed')).toEqual(['retry', 'remove']);
     expect(actions('canceled')).toEqual(['retry', 'remove']);
     expect(screen.getByText('Queue')).toBeTruthy();
@@ -111,13 +112,18 @@ describe('DownloadsPage', () => {
       download = { ...download, rateLimitBps: (args as { bytesPerSecond: number | null }).bytesPerSecond ?? undefined };
     };
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Default speed: 1 MiB/s' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Default speed: 1 MB/s' }));
+    // 1 MB/s is a preset; any other number is Custom.
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('1');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(rpc.callsOf('settings.update')).toEqual([{ patch: { downloadRateLimitBps: 2.5 * mib } }]));
     const openRow = async () => fireEvent.click(await screen.findByRole('button', { name: /Change download speed for News/ }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(screen.getByText('Default: 2.5 MiB/s')).toBeTruthy();
+    // The default is not repeated on the row; its speed button names it.
+    expect(await screen.findByRole('button', { name: 'Change download speed for News (Default: 2.5 MB/s)' })).toBeTruthy();
+    expect(screen.queryByTestId('download-speed-limit')).toBeNull();
     await openRow();
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('default');
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
@@ -125,6 +131,14 @@ describe('DownloadsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(rpc.callsOf('downloads.setRateLimit')).toEqual([{ id: 51, bytesPerSecond: 4 * mib }]);
+    // A limit of its own shows on the row.
+    expect((await screen.findByTestId('download-speed-limit')).textContent).toContain('4 MB/s');
+    await openRow();
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('custom');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rpc.callsOf('downloads.setRateLimit').at(-1)).toEqual({ id: 51, bytesPerSecond: 10 * mib });
     await openRow();
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'unlimited' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -135,7 +149,7 @@ describe('DownloadsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(rpc.callsOf('downloads.setRateLimit').at(-1)).toEqual({ id: 51, bytesPerSecond: null });
-    expect(screen.getByText('Default: 2.5 MiB/s')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Change download speed for News (Default: 2.5 MB/s)' })).toBeTruthy();
   });
 
   it('rejects invalid speeds and keeps the editor open when saving fails', async () => {
@@ -155,6 +169,24 @@ describe('DownloadsPage', () => {
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect((screen.getByRole('spinbutton') as HTMLInputElement).value).toBe('3');
+  });
+
+  it('pauses every running row at once, then resumes every paused one', async () => {
+    let rows = [
+      makeDownload({ id: 61, title: 'One', status: 'downloading' }),
+      makeDownload({ id: 62, title: 'Two', status: 'queued' }),
+      makeDownload({ id: 63, title: 'Three', status: 'failed' }),
+    ];
+    rpc.handlers['downloads.list'] = () => rows;
+    rpc.handlers['downloads.pause'] = (args) => {
+      rows = rows.map((d) => (d.id === (args as { id: number }).id ? { ...d, status: 'paused' } : d));
+    };
+    rpc.handlers['downloads.resume'] = () => undefined;
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause all' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.pause').map((a) => (a as { id: number }).id).sort()).toEqual([61, 62]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume all' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.resume').map((a) => (a as { id: number }).id).sort()).toEqual([61, 62]));
   });
 
   it('calls the matching rpc for row actions', async () => {
@@ -205,7 +237,9 @@ describe('DownloadsPage', () => {
       resumeSeconds: 300,
       subtitle: 'Evening news',
     });
-    expect(screen.getByRole('button', { name: 'Pause Channel 1' })).toBeTruthy();
+    // An archived programme is named by the programme, not its channel (four would all read "Channel 1").
+    expect(screen.getByRole('button', { name: 'Pause Evening news' })).toBeTruthy();
+    expect(screen.getByTestId('download-row').textContent).toContain('Channel 1 · Sun 18 Oct 8:00 PM');
   });
 
   it('offers Try again on a retryable failure and re-issues the command', async () => {

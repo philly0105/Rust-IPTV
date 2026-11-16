@@ -44,6 +44,8 @@
 
   "downloads": "Pobrane",
   "downloadsFolder": "Folder pobierania",
+  "downloadSpeed": "Szybkość pobierania",
+  "downloadSpeedHint": "Najwyższa szybkość dla każdego pobierania. Pojedyncze pobieranie może też mieć własny limit ustawiony w jego wierszu w Pobranych.",
   "downloadConnectionsFor": "Połączenia na pobieranie z {{name}}",
   "downloadConnectionsHint": "Tryb automatyczny pobiera plik przez wolne połączenia konta i wraca do jednego, gdy coś jest odtwarzane z tego źródła. Wybierz 1, jeśli dostawca nie pozwala na równoległe pobieranie.",
   "downloadConnectionsOne": "1",

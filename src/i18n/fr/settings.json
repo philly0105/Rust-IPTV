@@ -44,6 +44,8 @@
 
   "downloads": "Téléchargements",
   "downloadsFolder": "Dossier de téléchargements",
+  "downloadSpeed": "Vitesse de téléchargement",
+  "downloadSpeedHint": "Le maximum que chaque téléchargement peut utiliser. Un téléchargement peut aussi avoir sa propre limite depuis sa ligne dans Téléchargements.",
   "downloadConnectionsFor": "Connexions par téléchargement depuis {{name}}",
   "downloadConnectionsHint": "Automatique télécharge un fichier par les connexions libres du compte et revient à une seule pendant une lecture depuis la source. Choisissez 1 si le fournisseur refuse les téléchargements parallèles.",
   "downloadConnectionsOne": "1",

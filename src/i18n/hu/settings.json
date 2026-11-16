@@ -44,6 +44,8 @@
 
   "downloads": "Letöltések",
   "downloadsFolder": "Letöltési mappa",
+  "downloadSpeed": "Letöltési sebesség",
+  "downloadSpeedHint": "Ennyit használhat legfeljebb egy-egy letöltés. Egy letöltésnek saját korlát is adható a sorából a Letöltések oldalon.",
   "downloadConnectionsFor": "Kapcsolatok letöltésenként innen: {{name}}",
   "downloadConnectionsHint": "Automatikus módban egy fájl a fiók szabad kapcsolatain töltődik le, és visszaáll egyre, amíg a forrásból valami lejátszódik. Válaszd az 1-et, ha a szolgáltató nem engedi a párhuzamos letöltést.",
   "downloadConnectionsOne": "1",

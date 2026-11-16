@@ -50,6 +50,8 @@
   "sortAscending": "تصاعدي. دوز للتنازلي",
   "sortDescending": "تنازلي. دوز للتصاعدي",
   "searchInCategory": "قلّب فهاد الفئة",
+  "searchAllMovies": "قلّب فجميع الأفلام",
+  "searchAllSeries": "قلّب فجميع السلاسل",
   "noSearchMatchTitle": "حتى حاجة هنا ما مطابقة لـ «{{query}}»",
   "noSearchMatchHint": "شوف الكتابة، ولا قلّب فكل المصادر من الفوق.",
   "clearSearch": "مسح البحث",

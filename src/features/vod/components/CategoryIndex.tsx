@@ -13,6 +13,8 @@ import { intlLocale } from '@/lib/intl';
 export interface CategoryEntry {
   id: string;
   name: string;
+  /** The provider's name when `name` shortens it, for the tooltip. */
+  fullName?: string;
   /** Omitted when the source does not report counts (Stalker). */
   count?: number;
   emphasis?: boolean;
@@ -91,7 +93,8 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
                   // The grid reads this: Escape there goes back one step instead of pushing the landing again.
                   state={FROM_LANDING}
                   data-grid-index={i}
-                  title={entry.locked && lockedLabel ? `${entry.name} (${lockedLabel})` : undefined}
+                  // The whole name: a long one is cut at the column's width.
+                  title={entry.locked && lockedLabel ? `${entry.fullName ?? entry.name} (${lockedLabel})` : (entry.fullName ?? entry.name)}
                   className={cn(
                     'group flex h-11 items-center gap-3 rounded-md px-3',
                     'text-sm text-fg-muted hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg',

@@ -41,6 +41,8 @@
   "sortAscending": "Crescente. Mudar para decrescente",
   "sortDescending": "Decrescente. Mudar para crescente",
   "searchInCategory": "Pesquisar nesta categoria",
+  "searchAllMovies": "Pesquisar em todos os filmes",
+  "searchAllSeries": "Pesquisar em todas as séries",
   "noSearchMatchTitle": "Nada aqui corresponde a \"{{query}}\"",
   "noSearchMatchHint": "Verifique a ortografia ou pesquise em todas as fontes pelo cabeçalho.",
   "clearSearch": "Limpar a pesquisa",

@@ -38,6 +38,8 @@
   "sortAscending": "昇順。降順に切り替え",
   "sortDescending": "降順。昇順に切り替え",
   "searchInCategory": "このカテゴリーを検索",
+  "searchAllMovies": "すべての映画を検索",
+  "searchAllSeries": "すべてのシリーズを検索",
   "noSearchMatchTitle": "「{{query}}」に一致する作品はありません",
   "noSearchMatchHint": "スペルを確認するか、ヘッダーからすべてのソースを検索してください。",
   "clearSearch": "検索をクリア",

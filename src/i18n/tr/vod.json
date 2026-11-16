@@ -38,6 +38,8 @@
   "sortAscending": "Artan. Azalana geç",
   "sortDescending": "Azalan. Artana geç",
   "searchInCategory": "Bu kategoride ara",
+  "searchAllMovies": "Tüm filmlerde ara",
+  "searchAllSeries": "Tüm dizilerde ara",
   "noSearchMatchTitle": "Burada \"{{query}}\" ile eşleşen bir şey yok",
   "noSearchMatchHint": "Yazımı kontrol edin veya üst çubuktan tüm kaynaklarda arayın.",
   "clearSearch": "Aramayı temizle",

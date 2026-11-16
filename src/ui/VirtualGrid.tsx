@@ -84,6 +84,11 @@ export interface VirtualGridProps<T> {
   /** Fixed extra height per cell below the artwork (title, meta). Default 52. */
   captionHeight?: number;
   gap?: number;
+  /**
+   * Space above the first row, inside the scroller (scaled like `gap`): the first row's hover lift
+   * and focus glow have room, and scrolled rows run up to the scroller's top edge.
+   */
+  paddingStart?: number;
   overscan?: number;
   className?: string;
   onSelect?: (item: T, index: number) => void;
@@ -125,6 +130,7 @@ export function VirtualGrid<T>({
   endThresholdRows = 2,
   captionHeight: baseCaptionHeight = 52,
   gap: baseGap = 16,
+  paddingStart: basePaddingStart = 0,
   overscan = 3,
   className,
   onSelect,
@@ -142,6 +148,7 @@ export function VirtualGrid<T>({
   const density = useDensity();
   const minColumnWidth = scalePx(baseMinColumnWidth, uiScale, density, true);
   const gap = scalePx(baseGap, uiScale, density, true);
+  const paddingStart = scalePx(basePaddingStart, uiScale, density, true);
   // The caption holds text, which density does not shrink.
   const captionHeight = scalePx(baseCaptionHeight, uiScale, density);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -178,6 +185,9 @@ export function VirtualGrid<T>({
     count: rowCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeight + gap,
+    paddingStart,
+    // The keyboard cursor scrolled to the first row shows the space above it too.
+    scrollPaddingStart: paddingStart,
     overscan,
     initialRect,
   });
@@ -185,7 +195,7 @@ export function VirtualGrid<T>({
   useEffect(() => {
     virtualizer.measure();
     // remeasure when geometry changes
-  }, [rowHeight, gap, columns]);
+  }, [rowHeight, gap, columns, paddingStart]);
 
   const rows = virtualizer.getVirtualItems();
   const lastRow = rows.length > 0 ? rows[rows.length - 1]!.index : -1;

@@ -2,11 +2,11 @@ import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
   CalendarX2,
+  ChevronDown,
   CircleCheck,
   Clapperboard,
+  FolderOpen,
   FolderX,
-  Info,
-  Play,
   RotateCw,
   SearchX,
   SlidersHorizontal,
@@ -22,17 +22,17 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type ItemRef, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 
-import { useMyListMenuItem } from '@/features/mylist/hooks/useMyListMenuItem';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
-import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMenu';
 import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useShortcut } from '@/shell';
 
 import { GridMyListProvider, PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
+import { CategoryPickerDialog } from '../components/CategoryPickerDialog';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { DecadeChips, YearRangeFields, useYearFilter } from '../components/VodFilterBar';
 import { preloadDetailChunk, usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
-import { usePlayTitle, type PlayTarget } from '../hooks/usePlayTitle';
+import { usePosterMenu } from '../hooks/usePosterMenu';
+import { useLongPress } from '@/features/live/hooks/useLongPress';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
@@ -61,6 +61,7 @@ import {
   type VodKind,
   type VodSortKey,
 } from '../lib/paging';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
 import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, Toggle, Tooltip, VirtualGrid, buttonClass, cn, filterChipClass, type VirtualItemState } from '@/ui';
@@ -236,6 +237,21 @@ function RatingFloorChip({ setting, on, onChange, className }: { setting: number
   );
 }
 
+/**
+ * A grid card's caption at 100 %: the 8 px gap, two title lines (13.5/18.56) and the year line
+ * (16), so a title that wraps keeps its year inside the cell and every row has the same gap.
+ */
+const GRID_CAPTION_HEIGHT = 62;
+
+/** Space above the first row, inside the scroller: room for its hover lift and focus glow. */
+const GRID_PADDING_TOP = 16;
+
+/**
+ * The grid's listbox. The keyboard cursor's ring on the card shows where focus is; the listbox
+ * draws a ring of its own only while it has focus and no cursor, so one focus never shows two rings.
+ */
+const GRID_CLASS = 'rounded-md pb-8 outline-none focus-visible:shadow-none [&:not([aria-activedescendant])]:focus-visible:ring-2 [&:not([aria-activedescendant])]:focus-visible:ring-focus';
+
 /** Below this many titles a category drops its decade chips and its search field. */
 const FEW_TITLES = 12;
 
@@ -380,11 +396,14 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const categoryMissing = categoryId !== ALL_CATEGORIES && cats.isSuccess && !category;
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
+  // Under Movies, "Movies | Action" reads "Action" (the grid's accessible name keeps the provider's).
+  const shownName = categoryId === ALL_CATEGORIES ? categoryName : sectionlessCategoryName(categoryName, kind);
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   // One string for the page h1 and the shell header title (C16), so they always agree. The shell
   // header shows it; the page's h1 is for assistive technology only, so the title shows once.
-  const pageTitle = categoryName || (kind === 'movie' ? t('movies') : t('series'));
-  const countText = firstReady ? t('titleCount', { count: total, formatted: fmt.format(total) }) : undefined;
+  const pageTitle = shownName || (kind === 'movie' ? t('movies') : t('series'));
+  // A zero is left out: the empty state under it already says nothing is here.
+  const countText = firstReady && total > 0 ? t('titleCount', { count: total, formatted: fmt.format(total) }) : undefined;
   // The source's name only when there are others to tell it from; with one, the count alone.
   const sourceName = useShowSourceName() ? source.data?.name : undefined;
 
@@ -396,6 +415,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     [pageTitle, sourceName, countText],
   );
   const locks = useVodLocks(sourceId, kind);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Phones: sort, years and Hide watched fold behind one Filters button, so the grid starts under the search row.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersId = useId();
@@ -415,7 +435,13 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   // A small category (a row or two of posters) needs no decade chips and no search of its own:
   // they were most of the page for five titles. Counted from the category itself, so the toolbar
   // does not change as filters narrow the grid, and kept while one of them is in use.
-  const fewTitles = category !== undefined && category.itemCount < FEW_TITLES;
+  // All movies and All series have no category row: there the shown categories' titles count, as
+  // on the landing (a Stalker portal that counts none keeps its tools).
+  const allCount = useMemo(
+    () => (categoryId === ALL_CATEGORIES ? cats.data?.reduce((n, c) => n + (c.hidden ? 0 : Math.max(0, c.itemCount)), 0) || undefined : undefined),
+    [categoryId, cats.data],
+  );
+  const fewTitles = (category?.itemCount ?? allCount ?? Infinity) < FEW_TITLES;
   const showChips = !fewTitles || yearFiltered;
   const showSearch = !fewTitles || searchDraft !== '';
 
@@ -532,48 +558,36 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     }
   });
 
-  // A poster's menu (right click, Shift+F10, the context-menu key): open it, or My List.
-  const [menu, setMenu] = useState<{ pos: { x: number; y: number }; item: VodItem | SeriesItem; index: number } | null>(null);
-  const closeMenu = useCallback(() => setMenu(null), []);
-  const myListItem = useMyListMenuItem(menu ? { ref: menu.item.ref, snapshot: myListTarget(menu.item).snapshot } : null);
-  // L4-vod-4: the menu also plays the title (resuming like the detail page's Play) and marks it watched.
-  const menuTitle = useMemo(() => (menu ? [menu.item] : undefined), [menu]);
-  const menuWatched = useWatchedKeys(menuTitle).has(menu ? itemKey(menu.item.ref) : '');
-  const play = usePlayTitle();
-  const playFromMenu = (item: VodItem | SeriesItem, index: number) => {
-    // A series has no single thing to play from here: its details pick the episode.
-    if (item.ref.contentType !== 'movie' || !input) return openTitle(item.ref, index);
-    const target: PlayTarget = { ref: item.ref, sourceKind: input.sourceKind, title: item.title, categoryId: item.categoryId };
-    if (item.posterUrl) target.posterUrl = item.posterUrl;
-    void play(target);
-  };
-  const menuItems: MenuItem[] = menu
-    ? [
-        { id: 'play', label: t('play'), icon: <Play aria-hidden className="size-4" />, onSelect: () => playFromMenu(menu.item, menu.index) },
-        { id: 'open', label: t('openDetails'), icon: <Info aria-hidden className="size-4" />, onSelect: () => openTitle(menu.item.ref, menu.index) },
-        ...(myListItem ? [myListItem] : []),
-        {
-          id: 'watched',
-          label: menuWatched ? t('markUnwatched') : t('markWatched'),
-          icon: <CircleCheck aria-hidden className="size-4" />,
-          onSelect: () => void toggleWatched(menu.item.ref),
-        },
-      ]
-    : [];
+  // A poster's menu (right click, Shift+F10, the context-menu key, a long press): Play or Resume,
+  // details, My List and watched, the same menu as the landing's rails.
+  const posterMenu = usePosterMenu({ sourceKind: input?.sourceKind, resume, openDetails: openTitle });
+  const openMenu = (item: VodItem | SeriesItem, index: number, pos: { x: number; y: number }) =>
+    posterMenu.open(
+      { ref: item.ref, name: item.titleBase || item.title, title: item.title, year: item.year, posterUrl: item.posterUrl, categoryId: item.categoryId },
+      index,
+      pos,
+    );
+  // iOS fires no contextmenu on a long press: a timer opens the menu there (Android gets both, to the same effect).
+  const longPress = useLongPress((x, y) => {
+    const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>('[role="option"]');
+    const index = Number(cell?.dataset.index);
+    const item = cell && gridWrapRef.current?.contains(cell) && Number.isInteger(index) ? itemAt(index) : undefined;
+    if (item) openMenu(item, index, { x, y });
+  });
   const onGridContextMenu = (e: MouseEvent<HTMLDivElement>) => {
     const cell = (e.target as HTMLElement).closest<HTMLElement>('[role="option"]');
     const index = Number(cell?.dataset.index);
     const item = cell && Number.isInteger(index) ? itemAt(index) : undefined;
     if (!item) return;
     e.preventDefault();
-    setMenu({ pos: { x: e.clientX, y: e.clientY }, item, index });
+    openMenu(item, index, { x: e.clientX, y: e.clientY });
   };
   const openCursorMenu = () => {
     const at = activeCell();
     const item = at ? itemAt(at.index) : undefined;
     if (!at || !item) return;
     const r = at.cell.getBoundingClientRect();
-    setMenu({ pos: { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 120) }, item, index: at.index });
+    openMenu(item, at.index, { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 120) });
   };
   useShortcut('shift+f10', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
   useShortcut('contextmenu', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
@@ -618,13 +632,27 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         {/*
           VL-grid-toolbars: one toolbar under the header, one hairline. Back, the decade chips, the
           rating floor, search and sort share a row; From/To and Hide watched wait behind Filters,
-          whose badge counts what is on. Below sm the row wraps: the search takes a line, and the
-          sort and the chips move into the Filters panel.
+          whose badge counts what is on. Where the toolbar is narrower than 56rem (a tablet beside
+          the expanded rail) the chips take a line of their own under the controls, and the search
+          grows to fill the row. Below sm the row wraps: the search takes a line, and the sort and
+          the chips move into the Filters panel.
         */}
-        <div className="flex flex-col gap-2 border-b border-divider px-(--page-gutter) py-2.5" data-testid="vod-grid-toolbar">
+        <div className="@container flex flex-col gap-2 border-b border-divider px-(--page-gutter) py-2.5" data-testid="vod-grid-toolbar">
           <div className="flex flex-wrap items-center gap-2">
             <BackButton to={backHref} label={kind === 'movie' ? t('movies') : t('series')} className="-ms-2" />
             <h1 className="sr-only">{pageTitle}</h1>
+            {/* Another category without going back to the landing (Netflix's Genres, Plex's library menu). */}
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              onClick={() => setPickerOpen(true)}
+              className={buttonClass('ghost', 'sm', 'shrink-0')}
+              data-testid="vod-category-picker"
+            >
+              <FolderOpen aria-hidden size={16} />
+              <span className="max-sm:sr-only">{t('categories')}</span>
+              <ChevronDown aria-hidden size={14} className="text-fg-muted max-sm:hidden" />
+            </button>
             {/* The shell header carries the count from md up; below it the header has room for the title only. */}
             {countText && (
               <span title={countText} className="tabular min-w-0 flex-1 truncate text-sm text-fg-subtle sm:hidden">
@@ -632,7 +660,10 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               </span>
             )}
             {/* Mounted from the first frame (L2-vod-5): its placeholder chips hold the row while the source loads. */}
-            <div id={`${filtersId}-chips`} className={cn('min-w-0 sm:flex-1', 'max-sm:order-3 max-sm:basis-full', !filtersOpen && 'max-sm:hidden')}>
+            <div
+              id={`${filtersId}-chips`}
+              className={cn('min-w-0 @max-4xl:empty:hidden @4xl:flex-1', '@max-4xl:order-3 @max-4xl:basis-full', !filtersOpen && 'max-sm:hidden')}
+            >
               {sourceId && !source.isError && showChips && <DecadeChips filter={yearFilter} />}
             </div>
             {ratingFilterSet && (
@@ -648,8 +679,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 value={searchDraft}
                 onChange={setSearchDraft}
                 size="sm"
-                className="w-full max-sm:order-1 sm:w-56"
-                placeholder={t('searchInCategory')}
+                className="w-full max-sm:order-1 sm:w-56 sm:@max-4xl:flex-1"
+                // The header's field searches everything; this one says what it narrows.
+                placeholder={categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('searchAllMovies') : t('searchAllSeries')) : t('searchInCategory')}
                 onSubmit={focusGrid}
                 onKeyDown={(e) => {
                   // ArrowDown leaves the search box for the posters.
@@ -709,10 +741,14 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           aria-busy={refreshing || undefined}
           data-refreshing={refreshing || undefined}
           className={cn(
-            'min-h-0 flex-1 px-(--page-gutter) pt-4 motion-safe:transition-opacity motion-safe:duration-200',
+            // The grid keeps that space inside its scroller instead (GRID_PADDING_TOP).
+            'min-h-0 flex-1 px-(--page-gutter) pt-4 has-[[role=listbox]]:pt-0 motion-safe:transition-opacity motion-safe:duration-200',
             refreshing && 'motion-safe:opacity-60 motion-safe:delay-150',
+            // A long press opens the poster's menu: no link preview or text selection on touch.
+            'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]',
           )}
           onContextMenu={onGridContextMenu}
+          {...longPress}
           onFocus={(e) => setGridFocused(e.target.getAttribute('role') === 'listbox')}
           onBlur={(e) => {
             if (e.target.getAttribute('role') === 'listbox') setGridFocused(false);
@@ -824,7 +860,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 ) : undefined
               }
               onSelect={(item, index) => openTitle(item.ref, index)}
-              className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              captionHeight={GRID_CAPTION_HEIGHT}
+              paddingStart={GRID_PADDING_TOP}
+              className={GRID_CLASS}
             />
           ) : (
             <PageGateProvider value={pageGate}>
@@ -847,12 +885,24 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                   if (!item) return retryPageOf(i);
                   openTitle(item.ref, i);
                 }}
-                className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                captionHeight={GRID_CAPTION_HEIGHT}
+                paddingStart={GRID_PADDING_TOP}
+                className={GRID_CLASS}
               />
             </PageGateProvider>
           )}
         </div>
-        <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu ? menu.item.titleBase || menu.item.title : ''} onClose={closeMenu} />
+        {posterMenu.element}
+        <CategoryPickerDialog
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          kind={kind}
+          categories={cats.data}
+          currentId={categoryId}
+          hrefFor={(id) => `${backHref}/c/${encodeURIComponent(id)}`}
+          state={location.state}
+          locked={locks.categoryLocked}
+        />
       </div>
     </GridMyListProvider>
   );

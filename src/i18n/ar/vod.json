@@ -50,6 +50,8 @@
   "sortAscending": "تصاعدي. التبديل إلى تنازلي",
   "sortDescending": "تنازلي. التبديل إلى تصاعدي",
   "searchInCategory": "البحث في هذه الفئة",
+  "searchAllMovies": "البحث في جميع الأفلام",
+  "searchAllSeries": "البحث في جميع المسلسلات",
   "noSearchMatchTitle": "لا شيء هنا يطابق «{{query}}»",
   "noSearchMatchHint": "تحقّق من الإملاء، أو ابحث في كل المصادر من الشريط العلوي.",
   "clearSearch": "مسح البحث",

@@ -38,6 +38,8 @@
   "sortAscending": "升序。切换为降序",
   "sortDescending": "降序。切换为升序",
   "searchInCategory": "搜索此分类",
+  "searchAllMovies": "搜索所有电影",
+  "searchAllSeries": "搜索所有剧集",
   "noSearchMatchTitle": "没有与“{{query}}”匹配的内容",
   "noSearchMatchHint": "请检查拼写，或在顶部搜索所有播放源。",
   "clearSearch": "清除搜索",

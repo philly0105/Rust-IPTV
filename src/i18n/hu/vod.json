@@ -38,6 +38,8 @@
   "sortAscending": "Növekvő. Váltás csökkenőre",
   "sortDescending": "Csökkenő. Váltás növekvőre",
   "searchInCategory": "Keresés ebben a kategóriában",
+  "searchAllMovies": "Keresés az összes filmben",
+  "searchAllSeries": "Keresés az összes sorozatban",
   "noSearchMatchTitle": "Nincs találat a következőre: „{{query}}”",
   "noSearchMatchHint": "Ellenőrizze a helyesírást, vagy keressen az összes forrásban a fejléc keresőjével.",
   "clearSearch": "Keresés törlése",

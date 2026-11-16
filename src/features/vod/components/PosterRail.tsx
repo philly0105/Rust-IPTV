@@ -4,6 +4,8 @@ import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { MyListKey, useMyListKeyFocus, type MyListTarget } from '../hooks/useMyListKey';
+import { menuPosition } from '../hooks/usePosterMenu';
+import { useLongPress } from '@/features/live/hooks/useLongPress';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { IconButton, PosterWidthContext, SectionHeader, cn } from '@/ui';
@@ -75,6 +77,11 @@ export interface PosterRailProps<T> {
   className?: string;
   /** The title a card saves to My List: S on a focused card toggles it (its corner button is out of the Tab order). */
   myList?: ((item: T) => MyListTarget | undefined) | undefined;
+  /**
+   * Opens a card's menu (right click, the menu key, a long press), as a category grid's posters do;
+   * without it the browser's own link menu shows.
+   */
+  menu?: ((item: T, index: number, pos: { x: number; y: number }) => void) | undefined;
 }
 
 /**
@@ -84,7 +91,7 @@ export interface PosterRailProps<T> {
  * the focused card to My List when the rail has `myList`. The step buttons
  * page by the visible width.
  */
-export function PosterRail<T>({ title, items, render, loading, empty, action, count, seeAll, cardWidth: fixedWidth, bleed, className, myList }: PosterRailProps<T>) {
+export function PosterRail<T>({ title, items, render, loading, empty, action, count, seeAll, cardWidth: fixedWidth, bleed, className, myList, menu }: PosterRailProps<T>) {
   const { t } = useTranslation('vod');
   const headingId = useId();
   const autoWidth = useRailCardWidth();
@@ -108,6 +115,20 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
     const index = Number(cell?.dataset['gridIndex']);
     if (cell && Number.isInteger(index) && index !== current) setCurrent(index);
   };
+
+  /** Opens the menu of the card `card`; false when it holds no title. */
+  const openMenuOn = (card: HTMLElement, pos: { x: number; y: number }): boolean => {
+    const index = Number(card.dataset['gridIndex']);
+    const item = Number.isInteger(index) ? items[index] : undefined;
+    if (!menu || item === undefined) return false;
+    menu(item, index, pos);
+    return true;
+  };
+  // iOS fires no contextmenu on a long press of a link (it shows its own preview): a timer does.
+  const longPress = useLongPress((x, y) => {
+    const card = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-grid-index]');
+    if (card && scroller.current?.contains(card)) openMenuOn(card, { x, y });
+  });
 
   const fromCardsEnd = fromCards.end;
   const updateEdges = useCallback(() => {
@@ -209,12 +230,23 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
           onFocus={onCardFocus}
           onBlur={myListFocus.onBlur}
           onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: items.length })}
+          onContextMenu={
+            menu
+              ? (e) => {
+                  const card = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
+                  if (card && openMenuOn(card, menuPosition(e, card))) e.preventDefault();
+                }
+              : undefined
+          }
+          {...(menu ? longPress : {})}
           // Skeletons have nothing to focus, so the loading row clips instead of scrolling (axe scrollable-region-focusable).
           className={cn(
             'flex snap-x gap-4 pt-1 pb-3 motion-safe:scroll-smooth',
             // Bleeding through the gutter, the first card still snaps to the content edge (scroll padding = gutter).
             bleed ? '-mx-(--page-gutter) scroll-px-(--page-gutter) px-(--page-gutter)' : '-mx-1 scroll-px-1 px-1',
             loading ? 'overflow-x-hidden' : 'overflow-x-auto scrollbar-none',
+            // A long press opens the poster's menu: no link preview or text selection on touch.
+            menu && 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]',
           )}
         >
           {/* The posters fill the card, so they load at its width without measuring (SH-6). */}

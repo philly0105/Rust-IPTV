@@ -44,6 +44,8 @@
   "sortAscending": "Rosnąco. Przełącz na malejąco",
   "sortDescending": "Malejąco. Przełącz na rosnąco",
   "searchInCategory": "Szukaj w tej kategorii",
+  "searchAllMovies": "Szukaj we wszystkich filmach",
+  "searchAllSeries": "Szukaj we wszystkich serialach",
   "noSearchMatchTitle": "Nic tu nie pasuje do „{{query}}”",
   "noSearchMatchHint": "Sprawdź pisownię lub przeszukaj wszystkie źródła z paska u góry.",
   "clearSearch": "Wyczyść wyszukiwanie",

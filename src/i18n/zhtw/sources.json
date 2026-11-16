@@ -85,7 +85,7 @@
   "macOuiHint": "大多數入口網站要求 MAC 以 {{oui}} 開頭。請確認與供應商登記的一致。",
   "fullPortal": "完整 Stalker 入口網站",
   "fullPortalHint": "適用於透過 /stalker_portal 提供服務的入口網站。會盡可能根據 URL 自動偵測。",
-  "deviceIdentity": "裝置識別資訊",
+  "deviceIdentity": "進階：入口網站類型、登入和裝置識別資訊",
   "deviceIdentityHint": "除非供應商要求，否則請留空。",
   "serialNumber": "序號",
   "deviceId1": "裝置 ID 1",

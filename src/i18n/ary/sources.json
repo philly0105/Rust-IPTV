@@ -105,7 +105,7 @@
   "macOuiHint": "أغلب البوابات كتسنى MAC كيبدا بـ {{oui}}. تأكد بلي هادا هو اللي سجّل المزود ديالك.",
   "fullPortal": "بوابة Stalker كاملة",
   "fullPortalHint": "شعلها للبوابات اللي خدامة من /stalker_portal. كتتعرف من الـURL ملي يمكن.",
-  "deviceIdentity": "هوية الجهاز",
+  "deviceIdentity": "خيارات متقدمة: نوع البوابة والدخول وهوية الجهاز",
   "deviceIdentityHint": "خليهم خاويين إلا ما طلبهمش منك المزود.",
   "serialNumber": "الرقم التسلسلي",
   "deviceId1": "معرّف الجهاز 1",

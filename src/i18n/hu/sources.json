@@ -85,7 +85,7 @@
   "macOuiHint": "A legtöbb portál {{oui}} kezdetű MAC-címet vár. Ellenőrizze, hogy ez egyezik-e a szolgáltatónál regisztrált címmel.",
   "fullPortal": "Teljes Stalker-portál",
   "fullPortalHint": "Kapcsolja be a /stalker_portal útvonalon elérhető portálokhoz. Ha lehetséges, az URL-címből automatikusan felismeri.",
-  "deviceIdentity": "Eszközazonosítás",
+  "deviceIdentity": "Speciális: portál típusa, bejelentkezés és eszközazonosítás",
   "deviceIdentityHint": "Hagyja üresen ezeket a mezőket, hacsak a szolgáltató nem kéri őket.",
   "serialNumber": "Sorozatszám",
   "deviceId1": "1. eszközazonosító",

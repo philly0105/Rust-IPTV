@@ -85,7 +85,7 @@
   "macOuiHint": "大多数门户要求 MAC 以 {{oui}} 开头。请确认它与提供商登记的一致。",
   "fullPortal": "完整 Stalker 门户",
   "fullPortalHint": "适用于通过 /stalker_portal 提供服务的门户。会尽可能根据 URL 自动检测。",
-  "deviceIdentity": "设备标识",
+  "deviceIdentity": "高级：门户类型、登录和设备标识",
   "deviceIdentityHint": "除非提供商要求，否则请留空。",
   "serialNumber": "序列号",
   "deviceId1": "设备 ID 1",

@@ -90,7 +90,7 @@
   "macOuiHint": "La plupart des portails attendent une adresse MAC commençant par {{oui}}. Vérifiez qu'elle correspond à celle enregistrée par votre fournisseur.",
   "fullPortal": "Portail Stalker complet",
   "fullPortalHint": "Activez pour les portails servis depuis /stalker_portal. Détecté à partir de l'URL si possible.",
-  "deviceIdentity": "Identité de l'appareil",
+  "deviceIdentity": "Avancé : type de portail, identifiants et identité de l'appareil",
   "deviceIdentityHint": "Laissez ces champs vides sauf si votre fournisseur les demande.",
   "serialNumber": "Numéro de série",
   "deviceId1": "ID d'appareil 1",

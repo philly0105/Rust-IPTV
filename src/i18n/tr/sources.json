@@ -85,7 +85,7 @@
   "macOuiHint": "Çoğu portal {{oui}} ile başlayan bir MAC adresi bekler. Sağlayıcınızın kaydettiği adresle eşleştiğini kontrol edin.",
   "fullPortal": "Tam Stalker portalı",
   "fullPortalHint": "/stalker_portal üzerinden sunulan portallar için açın. Mümkün olduğunda URL'den algılanır.",
-  "deviceIdentity": "Cihaz kimliği",
+  "deviceIdentity": "Gelişmiş: portal türü, giriş ve cihaz kimliği",
   "deviceIdentityHint": "Sağlayıcınız istemedikçe bunları boş bırakın.",
   "serialNumber": "Seri numarası",
   "deviceId1": "Cihaz kimliği 1",

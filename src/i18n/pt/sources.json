@@ -90,7 +90,7 @@
   "macOuiHint": "A maioria dos portais espera um MAC começando com {{oui}}. Confira se corresponde ao que seu provedor registrou.",
   "fullPortal": "Portal Stalker completo",
   "fullPortalHint": "Ative para portais servidos em /stalker_portal. Detectado pela URL quando possível.",
-  "deviceIdentity": "Identidade do dispositivo",
+  "deviceIdentity": "Avançado: tipo de portal, acesso e identidade do dispositivo",
   "deviceIdentityHint": "Deixe em branco, a menos que seu provedor solicite.",
   "serialNumber": "Número de série",
   "deviceId1": "ID do dispositivo 1",

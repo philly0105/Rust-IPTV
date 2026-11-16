@@ -1,4 +1,5 @@
 import { ChevronRight } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
@@ -62,7 +63,11 @@ export function StalkerForm({
   const macValid = normalizeMac(value.macAddress) !== null;
   const macHint =
     macValid && !hasInfomirOui(value.macAddress) ? t('macOuiHint', { oui: INFOMIR_MAC_OUI }) : t('macHint');
-  const identityFilled = IDENTITY_FIELDS.some((k) => value[k]);
+  // Decided once, from the details the form opened with, so the section never shuts on the user
+  // while they clear a field inside it. A full portal the address does not reveal was set by hand.
+  const [advancedOpen] = useState(
+    () => IDENTITY_FIELDS.some((k) => value[k]) || !!value.username || !!value.password || (value.isFullPortal && !looksLikeFullPortal(value.portalUrl)),
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -99,58 +104,62 @@ export function StalkerForm({
           />
         )}
       </Field>
-      <Toggle
-        checked={value.isFullPortal}
-        onChange={(isFullPortal) => set({ isFullPortal })}
-        disabled={disabled}
-        label={t('fullPortal')}
-        description={t('fullPortalHint')}
-      />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label={t('username')} optional optionalLabel={t('optional')}>
-          {(p) => (
-            <Input
-              {...p}
-              autoComplete="off"
-              spellCheck={false}
-              disabled={disabled}
-              value={value.username}
-              onChange={(e) => set({ username: e.target.value })}
-            />
-          )}
-        </Field>
-        <Field
-          label={t('password')}
-          optional
-          optionalLabel={t('optional')}
-          hint={hasEdgeSpace(value.password) ? t('passwordSpaceHint') : undefined}
-        >
-          {(p) => <SecretInput {...p} disabled={disabled} value={value.password} onChange={(e) => set({ password: e.target.value })} />}
-        </Field>
-      </div>
-
-      <details className="group rounded-md border border-edge bg-surface-2/50" open={identityFilled || undefined}>
+      {/* Most portals need only the address and the MAC. The portal type (detected from the
+          address), the optional login and the device identity wait under Advanced, open when the
+          source already uses one of them. */}
+      <details className="group rounded-md border border-edge bg-surface-2/50" open={advancedOpen || undefined}>
         <summary className="flex cursor-pointer select-none items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-fg hover:bg-hover active:bg-active [&::-webkit-details-marker]:hidden">
           <ChevronRight aria-hidden className="size-4 shrink-0 text-fg-subtle motion-safe:transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90" />
           {t('deviceIdentity')}
         </summary>
-        <div className="grid gap-4 px-3 pb-4 pt-1 sm:grid-cols-2">
-          <p className="text-sm text-fg-muted sm:col-span-2">{t('deviceIdentityHint')}</p>
-          {IDENTITY_FIELDS.map((k) => (
-            <Field key={k} label={t(k)} optional optionalLabel={t('optional')} className={k === 'serialNumber' ? 'sm:col-span-2' : undefined}>
+        <div className="flex flex-col gap-5 px-3 pb-4 pt-1">
+          <Toggle
+            checked={value.isFullPortal}
+            onChange={(isFullPortal) => set({ isFullPortal })}
+            disabled={disabled}
+            label={t('fullPortal')}
+            description={t('fullPortalHint')}
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t('username')} optional optionalLabel={t('optional')}>
               {(p) => (
                 <Input
                   {...p}
                   autoComplete="off"
                   spellCheck={false}
                   disabled={disabled}
-                  className="font-mono text-sm"
-                  value={value[k]}
-                  onChange={(e) => set({ [k]: e.target.value } as Partial<StalkerDraft>)}
+                  value={value.username}
+                  onChange={(e) => set({ username: e.target.value })}
                 />
               )}
             </Field>
-          ))}
+            <Field
+              label={t('password')}
+              optional
+              optionalLabel={t('optional')}
+              hint={hasEdgeSpace(value.password) ? t('passwordSpaceHint') : undefined}
+            >
+              {(p) => <SecretInput {...p} disabled={disabled} value={value.password} onChange={(e) => set({ password: e.target.value })} />}
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <p className="text-sm text-fg-muted sm:col-span-2">{t('deviceIdentityHint')}</p>
+            {IDENTITY_FIELDS.map((k) => (
+              <Field key={k} label={t(k)} optional optionalLabel={t('optional')} className={k === 'serialNumber' ? 'sm:col-span-2' : undefined}>
+                {(p) => (
+                  <Input
+                    {...p}
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={disabled}
+                    className="font-mono text-sm"
+                    value={value[k]}
+                    onChange={(e) => set({ [k]: e.target.value } as Partial<StalkerDraft>)}
+                  />
+                )}
+              </Field>
+            ))}
+          </div>
         </div>
       </details>
 

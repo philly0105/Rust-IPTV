@@ -85,7 +85,7 @@
   "macOuiHint": "ほとんどのポータルは {{oui}} で始まるMACを想定しています。プロバイダーに登録したものと一致しているか確認してください。",
   "fullPortal": "フルStalkerポータル",
   "fullPortalHint": "/stalker_portal で提供されるポータルの場合にオンにします。可能な場合はURLから自動検出されます。",
-  "deviceIdentity": "デバイス識別情報",
+  "deviceIdentity": "詳細設定：ポータルの種類、ログイン、デバイス識別情報",
   "deviceIdentityHint": "プロバイダーから求められない限り、空欄のままにしてください。",
   "serialNumber": "シリアル番号",
   "deviceId1": "デバイスID 1",

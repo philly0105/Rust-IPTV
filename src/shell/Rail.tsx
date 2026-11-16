@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Ellipsis, Keyboard, ListVideo, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Settings as SettingsIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Ellipsis, Keyboard, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Server, Settings as SettingsIcon } from 'lucide-react';
 import { type CSSProperties, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -910,7 +910,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
               <RailNavLink
                 to="/sources"
                 labelKey="manageSources"
-                icon={ListVideo}
+                // Its own glyph: ListVideo is a channel list's (library-12).
+                icon={Server}
                 collapsed={collapsed}
                 end
                 // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.

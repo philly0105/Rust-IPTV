@@ -18,7 +18,7 @@ import {
   House,
   Layers,
   LayoutGrid,
-  ListOrdered,
+  ListVideo,
   Radio,
   Search,
   Trophy,
@@ -103,7 +103,8 @@ export const LIBRARY_LINKS: readonly NavLinkDef[] = [
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
   // Run 2: custom channel lists and watch stats reuse their pages' titles.
   // A list can be created before any source is added.
-  { to: '/lists', labelKey: 'lists:title', icon: ListOrdered, noSourceNeeded: true },
+  // ListVideo, as the list page, its column and its empty state draw a channel list (library-12).
+  { to: '/lists', labelKey: 'lists:title', icon: ListVideo, noSourceNeeded: true },
   { to: '/recent', labelKey: 'navRecent', icon: History },
   // The rest are visited now and then, not every evening: the rail folds them under More.
   { to: '/downloads', labelKey: 'navDownloads', icon: Download, more: true },

@@ -205,9 +205,9 @@ describe('large seek and next-item keys', () => {
 describe('seek preview position', () => {
   it('keeps the time label inside the bar at both ends', async () => {
     const { clampTip } = await import('./SeekBar');
-    expect(clampTip(0, 400)).toBe(28);
+    expect(clampTip(0, 400)).toBe(36);
     expect(clampTip(200, 400)).toBe(200);
-    expect(clampTip(400, 400)).toBe(372);
+    expect(clampTip(400, 400)).toBe(364);
     expect(clampTip(10, 40)).toBe(20);
   });
 

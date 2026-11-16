@@ -38,6 +38,7 @@
   "live": "直播",
   "liveNoSignal": "无信号",
   "goLive": "跳到直播",
+  "watchLive": "观看直播",
   "behindLive": "落后直播 {{time}}",
   "loading": "正在加载流",
   "buffering": "正在缓冲",

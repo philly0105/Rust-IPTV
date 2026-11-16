@@ -89,6 +89,36 @@ describe('Controls options menu', () => {
     expect(menu()).toBeNull();
   });
 
+  it('a catch-up programme offers its channel live; a movie does not (PV-12)', () => {
+    const { rerender } = render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Watch live' })).toBeNull();
+    act(() => {
+      usePlayerStore.setState({
+        source: {
+          url: 'http://v/archive.ts?utc=1&lutc=2',
+          kind: 'direct',
+          title: 'ESPN HD',
+          isLive: false,
+          isRadio: false,
+          ref: { sourceId: 's1', contentType: 'live', itemId: 'c1' },
+          catchupProgramStart: '2026-11-16T10:00:00Z',
+        },
+        durationSeconds: undefined,
+      });
+    });
+    rerender(<Controls variant="overlay" visible />);
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeTruthy();
+  });
+
+  it('a list submenu opens on its current choice (PV-16)', () => {
+    render(<Controls variant="overlay" visible />);
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
+    const current = document.activeElement;
+    expect(current?.getAttribute('role')).toBe('menuitemradio');
+    expect(current?.getAttribute('aria-checked')).toBe('true');
+  });
+
   it.each(['dock', 'overlay'] as const)('%s: the close button closes the menu from any view', (variant) => {
     render(<Controls variant={variant} visible />);
     openMenu();

@@ -38,6 +38,7 @@
   "live": "Élő tévéadás",
   "liveNoSignal": "Nincs jel",
   "goLive": "Ugrás az élő adáshoz",
+  "watchLive": "Élő adás megtekintése",
   "behindLive": "{{time}} késés az élő adáshoz képest",
   "loading": "Adatfolyam betöltése",
   "buffering": "Pufferelés",

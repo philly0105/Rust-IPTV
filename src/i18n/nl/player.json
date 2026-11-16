@@ -38,6 +38,7 @@
   "live": "Live",
   "liveNoSignal": "Geen signaal",
   "goLive": "Naar live springen",
+  "watchLive": "Live bekijken",
   "behindLive": "{{time}} achter op live",
   "loading": "Stream laden",
   "buffering": "Bufferen",

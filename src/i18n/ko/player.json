@@ -38,6 +38,7 @@
   "live": "라이브",
   "liveNoSignal": "신호 없음",
   "goLive": "라이브로 이동",
+  "watchLive": "라이브 시청",
   "behindLive": "라이브보다 {{time}} 늦음",
   "loading": "스트림 불러오는 중",
   "buffering": "버퍼링 중",

@@ -38,6 +38,7 @@
   "live": "Na żywo",
   "liveNoSignal": "Brak sygnału",
   "goLive": "Przejdź na żywo",
+  "watchLive": "Oglądaj na żywo",
   "behindLive": "{{time}} za transmisją na żywo",
   "loading": "Ładowanie strumienia",
   "buffering": "Buforowanie",

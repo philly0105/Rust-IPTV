@@ -38,6 +38,7 @@
   "live": "Direct",
   "liveNoSignal": "Pas de signal",
   "goLive": "Revenir au direct",
+  "watchLive": "Regarder en direct",
   "behindLive": "{{time}} de retard sur le direct",
   "loading": "Chargement du flux",
   "buffering": "Mise en mémoire tampon",

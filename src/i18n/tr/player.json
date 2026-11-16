@@ -38,6 +38,7 @@
   "live": "Canlı",
   "liveNoSignal": "Sinyal yok",
   "goLive": "Canlı yayına geç",
+  "watchLive": "Canlı izle",
   "behindLive": "Canlı yayının {{time}} gerisinde",
   "loading": "Yayın yükleniyor",
   "buffering": "Arabelleğe alınıyor",

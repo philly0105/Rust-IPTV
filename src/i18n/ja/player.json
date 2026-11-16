@@ -38,6 +38,7 @@
   "live": "ライブ",
   "liveNoSignal": "信号なし",
   "goLive": "ライブへ移動",
+  "watchLive": "ライブを視聴",
   "behindLive": "ライブから{{time}}遅れ",
   "loading": "ストリームを読み込み中",
   "buffering": "バッファリング中",

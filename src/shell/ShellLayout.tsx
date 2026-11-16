@@ -258,6 +258,7 @@ function GlobalShortcuts() {
       if (s.paletteOpen) return s.setPaletteOpen(false);
       if (s.helpOpen) return s.setHelpOpen(false);
       if (s.panelOpen) return s.setPanelOpen(false);
+      if (s.railPeek) return s.setRailPeek(false);
       // Leaves a search or text field; a focused link, card or button keeps focus (and the Tab position).
       const active = document.activeElement;
       if (active instanceof HTMLElement && isTextEntry(active)) active.blur();
@@ -307,6 +308,7 @@ function ShellNavigationEffects() {
     if (s.paletteOpen) s.setPaletteOpen(false);
     if (s.helpOpen) s.setHelpOpen(false);
     if (s.panelOpen) s.setPanelOpen(false);
+    if (s.railPeek) s.setRailPeek(false);
   }, [key]);
   useOutletScrollMemory();
   return null;
@@ -495,10 +497,17 @@ export function ShellLayout() {
   const wide = useMediaQuery('(min-width: 1440px)');
   // Below sm the tab bar replaces the rail (CB-PHONE-NAV).
   const phone = useMediaQuery(PHONE_QUERY);
-  const collapsed = railPref || narrow;
   // Hiding the rail is a narrow-window choice: from 1024 px up it always shows, and on a phone
   // there is no rail to show.
   const railHidden = useShellStore((s) => s.railHidden) && narrow && !phone;
+  // Below 1024 px the icon rail opens over the page (Expand sidebar), only while it is docked.
+  const railPeekPref = useShellStore((s) => s.railPeek);
+  const railPeek = railPeekPref && narrow && !phone && !railHidden;
+  const collapsed = !railPeek && (railPref || narrow);
+  // A window widened past the narrow range (or narrowed to a phone) leaves no peek to come back to.
+  useEffect(() => {
+    if (railPeekPref && !railPeek) useShellStore.getState().setRailPeek(false);
+  }, [railPeekPref, railPeek]);
 
   useParentalEvents();
   const player = usePlayerModule();
@@ -558,7 +567,7 @@ export function ShellLayout() {
           {t('skipToContent')}
         </a>
         <GlobalShortcuts />
-        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
+        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} peek={railPeek} />}
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <Header panelInline={wide} railHidden={railHidden} phone={phone} />
           <ConnectionBanner />

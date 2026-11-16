@@ -84,7 +84,7 @@ beforeEach(() => {
   matchMedia = window.matchMedia;
   handlers();
   localStorage.clear();
-  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false });
+  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false, railPeek: false });
   useToastStore.setState({ toasts: [] });
 });
 afterEach(() => {

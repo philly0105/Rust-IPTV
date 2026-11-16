@@ -44,7 +44,7 @@ describe('RELEASE_NOTES', () => {
 
   it('keeps every English string the feature uses', () => {
     const used = [
-      ...[...TOUR_STEPS, ...COACH_STEPS].flatMap((s) => [s.titleKey, s.textKey]),
+      ...[...TOUR_STEPS, ...COACH_STEPS].flatMap((s) => [s.titleKey, s.textKey, ...(s.touchTextKey ? [s.touchTextKey] : [])]),
       ...['tourStep', 'tourNext', 'tourBack', 'tourSkip', 'tourDone', 'tourHintSearch', 'tourHintPalette', 'tourHintShortcuts', 'tourGotIt', 'tourShowAround'],
       ...['whatsNewTitle', 'whatsNewVersion', 'whatsNewClose', 'whatsNewTour', 'whatsNewEmpty'],
       ...RELEASE_NOTES.flatMap((r) => r.items.flatMap((i) => [`${i.key}Title`, `${i.key}Text`])),

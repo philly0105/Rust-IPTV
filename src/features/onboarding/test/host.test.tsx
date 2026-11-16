@@ -195,14 +195,17 @@ describe('OnboardingHost', () => {
     const other = document.createElement('div');
     other.setAttribute('aria-modal', 'true');
     document.body.append(other);
-    mount();
-    await sleep(WHATS_NEW_WINDOW_MS + IDLE_POLL_MS);
-    other.remove();
+    try {
+      mount();
+      await sleep(WHATS_NEW_WINDOW_MS + IDLE_POLL_MS);
+    } finally {
+      other.remove();
+    }
     await sleep(2 * IDLE_POLL_MS);
     expect(whatsNew()).toBeNull();
     // Not marked seen: the next launch shows it.
     expect(core.updates()).toEqual([]);
-  });
+  }, WHATS_NEW_WINDOW_MS + 10_000);
 
   it('waits while a video plays', async () => {
     const video = document.createElement('video');

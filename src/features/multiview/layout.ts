@@ -10,8 +10,13 @@
  * Ratios (gaps ignored, the video letterboxes the last pixels):
  * - 1x2: two 16:9 slots in a row, 32:9.
  * - 2x2: 16:9.
- * - 1+3 from 64rem: a 3/4-width slot beside three stacked ones, 64:27.
- * - 1+3 from 42rem: the large slot on top, three below, 4:3.
+ * - 1+3 on a host wider than 16:9: a 3/4-width slot beside three stacked ones, 64:27.
+ * - 1+3 otherwise (from 42rem): the large slot on top, three below, 4:3.
+ *
+ * 1+3 picks its arrangement by the host's shape, not its width: beside the others the large slot
+ * is 3/4 of a wall fitted to the width, on top it is a wall fitted to the height, so beside wins
+ * exactly when the host is wider than 16:9 (0.75 W > 4/3 H). At 1440x900 the host is about 3:2
+ * and the large slot on top is about 44% bigger than beside.
  *
  * Focus moves by geometry (`neighbour`), so arrow keys follow what is on screen in every
  * layout, width and writing direction.
@@ -69,8 +74,13 @@ export const WALL_CLASSES: Record<MultiviewLayout, string> = {
     'grid-cols-1 @2xl:grid-cols-2 @2xl:grid-rows-1 @2xl:w-[min(100cqw,calc(100cqh*32/9))] @2xl:h-[min(100cqh,calc(100cqw*9/32))]',
   '2x2':
     'grid-cols-1 @2xl:grid-cols-2 @2xl:grid-rows-2 @2xl:w-[min(100cqw,calc(100cqh*16/9))] @2xl:h-[min(100cqh,calc(100cqw*9/16))]',
+  // Tailwind reads class names from the source, so the two container queries are spelled out in full.
   '1+3':
-    'grid-cols-1 @2xl:grid-cols-3 @2xl:grid-rows-[3fr_1fr] @2xl:w-[min(100cqw,calc(100cqh*4/3))] @2xl:h-[min(100cqh,calc(100cqw*3/4))] @5xl:grid-cols-[3fr_1fr] @5xl:grid-rows-3 @5xl:w-[min(100cqw,calc(100cqh*64/27))] @5xl:h-[min(100cqh,calc(100cqw*27/64))]',
+    'grid-cols-1 ' +
+    '[@container_wall_(min-width:42rem)_and_(not_(min-aspect-ratio:16/9))]:grid-cols-3 [@container_wall_(min-width:42rem)_and_(not_(min-aspect-ratio:16/9))]:grid-rows-[3fr_1fr] ' +
+    '[@container_wall_(min-width:42rem)_and_(not_(min-aspect-ratio:16/9))]:w-[min(100cqw,calc(100cqh*4/3))] [@container_wall_(min-width:42rem)_and_(not_(min-aspect-ratio:16/9))]:h-[min(100cqh,calc(100cqw*3/4))] ' +
+    '[@container_wall_(min-width:42rem)_and_(min-aspect-ratio:16/9)]:grid-cols-[3fr_1fr] [@container_wall_(min-width:42rem)_and_(min-aspect-ratio:16/9)]:grid-rows-3 ' +
+    '[@container_wall_(min-width:42rem)_and_(min-aspect-ratio:16/9)]:w-[min(100cqw,calc(100cqh*64/27))] [@container_wall_(min-width:42rem)_and_(min-aspect-ratio:16/9)]:h-[min(100cqh,calc(100cqw*27/64))]',
 };
 
 /**
@@ -80,7 +90,7 @@ export const WALL_CLASSES: Record<MultiviewLayout, string> = {
  */
 export function slotClass(layout: MultiviewLayout, index: number): string {
   const base = 'aspect-video min-w-0 @2xl:aspect-auto @2xl:min-h-0';
-  if (layout === '1+3' && index === 0) return `${base} @2xl:col-span-3 @5xl:col-span-1 @5xl:row-span-3`;
+  if (layout === '1+3' && index === 0) return `${base} [@container_wall_(min-width:42rem)_and_(not_(min-aspect-ratio:16/9))]:col-span-3 [@container_wall_(min-width:42rem)_and_(min-aspect-ratio:16/9)]:row-span-3`;
   return base;
 }
 

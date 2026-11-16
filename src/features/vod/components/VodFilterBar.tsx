@@ -136,8 +136,10 @@ export function DecadeChips({ filter, className }: { filter: YearFilter; classNa
       style={fades.style}
       data-testid="vod-year-filter"
     >
-      {/* The kit's filter chips: idle on the quiet fill with the edge, a chosen one inverted (never amber). */}
-      <FilterChip pressed={!active} onClick={filter.clear}>
+      {/* The kit's filter chips: idle on the quiet fill with the edge, a chosen one inverted (never amber).
+          All years filters nothing, so it keeps the resting look while it is the choice (pressed for
+          assistive tech): inverted and first, it read as a filter that was on. */}
+      <FilterChip pressed={false} aria-pressed={!active} onClick={filter.clear}>
         {t('yearAll')}
       </FilterChip>
       {loading

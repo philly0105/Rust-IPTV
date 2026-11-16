@@ -225,7 +225,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
         showOsd(on ? t('captionsOff') : t('captionsOn'));
       }),
     ),
-    { ...base, description: opts.channelPanelAvailable ? t('shortcutChannelPanel') : t('shortcutCaptions') },
+    { ...base, description: opts.channelPanelAvailable ? t('shortcutCaptionsOrPanel') : t('shortcutCaptions') },
   );
   // Subtitles (C6): Shift+C opens the control bar's Subtitles submenu (tracks, loading a file, style).
   useShortcut('shift+c', once(guard('letter', () => useMediaStore.setState({ subtitleMenuAt: Date.now() }))), {

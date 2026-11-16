@@ -212,7 +212,7 @@ export function SeriesDetailPage() {
   // The source is named only when there are others (useShowSourceName); the About facts always name it.
   const headerSource = useShowSourceName() ? source.data?.name : undefined;
   const header = watch.active
-    ? { title: t('series'), documentTitle: pageTitle }
+    ? { title: t('series'), documentTitle: pageTitle, back: { onClick: goBack } }
     : { title: pageTitle, subtitle: headerSource, section: t('series'), back: { onClick: goBack } };
   usePageHeader(header, [watch.active, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });

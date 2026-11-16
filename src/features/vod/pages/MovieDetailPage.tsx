@@ -151,12 +151,14 @@ export function MovieDetailPage() {
   // it is the title's own name. On screen the header leads with Back and names the section while
   // the hero shows the title large; the title fades into the header once the hero's h1 scrolls
   // away (section). Watching, the stage's own bar names the title and the source right under the
-  // header, so the header names the section and the window keeps the title (documentTitle).
+  // header, so the header names the section and the window keeps the title (documentTitle). Back
+  // stays: it leaves the page and playback carries on in the mini player, as the browser's Back
+  // does, while the stage's X stops it (PV-10).
   // The source is named only when there are others (useShowSourceName); the About facts always name it.
   const showSource = useShowSourceName();
   const headerSource = showSource ? source.data?.name : undefined;
   const header = watching
-    ? { title: t('movies'), documentTitle: pageTitle }
+    ? { title: t('movies'), documentTitle: pageTitle, back: { onClick: goBack } }
     : { title: pageTitle, subtitle: headerSource, section: t('movies'), back: { onClick: goBack } };
   usePageHeader(header, [watching, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'movie'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });

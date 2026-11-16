@@ -1057,8 +1057,12 @@ describe('guide grid (round 2)', () => {
     fireEvent.click(cells[0]!);
     const pop = await screen.findByTestId('program-popover');
     expect(pop.textContent).not.toContain('·');
-    // joinList: each part bidi-isolated, joined by the locale's separator (", " in English).
-    expect(pop.querySelector('p')!.textContent).toMatch(/^⁨Channel 0⁩, ⁨.+⁩$/);
+    // Each part bidi-isolated (the name by ChannelName's dir="auto", the time in a bdi), joined by
+    // the locale's separator (", " in English).
+    const line = pop.querySelector('p')!;
+    expect(line.textContent).toMatch(/^Channel 0, .+$/);
+    expect(line.querySelector('[dir="auto"]')!.textContent).toBe('Channel 0');
+    expect(line.querySelector('bdi')).toBeTruthy();
   });
 });
 

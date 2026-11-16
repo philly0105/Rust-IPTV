@@ -3095,7 +3095,11 @@ function ProgramPopover({
             {/* The channel as the grid's column names it: the place tag after the name, quiet. */}
             <p className="flex min-w-0 items-baseline text-caption tabular-nums text-fg-muted">
               <ChannelName name={channel.name} strip={stripCountryPrefix} className="min-w-0 truncate" />
-              <span className="shrink-0 whitespace-pre">{`${listSeparator(i18n.language)}${formatRange(program, i18n.language)}`}</span>
+              {/* Each part isolated (the name by its dir="auto"), joined by the locale's separator, as joinList does. */}
+              <span className="shrink-0 whitespace-pre">
+                {listSeparator(i18n.language)}
+                <bdi>{formatRange(program, i18n.language)}</bdi>
+              </span>
             </p>
             <h3 dir="auto" className="mt-0.5 text-base font-semibold text-match-parent">{program.title}</h3>
             {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}

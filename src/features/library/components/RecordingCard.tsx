@@ -83,7 +83,8 @@ function RecordingCardImpl({ entry }: { entry: RecordingEntry }) {
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-caption text-fg-muted">
           {entry.missing ? (
-            <Badge variant="danger" className="inline-flex items-center gap-1">
+            // Warning, as the Recordings tab and Missing files say it: the file is gone, nothing failed.
+            <Badge variant="warning" className="inline-flex items-center gap-1">
               <FileWarning size={12} aria-hidden />
               {t('fileMissing')}
             </Badge>

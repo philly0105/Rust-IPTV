@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DownloadStatus, PlayerSource } from '@/api/types';
 
 import { buildFavoriteRows, groupFavorites, moveWithinGroup, reorderArgs, sortFavorites, withPositions } from '../lib/favorites';
-import { etaSeconds, formatBytes, formatClock, formatDuration, percentOf } from '../lib/format';
+import { etaSeconds, formatBytes, formatClock, formatDuration, formatSpeedLimit, percentOf } from '../lib/format';
 import { k } from '../lib/keys';
 import { buildLibrary, filterLibrary, findEntry, groupBySeason, parseEpisodeCode, resumePoint, seriesTitle, type SeriesEntry } from '../lib/myvideos';
 import { positionToSave, SAVE_EVERY_MS, trackDownloadPosition, type PositionStore } from '../lib/positionSync';
 import { effectiveProgress, ProgressStore, STALE_MS } from '../lib/progress';
-import { actionsFor, buildQueueRows, partitionQueue, queueCounts } from '../lib/queue';
+import { actionsFor, buildQueueRows, downloadNames, partitionQueue, queueCounts } from '../lib/queue';
 import { bucketOf, buildRecentRows, continueForSource, watchedFraction } from '../lib/recent';
 import { makeDownload, makeEpisode, makeFavorite, makePosition, makeRecent } from './fixtures';
 
@@ -293,5 +293,22 @@ describe('position sync', () => {
     set({ source: { url: 'http://other', kind: 'hls', title: 'B', isLive: true, isRadio: false } });
     expect(save).toHaveBeenLastCalledWith(7, 6);
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe('download speed limits and names', () => {
+  it('formats a limit in the units the live speed uses, without a trailing .0', () => {
+    expect(formatSpeedLimit(2 * 1024 * 1024, 'en')).toBe('2 MB/s');
+    expect(formatSpeedLimit(2.5 * 1024 * 1024, 'en')).toBe('2.5 MB/s');
+    expect(formatSpeedLimit(400_000, 'en')).toBe('391 KB/s');
+    expect(formatSpeedLimit(0, 'en')).toBe('');
+  });
+
+  it('names an archived programme by the programme, with its channel and air time after it', () => {
+    const catchup = { title: 'US| ESPN2 FHD', subtitle: 'SportsCenter · Mon 9:00 AM', episodeId: 'catchup:2026-11-16T09:00:00Z' };
+    expect(downloadNames(catchup)).toEqual({ title: 'SportsCenter', subtitle: 'US| ESPN2 FHD · Mon 9:00 AM' });
+    expect(downloadNames({ ...catchup, subtitle: 'News · Late · Mon 9:00 AM' })).toEqual({ title: 'News · Late', subtitle: 'US| ESPN2 FHD · Mon 9:00 AM' });
+    expect(downloadNames({ title: 'Harbor Nine', subtitle: 'S01E02 · The Tide Turns', episodeId: 'e2' })).toEqual({ title: 'Harbor Nine', subtitle: 'S01E02 · The Tide Turns' });
+    expect(downloadNames({ title: 'Harbor Lights' })).toEqual({ title: 'Harbor Lights' });
   });
 });

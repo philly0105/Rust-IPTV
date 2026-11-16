@@ -112,3 +112,18 @@ export function queueCounts(downloads: readonly Download[]): QueueCounts {
   }
   return c;
 }
+
+/**
+ * How a row, a dialog or a toast names a download. An archived programme is stored under its
+ * channel (title "US| ESPN2 FHD", subtitle "SportsCenter · Mon 9:00 AM"), so four programmes from
+ * one channel would all read as the channel: it leads with the programme instead, and the channel
+ * and air time go under it ("SportsCenter", "US| ESPN2 FHD · Mon 9:00 AM").
+ */
+export function downloadNames(d: Pick<Download, 'title' | 'subtitle' | 'episodeId'>): { title: string; subtitle?: string } {
+  const sub = d.subtitle?.trim();
+  if (!sub) return { title: d.title };
+  if (!d.episodeId?.startsWith('catchup:')) return { title: d.title, subtitle: sub };
+  const at = sub.lastIndexOf(' · ');
+  if (at <= 0) return { title: sub, subtitle: d.title };
+  return { title: sub.slice(0, at), subtitle: `${d.title} · ${sub.slice(at + 3)}` };
+}

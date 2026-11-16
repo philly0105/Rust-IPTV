@@ -44,6 +44,8 @@
 
   "downloads": "Downloads",
   "downloadsFolder": "Downloadmap",
+  "downloadSpeed": "Downloadsnelheid",
+  "downloadSpeedHint": "Het maximum dat elke download mag gebruiken. Een download kan ook een eigen limiet krijgen vanuit zijn rij bij Downloads.",
   "downloadConnectionsFor": "Verbindingen per download van {{name}}",
   "downloadConnectionsHint": "Automatisch downloadt een bestand over de vrije verbindingen van het account en gaat terug naar één zolang er iets van de bron speelt. Kies 1 als de aanbieder geen parallelle downloads toestaat.",
   "downloadConnectionsOne": "1",

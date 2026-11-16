@@ -44,6 +44,8 @@
 
   "downloads": "Download",
   "downloadsFolder": "Cartella di download",
+  "downloadSpeed": "Velocità di download",
+  "downloadSpeedHint": "Il massimo che ogni download può usare. Un singolo download può avere anche un proprio limite dalla sua riga in Download.",
   "downloadConnectionsFor": "Connessioni per download da {{name}}",
   "downloadConnectionsHint": "Automatico scarica un file sulle connessioni libere dell'account e torna a una mentre si riproduce qualcosa dalla fonte. Scegli 1 se il provider non accetta download paralleli.",
   "downloadConnectionsOne": "1",

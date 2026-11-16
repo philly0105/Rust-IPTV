@@ -185,14 +185,14 @@ describe('VL-cancel-recording: cancelling from Scheduled can be undone', () => {
 });
 
 describe('VL-clear-finished-copy: the clear button names what it removes and sits with those rows', () => {
-  it('shows "Clear failed" in the Needs attention heading', async () => {
+  it('shows "Clear all" in the Needs attention heading', async () => {
     rpc.handlers['downloads.list'] = () => [dl({ id: 1 }), dl({ id: 2, status: 'failed' })];
     rpc.handlers['downloads.dir'] = () => ({ path: '/data' });
     rpc.handlers['sources.list'] = () => [];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
     // The kit's SectionHeader: the count is part of the heading ("Needs attention 1").
     const heading = await screen.findByRole('heading', { name: /^Needs attention/ });
-    expect(within(heading.parentElement!).getByRole('button', { name: 'Clear failed' })).toBeTruthy();
+    expect(within(heading.parentElement!).getByRole('button', { name: 'Clear all' })).toBeTruthy();
     expect(screen.queryByText('Clear finished')).toBeNull();
   });
 });

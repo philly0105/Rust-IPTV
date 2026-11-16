@@ -44,6 +44,8 @@
 
   "downloads": "İndirilenler",
   "downloadsFolder": "İndirme klasörü",
+  "downloadSpeed": "İndirme hızı",
+  "downloadSpeedHint": "Her indirmenin kullanabileceği en yüksek hız. Tek bir indirmeye İndirilenler'deki kendi satırından ayrı bir sınır da verilebilir.",
   "downloadConnectionsFor": "{{name}} için indirme başına bağlantı",
   "downloadConnectionsHint": "Otomatik, bir dosyayı hesabın boş bağlantılarıyla indirir ve kaynaktan bir şey oynatılırken tek bağlantıya döner. Sağlayıcı paralel indirmeye izin vermiyorsa 1'i seçin.",
   "downloadConnectionsOne": "1",

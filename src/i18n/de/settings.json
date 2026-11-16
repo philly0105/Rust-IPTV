@@ -44,6 +44,8 @@
 
   "downloads": "Downloads",
   "downloadsFolder": "Download-Ordner",
+  "downloadSpeed": "Download-Geschwindigkeit",
+  "downloadSpeedHint": "Das Höchste, was jeder Download nutzen darf. Ein einzelner Download kann in seiner Zeile unter Downloads auch ein eigenes Limit bekommen.",
   "downloadConnectionsFor": "Verbindungen pro Download von {{name}}",
   "downloadConnectionsHint": "Automatisch lädt eine Datei über die freien Verbindungen des Kontos und geht auf eine zurück, solange aus der Quelle etwas läuft. Wähle 1, wenn der Anbieter parallele Downloads nicht erlaubt.",
   "downloadConnectionsOne": "1",

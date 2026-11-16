@@ -19,6 +19,7 @@ import { toast } from '@/ui';
 
 import { errorDescription } from '../deps';
 import { playDownload } from '../lib/playDownload';
+import { downloadNames } from '../lib/queue';
 
 /** The toast of one download: a later change of the same download updates it in place. */
 export const downloadToastId = (id: number) => `download-${id}`;
@@ -36,7 +37,10 @@ export function downloadTransitions(before: ReadonlyMap<number, DownloadStatus>,
   return { finished, failed };
 }
 
-const nameOf = (d: Download) => (d.subtitle ? `${d.title} · ${d.subtitle}` : d.title);
+const nameOf = (d: Download) => {
+  const { title, subtitle } = downloadNames(d);
+  return subtitle ? `${title} · ${subtitle}` : title;
+};
 
 export function DownloadWatcher() {
   const { t } = useTranslation('library');
@@ -58,7 +62,7 @@ export function DownloadWatcher() {
         action: {
           label: t('playOffline'),
           onClick: () => {
-            playDownload(d).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title: d.title }), description: errorDescription(err) }));
+            playDownload(d).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title: downloadNames(d).title }), description: errorDescription(err) }));
           },
         },
       });
@@ -73,7 +77,7 @@ export function DownloadWatcher() {
           label: t('actionRetry'),
           onClick: () => {
             rpc('downloads.retry', { id: d.id }).catch((err: unknown) =>
-              toast({ variant: 'error', title: t('actionFailedRetry', { title: d.title }), description: errorDescription(err) }),
+              toast({ variant: 'error', title: t('actionFailedRetry', { title: downloadNames(d).title }), description: errorDescription(err) }),
             );
           },
         },

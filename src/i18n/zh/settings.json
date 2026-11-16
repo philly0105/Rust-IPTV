@@ -44,6 +44,8 @@
 
   "downloads": "下载",
   "downloadsFolder": "下载文件夹",
+  "downloadSpeed": "下载速度",
+  "downloadSpeedHint": "每个下载可使用的最高速度。也可以在“下载”页某个下载的那一行为它单独设置限速。",
   "downloadConnectionsFor": "从 {{name}} 下载时每个文件的连接数",
   "downloadConnectionsHint": "自动模式会用账户的空闲连接下载一个文件，并在从该来源播放时恢复为一个连接。如果提供商不允许并行下载，请选择 1。",
   "downloadConnectionsOne": "1",

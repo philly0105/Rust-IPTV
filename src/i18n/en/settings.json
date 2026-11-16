@@ -44,6 +44,8 @@
 
   "downloads": "Downloads",
   "downloadsFolder": "Downloads folder",
+  "downloadSpeed": "Download speed",
+  "downloadSpeedHint": "The most each download may use. One download can also get its own limit from its row on Downloads.",
   "downloadConnectionsFor": "Connections per download from {{name}}",
   "downloadConnectionsHint": "Auto downloads one file over the connections the account has spare, and goes back to one while something plays from the source. Choose 1 if the provider objects to parallel downloads.",
   "downloadConnectionsOne": "1",

@@ -83,7 +83,7 @@ describe('Back to My Videos lands on the opened card (L1-guide-library-13 carry-
     expect(cards.map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Heat']);
     fireEvent.click(cards[1]!);
     expect(await screen.findByTestId('play-offline')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('link', { name: 'Back to My videos' }));
+    fireEvent.click(await within(screen.getByTestId('fake-header')).findByRole('button', { name: 'Back' }));
     await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Heat'));
     // The opened card is the grid's tab stop again.
     expect(screen.getByRole('listitem', { name: 'Heat' }).tabIndex).toBe(0);
@@ -208,7 +208,8 @@ describe('Downloads folder bar (L2-guide-library-14)', () => {
     rpc.handlers['downloads.list'] = () => [makeDownload({ id: 7, status: 'queued' }), makeDownload({ id: 8, status: 'paused' })];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
     const dir = await screen.findByTestId('downloads-dir');
-    expect(dir.getAttribute('title')).toBe('D:\\Media\\Downloads\\Tsrust');
+    // In a browser the tooltip adds that the folder is on the server.
+    expect(dir.getAttribute('title')?.split('\n')[0]).toBe('D:\\Media\\Downloads\\Tsrust');
     // Once: the fake header renders the subtitle since loop 3, so the summary is there and nowhere else.
     expect(screen.getAllByText(/1 queued/).map((el) => el.dataset.testid)).toEqual(['page-subtitle']);
   });

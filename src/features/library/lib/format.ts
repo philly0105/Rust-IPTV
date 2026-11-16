@@ -25,6 +25,22 @@ export function formatSpeed(bytesPerSecond: number | undefined | null, locale?: 
   return `${formatBytes(bytesPerSecond, locale)}/s`;
 }
 
+/**
+ * A speed limit in the units the live speed beside it uses: `2 MB/s`, `1.5 MB/s`, `391 KB/s`. A
+ * limit is usually a round number, so it drops a trailing `.0`. Empty for none (0 or unknown).
+ */
+export function formatSpeedLimit(bytesPerSecond: number | undefined | null, locale?: string): string {
+  if (bytesPerSecond == null || !Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '';
+  let value = bytesPerSecond;
+  let unit = 0;
+  while (value >= 1024 && unit < UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const digits = unit === 0 || value >= 100 ? 0 : 1;
+  return `${numberFormat(intlLocale(locale), { maximumFractionDigits: digits }).format(value)} ${UNITS[unit]}/s`;
+}
+
 /** Seconds remaining, or undefined when the total or speed is unknown. */
 export function etaSeconds(bytesDownloaded: number, totalBytes: number | undefined, bytesPerSecond: number | undefined): number | undefined {
   if (!totalBytes || !bytesPerSecond || bytesPerSecond <= 0) return undefined;

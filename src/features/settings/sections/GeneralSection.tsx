@@ -10,6 +10,7 @@ import { intlLocale } from '@/lib/intl';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { clampRating, type SettingsPatch } from '../lib/patch';
 import { DownloadConnectionsRows } from './DownloadConnectionsRows';
+import { DownloadSpeedRow } from './DownloadSpeedRow';
 import { DownloadsFolderRow } from './DownloadsFolderRow';
 // account:
 import { SourceRefreshGroup } from './SourceRefreshGroup';
@@ -140,6 +141,7 @@ export function GeneralSection({ settings, update }: SectionProps) {
 
       <SettingsGroup title={t('downloads')}>
         <DownloadsFolderRow custom={Boolean(settings.downloadsDir?.trim())} />
+        <DownloadSpeedRow settings={settings} />
         <DownloadConnectionsRows settings={settings} update={update} />
       </SettingsGroup>
     </SettingsSection>

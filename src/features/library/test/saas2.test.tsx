@@ -329,7 +329,9 @@ describe('Scheduled says the padding once and stops with a labelled button', () 
     renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
     const note = await screen.findByRole('note');
     expect(note.dataset['testid']).toBe('scheduled-no-recording');
-    expect(note.textContent).toBe('Recording is unavailable because the server has no mpv. Reminders still work.');
+    expect(note.textContent).toBe("This server can't record TV. Reminders still work. (The server needs mpv installed.)");
+    // The empty state below asks only for what works without recording.
+    expect(screen.getByText('Open the TV guide and choose Remind me on a programme.')).toBeTruthy();
     // Not a page-wide card over the empty state.
     expect(note.className).not.toMatch(/\bborder\b|bg-surface/);
   });
@@ -383,8 +385,11 @@ describe('My Videos toolbar and the offline detail page', () => {
     expect((await screen.findByTestId('play-offline')).textContent).toContain('10:00');
     expect(screen.getByRole('heading', { level: 1, name: 'Heat' })).toBeTruthy();
     expect(screen.getByTestId('vod-detail-poster')).toBeTruthy();
-    // One Back pattern: the hero's pill, back to the library.
-    expect(screen.getByRole('link', { name: 'Back to My videos' }).getAttribute('href')).toBe('/my-videos');
+    // The catalogue's detail pattern: Back in the header, which names the section while the hero's
+    // title is on screen; no Back pill in the hero.
+    expect(within(screen.getByTestId('fake-header')).getByRole('button', { name: 'Back' })).toBeTruthy();
+    expect(screen.getByTestId('page-section').textContent).toBe('My videos');
+    expect(screen.queryByRole('link', { name: 'Back to My videos' })).toBeNull();
     const about = screen.getByTestId('vod-about');
     expect(within(about).getByText('Heat (1995).mkv')).toBeTruthy();
     expect(within(about).getByText('Northwind')).toBeTruthy();

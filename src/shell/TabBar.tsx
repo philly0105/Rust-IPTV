@@ -219,7 +219,7 @@ function sheetCurrent(
   const under = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
   const library = LIBRARY_LINKS.find((l) => under(l.to));
   if (library) return { label: t(library.labelKey), icon: library.icon };
-  if (pathname === '/sources') return { label: t('sources'), icon: ListVideo };
+  if (pathname === '/sources') return { label: t('sources'), icon: Server };
   if (under('/settings')) return { label: t('navSettings'), icon: SettingsIcon };
   return undefined;
 }

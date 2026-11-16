@@ -1,4 +1,4 @@
-import { CircleAlert, Star } from 'lucide-react';
+import { CircleAlert, CircleCheck, Star } from 'lucide-react';
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -29,6 +29,9 @@ const HERO_TOP_PLAIN = 'pt-10 max-sm:pt-6';
 /** The same with a Back pill of the page's own in the hero's top corner (`back`). */
 const HERO_TOP_WITH_ART_BACK = 'pt-[clamp(88px,20vh,240px)] max-sm:pt-20';
 const HERO_TOP_PLAIN_BACK = 'pt-[clamp(56px,9vh,112px)] max-sm:pt-20';
+
+/** Past this many characters a title takes the headline size instead of the display size. */
+const LONG_TITLE = 40;
 
 export interface DetailHeroProps {
   model: DetailModel;
@@ -87,6 +90,8 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
   const plotLong = (model.plot?.length ?? 0) > 360;
   // The header names the section until this h1 scrolls away, then fades the title in.
   const titleRef = useHeaderTitleAnchor();
+  const heading = model.titleBase ?? model.title;
+  const longTitle = heading.length > LONG_TITLE;
   const top = model.backdropUrl || pending ? (back ? HERO_TOP_WITH_ART_BACK : HERO_TOP_WITH_ART) : back ? HERO_TOP_PLAIN_BACK : HERO_TOP_PLAIN;
 
   return (
@@ -117,8 +122,20 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
         </div>
         <div className="flex min-w-0 flex-col gap-2 self-end">
           {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
-          <h1 ref={titleRef} id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-headline">
-            {model.titleBase ?? model.title}
+          {/* A provider's long name steps down a size and stops at three lines, so it does not
+              outweigh the page or push Play towards the fold (vod-detail-13). */}
+          <h1
+            ref={titleRef}
+            id="vod-detail-title"
+            dir="auto"
+            tabIndex={-1}
+            title={longTitle ? heading : undefined}
+            className={cn(
+              'text-match-parent line-clamp-3 outline-none text-fg',
+              longTitle ? 'text-headline max-sm:text-title' : 'text-display max-sm:text-headline',
+            )}
+          >
+            {heading}
           </h1>
           <MetaLine
             data-testid="vod-detail-meta"
@@ -227,6 +244,20 @@ export function HeroIcon({ caption, children }: { caption: string; children: Rea
   );
 }
 
+/**
+ * "Watched" in the hero's meta line, as the episode rows say it: the title's own page says so in
+ * words, not only through the tint of the Watched button (vod-detail-14).
+ */
+export function WatchedFact() {
+  const { t } = useTranslation('vod');
+  return (
+    <span className="inline-flex items-center gap-1 text-success" data-testid="vod-watched-fact">
+      <CircleCheck aria-hidden size={12} className="shrink-0" />
+      {t('watched')}
+    </span>
+  );
+}
+
 /** The hero's More menu trigger: the Menu's own icon button, drawn as the other icon secondaries. */
 export const HERO_MENU_TRIGGER =
   'h-12 w-12 rounded-md border border-edge bg-surface-2 text-fg hover:bg-surface-3 hover:text-fg active:bg-pressed active:text-fg';
@@ -285,18 +316,26 @@ function Backdrop({ backdropUrl, posterUrl, sourceId, title }: { backdropUrl?: s
           className={wide ? 'h-full w-full object-cover object-top' : cn(QUARTER_BLUR, 'object-top opacity-50')}
         />
       )}
-      {/* The top quarter stays clear; below it the art fades into the page, where the title and buttons sit. */}
-      <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-transparent from-25% via-bg/75 via-60% to-bg" />
+      {/* The top quarter stays clear; below it the art fades into the page, where the title and buttons sit.
+          On a phone the text column is the full width, so no side of the art is left clear for it: the
+          fade starts at the top and is nearly the page by the meta line, and the muted meta and the
+          resume caption keep 4.5:1 on warm or pale art (vod-detail-01). */}
+      <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-transparent from-25% via-bg/75 via-60% to-bg max-sm:from-bg/10 max-sm:from-0% max-sm:via-bg/90 max-sm:via-30%" />
       {/* The leading edge darkens behind the text column only; the far side of the artwork stays clear. */}
-      <div className="pointer-events-none absolute inset-0 bg-linear-to-r from-bg/90 via-bg/50 via-40% to-transparent to-75% rtl:bg-linear-to-l" />
+      <div className="pointer-events-none absolute inset-0 bg-linear-to-r from-bg/90 via-bg/50 via-40% to-transparent to-75% max-sm:hidden rtl:bg-linear-to-l" />
     </div>
   );
 }
 
-export function DetailHeroSkeleton() {
+/**
+ * The hero while its title loads. `art`: whether the title will likely have a backdrop, so the
+ * poster's skeleton sits where the poster will and the page does not jump up as it loads
+ * (vod-detail-08). Without a hint, the room for artwork.
+ */
+export function DetailHeroSkeleton({ art = true }: { art?: boolean }) {
   const { t } = useTranslation('vod');
   return (
-    <div role="status" aria-busy="true" className={cn(HERO_GRID, HERO_TOP_WITH_ART)}>
+    <div role="status" aria-busy="true" className={cn(HERO_GRID, art ? HERO_TOP_WITH_ART : HERO_TOP_PLAIN)}>
       <span className="sr-only">{t('loading')}</span>
       <div className="skeleton-surface w-full self-end rounded-lg motion-safe:animate-shimmer sm:row-span-2 sm:self-start" style={{ aspectRatio: 2 / 3 }} />
       <div className="flex min-w-0 flex-col gap-3 self-end">
@@ -306,9 +345,9 @@ export function DetailHeroSkeleton() {
       <div className="col-span-2 flex min-w-0 flex-col gap-4 sm:col-span-1 sm:col-start-2">
         <div className="flex gap-2">
           <Skeleton className="h-12 w-36 rounded-md" />
-          <Skeleton className="h-12 w-12 rounded-md" />
-          <Skeleton className="h-12 w-12 rounded-md" />
-          <Skeleton className="h-12 w-12 rounded-md" />
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-12 w-12 rounded-md" />
+          ))}
         </div>
         <Skeleton className="h-4 w-full max-w-[72ch]" />
         <Skeleton className="h-4 w-5/6 max-w-[72ch]" />

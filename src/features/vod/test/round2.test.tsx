@@ -266,7 +266,8 @@ describe('the movie page', () => {
     const icons = screen.getByTestId('vod-hero-icons');
     // Each round button has its caption under it, below sm only, hidden from assistive tech.
     const captions = [...icons.querySelectorAll('span[aria-hidden]')].filter((s) => s.className.includes('sm:hidden')).map((s) => s.textContent);
-    expect(captions).toEqual(['My List', 'Favorite', 'Watched', 'Download', 'More']);
+    // Start over is a tile of its own beside Resume (vod-detail-07), and More had nothing else to hold.
+    expect(captions).toEqual(['Restart', 'My List', 'Favorite', 'Watched', 'Download']);
     expect(icons.className).toContain('max-sm:grid');
     // Resume, then its progress, then the icons, in the DOM as on a phone's screen.
     const progress = screen.getByTestId('vod-hero-progress');

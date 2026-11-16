@@ -107,7 +107,8 @@ function cleanCodeSlow(t: string, season: number, episode: number): string {
  * Episode title without the noise Xtream panels wrap around it:
  * `Captain Kindling - S01E02 - Last Call` -> `Last Call`. Strips a leading
  * series name and a leading or trailing episode code (`S01E02`, `1x02`) for
- * this season/episode. Returns '' when nothing else is left.
+ * this season/episode. Returns '' when nothing else is left, or only the
+ * series name (`Captain Kindling S01E02`).
  */
 export function cleanEpisodeTitle(title: string | undefined, seriesTitle: string | undefined, season: number, episode: number): string {
   let t = (title ?? '').trim();
@@ -141,7 +142,9 @@ export function cleanEpisodeTitle(title: string | undefined, seriesTitle: string
       }
     }
   }
-  return t.trim();
+  t = t.trim();
+  // "Show S01E02": once the code is gone only the series' name is left, which names no episode.
+  return series && t.toLowerCase() === series.toLowerCase() ? '' : t;
 }
 
 /**

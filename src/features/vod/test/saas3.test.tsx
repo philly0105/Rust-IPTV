@@ -23,7 +23,7 @@ import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { CATEGORY_CHIP_LIMIT, CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { currentLocation, i18n, installDomStubs, makeSource, openHeroMenu, renderAt, settings } from './harness';
+import { currentLocation, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -128,7 +128,7 @@ describe('offline play resumes where the title says', () => {
     expect(played.sources[0]).toMatchObject({ url: 'http://local/files/42', resumeSeconds: 1800 });
     // The bar under it says the same.
     expect(screen.getByText('90 minutes left')).toBeTruthy();
-    fireEvent.click(within(await openHeroMenu()).getByRole('menuitem', { name: 'Start over' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start over' }));
     await waitFor(() => expect(played.sources).toHaveLength(2));
     expect(played.sources[1]).toMatchObject({ url: 'http://local/files/42', resumeSeconds: 0 });
   });

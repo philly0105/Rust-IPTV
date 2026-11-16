@@ -18,7 +18,7 @@ import { CatalogRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
 import { DownloadButton, FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { TmdbPromo } from '../components/detail/TmdbPromo';
-import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup } from '../components/detail/DetailHero';
+import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup, WatchedFact } from '../components/detail/DetailHero';
 import { OtherSourcesDialog, OtherSourcesList } from '../components/detail/OtherSourcesDialog';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
@@ -27,8 +27,9 @@ import { WatchStage } from '../components/detail/WatchStage';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import type { RailCardProps } from '../components/PosterRail';
 import { SimilarSection } from '../components/SimilarSection';
-import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
+import { SourceMissing, TitleGone, isSourceMissing } from '../components/SourceMissing';
 import {
+  cachedCatalogRow,
   useIsFavorite,
   useMovieDetail,
   useSettings,
@@ -52,7 +53,7 @@ import { itemLanguage, languageName } from '../lib/language';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
 import { ALL_CATEGORIES, effectiveMinRating } from '../lib/paging';
 import { detailHref, isCachedStalkerSeries } from '../lib/search';
-import { Badge, Button, ErrorState, Menu, Page, SectionHeader, Skeleton, errorDescription, useToast, type MenuItem } from '@/ui';
+import { Badge, Button, ErrorState, IconButton, Menu, Page, SectionHeader, Skeleton, errorDescription, useToast, type MenuItem } from '@/ui';
 
 export function MovieDetailPage() {
   const { t, i18n } = useTranslation('vod');
@@ -74,6 +75,9 @@ export function MovieDetailPage() {
     return isCachedStalkerSeries(cached, sourceId, itemId);
   }, [qc, source.data?.kind, sourceId, itemId]);
   const detail = useMovieDetail(seriesTwin ? undefined : source.data, ref);
+  // The skeleton keeps the artwork's room only when a backdrop is likely: an M3U title has none
+  // unless its catalog row says so, so its page does not drop 140 px when it loads (vod-detail-08).
+  const skeletonArt = () => source.data?.kind !== 'm3u' || !!cachedCatalogRow(qc, ref)?.backdropUrl;
   // A failed lookup may be a series id on the movie route (cold link, Stalker VOD-as-series): look it up as a series.
   const probeTwin = detail.isError && detail.error.code !== 'auth' && !!source.data;
   const twin = useTwinProbe(source.data, ref, probeTwin);
@@ -193,7 +197,7 @@ export function MovieDetailPage() {
       <div className="h-full overflow-y-auto" data-testid="vod-movie-detail">
         <h1 className="sr-only">{pageTitle}</h1>
         {gate.state === 'checking' ? (
-          <DetailHeroSkeleton />
+          <DetailHeroSkeleton art={skeletonArt()} />
         ) : (
           <ParentalLocked
             itemRef={ref}
@@ -215,6 +219,14 @@ export function MovieDetailPage() {
       </div>
     );
   }
+  if (detail.isError && detail.error.code === 'not_found' && !(probeTwin && twin.isPending)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <TitleGone itemRef={ref} />
+      </div>
+    );
+  }
   if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
       <div className="h-full overflow-y-auto">
@@ -233,7 +245,7 @@ export function MovieDetailPage() {
     return (
       <div className="h-full overflow-y-auto" data-testid="vod-movie-detail">
         <h1 className="sr-only">{pageTitle}</h1>
-        <DetailHeroSkeleton />
+        <DetailHeroSkeleton art={skeletonArt()} />
       </div>
     );
   }
@@ -269,10 +281,6 @@ export function MovieDetailPage() {
 
   // VL-hero-actions: what is not Play, Trailer or one of the round icon buttons waits in More.
   const moreItems: MenuItem[] = [
-    // Offline as well: the file from its beginning.
-    ...(resumeAt !== undefined
-      ? [{ id: 'start-over', label: t('startOver'), icon: <RotateCcw aria-hidden size={16} />, onSelect: () => (offline ? playOffline(true) : play(true)) }]
-      : []),
     // Offline, the stream is still one choice away (a newer copy, a file that will not play).
     ...(offline ? [{ id: 'stream', label: t('streamInstead'), icon: <Play aria-hidden size={16} />, onSelect: () => play(false) }] : []),
     ...(others.length > 0
@@ -285,8 +293,22 @@ export function MovieDetailPage() {
   // two states share one set and one look.
   const iconActions = (
     <>
+      {/* With a saved spot, the other half of the resume choice sits first among the icons, one
+          press away, not alone in More (vod-detail-07). Offline as well: the file from its beginning. */}
+      {resumeAt !== undefined && (
+        <HeroIcon caption={t('captionStartOver')}>
+          <IconButton
+            size="lg"
+            variant="secondary"
+            label={t('startOver')}
+            icon={<RotateCcw aria-hidden size={18} />}
+            onClick={() => (offline ? playOffline(true) : play(true))}
+            data-testid="vod-start-over"
+          />
+        </HeroIcon>
+      )}
       <HeroIcon caption={t('captionMyList')}>
-        <MyListButton itemRef={ref} snapshot={listSnapshot} variant="round" size="lg" />
+        <MyListButton itemRef={ref} snapshot={listSnapshot} variant={watching ? 'round' : 'hero'} size="lg" />
       </HeroIcon>
       <HeroIcon caption={t('captionFavorite')}>
         <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
@@ -380,19 +402,17 @@ export function MovieDetailPage() {
           model={model}
           sourceId={sourceId}
           castLinks={tmdbOn}
+          // The container format is a file fact, in About; the meta line keeps what a viewer acts on (vod-detail-17).
           chips={[
-            item.containerExtension && (
-              <Badge key="format" variant="outline" className="h-4.5 px-1 text-2xs tracking-wide uppercase">
-                {item.containerExtension}
-              </Badge>
-            ),
+            watched && <WatchedFact key="watched" />,
             offline && (
               <Badge key="offline" variant="success" data-testid="vod-offline-chip">
                 {t('downloaded')}
               </Badge>
             ),
           ]}
-          note={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
+          // Play takes the finished download when its file is there (VL-offline-play), and says so.
+          note={offline ? t('playsDownloaded') : pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           pending={placeholder}
           progress={progress}

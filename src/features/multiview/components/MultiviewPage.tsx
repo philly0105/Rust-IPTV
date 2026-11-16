@@ -9,7 +9,7 @@ import { itemKey } from '@/api/types';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
-import { cn, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
+import { cn, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useMediaQuery, useShellHeader, useShortcut } from '../deps';
 import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
 import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../types';
@@ -26,6 +26,12 @@ import { Wall } from './Wall';
 
 /** Full screen: the toolbar fades after this long without pointer or key activity. */
 export const CHROME_IDLE_MS = 2_500;
+
+/**
+ * A window this short (a phone on its side) has no height to spare for a toolbar row above the
+ * wall: the toolbar floats over the wall as it does in full screen, and fades when idle.
+ */
+export const SHORT_STAGE_QUERY = '(max-height: 480px)';
 
 const ADD: PickerMode = { kind: 'add' };
 
@@ -109,7 +115,10 @@ export function MultiviewPage() {
 
   const count = tiles.length;
   const { active: fsActive, supported: fsSupported, toggle: fsToggle, exit: fsExit } = useWallFullscreen(stageRef);
-  const chrome = useIdleChrome(fsActive);
+  const shortStage = useMediaQuery(SHORT_STAGE_QUERY);
+  // The toolbar floats over the wall: in full screen, and on a short window once tiles are up.
+  const floating = fsActive || (shortStage && count > 0);
+  const chrome = useIdleChrome(floating);
   const { mainPlaying, stopMain } = useMainPlayerHandoff(count > 0);
   const sources = useSources();
   // The no-source state stays while its add dialog is open: the new source is listed before its
@@ -390,16 +399,16 @@ export function MultiviewPage() {
 
   const limitBanners = <LimitBanners over={shownOver} onDismiss={(l) => setDismissed((d) => new Set(d).add(loadKey(l)))} />;
   const banners = (
-    <div className={cn('flex flex-col gap-2', !fsActive && mainPlaying && 'px-3 pt-3 sm:px-4')} data-testid="multiview-banners">
+    <div className={cn('flex flex-col gap-2', !floating && mainPlaying && 'px-3 pt-3 sm:px-4')} data-testid="multiview-banners">
       {mainPlaying ? <MainPlayingBanner onStop={stopMain} /> : null}
-      {/* Full screen: under the toolbar in the overlay, which already floats over the wall. */}
-      {fsActive ? limitBanners : null}
+      {/* A floating toolbar: under it in the overlay, which already floats over the wall. */}
+      {floating ? limitBanners : null}
     </div>
   );
   // Out of full screen the connection-limit warning lies over the toolbar instead of pushing the
   // wall down: after a cold load the account's limit can answer after the tiles are up (XB2-32).
   // The toolbar under it is inert until the warning is dismissed, so focus never hides beneath it.
-  const limitOver = !fsActive && count > 0 && shownOver.length > 0;
+  const limitOver = !floating && count > 0 && shownOver.length > 0;
 
   const wall = (
     <Wall
@@ -448,15 +457,15 @@ export function MultiviewPage() {
           ref={stageRef}
           data-testid="multiview-stage"
           data-fullscreen={fsActive ? 'true' : 'false'}
-          onPointerMove={fsActive ? chrome.poke : undefined}
-          onPointerDown={fsActive ? chrome.poke : undefined}
-          onKeyDownCapture={fsActive ? chrome.poke : undefined}
-          className={cn('@container/stage relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
+          onPointerMove={floating ? chrome.poke : undefined}
+          onPointerDown={floating ? chrome.poke : undefined}
+          onKeyDownCapture={floating ? chrome.poke : undefined}
+          className={cn('@container/stage relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', floating && !chrome.visible && 'cursor-none')}
         >
           {/* One toolbar from the first visit on, so the layout choice never moves or changes look
               when the first tile goes up. */}
-          {!fsActive ? <div inert={limitOver}>{toolbar(false)}</div> : null}
-          {!fsActive ? (
+          {!floating ? <div inert={limitOver}>{toolbar(false)}</div> : null}
+          {!floating ? (
             <div
               data-testid="multiview-limit-layer"
               className={cn('absolute inset-x-0 top-0 z-40', limitOver && 'bg-surface px-3 py-1 shadow-md sm:px-4')}
@@ -464,9 +473,16 @@ export function MultiviewPage() {
               {limitBanners}
             </div>
           ) : null}
-          {!fsActive ? banners : null}
-          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size] [container-name:wall]', fsActive ? 'p-0' : 'px-(--page-gutter) py-3 sm:py-4')}>{wall}</div>
-          {fsActive ? (
+          {!floating ? banners : null}
+          <div
+            className={cn(
+              'relative flex min-h-0 flex-1 overflow-y-auto [container-type:size] [container-name:wall]',
+              fsActive ? 'p-0' : floating ? 'p-1' : 'px-(--page-gutter) py-3 sm:py-4',
+            )}
+          >
+            {wall}
+          </div>
+          {floating ? (
             <div
               ref={overlayRef}
               onFocus={onOverlayFocus}

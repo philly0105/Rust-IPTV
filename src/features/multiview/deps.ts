@@ -22,6 +22,7 @@ export {
   Select,
   Skeleton,
   SkeletonList,
+  Slider,
   Tooltip,
   TOUCH_TARGET,
   toast,
@@ -29,5 +30,6 @@ export {
 } from '@/ui';
 export type { MenuAction } from '@/ui';
 export { useShellHeader, useShortcut } from '@/shell';
+export { useMediaQuery } from '@/shell/useMediaQuery';
 export { usePlayerStore } from '@/features/player';
 export { ensureUnlocked, requestPin } from './parentalGate';

@@ -215,7 +215,7 @@ export function PositionSlider({
           htmlFor={id}
           aria-live="polite"
           data-testid="subtitle-position-value"
-          className={cn('tabular-nums', tone === 'page' ? 'font-display text-lg font-semibold text-fg' : 'text-caption text-on-glass-muted')}
+          className={cn('tabular-nums', tone === 'page' ? 'font-display text-title-sm text-fg' : 'text-caption text-on-glass-muted')}
         >
           {readout(draft)}
         </output>

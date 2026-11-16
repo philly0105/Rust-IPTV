@@ -61,7 +61,7 @@ export function SkeletonGrid({ count = 12, className, aspect = 2 / 3, minColumnW
       <span className="sr-only">{t('loading')}</span>
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="flex flex-col gap-2">
-          <div aria-hidden className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: aspect }} />
+          <div aria-hidden className="skeleton-surface w-full rounded-lg motion-safe:animate-shimmer" style={{ aspectRatio: aspect }} />
           <Skeleton className="h-3.5 w-4/5" />
           <Skeleton className="h-3 w-2/5 opacity-70" />
         </div>

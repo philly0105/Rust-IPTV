@@ -171,8 +171,8 @@ export const ChannelLogo = memo(function ChannelLogo({
       data-plate={plate ?? 'dark'}
       className={cn(
         'inline-flex shrink-0 items-center justify-center overflow-hidden ring-1 ring-inset',
-        // Fixed plates, not theme surfaces: the logo's own colours decide what it needs.
-        plate === 'light' ? 'bg-[#eef1f5] ring-black/5' : 'bg-[#161d2a] ring-white/6',
+        // Plates chosen by the logo's own colours, not the theme (tokens.css --color-logo-plate*).
+        plate === 'light' ? 'bg-(--color-logo-plate) ring-black/5' : 'bg-(--color-logo-plate-dark) ring-white/6',
         radius,
         className,
       )}

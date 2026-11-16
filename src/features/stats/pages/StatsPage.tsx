@@ -141,7 +141,7 @@ export function StatsPage() {
         <div className={tile} data-testid="stats-total">
           {/* Read as one sentence ("3 hr 20 min watched in the last 7 days"); drawn as a number over its label. */}
           <span className="sr-only">{t(range === 7 ? 'totalWeek' : 'totalMonth', { time: time(data.totalSeconds) })}</span>
-          <span aria-hidden className="text-headline tabular-nums text-fg sm:text-[calc(36rem/15)]">
+          <span aria-hidden className="text-headline tabular-nums text-fg">
             {time(data.totalSeconds)}
           </span>
           <span aria-hidden className="text-body-sm text-fg-muted">

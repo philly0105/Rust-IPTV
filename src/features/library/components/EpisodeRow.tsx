@@ -51,7 +51,7 @@ function EpisodeRowImpl({
     <div
       className={cn(
         'flex h-full items-center gap-4 rounded-md px-3 hover:bg-hover',
-        playing && 'bg-surface-2 shadow-[inset_3px_0_0_var(--color-accent)] rtl:shadow-[inset_-3px_0_0_var(--color-accent)]',
+        playing && 'bg-surface-2 shadow-[inset_3px_0_0_var(--color-accent-mark)] rtl:shadow-[inset_-3px_0_0_var(--color-accent-mark)]',
       )}
       data-testid="episode-row"
       data-missing={ep.missing || undefined}

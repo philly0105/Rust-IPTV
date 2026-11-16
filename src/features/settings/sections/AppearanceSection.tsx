@@ -46,9 +46,9 @@ const RAIL_KEY: Record<keyof DashboardRails, string> = {
  * in step with the token file.
  */
 export const PREVIEW_PALETTE = {
-  dark: { bg: '#0c1320', surface: '#121a29', line: '#1d2637', fg: '#eef1f6', accent: '#f5b544' },
+  dark: { bg: '#0c1320', surface: '#121a29', line: '#1d2637', fg: '#e3e7ee', accent: '#f5b544' },
   light: { bg: '#edf0f5', surface: '#ffffff', line: '#e1e5ec', fg: '#0f1626', accent: '#8f4f00' },
-  oled: { bg: '#000000', surface: '#000000', line: '#151a22', fg: '#eef1f6', accent: '#f5b544' },
+  oled: { bg: '#000000', surface: '#000000', line: '#151a22', fg: '#e3e7ee', accent: '#f5b544' },
 } as const;
 
 /**

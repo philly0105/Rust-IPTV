@@ -253,7 +253,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-y-auto overflow-x-hidden" data-testid={`vod-landing-${kind}`}>
-      <Page width="wide" className="flex flex-col gap-10 max-sm:gap-8">
+      <Page width="full" className="flex flex-col gap-10 max-sm:gap-8">
         {/* The shell header shows the title and the count, with the source when there are others (one place, L1-visual-13). Its
             subtitle folds away below md, so only there the source line shows here: in the category
             row's first line, or on its own over an empty source. */}

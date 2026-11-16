@@ -115,7 +115,7 @@ export function UpdatesPanel({ available, server = false }: { available: boolean
         {state.step === 'available' || state.step === 'installing' ? (
           <div className="flex flex-col gap-3" data-testid="updates-available">
             <div className="flex flex-col gap-0.5">
-              <p className="font-display text-lg font-semibold text-fg">{t('updatesAvailable', { version: state.update.version })}</p>
+              <p className="font-display text-title-sm text-fg">{t('updatesAvailable', { version: state.update.version })}</p>
               <p className="text-sm text-fg-muted">
                 {state.update.date
                   ? t('updatesFromToDated', { current: state.update.currentVersion, when: absoluteTime(state.update.date, lang) })

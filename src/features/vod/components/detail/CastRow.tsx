@@ -58,7 +58,7 @@ function CastChips({ people, sourceId, linked, headingId }: { people: Person[]; 
             <>
               <Avatar person={p} />
               <span className="flex min-w-0 flex-col leading-tight">
-                <span dir="auto" className="truncate text-[calc(13rem/15)] font-medium text-fg text-match-parent">{p.name}</span>
+                <span dir="auto" className="truncate text-body-sm font-medium text-fg text-match-parent">{p.name}</span>
                 {p.role && <span className="truncate text-xs text-fg-subtle">{p.role}</span>}
               </span>
             </>
@@ -112,7 +112,7 @@ function Avatar({ person }: { person: Person }) {
       className="h-8 w-8 shrink-0 rounded-full bg-surface-3 object-cover"
     />
   ) : (
-    <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[calc(11rem/15)] font-semibold text-fg-muted">
+    <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-caption font-semibold text-fg-muted">
       {initials}
     </span>
   );

@@ -281,11 +281,12 @@ export function Poster({
           <span
             className={cn(
               'font-display leading-none font-semibold tracking-tight',
-              // About a quarter of a poster's width, a third of a wide tile's height, capped; under
+              // About a quarter of a poster's width, a third of a wide tile's height, capped (28 and
+              // 34 px at 100 %, so a row of fallbacks does not shout over its titles); under
               // about 60 px the floor (40% of the side, up to 0.9rem) keeps small tiles legible.
               aspect === 'poster'
-                ? 'text-[length:max(min(40cqmin,0.9rem),min(24cqmin,2.25rem))]'
-                : 'text-[length:max(min(40cqmin,1rem),min(30cqmin,2.75rem))]',
+                ? 'text-[length:max(min(40cqmin,0.9rem),min(24cqmin,1.875rem))]'
+                : 'text-[length:max(min(40cqmin,1rem),min(30cqmin,2.25rem))]',
             )}
           >
             {initialsOf(fallbackText)}

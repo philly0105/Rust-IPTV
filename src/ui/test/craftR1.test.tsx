@@ -104,7 +104,7 @@ describe('toasts and centred dialogs', () => {
       expect(layer().className).toContain('pt-[8vh]');
       expect(layer().className).toContain('max-sm:pt-[max(8vh,var(--toast-reserve,0px))]');
       // A md dialog is a bottom sheet below sm: its height cap leaves the reserve free above it.
-      expect(screen.getByRole('dialog').className).toContain('max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))]');
+      expect(screen.getByRole('dialog').className).toContain('max-sm:max-h-[calc(100dvh-var(--kb-inset,0px)-max(1.5rem,var(--toast-reserve,0px)))]');
 
       act(() => void toast({ title: 'Locks saved', description: 'Two groups are locked now.', variant: 'success' }));
       expect(reserve()).toBe(`${112 + TOAST_DIALOG_GAP}px`);

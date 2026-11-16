@@ -459,7 +459,7 @@ export function MultiviewPage() {
           {!fsActive ? (
             <div
               data-testid="multiview-limit-layer"
-              className={cn('absolute inset-x-0 top-0 z-40', limitOver && 'bg-surface px-3 py-1 shadow-md sm:px-4')}
+              className={cn('absolute inset-x-0 top-0 z-40', limitOver && 'bg-surface px-3 py-1 shadow-2 sm:px-4')}
             >
               {limitBanners}
             </div>

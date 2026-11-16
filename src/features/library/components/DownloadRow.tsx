@@ -109,7 +109,7 @@ export function DialProgress({
           style={{ '--dial': percent } as CSSProperties}
         >
           {tone === 'accent' && percent > 0 && percent < 100 && (
-            <div aria-hidden data-testid="dial-needle" className="absolute -end-px inset-y-0 w-0.5 rounded-full bg-fg shadow-[0_0_6px_var(--color-glow)]" />
+            <div aria-hidden data-testid="dial-needle" className="absolute -end-px inset-y-0 w-0.5 rounded-full bg-fg" />
           )}
         </div>
       )}

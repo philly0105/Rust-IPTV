@@ -179,7 +179,7 @@ export function YearRangeFields({ filter, className }: { filter: YearFilter; cla
         options={filter.optionsFor('from')}
         value={range.from !== undefined ? String(range.from) : ''}
         onValueChange={(v) => filter.setBound('from', v)}
-        className={cn('tabular h-8 w-auto min-w-24', range.from !== undefined && activeDecade === undefined && 'border-accent text-fg')}
+        className={cn('tabular h-8 w-auto min-w-24', range.from !== undefined && activeDecade === undefined && 'border-fg text-fg')}
         wrapperClassName="shrink-0"
         disabled={loading}
       />
@@ -188,7 +188,7 @@ export function YearRangeFields({ filter, className }: { filter: YearFilter; cla
         options={filter.optionsFor('to')}
         value={range.to !== undefined ? String(range.to) : ''}
         onValueChange={(v) => filter.setBound('to', v)}
-        className={cn('tabular h-8 w-auto min-w-24', range.to !== undefined && activeDecade === undefined && 'border-accent text-fg')}
+        className={cn('tabular h-8 w-auto min-w-24', range.to !== undefined && activeDecade === undefined && 'border-fg text-fg')}
         wrapperClassName="shrink-0"
         disabled={loading}
       />

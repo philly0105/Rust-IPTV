@@ -104,7 +104,7 @@ function PlayGlyph() {
       aria-hidden
       className="absolute inset-0 flex items-center justify-center bg-scrim/0 opacity-0 group-hover/card:bg-scrim/40 group-hover/card:opacity-100 group-focus-visible/card:opacity-100 motion-safe:transition-opacity"
     >
-      <span className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-active/card:scale-90">
+      <span className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-2 motion-safe:transition-transform motion-safe:duration-(--duration-fast) motion-safe:group-active/card:scale-90">
         <Play size={20} fill="currentColor" className="translate-x-px" />
       </span>
     </span>
@@ -166,7 +166,7 @@ export interface PosterCardProps {
  */
 const WRAPPER_HOVER_ART = 'group-hover/poster:shadow-2 group-hover/poster:ring-fg-subtle motion-safe:group-hover/poster:-translate-y-0.5';
 const WRAPPER_HOVER_LAYER =
-  'motion-safe:transition-[translate] motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/poster:-translate-y-0.5 motion-safe:group-has-[a:active]/poster:translate-y-0';
+  'motion-safe:transition-[translate] motion-safe:duration-(--duration-fast) motion-safe:ease-enter motion-safe:group-hover/poster:-translate-y-0.5 motion-safe:group-has-[a:active]/poster:translate-y-0';
 
 const SAVED_PATH = /^\/s\/([^/]+)\/(movie|series)\/([^/?#]+)$/;
 
@@ -896,7 +896,7 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
         style={tintVars(source.name)}
       >
         {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
-        <span aria-hidden className="font-display text-4xl font-semibold">{initialsOf(source.name)}</span>
+        <span aria-hidden className="font-display text-headline">{initialsOf(source.name)}</span>
         <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white light:bg-white/70 light:text-fg">
           {t(kindShortKey(source.kind))}
         </span>

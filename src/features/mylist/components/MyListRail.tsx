@@ -92,7 +92,7 @@ export function MyListRail({ hideError = false }: MyListRailProps = {}) {
 function WatchedTag({ label }: { label: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-sm border border-glass-border bg-glass-strong px-1.5 py-0.5 text-[calc(11rem/15)] font-medium leading-4 text-on-glass"
+      className="inline-flex items-center gap-1 rounded-sm border border-glass-border bg-glass-strong px-1.5 py-0.5 text-caption font-medium leading-4 text-on-glass"
       data-testid="mylist-watched-tag"
     >
       <Check aria-hidden size={12} strokeWidth={2.75} className="text-success" />

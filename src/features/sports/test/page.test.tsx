@@ -25,12 +25,14 @@ const data = vi.hoisted(() => ({
   days: {} as Record<string, unknown[]>,
   loading: false,
   error: null as unknown,
+  failedLeagues: [] as string[],
   refetches: 0,
   live: [] as unknown[],
   streams: new Map<string, unknown[]>(),
   streamsLoading: false,
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
+  weekCalls: [] as string[][],
   streamCalls: [] as { keys: string[]; enabled: boolean }[],
   /** One stable answer per (day, leagues), as React Query's combine gives. */
   cache: new Map<string, unknown>(),
@@ -41,9 +43,13 @@ vi.mock('../hooks/useGames', () => ({
     const id = `day|${day}|${leagues.join()}`;
     if (!data.cache.has(id)) {
       const games = ((data.days[day] ?? []) as { league: string }[]).filter((g) => leagues.includes(g.league));
-      data.cache.set(id, { games, loading: data.loading, error: data.error, refetch: () => void data.refetches++ });
+      data.cache.set(id, { games, loading: data.loading, error: data.error, failedLeagues: data.failedLeagues, refetch: () => void data.refetches++ });
     }
     return data.cache.get(id);
+  },
+  useSportsDays: (days: readonly string[], leagues: readonly string[]) => {
+    data.weekCalls.push([...days]);
+    return { games: days.flatMap((d) => ((data.days[d] ?? []) as { league: string }[]).filter((g) => leagues.includes(g.league))), loading: false };
   },
   useLiveGames: (leagues: readonly string[]) => {
     data.liveCalls.push([...leagues]);
@@ -76,13 +82,15 @@ const player = vi.hoisted(() => ({
   played: [] as { channel: unknown; kind: string; nowTitle?: string; displayName?: string }[],
   catchups: [] as { channel: unknown; kind: string; program: { start: string; end: string; title: string }; displayName?: string }[],
   fail: null as Error | null,
-  state: {} as { source?: { ref: unknown }; zapContext?: unknown },
+  state: {} as { source?: { ref: unknown; isLive?: boolean }; zapContext?: unknown },
+  listeners: new Set<() => void>(),
 }));
 vi.mock('@/features/live/lib/playback', () => ({
   playChannel: async (channel: { ref: unknown }, kind: string, nowTitle?: string, displayName?: string) => {
     if (player.fail) throw player.fail;
     player.played.push({ channel, kind, nowTitle, displayName });
-    player.state.source = { ref: channel.ref };
+    player.state = { ...player.state, source: { ref: channel.ref, isLive: true } };
+    for (const l of player.listeners) l();
   },
   playCatchup: async (channel: unknown, kind: string, program: { start: string; end: string; title: string }, _now?: number, displayName?: string) => {
     if (player.fail) throw player.fail;
@@ -92,7 +100,14 @@ vi.mock('@/features/live/lib/playback', () => ({
 vi.mock('@/features/player/store', () => ({
   usePlayerStore: {
     getState: () => player.state,
-    setState: (patch: object) => Object.assign(player.state, patch),
+    setState: (patch: object) => {
+      player.state = { ...player.state, ...patch };
+      for (const l of player.listeners) l();
+    },
+    subscribe: (l: () => void) => {
+      player.listeners.add(l);
+      return () => player.listeners.delete(l);
+    },
   },
 }));
 
@@ -151,12 +166,14 @@ beforeEach(() => {
   data.days = {};
   data.loading = false;
   data.error = null;
+  data.failedLeagues = [];
   data.refetches = 0;
   data.live = [];
   data.streams = new Map();
   data.streamsLoading = false;
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
+  data.weekCalls.length = 0;
   data.streamCalls.length = 0;
   data.cache.clear();
   player.played.length = 0;
@@ -365,9 +382,22 @@ describe('sports page', () => {
     await waitFor(() => expect(useMultiviewStore.getState().tiles.map((t) => t.title)).toEqual(['NBA 05: Celtics vs Knicks']));
     expect(useMultiviewStore.getState().tiles[0]!.ref).toEqual(EVENT.ref);
     await waitFor(() => expect(h.lastToast()?.title).toBe('Added NBA 05: Celtics vs Knicks to multi-view'));
-    // Two hours before the start there is nothing to put up yet.
+    // Two hours before the start the wall can be set up already, with the best stream.
     fireEvent.click(within(card(later)).getByRole('button', { name: 'More for New England Patriots at Chicago Bears' }));
-    await waitFor(() => expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Follow New England Patriots', 'Follow Chicago Bears']));
+    await waitFor(() =>
+      expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Add to multi-view', 'Follow New England Patriots', 'Follow Chicago Bears']),
+    );
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    cleanup();
+
+    // A game that is over has nothing on air to put up.
+    const final = h.finalGame('3');
+    setDay([final]);
+    setStreams(final, [h.match(ESPN)]);
+    data.cache.clear();
+    await openReady();
+    fireEvent.click(within(card(final)).getByRole('button', { name: /^More for / }));
+    await waitFor(() => expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).not.toContain('Add to multi-view'));
   });
 
   it('follows a team from a card, stars it everywhere, and "My teams" keeps only its games', async () => {
@@ -567,10 +597,30 @@ describe('sports page', () => {
     // The search only hides cards: the streams are still matched for the whole league.
     expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1', 'nfl:2']);
     act(() => useShellStore.getState().header!.search!.onChange('lakers'));
-    await screen.findByText('No games match');
-    fireEvent.click(screen.getByTestId('sports-clear-filters'));
+    await screen.findByText('No game for “lakers” on this day');
+    // Nothing is read for the week until asked.
+    expect(data.weekCalls).toEqual([]);
+    act(() => useShellStore.getState().header!.search!.onChange(''));
     await waitFor(() => expect(screen.getAllByTestId('sports-game')).toHaveLength(2));
     expect(useShellStore.getState().header?.search?.value).toBe('');
+  });
+
+  it('looks through the coming week for a team the picked day has no game of, and opens its day', async () => {
+    const days = etDays(Date.now(), 7, 7);
+    const lakers = h.game('7', { startMs: Date.now() + 2 * 24 * h.HOUR, etDate: days[9]!, home: h.team('LAL', 'Los Angeles Lakers'), away: h.team('DEN', 'Denver Nuggets') });
+    setDay([h.game('1')]);
+    setDay([lakers], days[9]);
+    await openReady('/sports?league=nfl');
+    act(() => useShellStore.getState().header!.search!.onChange('lakers'));
+    fireEvent.click(await screen.findByTestId('sports-search-week'));
+    // The seven days after the picked one, every league whichever tab is picked.
+    expect(data.weekCalls.at(-1)).toEqual(days.slice(8, 15));
+    const found = await screen.findAllByTestId('sports-week-game');
+    expect(found.map((b) => b.textContent)).toEqual([expect.stringContaining('Denver Nuggets at Los Angeles Lakers')]);
+    fireEvent.click(found[0]!);
+    // Its day opens, on every league, with the search still on.
+    await waitFor(() => expect(h.location.current).toBe(`/sports?day=${days[9]}`));
+    expect(screen.getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual(['nba:7']);
   });
 
   it('keeps the cards a search key leaves as they were without rendering them again', async () => {
@@ -589,13 +639,53 @@ describe('sports page', () => {
 
   it('says the filters hide every game of the day even while Live now shows another day\'s game', async () => {
     const tomorrow = etDays(Date.now(), 7, 7)[8]!;
-    data.live = [h.liveGame('9')];
+    const playing = h.liveGame('9', { league: 'nfl', home: h.team('GB', 'Green Bay Packers'), away: h.team('DET', 'Detroit Lions') });
+    data.live = [playing];
+    setStreams(playing, [h.match(ESPN)]);
     setDay([h.game('2', { league: 'nfl', startMs: Date.now() + 26 * h.HOUR, etDate: tomorrow, home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') })], tomorrow);
     pickDay(tomorrow);
-    await openReady(`/sports?day=${tomorrow}&league=nba`);
+    // "With streams" hides the day's one game, which has none.
+    localStorage.setItem('tsrust.sportsStreamsOnly', '1');
+    await openReady(`/sports?day=${tomorrow}&league=nfl`);
     expect(within(screen.getByTestId('sports-live')).getAllByTestId('sports-game')).toHaveLength(1);
     expect(within(screen.getByTestId('sports-day-panel')).getByText('No games match')).toBeTruthy();
     expect(screen.getByTestId('sports-clear-filters')).toBeTruthy();
+  });
+
+  it('says a picked league has no games that day, and offers every league instead of clearing filters', async () => {
+    const tomorrow = etDays(Date.now(), 7, 7)[8]!;
+    setDay([h.game('2', { league: 'nfl', startMs: Date.now() + 26 * h.HOUR, etDate: tomorrow, home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') })], tomorrow);
+    pickDay(tomorrow);
+    await openReady(`/sports?day=${tomorrow}&league=nba`);
+    const panel = screen.getByTestId('sports-day-panel');
+    expect(within(panel).getByText('No NBA games on this day')).toBeTruthy();
+    expect(screen.queryByTestId('sports-clear-filters')).toBeNull();
+    // The empty league reads as empty on its tab before it is picked.
+    expect(within(screen.getByRole('tab', { name: /^MLB / })).getByText('MLB').className).toContain('text-fg-subtle');
+    expect(within(screen.getByRole('tab', { name: /^NFL / })).getByText('NFL').className).not.toContain('text-fg-subtle');
+    fireEvent.click(within(panel).getByTestId('sports-all-leagues'));
+    await waitFor(() => expect(h.location.current).toBe(`/sports?day=${tomorrow}`));
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(1);
+  });
+
+  it('shows no counts while nothing was counted, and names a league that failed', async () => {
+    data.loading = true;
+    setDay([]);
+    await openReady();
+    expect(screen.getByTestId('sports-loading')).toBeTruthy();
+    expect(within(screen.getByTestId('sports-leagues')).getAllByRole('tab').map((p) => p.textContent)).toEqual(['All', 'NFL', 'NCAAFCollege Football', 'NBA', 'MLB']);
+    expect(screen.getByTestId('sports-streams-only').textContent).toBe('With streams');
+    cleanup();
+
+    // One league failed with nothing kept: its tab and All have no number, and the error names it.
+    data.loading = false;
+    data.error = new Error('ESPN nba scoreboard answered HTTP 503');
+    data.failedLeagues = ['nba'];
+    data.cache.clear();
+    setDay([h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') })]);
+    await openReady();
+    expect(within(screen.getByTestId('sports-leagues')).getAllByRole('tab').map((p) => p.textContent)).toEqual(['All', 'NFL 1', 'NCAAFCollege Football 0', 'NBA', 'MLB 0']);
+    expect(screen.getByText("Couldn't load NBA scores")).toBeTruthy();
   });
 
   it('hides the games no stream was found for while "With streams" is on, and remembers it', async () => {
@@ -706,18 +796,22 @@ describe('sports page', () => {
     const more = within(rows[0]!).getByRole('button', { name: 'Show all 5 streams' });
     expect(more.textContent).toBe('+4');
     expect(more.getAttribute('aria-expanded')).toBe('false');
-    // Its 44 px hit area is for touch only: for a mouse it stays on the chip, off the name above it.
+    // Its hit area reaches 44 px on touch, and 24 px for a mouse, just short of the name above it.
     const hit = more.className.split(' ');
-    expect(hit).toEqual(expect.arrayContaining(['pointer-coarse:after:absolute', 'pointer-coarse:after:-inset-y-3']));
-    expect(hit.filter((c) => c.startsWith('after:'))).toEqual([]);
+    expect(hit).toEqual(expect.arrayContaining(['after:absolute', 'after:-inset-y-0.5', 'pointer-coarse:after:-inset-y-3']));
     fireEvent.click(more);
     rows = within(list).getAllByTestId('sports-stream');
     // The toggle stays put in the first row, so the same press closes the list again.
     expect(within(rows[0]!).getByTestId('sports-show-all').getAttribute('aria-expanded')).toBe('true');
     expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide', 'event', 'network', 'network', 'network']);
-    expect(within(rows[0]!).getByText('In guide')).toBeTruthy();
-    // The reason is quiet text, not a badge: only the regional warning is one.
-    expect(within(rows[0]!).getByTestId('sports-reason').getAttribute('class')).toBeNull();
+    // A guide match's slot stands in for "In guide", which stays its tooltip and is read before it.
+    expect(within(rows[0]!).queryByTestId('sports-reason')).toBeNull();
+    const slot = within(rows[0]!).getByTestId('sports-stream-slot');
+    expect(slot.getAttribute('title')).toBe('In guide');
+    expect(slot.textContent).toMatch(/^In guide, \d/);
+    // The reason is quiet text, and the regional warning warning-toned text: neither is a badge.
+    expect(within(rows[1]!).getByTestId('sports-reason').className).toBe('block truncate');
+    expect(within(rows[2]!).getByTestId('sports-regional').className).toContain('text-warning');
     expect(within(rows[1]!).getByText('Event channel')).toBeTruthy();
     expect(within(rows[2]!).getByText('Network')).toBeTruthy();
     expect(within(rows[2]!).getByTestId('sports-regional').textContent).toBe('Regional');
@@ -770,6 +864,31 @@ describe('sports page', () => {
     await waitFor(() => expect(player.played).toHaveLength(1));
     expect(player.played[0]).toEqual({ channel: EVENT, kind: 'xtream', nowTitle: 'Boston Celtics at New York Knicks', displayName: 'NBA 05: Celtics vs Knicks' });
     await waitFor(() => expect(player.state.zapContext).toEqual({ sourceId: 'src1', categoryId: 'nba-events' }));
+    // The row says it is the one playing, in place of its Watch; on a wide window the page stays.
+    const row = await within(card(g)).findByTestId('sports-playing');
+    expect(row.textContent).toBe('Playing');
+    expect(row.closest('li')?.getAttribute('aria-current')).toBe('true');
+    expect(within(card(g)).queryByTestId('sports-watch')).toBeNull();
+    expect(h.location.current).toBe('/sports');
+  });
+
+  it('opens the big picture after Watch on a phone', async () => {
+    // jsdom has no matchMedia: a phone's width, and nothing else.
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({ matches: query === '(max-width: 639px)', media: query, addEventListener: () => undefined, removeEventListener: () => undefined }),
+    });
+    try {
+      const g = h.liveGame('1');
+      setDay([g]);
+      setStreams(g, [h.match(EVENT, { reason: 'event' })]);
+      await openReady();
+      fireEvent.click(within(card(g)).getByTestId('sports-watch'));
+      // Where the mini player's Expand goes: Live TV on the channel's group.
+      await waitFor(() => expect(h.location.current).toBe('/s/src1/live/nba-events'));
+    } finally {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    }
   });
 
   it('offers Watch from 15 minutes before the start, and says when playback fails', async () => {

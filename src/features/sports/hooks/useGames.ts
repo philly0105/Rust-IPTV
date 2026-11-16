@@ -7,7 +7,7 @@
  */
 
 import { queryOptions, useQueries, type UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { etDate, fetchScoreboard, shiftEtDate } from '../lib/espn';
 import { LEAGUES, type Game, type League } from '../lib/types';
@@ -84,16 +84,22 @@ function byLeague(a: Game, b: Game): number {
   return leagueOrder(a.league) - leagueOrder(b.league) || a.startMs - b.startMs || a.id.localeCompare(b.id);
 }
 
-// Module-level, so useQueries re-runs them only when a result changes.
-function combineDay(results: UseQueryResult<Game[]>[]) {
+// Module-level (combineDay through a callback kept per league list), so useQueries re-runs them only
+// when a result changes.
+function combineDay(results: UseQueryResult<Game[]>[], leagues: readonly League[]) {
   return {
     games: results.flatMap((r) => r.data ?? []).sort(byStart),
     loading: results.some((r) => r.isPending),
     error: (results.find((r) => r.error)?.error ?? null) as unknown,
+    failedLeagues: leagues.filter((_, i) => results[i]?.error && results[i].data === undefined),
     refetch: () => {
       for (const r of results) void r.refetch();
     },
   };
+}
+
+function combineDays(results: UseQueryResult<Game[]>[]) {
+  return { games: results.flatMap((r) => r.data ?? []).sort(byStart), loading: results.some((r) => r.isPending) };
 }
 
 function combineLive(results: UseQueryResult<Game[]>[]) {
@@ -118,13 +124,21 @@ export function useEtToday(): string {
 
 /**
  * The games of one Eastern day for `leagues`, sorted by start. `loading` while any league has no answer
- * yet; `error` is the first league's failure (its last good games are still in `games`).
+ * yet; `error` is the first league's failure (its last good games are still in `games`), and
+ * `failedLeagues` the leagues that failed with no games to keep, whose count is unknown.
  */
 export function useSportsDay(
   etDate: string,
   leagues: readonly League[],
-): { games: Game[]; loading: boolean; error: unknown; refetch(): void } {
-  return useQueries({ queries: leagues.map((l) => dayQuery(l, etDate)), combine: combineDay });
+): { games: Game[]; loading: boolean; error: unknown; failedLeagues: League[]; refetch(): void } {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const combine = useCallback((results: UseQueryResult<Game[]>[]) => combineDay(results, leagues), [leagues.join()]);
+  return useQueries({ queries: leagues.map((l) => dayQuery(l, etDate)), combine });
+}
+
+/** Every game of several Eastern days for `leagues`, sorted by start; `loading` while any day has no answer yet. */
+export function useSportsDays(days: readonly string[], leagues: readonly League[]): { games: Game[]; loading: boolean } {
+  return useQueries({ queries: days.flatMap((d) => leagues.map((l) => dayQuery(l, d))), combine: combineDays });
 }
 
 /**

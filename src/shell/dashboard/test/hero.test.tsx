@@ -377,11 +377,11 @@ describe('HeroCarousel', () => {
     const layer = hero.querySelector('[data-hero-backdrop]')!;
     fireEvent.load(layer.querySelector('img')!);
     const poster = layer.querySelector<HTMLElement>('[data-hero-poster]')!;
-    // Top 8 % plus 56 % leaves the bottom 36 % to the controls (lg:bottom-14, level with the buttons).
+    // Top 8 % plus 56 % leaves the bottom 36 % to the controls (lg:bottom-10, level with the buttons).
     expect(poster.className).toContain('top-[8%]');
     expect(poster.className).toContain('h-[56%]');
     const controls = screen.getByTestId('hero-controls');
-    expect(controls.className).toContain('lg:bottom-14');
+    expect(controls.className).toContain('lg:bottom-10');
     // Both end on the page gutter, so the poster stands flush over the controls' pill.
     expect(poster.className).toMatch(/(^| )end-\(--page-gutter\)( |$)/);
     expect(controls.className).toMatch(/(^| )lg:end-\(--page-gutter\)( |$)/);

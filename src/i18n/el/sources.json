@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Πύλη Stalker",
 
   "sourceName": "Όνομα",
-  "sourceNamePlaceholder": "Πάροχος σαλονιού",
   "optional": "προαιρετικό",
   "autoRefresh": "Αυτόματη ανανέωση",
   "autoRefreshUnavailable": "Οι επικολλημένες και ανεβασμένες λίστες δεν ανανεώνονται μόνες τους. Προσθέστε τη μέσω URL ή αρχείου για να μένει ενημερωμένη.",

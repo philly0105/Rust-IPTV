@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalker portalı",
 
   "sourceName": "Ad",
-  "sourceNamePlaceholder": "Salondaki sağlayıcı",
   "optional": "isteğe bağlı",
   "autoRefresh": "Otomatik yenile",
   "autoRefreshUnavailable": "Yapıştırılan ve yüklenen oynatma listeleri kendiliğinden yenilenmez. Güncel tutmak için URL veya dosya ile ekleyin.",

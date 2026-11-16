@@ -543,8 +543,9 @@ export function AddSourceDialog({
           disabled={submitting}
           maxLength={120}
           // The name a submit uses when this is left empty, as a placeholder so it never lands in the middle of
-          // what the user is typing.
-          placeholder={defaultName(draft, t('originPasted')) || t('sourceNamePlaceholder')}
+          // what the user is typing. None before there is an address: an invented example name read
+          // as the one the source would get.
+          placeholder={defaultName(draft, t('originPasted')) || undefined}
           value={draft.name}
           // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
           onFocus={(e) => {

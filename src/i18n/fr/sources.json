@@ -26,7 +26,6 @@
   "kindLabel_stalker": "Portail Stalker",
 
   "sourceName": "Nom",
-  "sourceNamePlaceholder": "Fournisseur du salon",
   "optional": "facultatif",
   "autoRefresh": "Actualiser automatiquement",
   "autoRefreshUnavailable": "Les listes collées ou importées ne s’actualisent pas d’elles-mêmes. Ajoutez-la par URL ou par fichier pour la garder à jour.",

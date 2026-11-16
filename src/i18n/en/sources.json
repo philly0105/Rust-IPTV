@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalker portal",
 
   "sourceName": "Name",
-  "sourceNamePlaceholder": "Living room provider",
   "optional": "optional",
   "autoRefresh": "Refresh automatically",
   "autoRefreshUnavailable": "Pasted and uploaded playlists don't refresh on their own. Add it by URL or file to keep it current.",

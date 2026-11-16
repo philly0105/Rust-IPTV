@@ -26,7 +26,6 @@
   "kindLabel_stalker": "Portale Stalker",
 
   "sourceName": "Nome",
-  "sourceNamePlaceholder": "IPTV del soggiorno",
   "optional": "facoltativo",
   "autoRefresh": "Aggiorna automaticamente",
   "autoRefreshUnavailable": "Le playlist incollate o caricate non si aggiornano da sole. Aggiungila tramite URL o file per mantenerla aggiornata.",

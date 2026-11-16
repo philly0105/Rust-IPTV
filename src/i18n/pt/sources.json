@@ -26,7 +26,6 @@
   "kindLabel_stalker": "Portal Stalker",
 
   "sourceName": "Nome",
-  "sourceNamePlaceholder": "Provedor da sala",
   "optional": "opcional",
   "autoRefresh": "Atualizar automaticamente",
   "autoRefreshUnavailable": "Playlists coladas ou enviadas não se atualizam sozinhas. Adicione-a por URL ou arquivo para mantê-la em dia.",

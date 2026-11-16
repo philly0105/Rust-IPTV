@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalker-portál",
 
   "sourceName": "Név",
-  "sourceNamePlaceholder": "Nappali tévé",
   "optional": "nem kötelező",
   "autoRefresh": "Automatikus frissítés",
   "autoRefreshUnavailable": "A beillesztett és feltöltött lejátszási listák nem frissülnek maguktól. A naprakészen tartáshoz adja hozzá URL-címmel vagy fájlként.",

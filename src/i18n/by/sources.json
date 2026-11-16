@@ -27,7 +27,6 @@
   "kindLabel_stalker": "Stalker партал",
 
   "sourceName": "Назва",
-  "sourceNamePlaceholder": "Правайдар у гасцёўні",
   "optional": "неабавязкова",
   "autoRefresh": "Абнаўляць аўтаматычна",
   "autoRefreshUnavailable": "Устаўленыя і запампаваныя плэйлісты не абнаўляюцца самі. Дадайце плэйліст па URL або з файла, каб ён заставаўся актуальным.",

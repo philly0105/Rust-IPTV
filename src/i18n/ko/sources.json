@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalker 포털",
 
   "sourceName": "이름",
-  "sourceNamePlaceholder": "거실 TV 제공업체",
   "optional": "선택 사항",
   "autoRefresh": "자동 새로 고침",
   "autoRefreshUnavailable": "붙여넣거나 업로드한 재생목록은 저절로 새로 고쳐지지 않습니다. 최신 상태로 유지하려면 URL이나 파일로 추가하세요.",

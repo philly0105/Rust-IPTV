@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalker-portaal",
 
   "sourceName": "Naam",
-  "sourceNamePlaceholder": "Provider woonkamer",
   "optional": "optioneel",
   "autoRefresh": "Automatisch vernieuwen",
   "autoRefreshUnavailable": "Geplakte en geüploade afspeellijsten vernieuwen niet vanzelf. Voeg hem toe via een URL of bestand om hem actueel te houden.",

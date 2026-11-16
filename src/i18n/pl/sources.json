@@ -27,7 +27,6 @@
   "kindLabel_stalker": "Portal Stalker",
 
   "sourceName": "Nazwa",
-  "sourceNamePlaceholder": "Dostawca w salonie",
   "optional": "opcjonalnie",
   "autoRefresh": "Odświeżaj automatycznie",
   "autoRefreshUnavailable": "Wklejone i przesłane listy odtwarzania nie odświeżają się same. Dodaj listę przez URL lub plik, aby była aktualna.",

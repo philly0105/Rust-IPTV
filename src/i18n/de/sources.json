@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalker-Portal",
 
   "sourceName": "Name",
-  "sourceNamePlaceholder": "Anbieter Wohnzimmer",
   "optional": "optional",
   "autoRefresh": "Automatisch aktualisieren",
   "autoRefreshUnavailable": "Eingefügte und hochgeladene Playlists aktualisieren sich nicht von selbst. Fügen Sie sie per URL oder Datei hinzu, um sie aktuell zu halten.",

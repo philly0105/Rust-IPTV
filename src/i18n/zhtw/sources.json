@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalker 入口網站",
 
   "sourceName": "名稱",
-  "sourceNamePlaceholder": "客廳的供應商",
   "optional": "選填",
   "autoRefresh": "自動重新整理",
   "autoRefreshUnavailable": "貼上或上傳的播放清單不會自動重新整理。請改用 URL 或檔案新增，以保持最新狀態。",

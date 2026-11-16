@@ -27,7 +27,6 @@
   "kindLabel_stalker": "Портал Stalker",
 
   "sourceName": "Название",
-  "sourceNamePlaceholder": "Провайдер в гостиной",
   "optional": "необязательно",
   "autoRefresh": "Обновлять автоматически",
   "autoRefreshUnavailable": "Вставленные и загруженные плейлисты не обновляются сами. Добавьте плейлист по URL или из файла, чтобы он оставался актуальным.",

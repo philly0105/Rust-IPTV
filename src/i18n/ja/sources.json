@@ -25,7 +25,6 @@
   "kindLabel_stalker": "Stalkerポータル",
 
   "sourceName": "名前",
-  "sourceNamePlaceholder": "リビングのプロバイダー",
   "optional": "任意",
   "autoRefresh": "自動更新",
   "autoRefreshUnavailable": "貼り付けたりアップロードしたりしたプレイリストは自動では更新されません。最新の状態を保つには、URLまたはファイルで追加してください。",

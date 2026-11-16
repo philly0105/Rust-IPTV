@@ -26,7 +26,6 @@
   "kindLabel_stalker": "Portal Stalker",
 
   "sourceName": "Nombre",
-  "sourceNamePlaceholder": "Proveedor de la sala",
   "optional": "opcional",
   "autoRefresh": "Actualizar automáticamente",
   "autoRefreshUnavailable": "Las listas pegadas o subidas no se actualizan solas. Añádela por URL o archivo para mantenerla al día.",

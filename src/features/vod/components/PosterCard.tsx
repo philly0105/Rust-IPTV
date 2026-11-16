@@ -260,7 +260,8 @@ function PosterCardBody({
   const { onPointerEnter: warm, onPointerLeave, onFocus, onBlur } = intent ?? ownIntent;
   // A native tooltip only when it adds something: the provider's fuller name, or a caption cut at
   // two lines (measured as the pointer comes in). Otherwise it repeated the caption under it.
-  const tip = fullTitle && fullTitle !== title ? fullTitle : undefined;
+  // "Harbor Lights (2021)" over the caption "Harbor Lights" and the year line adds nothing.
+  const tip = fullTitle && fullTitle !== title && fullTitle !== `${title} (${year})` ? fullTitle : undefined;
   const onPointerEnter = (e: PointerEvent<HTMLElement>) => {
     warm(e);
     if (tip) return;

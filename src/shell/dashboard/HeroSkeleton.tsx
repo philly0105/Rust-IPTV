@@ -24,7 +24,7 @@ export const HERO_FRAME =
  * on the page gutter, on the header title's line.
  */
 export const HERO_BODY =
-  'relative flex min-h-[clamp(16rem,38vh,20rem)] items-end px-(--page-gutter) pt-12 pb-14 sm:min-h-[clamp(18rem,min(40vh,32vw),30rem)] sm:pt-20 sm:pb-12 lg:pt-12';
+  'relative flex min-h-[clamp(16rem,38vh,20rem)] items-end px-(--page-gutter) pt-12 pb-14 sm:min-h-[clamp(18rem,min(40vh,32vw),30rem)] sm:pt-20 sm:pb-8 lg:pt-12';
 
 /**
  * The fade from the hero into the page under it. In the dark themes the stage melts into the

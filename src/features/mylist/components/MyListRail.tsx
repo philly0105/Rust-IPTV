@@ -1,12 +1,11 @@
 /**
  * The dashboard's My List rail (contract C3): saved movies and series in the
- * user's order, a "See all" link to /my-list, and a Watched tag on finished
- * titles. Renders nothing when the rail is switched off in Settings or the
+ * user's order, a "See all" link to /my-list, and the kit's watched tick on
+ * finished titles. Renders nothing when the rail is switched off in Settings or the
  * list is empty; the detail pages and posters carry the invitation to save
  * something instead, so an empty dashboard does not grow an empty shelf.
  */
 
-import { Check } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -59,7 +58,7 @@ export function MyListRail({ hideError = false }: MyListRailProps = {}) {
       seeAll={{ to: MY_LIST_PATH, label: t('seeAll') }}
       meta={
         total > 0 ? (
-          <span className="shrink-0 text-sm text-fg-subtle tabular" data-testid="mylist-rail-count">
+          <span className="shrink-0 text-caption text-fg-subtle tabular-nums" data-testid="mylist-rail-count">
             {t('count', { count: total })}
           </span>
         ) : undefined
@@ -79,24 +78,13 @@ export function MyListRail({ hideError = false }: MyListRailProps = {}) {
             posterUrl={e.snapshot.posterUrl}
             to={itemPath(e.ref)}
             myList={{ itemRef: e.ref, snapshot: e.snapshot }}
-            badge={e.watched ? <WatchedTag label={t('watched')} /> : undefined}
+            // Every title here is saved: the toggle shows on hover and focus only, not on every poster.
+            myListMark="hover"
+            watched={e.watched}
             ariaLabel={joinList([title, subtitle, e.watched && t('watched')], i18n.language)}
           />
         );
       }}
     />
-  );
-}
-
-/** Solid glass tag over the artwork: readable on any poster. Always on screen, so no backdrop blur (C5). */
-function WatchedTag({ label }: { label: string }) {
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-sm border border-glass-border bg-glass-strong px-1.5 py-0.5 text-caption font-medium leading-4 text-on-glass"
-      data-testid="mylist-watched-tag"
-    >
-      <Check aria-hidden size={12} strokeWidth={2.75} className="text-success" />
-      {label}
-    </span>
   );
 }

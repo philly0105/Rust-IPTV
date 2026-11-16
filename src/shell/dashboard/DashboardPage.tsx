@@ -167,20 +167,26 @@ export interface LiveCandidate {
   name: string;
   logoUrl?: string;
   channel: Channel;
+  /** From the source's first channels, not the user's own history. */
+  fill?: boolean;
 }
 
 /** On now shows at most this many programmes. */
 export const ON_NOW_LIMIT = 24;
+/**
+ * With at least this many of the user's own channels on air, On now shows only those; with fewer,
+ * the source's first channels top it up (a new or M3U user still sees live TV, SH-home-empty-m3u).
+ */
+export const ON_NOW_OWN_MIN = 4;
 /** At most this many channels are asked about in the one `epg.nowNext` call Home makes. */
 const NOW_NEXT_LIMIT = 48;
 
 /**
  * The channels On now asks the guide about, in order: recently watched channels, then the first
  * channels of the most used source (so a user with nothing watched yet, an M3U user above all,
- * still sees live TV on Home: SH-home-empty-m3u, CB-PROGRAM-ART). The channels in `skip` stay
- * out: those another rail on Home already shows (the live favourites, whose rail sits just below
- * with the same programmes, and recent channels while their rail is on). One entry per channel;
- * radio stays out (stations rarely have a guide). Exported for tests.
+ * still sees live TV on Home: SH-home-empty-m3u, CB-PROGRAM-ART), marked `fill`. The channels in
+ * `skip` stay out: the live favourites, whose rail sits just below with the same programmes. One
+ * entry per channel; radio stays out (stations rarely have a guide). Exported for tests.
  */
 export function liveCandidates(
   skip: readonly { ref: ItemRef }[],
@@ -200,8 +206,18 @@ export function liveCandidates(
   for (const e of recent) {
     add({ ref: e.ref, name: e.snapshot.title, logoUrl: e.snapshot.posterUrl, channel: snapshotChannel(e.ref, e.snapshot) });
   }
-  for (const ch of fill) add({ ref: ch.ref, name: ch.name, logoUrl: ch.logoUrl, channel: ch });
+  for (const ch of fill) add({ ref: ch.ref, name: ch.name, logoUrl: ch.logoUrl, channel: ch, fill: true });
   return out;
+}
+
+/**
+ * On now's cards: the user's own channels on air alone once there are {@link ON_NOW_OWN_MIN} of
+ * them, so a big provider's first channels (often a country nobody here watches) never push in
+ * ahead of or between them; with fewer, topped up with the source's channels. Exported for tests.
+ */
+export function ownFirst<T extends { fill?: boolean }>(items: readonly T[]): readonly T[] {
+  const own = items.filter((i) => !i.fill);
+  return own.length >= ON_NOW_OWN_MIN ? own : items;
 }
 
 export type OnNowItem = LiveCandidate & { programme: NonNullable<EpgNowNext['now']>; progress: number | undefined; left: number | undefined };
@@ -354,18 +370,15 @@ function DashboardBody() {
   const fillWanted = hasSources && liveOn && !!topLiveSource;
   const fillSettled = !fillWanted || fill.isSuccess || fill.isError;
   const fillChannels = useMemo(() => (fill.data?.items ?? []).filter((c) => !c.isRadio && !removingSources.has(c.ref.sourceId)), [fill.data, removingSources]);
-  // On now leaves out the channels another live rail already shows: the live favourites (On now
-  // shares their switch, so their rail is on too) and, while its rail is on, recent channels.
-  // Otherwise it opened with the very cards of the rails below, in the same order.
+  // On now is the user's own live rail: what is on now on the channels they watched, the most
+  // recent first, topped up from the source's first channels only while fewer than four are on
+  // (ownFirst). It leaves out the live favourites (On now shares their switch, so their rail is
+  // on too, just below, with the same programmes); the recent channels rail leaves out what On now
+  // shows instead (recentRailRows), so no channel is on two live rails.
   const recentLiveOn = show('recentlyWatchedLive');
   const candidates = useMemo(
-    () =>
-      liveOn
-        ? recentLiveOn
-          ? liveCandidates([...liveFavorites, ...recentLive], [], fillChannels)
-          : liveCandidates(liveFavorites, recentLive, fillChannels)
-        : [],
-    [liveOn, recentLiveOn, liveFavorites, recentLive, fillChannels],
+    () => (liveOn ? liveCandidates(liveFavorites, recentLive, fillChannels) : []),
+    [liveOn, liveFavorites, recentLive, fillChannels],
   );
   // The favourites rail shows its programmes from the same answer, so it is in the list first.
   // Only while Home's live rails are on: with them off nothing here shows a programme. The recent
@@ -419,7 +432,18 @@ function DashboardBody() {
   }, [nowNextOn, refetchNowNext]);
   // `minute` is in the list so the shares and minutes left are worked out again on each tick.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const onNow = useMemo(() => onNowItems(candidates, nowNext.data, epgOffset), [candidates, nowNext.data, epgOffset, minute]);
+  const onNow = useMemo(() => ownFirst(onNowItems(candidates, nowNext.data, epgOffset)), [candidates, nowNext.data, epgOffset, minute]);
+  const onNowPending = liveOn && (favorites.isPending || !recentSettled || !fillSettled || (nowRefs.length > 0 && nowNext.isPending));
+  // The recent channels rail without the channels On now and the favourites rail show (their
+  // switch is On now's): the same five channels filled three rails. The whole history stays on
+  // Recently watched (the rail's See all). Undefined while On now still waits, so no card shows
+  // there and then moves up. Kept as one array while the keys hold (SH-4: the minute tick).
+  const recentRailKeys = liveOn ? [...liveFavorites, ...onNow].map(refKey).join('\u0000') : '';
+  const recentRailRows = useMemo(() => {
+    if (onNowPending && recentLive.length > 0) return undefined;
+    const drop = new Set(recentRailKeys.split('\u0000'));
+    return recentLive.filter((r) => !drop.has(refKey(r)));
+  }, [onNowPending, recentLive, recentRailKeys]);
   // No guide data and nothing personal yet: the most used source's channels themselves.
   const showChannels = liveOn && !nowNext.isPending && onNow.length === 0 && liveFavorites.length === 0 && recentLive.length === 0 && fillChannels.length > 0;
 
@@ -487,7 +511,8 @@ function DashboardBody() {
     },
     [sourceById, toast, t],
   );
-  const heroSourceName = useCallback((id: string) => sourceById.get(id)?.name, [sourceById]);
+  // "New in <source>" only with two or more sources; with one the eyebrow says "Just added".
+  const heroSourceName = useCallback((id: string) => (manySources ? sourceById.get(id)?.name : undefined), [manySources, sourceById]);
   const heroCanPlay = useCallback((ref: ItemRef) => sourceById.has(ref.sourceId), [sourceById]);
   const playSlide = useCallback(
     (s: HeroSlide) => play({ ref: s.ref, episodeId: s.episodeId, title: s.title ?? '', subtitle: s.subtitle, posterUrl: s.posterUrl }),
@@ -557,13 +582,12 @@ function DashboardBody() {
     (liveOn && onNow.length > 0) ||
     showChannels ||
     (show('liveFavorites') && liveFavorites.length > 0) ||
-    (show('recentlyWatchedLive') && recentLive.length > 0) ||
+    (show('recentlyWatchedLive') && (recentRailRows?.length ?? 0) > 0) ||
     (show('favoriteMoviesAndSeries') && vodFavorites.length > 0) ||
     (show('recentlyAdded') && recentlyAdded.length > 0) ||
     (show('tmdbTrending') && tmdbEnabled && (trending.data?.length ?? 0) > 0);
   // Wait for every rail on screen (and a hero still waiting for new arrivals), so
   // "Nothing to show yet" never flashes above content still loading.
-  const onNowPending = liveOn && (favorites.isPending || !recentSettled || !fillSettled || (nowRefs.length > 0 && nowNext.isPending));
   const anyRailPending =
     railQueries.some((q) => q.isPending) || (myListOn && myList.isPending) || customLists.isPending || (show('hero') && heroLoading) || onNowPending;
 
@@ -576,14 +600,16 @@ function DashboardBody() {
     ['continueWatching', continueWatching.isPending],
     // On now waits for the lists it reads and the guide's answer; its own skeleton holds its place.
     ['onNow', false],
+    ['liveFavorites', favorites.isPending],
     // My List loads inside its own rail (skeleton first), so it never holds back the rest.
     ['myList', false],
-    ['liveFavorites', favorites.isPending],
-    ['recentlyWatchedLive', recent.isPending],
+    // It waits for On now too, which takes its channels on air.
+    ['recentlyWatchedLive', recent.isPending || !recentRailRows],
     ['favoriteMoviesAndSeries', favorites.isPending],
-    ['recentSources', sources.isPending],
     ['recentlyAdded', addedMovies.isPending || addedSeries.isPending],
     ['tmdbTrending', tmdbEnabled && trending.isPending],
+    // Last: a shortcut to manage sources, not something to watch.
+    ['recentSources', sources.isPending],
   ];
   const on = (k: Slot) => (k === 'onNow' ? liveOn : show(k));
   const firstPending = sections.findIndex(([k, pending]) => on(k) && pending);
@@ -600,7 +626,7 @@ function DashboardBody() {
     const px = (n: number) => scalePx(n, uiScale, density, true);
     const rail = (on: boolean, base: number, phoneBase: number, aspect: number) => (on ? railLeastHeight(px(phone ? phoneBase : base), aspect) : 0);
     const wide = (on: boolean) => rail(on, WIDE_CARD, WIDE_CARD_PHONE, 16 / 9);
-    const channel = (on: boolean) => rail(on, 232, Math.round(232 * 0.7), 16 / 9);
+    const channel = (on: boolean) => rail(on, CHANNEL_CARD, Math.round(CHANNEL_CARD * 0.7), 16 / 9);
     const poster = (on: boolean) => rail(on, 168, Math.round(168 * 0.7), 2 / 3);
     // A rail still loading draws its skeleton, as tall as its cards, unless it came back empty last time.
     const skeleton = (id: string) => !readRailEmpty(id);
@@ -609,16 +635,16 @@ function DashboardBody() {
         key: 'continueWatching',
         height: wide(visible('continueWatching') && (continueWatching.isPending ? skeleton('continue-watching') : railContinueRows.length > 0)),
       },
-      { key: 'onNow', height: wide(visible('onNow') && (onNowPending ? skeleton('on-now') : onNow.length > 0)) },
-      { key: 'myList', height: poster(visible('myList') && myListCount > 0) },
+      { key: 'onNow', height: rail(visible('onNow') && (onNowPending ? skeleton('on-now') : onNow.length > 0), CHANNEL_CARD, WIDE_CARD_PHONE, 16 / 9) },
+      { key: 'liveFavorites', height: channel(visible('liveFavorites') && (liveFavorites.length > 0 || showChannels)) },
       // Unknown here (their own queries): counted as drawing nothing, a lower bound.
       { key: 'customLists', height: 0 },
-      { key: 'liveFavorites', height: channel(visible('liveFavorites') && (liveFavorites.length > 0 || showChannels)) },
-      { key: 'recentlyWatchedLive', height: channel(visible('recentlyWatchedLive') && recentLive.length > 0) },
+      { key: 'myList', height: poster(visible('myList') && myListCount > 0) },
+      { key: 'recentlyWatchedLive', height: channel(visible('recentlyWatchedLive') && (recentRailRows?.length ?? 0) > 0) },
       { key: 'favoriteMoviesAndSeries', height: poster(visible('favoriteMoviesAndSeries') && vodFavorites.length > 0) },
-      { key: 'recentSources', height: channel(visible('recentSources') && rankedSources.length > 0) },
       { key: 'recentlyAdded', height: poster(visible('recentlyAdded') && recentlyAdded.length > 0) },
       { key: 'tmdbTrending', height: 0 },
+      { key: 'recentSources', height: channel(visible('recentSources') && manySources) },
     ];
     // The hero's least height is its content box's min-height (HERO_BODY), in rem and viewport units.
     const rem = 16 * uiScale;
@@ -693,17 +719,6 @@ function DashboardBody() {
           <OnNowRail items={onNowPending ? undefined : onNow} loading={onNowPending} loaded={!onNowPending} manySources={manySources} sourceById={sourceById} play={play} />
         )}
 
-        {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
-        {visible('myList') && (
-          <RailDeferContext.Provider value={deferred('myList')}>
-            <HomeMyListRail hideError={showSharedError} />
-          </RailDeferContext.Provider>
-        )}
-        {/* Run 2 C3: one rail per custom list with "Show on Home" on, in list order. */}
-        <RailDeferContext.Provider value={deferred('customLists')}>
-          <HomeCustomListRails />
-        </RailDeferContext.Provider>
-
         <RailDeferContext.Provider value={deferred('liveFavorites')}>
           {visible('liveFavorites') && (
             <LiveFavoritesRail
@@ -725,11 +740,23 @@ function DashboardBody() {
           )}
         </RailDeferContext.Provider>
 
+        {/* Run 2 C3: one rail per custom list with "Show on Home" on, in list order. */}
+        <RailDeferContext.Provider value={deferred('customLists')}>
+          <HomeCustomListRails />
+        </RailDeferContext.Provider>
+
+        {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
+        {visible('myList') && (
+          <RailDeferContext.Provider value={deferred('myList')}>
+            <HomeMyListRail hideError={showSharedError} />
+          </RailDeferContext.Provider>
+        )}
+
         <RailDeferContext.Provider value={deferred('recentlyWatchedLive')}>
           {visible('recentlyWatchedLive') && (
             <RecentLiveRail
-              items={recentLive}
-              loading={recent.isPending}
+              items={recentRailRows}
+              loading={recent.isPending || !recentRailRows}
               loaded={recent.isSuccess}
               error={railError(recent.error)}
               refetch={recent.refetch}
@@ -755,10 +782,6 @@ function DashboardBody() {
           )}
         </RailDeferContext.Provider>
 
-        <RailDeferContext.Provider value={deferred('recentSources')}>
-          {visible('recentSources') && <RecentSourcesRail items={rankedSources} loading={sources.isPending} />}
-        </RailDeferContext.Provider>
-
         <RailDeferContext.Provider value={deferred('recentlyAdded')}>
           {visible('recentlyAdded') && (
             <RecentlyAddedRail
@@ -768,6 +791,7 @@ function DashboardBody() {
               error={railError(addedMovies.error ?? addedSeries.error)}
               refetch={retryAdded}
               sourceById={sourceById}
+              manySources={manySources}
             />
           )}
         </RailDeferContext.Provider>
@@ -781,8 +805,14 @@ function DashboardBody() {
               error={railError(trending.error)}
               refetch={trending.refetch}
               sourceById={sourceById}
+              manySources={manySources}
             />
           )}
+        </RailDeferContext.Provider>
+
+        <RailDeferContext.Provider value={deferred('recentSources')}>
+          {/* With one source its one tile only repeats that source's own row in the app rail. */}
+          {visible('recentSources') && manySources && <RecentSourcesRail items={rankedSources} loading={sources.isPending} />}
         </RailDeferContext.Provider>
 
         {hasSources && !anyRailVisible && !anyRailError && !anyRailPending && <GetStarted source={rankedSources[0]} hasLive={rankedSources.some((s) => s.channelCount > 0)} />}
@@ -879,15 +909,19 @@ const channelKey = (c: Channel) => itemKey(c.ref);
 const sourceKey = (s: Source) => s.id;
 const trendingKey = (b: TmdbBrief) => `${b.mediaType}-${b.tmdbId}`;
 
-/** Wide cards: Continue watching and On now, a 16:9 still with room for an episode line. */
+/** Wide cards: Continue watching, a 16:9 still with room for an episode line. */
 const WIDE_CARD = 280;
 const WIDE_CARD_PHONE = 240;
+/** Channel cards: On now, the live favourites, recently watched channels, a source's channels and sources. */
+const CHANNEL_CARD = 232;
 
 /**
  * The card menu's actions load on the click: their watched-state module shares a chunk with the
  * player store, and a static import put that store in Home's first render (C4, SH-2).
  */
 const continueActions = () => import('./continueActions');
+/** The channel rails' Remove actions, loaded on the click like the card menu's. */
+const railActions = () => import('./railActions');
 
 /**
  * The detail page's backdrop of a resumed movie or series (a local catalog read, shared with the
@@ -1002,7 +1036,10 @@ const OnNowRail = memo(function OnNowRail({
       loaded={loaded}
       seeAll={{ to: '/epg', label: t('openGuide') }}
       getKey={candidateKey}
-      cardWidth={WIDE_CARD}
+      // The channel rails' width: most guides have no programme pictures, so an On now card is
+      // mostly the same logo tile as a favourite's, and it changed size between the two rails.
+      cardWidth={CHANNEL_CARD}
+      // On a phone the wide width: its second line holds the channel and the time left.
       phoneCardWidth={WIDE_CARD_PHONE}
       skeletonAspect={16 / 9}
       renderCard={(c, rail) => {
@@ -1060,7 +1097,7 @@ const LiveFavoritesRail = memo(function LiveFavoritesRail({
       onRetry={() => void refetch()}
       seeAll={{ to: '/favorites' }}
       getKey={refKey}
-      cardWidth={232}
+      cardWidth={CHANNEL_CARD}
       skeletonAspect={16 / 9}
       renderCard={(f, rail) => {
         const nn = nowNext?.[itemKey(f.ref)];
@@ -1078,6 +1115,14 @@ const LiveFavoritesRail = memo(function LiveFavoritesRail({
             ariaLabel={t('playTitle', { title: f.snapshot.title })}
             onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
             channel={snapshotChannel(f.ref, f.snapshot)}
+            menuExtra={[
+              {
+                id: 'remove-favorite',
+                label: t('library:removeFromFavorites'),
+                icon: <X className="size-4" />,
+                onSelect: () => void railActions().then((m) => m.removeFavorite(f, f.snapshot.title, t)),
+              },
+            ]}
           />
         );
       }}
@@ -1099,7 +1144,7 @@ const SourceChannelsRail = memo(function SourceChannelsRail({ source, items, pla
       loaded
       seeAll={{ to: `${sourceBasePath(source.id)}/live` }}
       getKey={channelKey}
-      cardWidth={232}
+      cardWidth={CHANNEL_CARD}
       skeletonAspect={16 / 9}
       renderCard={(c, rail) => (
         <ChannelCard
@@ -1129,7 +1174,7 @@ const RecentLiveRail = memo(function RecentLiveRail({
   manySources,
   play,
 }: RailQueryProps & {
-  items: readonly RecentEntry[];
+  items: readonly RecentEntry[] | undefined;
   nowNext: RpcResult<'epg.nowNext'> | undefined;
   epgOffset: number;
   sourceById: ReadonlyMap<string, Source>;
@@ -1149,7 +1194,7 @@ const RecentLiveRail = memo(function RecentLiveRail({
       onRetry={() => void refetch()}
       seeAll={{ to: '/recent' }}
       getKey={refKey}
-      cardWidth={232}
+      cardWidth={CHANNEL_CARD}
       skeletonAspect={16 / 9}
       renderCard={(r, rail) => {
         const nn = nowNext?.[itemKey(r.ref)];
@@ -1166,6 +1211,14 @@ const RecentLiveRail = memo(function RecentLiveRail({
             ariaLabel={t('playTitle', { title: r.snapshot.title })}
             onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
             channel={snapshotChannel(r.ref, r.snapshot)}
+            menuExtra={[
+              {
+                id: 'remove-recent',
+                label: t('library:removeFromHistory'),
+                icon: <X className="size-4" />,
+                onSelect: () => void railActions().then((m) => m.removeRecent(r, r.snapshot.title, t)),
+              },
+            ]}
           />
         );
       }}
@@ -1224,7 +1277,7 @@ const RecentSourcesRail = memo(function RecentSourcesRail({ items, loading }: { 
       loading={loading}
       seeAll={{ to: '/sources', label: t('manageSources') }}
       getKey={sourceKey}
-      cardWidth={232}
+      cardWidth={CHANNEL_CARD}
       skeletonAspect={16 / 9}
       renderCard={(s, rail) => <SourceCard rail={rail} source={s} />}
     />
@@ -1238,7 +1291,8 @@ const RecentlyAddedRail = memo(function RecentlyAddedRail({
   error,
   refetch,
   sourceById,
-}: RailQueryProps & { items: readonly (VodItem | SeriesItem)[]; sourceById: ReadonlyMap<string, Source> }) {
+  manySources,
+}: RailQueryProps & { items: readonly (VodItem | SeriesItem)[]; sourceById: ReadonlyMap<string, Source>; manySources: boolean }) {
   const { t, i18n } = useTranslation('shell');
   return (
     <RailMyListProvider>
@@ -1259,17 +1313,20 @@ const RecentlyAddedRail = memo(function RecentlyAddedRail({
           const rating = formatRating(v.rating, i18n.language);
           // The title the detail page and the hero show: no trailing year or provider tag.
           const title = v.titleBase || v.title;
+          // The source only when there are several (design-system.md): one name on every card says nothing.
+          const sourceName = manySources ? sourceById.get(v.ref.sourceId)?.name : undefined;
+          const year = !titleEndsWithYear(title, v.year) ? v.year : undefined;
           return (
             <PosterCard
               rail={rail}
               title={title}
-              subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, !titleEndsWithYear(title, v.year) && v.year], i18n.language)}
+              subtitle={joinList([sourceName, year], i18n.language) || (v.ref.contentType === 'series' ? t('series') : t('movie'))}
               posterUrl={v.posterUrl}
               backdropUrl={v.backdropUrl}
               badge={rating ? <Badge variant="neutral" className="bg-glass-strong text-on-glass">{rating}</Badge> : undefined}
               to={itemPath(v.ref)}
               // Name first: the rating badge sits before the caption in the DOM.
-              ariaLabel={joinList([title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })], i18n.language)}
+              ariaLabel={joinList([title, sourceName, v.year, rating && t('ratedLabel', { rating })], i18n.language)}
               myList={myListTarget(v)}
             />
           );
@@ -1309,7 +1366,19 @@ export function trendingMatch(b: TmdbBrief, found: CatalogSearchResult | undefin
  * own reads, and a `sources.changed` searches again only for the cards on screen
  * (SH-home-rpc-fanout).
  */
-function TrendingCard({ b, rail, sourceById, ready }: { b: TmdbBrief; rail: RailCardProps; sourceById: ReadonlyMap<string, Source>; ready: boolean }) {
+function TrendingCard({
+  b,
+  rail,
+  sourceById,
+  manySources,
+  ready,
+}: {
+  b: TmdbBrief;
+  rail: RailCardProps;
+  sourceById: ReadonlyMap<string, Source>;
+  manySources: boolean;
+  ready: boolean;
+}) {
   const { t, i18n } = useTranslation('shell');
   const [card, setCard] = useState<HTMLElement | null>(null);
   const near = useNearView(card);
@@ -1325,13 +1394,13 @@ function TrendingCard({ b, rail, sourceById, ready }: { b: TmdbBrief; rail: Rail
   const badge = rating ? <Badge variant="neutral" className="bg-glass-strong text-on-glass">{rating}</Badge> : undefined;
   if (match) {
     const title = match.titleBase || match.title;
-    const sourceName = sourceById.get(match.ref.sourceId)?.name;
+    const sourceName = manySources ? sourceById.get(match.ref.sourceId)?.name : undefined;
     const year = match.year ?? b.year;
     return (
       <PosterCard
         rail={cardRail}
         title={title}
-        subtitle={joinList([sourceName, !titleEndsWithYear(title, year) && year], i18n.language)}
+        subtitle={joinList([sourceName, !titleEndsWithYear(title, year) && year], i18n.language) || (match.ref.contentType === 'series' ? t('series') : t('movie'))}
         posterUrl={match.posterUrl ?? b.posterUrl}
         backdropUrl={match.backdropUrl}
         badge={badge}
@@ -1362,7 +1431,8 @@ const TrendingRail = memo(function TrendingRail({
   error,
   refetch,
   sourceById,
-}: RailQueryProps & { items: readonly TmdbBrief[] | undefined; sourceById: ReadonlyMap<string, Source> }) {
+  manySources,
+}: RailQueryProps & { items: readonly TmdbBrief[] | undefined; sourceById: ReadonlyMap<string, Source>; manySources: boolean }) {
   const { t } = useTranslation('shell');
   // The catalog lookups start once the page has gone idle after the rail appeared.
   const [ready, setReady] = useState(false);
@@ -1380,7 +1450,7 @@ const TrendingRail = memo(function TrendingRail({
         getKey={trendingKey}
         cardWidth={168}
         skeletonAspect={2 / 3}
-        renderCard={(b, rail) => <TrendingCard b={b} rail={rail} sourceById={sourceById} ready={ready} />}
+        renderCard={(b, rail) => <TrendingCard b={b} rail={rail} sourceById={sourceById} manySources={manySources} ready={ready} />}
       />
     </RailMyListProvider>
   );

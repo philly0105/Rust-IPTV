@@ -13,7 +13,7 @@ import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { useChannelEditMenuItems } from '@/features/channeledit';
 import { useAddToListMenuItem } from '@/features/lists/hooks/useAddToList';
-import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMenu';
+import { ContextMenu, type MenuEntry } from '@/features/live/components/ContextMenu';
 import { channelInput } from '@/features/multiview/addChannel';
 import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
@@ -47,7 +47,7 @@ export function ChannelMenuBody({ menu, actions, onClose }: { menu: ChannelMenuR
     { categoryId },
   );
 
-  const items = useMemo((): MenuItem[] => {
+  const items = useMemo((): MenuEntry[] => {
     if (!menu) return [];
     return [
       { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: menu.onPlay },
@@ -55,6 +55,7 @@ export function ChannelMenuBody({ menu, actions, onClose }: { menu: ChannelMenuR
       ...(addToListItem ? [addToListItem] : []),
       ...editItems,
       ...lockItems,
+      ...(menu.extra?.length ? [{ id: 'rail-sep', type: 'separator' as const }, ...menu.extra] : []),
     ];
   }, [menu, t, multiviewItem, addToListItem, editItems, lockItems]);
 
@@ -63,6 +64,7 @@ export function ChannelMenuBody({ menu, actions, onClose }: { menu: ChannelMenuR
       pos={menu?.pos ?? actions?.pos ?? null}
       items={menu ? items : (actions?.items ?? [])}
       label={menu?.channel.name ?? actions?.label ?? ''}
+      header={menu ? undefined : actions?.header}
       onClose={onClose}
     />
   );

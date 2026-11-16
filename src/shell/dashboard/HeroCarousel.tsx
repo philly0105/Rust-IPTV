@@ -52,7 +52,7 @@ import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, TOUCH_TARGET
 import { formatTenths } from '@/features/vod/lib/rating';
 
 import { useReducedMotion } from '../theme';
-import { buttonMenuAnchor, CardMenuContext, itemPath, usePrefetchTarget, type CardMenuItem } from './cards';
+import { buttonMenuAnchor, CardMenuContext, itemPath, joinList, usePrefetchTarget, type CardMenuItem } from './cards';
 import { HERO_BODY, HERO_FRAME, HERO_PAGE_FADE } from './HeroSkeleton';
 import { HERO_DWELL_MS, titleEndsWithYear, wrapIndex, type HeroSlide } from './heroSlides';
 
@@ -478,16 +478,29 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
           </p>
         )}
         {continuing && s.fraction !== undefined && (
-          <div className="flex max-w-md items-center gap-3">
-            <ProgressBar value={s.fraction * 100} tone="glass" label={t('watchedPercent', { percent: Math.round(s.fraction * 100) })} />
-            {s.minutesLeft !== undefined && <span className="shrink-0 text-sm text-on-glass-muted tabular">{t('minutesLeft', { count: s.minutesLeft })}</span>}
+          // A short bar with the time left right after it. The glass track is the scrim's own
+          // colour here, so the track is a light veil instead: a full-width row showed only the
+          // amber fill and left the time left floating at its far end.
+          <div className="flex items-center gap-3">
+            <ProgressBar value={s.fraction * 100} tone="glass" className="w-40 shrink-0 bg-on-glass/25" label={t('watchedPercent', { percent: Math.round(s.fraction * 100) })} />
+            {s.minutesLeft !== undefined && <span className="min-w-0 truncate text-body-sm text-on-glass-muted tabular">{t('minutesLeft', { count: s.minutesLeft })}</span>}
           </div>
         )}
         {/*
           On a phone Play takes the row and Details (and the slide's menu) fold into square icon
           buttons beside it; a slide with nothing to play keeps Details labelled across the row.
         */}
-        <div className="mt-2 flex gap-3 sm:flex-wrap">
+        <div
+          className="mt-2 flex gap-3 sm:flex-wrap"
+          // Down from the actions to the first rail's card that holds its Tab stop (arrows alone, a remote).
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowDown') return;
+            const card = document.querySelector<HTMLElement>('[data-dash-rail] [data-rail-card][tabindex="0"]');
+            if (!card) return;
+            e.preventDefault();
+            card.focus();
+          }}
+        >
           {playable && (
             <button
               type="button"
@@ -530,7 +543,9 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
                   const items = menuFor?.(s);
                   if (!items?.length || !openMenu) return;
                   onMenuOpen(true);
-                  openMenu({ pos: buttonMenuAnchor(e.currentTarget), label: title, items, onClose: () => onMenuOpen(false) });
+                  const left = s.minutesLeft !== undefined ? t('minutesLeft', { count: s.minutesLeft }) : undefined;
+                  const subtitle = joinList([s.subtitle, left], i18n.language) || undefined;
+                  openMenu({ pos: buttonMenuAnchor(e.currentTarget), label: title, items, header: { title, subtitle }, onClose: () => onMenuOpen(false) });
                 }}
                 className={cn(GLASS_BUTTON, 'w-12')}
               >
@@ -714,8 +729,33 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-[72%] bg-gradient-to-t from-glass-strong via-glass/60 to-transparent sm:h-3/5" />
       <div aria-hidden className={HERO_PAGE_FADE} />
 
+      {/* Live region: quiet while rotating (no announcement every few seconds), polite once the user drives it. */}
+      {/*
+        One column that may shrink below its content (minmax(0,1fr)): an auto column let the
+        widest slide's button row set the width, so on phones it overflowed the frame and the
+        frame clipped the Details button.
+      */}
+      <div className="relative z-[3] grid grid-cols-[minmax(0,1fr)]" aria-live={running ? 'off' : 'polite'} aria-atomic="false">
+        {slides.map((s, i) => (
+          <SlideBody
+            key={s.key}
+            slide={s}
+            active={i === index}
+            index={i}
+            count={count}
+            panelId={panelId}
+            sourceName={sourceName(s.ref.sourceId)}
+            canPlay={canPlay(s.ref)}
+            onPlay={onPlay}
+            menuFor={menuFor}
+            onMenuOpen={setMenuOpen}
+          />
+        ))}
+      </div>
+
       {count > 1 && (
-        // Top corner on smaller screens, beside the button row from lg up (the copy column has
+        // After the slide in the page's order, so Tab reaches Resume first; placed on screen by
+        // position. Top corner on smaller screens, beside the button row from lg up (the copy column has
         // the room then). On a phone the capsule goes: a 270 px dark pill of six dots over the
         // artwork read as a broken field and outweighed the title. There the toggle and the dots
         // are a plain row under the buttons (HERO_BODY leaves the room), the chevrons go, and the
@@ -723,7 +763,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
         // ticks choose. The toggle stays: a rotation that runs by itself needs a way to stop it.
         <div
           className={cn(
-            'absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-14',
+            'absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-10',
             'max-sm:inset-x-0 max-sm:top-auto max-sm:bottom-1 max-sm:justify-center max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:p-0 max-sm:shadow-none',
           )}
           data-testid="hero-controls"
@@ -793,30 +833,6 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
           </Tooltip>
         </div>
       )}
-
-      {/* Live region: quiet while rotating (no announcement every few seconds), polite once the user drives it. */}
-      {/*
-        One column that may shrink below its content (minmax(0,1fr)): an auto column let the
-        widest slide's button row set the width, so on phones it overflowed the frame and the
-        frame clipped the Details button.
-      */}
-      <div className="relative z-[3] grid grid-cols-[minmax(0,1fr)]" aria-live={running ? 'off' : 'polite'} aria-atomic="false">
-        {slides.map((s, i) => (
-          <SlideBody
-            key={s.key}
-            slide={s}
-            active={i === index}
-            index={i}
-            count={count}
-            panelId={panelId}
-            sourceName={sourceName(s.ref.sourceId)}
-            canPlay={canPlay(s.ref)}
-            onPlay={onPlay}
-            menuFor={menuFor}
-            onMenuOpen={setMenuOpen}
-          />
-        ))}
-      </div>
     </section>
   );
 });

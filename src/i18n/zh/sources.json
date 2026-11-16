@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "已导入 {{count, number}} 项。节目指南正在后台加载。",
 
   "editSource": "编辑 {{name}}",
-  "editSourceTitle": "编辑 {{name}}",
+  "editSourceTitle": "编辑来源",
   "tabDetails": "详情",
   "tabEpg": "节目指南",
   "saveChanges": "保存更改",

@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "{{count, number}} Einträge importiert. Der Programmführer wird im Hintergrund geladen.",
 
   "editSource": "{{name}} bearbeiten",
-  "editSourceTitle": "{{name}} bearbeiten",
+  "editSourceTitle": "Quelle bearbeiten",
   "tabDetails": "Details",
   "tabEpg": "Programmführer",
   "saveChanges": "Änderungen speichern",

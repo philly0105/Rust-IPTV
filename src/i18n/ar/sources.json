@@ -161,7 +161,7 @@
   "addedDescriptionGuide_other": "تم استيراد {{count, number}} عنصر. يُحمَّل دليل البرامج في الخلفية.",
 
   "editSource": "تعديل {{name}}",
-  "editSourceTitle": "تعديل {{name}}",
+  "editSourceTitle": "تعديل المصدر",
   "tabDetails": "التفاصيل",
   "tabEpg": "الدليل",
   "saveChanges": "حفظ التغييرات",

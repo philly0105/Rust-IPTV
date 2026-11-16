@@ -147,7 +147,7 @@
   "addedDescriptionGuide_other": "Импортировано {{count, number}} элемента. Телегид загружается в фоне.",
 
   "editSource": "Изменить {{name}}",
-  "editSourceTitle": "Изменение: {{name}}",
+  "editSourceTitle": "Изменение источника",
   "tabDetails": "Параметры",
   "tabEpg": "Телегид",
   "saveChanges": "Сохранить",

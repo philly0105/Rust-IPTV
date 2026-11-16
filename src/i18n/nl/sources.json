@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "{{count, number}} items geïmporteerd. De programmagids wordt op de achtergrond geladen.",
 
   "editSource": "{{name}} bewerken",
-  "editSourceTitle": "{{name}} bewerken",
+  "editSourceTitle": "Bron bewerken",
   "tabDetails": "Details",
   "tabEpg": "Gids",
   "saveChanges": "Wijzigingen opslaan",

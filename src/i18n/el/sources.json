@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "Εισήχθησαν {{count, number}} στοιχεία. Ο οδηγός προγράμματος φορτώνεται στο παρασκήνιο.",
 
   "editSource": "Επεξεργασία: {{name}}",
-  "editSourceTitle": "Επεξεργασία: {{name}}",
+  "editSourceTitle": "Επεξεργασία πηγής",
   "tabDetails": "Λεπτομέρειες",
   "tabEpg": "Οδηγός",
   "saveChanges": "Αποθήκευση αλλαγών",

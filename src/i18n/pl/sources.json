@@ -147,7 +147,7 @@
   "addedDescriptionGuide_other": "Zaimportowano {{count, number}} elementu. Przewodnik TV wczytuje się w tle.",
 
   "editSource": "Edytuj {{name}}",
-  "editSourceTitle": "Edytuj {{name}}",
+  "editSourceTitle": "Edytuj źródło",
   "tabDetails": "Szczegóły",
   "tabEpg": "Przewodnik",
   "saveChanges": "Zapisz zmiany",

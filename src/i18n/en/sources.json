@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "{{count, number}} items imported. The TV guide is loading in the background.",
 
   "editSource": "Edit {{name}}",
-  "editSourceTitle": "Edit {{name}}",
+  "editSourceTitle": "Edit source",
   "tabDetails": "Details",
   "tabEpg": "Guide",
   "saveChanges": "Save changes",

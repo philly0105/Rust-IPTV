@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "{{count, number}}件を読み込みました。番組表はバックグラウンドで読み込み中です。",
 
   "editSource": "{{name}}を編集",
-  "editSourceTitle": "{{name}}を編集",
+  "editSourceTitle": "ソースを編集",
   "tabDetails": "詳細",
   "tabEpg": "番組表",
   "saveChanges": "変更を保存",

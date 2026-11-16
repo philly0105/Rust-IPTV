@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "{{count, number}} elem importálva. A műsorújság a háttérben töltődik be.",
 
   "editSource": "{{name}} szerkesztése",
-  "editSourceTitle": "{{name}} szerkesztése",
+  "editSourceTitle": "Forrás szerkesztése",
   "tabDetails": "Részletek",
   "tabEpg": "Műsorújság",
   "saveChanges": "Változtatások mentése",

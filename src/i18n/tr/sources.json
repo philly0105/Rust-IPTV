@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "{{count, number}} öğe içe aktarıldı. TV rehberi arka planda yükleniyor.",
 
   "editSource": "{{name}} kaynağını düzenle",
-  "editSourceTitle": "{{name}} kaynağını düzenle",
+  "editSourceTitle": "Kaynağı düzenle",
   "tabDetails": "Ayrıntılar",
   "tabEpg": "Rehber",
   "saveChanges": "Değişiklikleri kaydet",

@@ -140,7 +140,7 @@
   "addedDescriptionGuide_other": "{{count, number}} elementi importati. La guida TV si sta caricando in background.",
 
   "editSource": "Modifica {{name}}",
-  "editSourceTitle": "Modifica {{name}}",
+  "editSourceTitle": "Modifica sorgente",
   "tabDetails": "Dettagli",
   "tabEpg": "Guida",
   "saveChanges": "Salva modifiche",

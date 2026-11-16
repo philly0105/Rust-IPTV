@@ -33,6 +33,7 @@ import { EpgLinksEditor, shiftTextOf } from './EpgLinksEditor';
 import { Field } from './Field';
 import { M3uForm } from './M3uForm';
 import { StalkerForm } from './StalkerForm';
+import { SourceErrorText } from './SourceCard';
 import { XtreamForm } from './XtreamForm';
 
 export type EditTab = 'details' | 'epg' | 'account';
@@ -55,6 +56,11 @@ export async function checkConnection(patch: SourcePatch): Promise<RpcError | nu
   } catch (e) {
     return RpcError.from(e);
   }
+}
+
+/** A source's stored import error in the shape the error helpers read. */
+function lastErrorOf(source: Source) {
+  return { code: importErrorCode(source.lastError, source.lastErrorCode), message: source.lastError };
 }
 
 export function EditSourceDialog({
@@ -97,10 +103,14 @@ export function EditSourceDialog({
     setShiftText(shiftTextOf(source.epg));
     setPendingGuideUrl('');
     setGuideUrlError(null);
-    setErrors({});
     setSaveError(null);
     setCheckError(null);
-    setTab(initialTab === 'account' && !hasAccountInfo(source) ? 'details' : initialTab);
+    const first = initialTab === 'account' && !hasAccountInfo(source) ? 'details' : initialTab;
+    setTab(first);
+    // A failed source ("Check settings"): mark the field its error points at, and go to it.
+    const field = source.lastError ? fieldForError(lastErrorOf(source), source.kind, source.m3u?.origin) : null;
+    setErrors(field ? { [field]: summaryKey(lastErrorOf(source)) } : {});
+    if (field && first === 'details') focusInvalid();
     // Only re-seed when a different source opens, not on background refetches.
   }, [sourceId, initialTab]);
 
@@ -232,20 +242,35 @@ export function EditSourceDialog({
         open
         onClose={guard.request}
         dismissible={!dirty}
-        title={t('editSourceTitle', { name: source.name })}
+        // The name, often long, as one truncated line under a short title: in the title it took
+        // three lines of a phone's sheet, right above the Name field that repeats it.
+        title={t('editSourceTitle')}
+        description={
+          <span className="block truncate" dir="auto" title={source.name}>
+            {source.name}
+          </span>
+        }
         size="lg"
         // As tall as the window allows on a phone, so the Details and Guide tabs stay put between them.
         className="max-sm:h-[calc(100dvh-1.5rem)]"
         testId="edit-source-dialog"
         footer={
-          <>
-            <Button variant="ghost" onClick={guard.request}>
-              {t('cancel')}
+          // The Account tab only shows details: with nothing changed on the other tabs there is
+          // nothing to save, so the footer only closes.
+          tab === 'account' && !dirty ? (
+            <Button variant="secondary" onClick={guard.request} data-testid="edit-source-close">
+              {t('common:close')}
             </Button>
-            <Button variant="primary" loading={saving} onClick={() => void save()} data-testid="edit-source-save">
-              {checking ? t('testing') : t('saveChanges')}
-            </Button>
-          </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={guard.request}>
+                {t('cancel')}
+              </Button>
+              <Button variant="primary" loading={saving} onClick={() => void save()} data-testid="edit-source-save">
+                {checking ? t('testing') : t('saveChanges')}
+              </Button>
+            </>
+          )
         }
       >
         <form
@@ -260,6 +285,13 @@ export function EditSourceDialog({
           <Tabs items={tabs} value={tab} label={t('editTabsLabel')} onChange={(id) => setTab(id as EditTab)} />
           {tab === 'details' ? (
             <>
+              {source.lastError ? (
+                // What the last refresh said, as on the source card, so the fix starts from it.
+                <div className="flex gap-3 rounded-md border border-danger/40 bg-danger/10 p-3 text-sm" data-testid="edit-source-last-error">
+                  <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
+                  <SourceErrorText source={source} />
+                </div>
+              ) : null}
               <Field label={t('sourceName')} error={errors.name ? t(errors.name) : null}>
                 {(p) => (
                   <Input

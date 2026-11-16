@@ -83,7 +83,7 @@ function sourceHost(s: Source): string | undefined {
  */
 const ERROR_TEXT = 'min-w-0 grow basis-48 text-fg';
 
-function SourceErrorText({ source }: { source: Source }) {
+export function SourceErrorText({ source }: { source: Source }) {
   const { t } = useTranslation('sources');
   const raw = source.lastError ?? '';
   const info = classifySourceError(raw, source.lastErrorCode);

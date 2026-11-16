@@ -133,7 +133,7 @@
   "addedDescriptionGuide_other": "已匯入 {{count, number}} 個項目。節目表正在背景載入。",
 
   "editSource": "編輯 {{name}}",
-  "editSourceTitle": "編輯 {{name}}",
+  "editSourceTitle": "編輯來源",
   "tabDetails": "詳細資訊",
   "tabEpg": "節目表",
   "saveChanges": "儲存變更",

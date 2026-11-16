@@ -140,7 +140,7 @@
   "addedDescriptionGuide_other": "{{count, number}} éléments importés. Le guide TV se charge en arrière-plan.",
 
   "editSource": "Modifier {{name}}",
-  "editSourceTitle": "Modifier {{name}}",
+  "editSourceTitle": "Modifier la source",
   "tabDetails": "Détails",
   "tabEpg": "Guide",
   "saveChanges": "Enregistrer les modifications",

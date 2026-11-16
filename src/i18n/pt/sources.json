@@ -140,7 +140,7 @@
   "addedDescriptionGuide_other": "{{count, number}} itens importados. O guia de TV está carregando em segundo plano.",
 
   "editSource": "Editar {{name}}",
-  "editSourceTitle": "Editar {{name}}",
+  "editSourceTitle": "Editar fonte",
   "tabDetails": "Detalhes",
   "tabEpg": "Guia",
   "saveChanges": "Salvar alterações",

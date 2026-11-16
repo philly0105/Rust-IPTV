@@ -161,7 +161,7 @@
   "addedDescriptionGuide_other": "العناصر اللي تستوردو: {{count, number}}. دليل البرامج كيتشرج فالخلفية.",
 
   "editSource": "بدّل {{name}}",
-  "editSourceTitle": "تعديل {{name}}",
+  "editSourceTitle": "عدّل المصدر",
   "tabDetails": "التفاصيل",
   "tabEpg": "الدليل",
   "saveChanges": "حفظ التغييرات",

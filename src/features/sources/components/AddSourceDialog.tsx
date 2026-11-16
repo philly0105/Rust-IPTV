@@ -240,8 +240,12 @@ export function AddSourceDialog({
   }, [submitting]);
 
   // On a short window the progress (and its Cancel) sits below the fold: bring it into view as the run starts.
+  // Enter in a field starts the run, and the fields step aside: focus goes to the progress rather
+  // than fall to <body>, out of reach of Escape and the focus trap.
   useEffect(() => {
     if (!submitting) return;
+    const panel = bodyRef.current?.closest<HTMLElement>('[role="dialog"]');
+    if (panel && !panel.contains(document.activeElement)) progressRef.current?.focus({ preventScroll: true });
     scrollFrame(() => progressRef.current?.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }));
   }, [submitting, scrollFrame]);
 
@@ -614,7 +618,10 @@ export function AddSourceDialog({
             <Tabs items={kinds} value={draft.kind} label={t('sourceType')} onChange={(id) => setKind(id as SourceKind)} />
           </div>
 
-          {draft.kind === 'm3u' ? (
+          {/* While the import runs the fields step aside (they come back as they were when it ends):
+              a disabled copy of the form pushed the progress, the one thing to watch, under a
+              phone's footer. The progress heading names the source, its line the host. */}
+          {!submitting && draft.kind === 'm3u' ? (
             <M3uForm
               mode="add"
               autoFocusAddress
@@ -631,7 +638,7 @@ export function AddSourceDialog({
               }}
             />
           ) : null}
-          {draft.kind === 'xtream' ? (
+          {!submitting && draft.kind === 'xtream' ? (
             <XtreamForm
               value={draft.xtream}
               onChange={(xtream) => setDraft((d) => ({ ...d, xtream }))}
@@ -643,7 +650,7 @@ export function AddSourceDialog({
               showHeaders={false}
             />
           ) : null}
-          {draft.kind === 'stalker' ? (
+          {!submitting && draft.kind === 'stalker' ? (
             <StalkerForm
               value={draft.stalker}
               onChange={(stalker) => setDraft((d) => ({ ...d, stalker }))}
@@ -656,20 +663,29 @@ export function AddSourceDialog({
             />
           ) : null}
 
-          {nameField}
+          {submitting ? null : (
+            <>
+              {nameField}
 
-          <Toggle
-            checked={draft.autoRefresh && !isTextOrigin}
-            disabled={submitting || isTextOrigin}
-            onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
-            label={t('autoRefresh')}
-            description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
-          />
+              <Toggle
+                checked={draft.autoRefresh && !isTextOrigin}
+                disabled={isTextOrigin}
+                onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
+                label={t('autoRefresh')}
+                description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
+              />
 
-          <HeadersFields value={draft[draft.kind].headers} onChange={setHeaders} errors={errors} prefix={`${draft.kind}.headers`} disabled={submitting} />
+              <HeadersFields value={draft[draft.kind].headers} onChange={setHeaders} errors={errors} prefix={`${draft.kind}.headers`} />
+            </>
+          )}
 
           {submitting ? (
-            <div ref={progressRef} className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4" data-testid="add-source-progress">
+            <div
+              ref={progressRef}
+              tabIndex={-1}
+              className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4 outline-none"
+              data-testid="add-source-progress"
+            >
               <p className="flex items-center gap-2 text-body-sm font-medium text-fg">
                 <LoaderCircle aria-hidden size={16} className="shrink-0 text-accent motion-safe:animate-spin" />
                 <span className="min-w-0 truncate" dir="auto">

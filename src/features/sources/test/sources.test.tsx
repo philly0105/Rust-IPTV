@@ -168,6 +168,21 @@ describe('Add source flow sends the exact C4 args', () => {
     }
   });
 
+  it('puts the progress in place of the fields while the import runs, and brings them back after', async () => {
+    let fail: (e: unknown) => void = () => undefined;
+    rpcMock.handlers['sources.add'] = () => new Promise((_, reject) => (fail = reject));
+    await openAdd();
+    type(/^Playlist URL/, 'http://lists.example.com/tv.m3u');
+    // Enter in the field submits; the field leaves, and focus stays in the dialog.
+    fireEvent.submit(within(dialog()).getByLabelText(/^Playlist URL/, { selector: 'input' }).closest('form')!);
+    const progress = await screen.findByTestId('add-source-progress');
+    expect(within(dialog()).queryByLabelText(/^Playlist URL/, { selector: 'input' })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(progress));
+    fail(new RpcError('timeout', 'operation timed out'));
+    await screen.findByTestId('add-source-error');
+    expect((within(dialog()).getByLabelText(/^Playlist URL/, { selector: 'input' }) as HTMLInputElement).value).toBe('http://lists.example.com/tv.m3u');
+  });
+
   it('shows the server error with a next step', async () => {
     rpcMock.handlers['sources.add'] = () => {
       throw new RpcError('auth', 'Bad credentials');

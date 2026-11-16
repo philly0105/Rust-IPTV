@@ -697,10 +697,18 @@ describe('DashboardPage', () => {
     renderRoutes(routes(), '/dashboard');
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
     const first = await within(live).findByRole('button', { name: 'Play Harbor News' });
+    // A rail below with cards.
+    await within(await screen.findByTestId('dashboard-rail-favorite-vod')).findByText('Quiet Coast');
     first.focus();
     fireEvent.keyDown(first, { key: 'ArrowDown' });
-    const recentRail = screen.getByTestId('dashboard-rail-recent-live');
-    expect(recentRail.contains(document.activeElement)).toBe(true);
+    // The next rail down with cards.
+    const rails = [...document.querySelectorAll('[data-dash-rail]')];
+    expect(rails.indexOf(document.activeElement!.closest('[data-dash-rail]')!)).toBeGreaterThan(rails.indexOf(live));
+    // Toward the inline start on a rail's first card: the app rail's link to Home.
+    first.focus();
+    fireEvent.keyDown(first, { key: 'ArrowLeft' });
+    expect(document.activeElement?.closest('[data-testid="shell-rail"]')).toBeTruthy();
+    expect(document.activeElement?.getAttribute('aria-current')).toBe('page');
   });
 });
 
@@ -928,7 +936,9 @@ describe('B7 shell fixes', () => {
     h['recent.list'] = () => [];
     h['catalog.recentlyAdded'] = () => new Promise(() => {});
     renderRoutes(routes(), '/dashboard');
-    await screen.findByTestId('dashboard-rail-recent-sources');
+    // Your sources, the last rail, waits behind the pending one; the other rails have answered.
+    await screen.findByTestId('dashboard');
+    await waitFor(() => expect(['favorites.list', 'recent.list', 'catalog.recentlyAdded'].every((cmd) => rpcMock.calls.some((c) => c.cmd === cmd))).toBe(true));
     await act(() => new Promise((r) => setTimeout(r, 20)));
     expect(screen.queryByText('Nothing to show yet')).toBeNull();
     cleanup();
@@ -1057,10 +1067,12 @@ describe('B7 shell fixes', () => {
       const nav = screen.getByRole('navigation', { name: 'Main navigation' });
       await within(nav).findByText('Night Portal');
       expect(within(nav).queryByText('Backup 1')).toBeNull();
-      const sourcesRail = await screen.findByTestId('dashboard-rail-recent-sources');
-      expect(within(sourcesRail).queryByText('Backup 1')).toBeNull();
+      // One source left: no Your sources rail (its one tile would repeat the app rail's row).
+      await screen.findByTestId('dashboard-rail-live-favorites');
+      expect(screen.queryByTestId('dashboard-rail-recent-sources')).toBeNull();
       act(() => usePendingRemovals.setState({ ids: new Set() }));
       expect(await within(nav).findByText('Backup 1')).toBeTruthy();
+      expect(within(await screen.findByTestId('dashboard-rail-recent-sources')).getByText('Backup 1')).toBeTruthy();
     } finally {
       act(() => usePendingRemovals.setState({ ids: new Set() }));
     }

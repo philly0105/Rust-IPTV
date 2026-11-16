@@ -1,6 +1,6 @@
 /** Run 1 craft fixes in the shell: the dashboard quiet state and My List (C3), the rail's Home glyph, the phone-width header search. */
 
-import { configure, act, cleanup, screen, within } from '@testing-library/react';
+import { configure, act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { WatchlistEntry } from '@/api/types';
@@ -105,7 +105,9 @@ describe('dashboard quiet state and My List', () => {
   it('waits for My List before calling the page empty', async () => {
     emptyDashboard(() => new Promise(() => {}));
     renderRoutes(routes(), '/dashboard');
-    await screen.findByTestId('dashboard-rail-recent-sources');
+    // Every other rail answered (Your sources, the old marker here, shows only with two sources).
+    await screen.findByTestId('dashboard');
+    await waitFor(() => expect(['favorites.list', 'recent.list', 'sources.list'].every((cmd) => rpcMock.calls.some((c) => c.cmd === cmd))).toBe(true));
     await act(() => new Promise((r) => setTimeout(r, 20)));
     expect(screen.queryByText(QUIET)).toBeNull();
   });
@@ -121,7 +123,9 @@ describe('dashboard quiet state and My List', () => {
       throw new RpcError('internal', 'watchlist table is gone');
     });
     renderRoutes(routes(), '/dashboard');
-    await screen.findByTestId('dashboard-rail-recent-sources');
+    // Every other rail answered (Your sources, the old marker here, shows only with two sources).
+    await screen.findByTestId('dashboard');
+    await waitFor(() => expect(['favorites.list', 'recent.list', 'sources.list'].every((cmd) => rpcMock.calls.some((c) => c.cmd === cmd))).toBe(true));
     await act(() => new Promise((r) => setTimeout(r, 50)));
     expect(screen.queryByText(QUIET)).toBeNull();
   });

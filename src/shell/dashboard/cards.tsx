@@ -13,7 +13,7 @@ import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { intlLocale, listSeparator } from '@/lib/intl';
-import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
+import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, WatchedChip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 import { useStableNavigate } from './stableNavigate';
@@ -98,14 +98,27 @@ export function usePrefetchTarget(ref: ItemRef | undefined, posterUrl?: string, 
 export const CAPTION_TITLE = 'mt-2 block truncate text-match-parent text-body-sm font-medium text-fg';
 export const CAPTION_META = 'block truncate text-match-parent text-caption text-fg-muted';
 
-function PlayGlyph() {
+/**
+ * The hover and focus mark of a card that plays. Centred over a picture; `corner` on a channel's
+ * logo tile, where a centred disc hid the logo (or showed the initials around its edge), so the
+ * hovered card kept nothing that said which channel it was.
+ */
+function PlayGlyph({ corner = false }: { corner?: boolean }) {
   return (
     <span
       aria-hidden
-      className="absolute inset-0 flex items-center justify-center bg-scrim/0 opacity-0 group-hover/card:bg-scrim/40 group-hover/card:opacity-100 group-focus-visible/card:opacity-100 motion-safe:transition-opacity"
+      className={cn(
+        'absolute inset-0 flex bg-scrim/0 opacity-0 group-hover/card:opacity-100 group-focus-visible/card:opacity-100 motion-safe:transition-opacity',
+        corner ? 'items-end justify-end p-2 group-hover/card:bg-scrim/20' : 'items-center justify-center group-hover/card:bg-scrim/40',
+      )}
     >
-      <span className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-active/card:scale-90">
-        <Play size={20} fill="currentColor" className="translate-x-px" />
+      <span
+        className={cn(
+          'flex items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-active/card:scale-90',
+          corner ? 'size-10' : 'size-12',
+        )}
+      >
+        <Play size={corner ? 18 : 20} fill="currentColor" className="translate-x-px" />
       </span>
     </span>
   );
@@ -134,6 +147,8 @@ export interface PosterCardProps {
   kind?: ContentType;
   /** 0..1 watched fraction. */
   progress?: number;
+  /** Finished: the kit's watched tick in the artwork's top-end corner, as on the VOD grids and My List. */
+  watched?: boolean;
   /** Small overlay label, e.g. "S2 E4" or rating. */
   badge?: ReactNode;
   onPlay?: () => void;
@@ -145,6 +160,12 @@ export interface PosterCardProps {
    * so the My List rail's cards take part too. Live, radio and search cards get neither.
    */
   myList?: { itemRef: ItemRef; snapshot: ItemSnapshot } | undefined;
+  /**
+   * When the My List toggle shows. `saved` (the default): on hover and focus, and always once the
+   * title is saved, as its saved marker. `hover`: on hover and focus only, for the My List rail,
+   * where every title is saved and a marker on each poster was a row of identical discs.
+   */
+  myListMark?: 'saved' | 'hover';
   /**
    * The source the artwork belongs to, for the image cache (C3). Defaults to the source of the
    * card's title (`myList`, or the movie or series an `itemPath` link opens).
@@ -208,6 +229,7 @@ function PosterCardView({
   backdropUrl,
   sourceId,
   progress,
+  watched,
   badge,
   onPlay,
   to,
@@ -227,6 +249,7 @@ function PosterCardView({
           {onPlay && <PlayGlyph />}
           {search && <SearchGlyph label={search} />}
           {badge && <span className="absolute top-2 start-2">{badge}</span>}
+          {watched && <WatchedChip className="absolute end-1.5 top-1.5" testId="mylist-watched-tag" />}
           {progress !== undefined && progress > 0 && (
             <span className="absolute inset-x-2 bottom-2">
               <ProgressBar value={Math.min(1, progress) * 100} size="xs" tone="glass" />
@@ -334,7 +357,7 @@ function CornerMyListButton(props: MyListButtonProps) {
  * colour, which is the card's saved marker.
  */
 function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
-  const { rail, myList, progress } = props;
+  const { rail, myList, progress, myListMark = 'saved' } = props;
   return (
     <div className="group/poster relative min-w-0">
       <PosterCardView {...props} artClassName={WRAPPER_HOVER_ART} />
@@ -347,7 +370,9 @@ function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef;
           itemRef={myList.itemRef}
           snapshot={myList.snapshot}
           className={cn(
-            'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
+            'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 group-has-[a:focus-visible]/poster:opacity-100 focus-visible:opacity-100',
+            // No hover on a touch screen: there an invisible toggle would only take stray taps.
+            myListMark === 'saved' ? 'data-in-list:opacity-100 [@media(hover:none)]:opacity-100' : '[@media(hover:none)]:hidden',
             'motion-safe:transition-[opacity,background-color,color,transform]',
             cornerOffset(progress),
           )}
@@ -362,6 +387,8 @@ export interface ChannelMenuRequest {
   pos: { x: number; y: number };
   channel: Channel;
   onPlay(): void;
+  /** The rail's own actions (Remove from favorites, Remove from history), after the channel's. */
+  extra?: CardMenuItem[];
 }
 
 /**
@@ -411,6 +438,8 @@ export interface ChannelCardProps {
   channel?: Channel;
   /** The source the logo belongs to, for the image cache (C3). Defaults to `channel`'s source. */
   sourceId?: string;
+  /** The rail's own menu actions (Remove from favorites, Remove from history), after the channel's. */
+  menuExtra?: CardMenuItem[];
   /**
    * The page a live channel opens once the card (or its menu's Play) has started it, whose stage
    * takes the player: the channel's Live TV (`itemPath`), or for a list's rail the list's page,
@@ -577,40 +606,46 @@ export function ChannelCard({
   channel,
   sourceId,
   watchPath,
+  menuExtra,
 }: ChannelCardProps) {
   const { t } = useTranslation('shell');
   const { stripCountryPrefix: strip } = useDisplayPrefs();
   const openMenu = useContext(ChannelMenuContext);
   const watch = useWatchChannel(onPlay, channel, watchPath);
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch, extra: menuExtra }) : undefined;
   return (
-    <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
-      <div className={cn(CARD_ART, 'aspect-video w-full')}>
-        {/* The name Live TV's row gives its logo, so the card's tint matches the channel's there. */}
-        <LogoArt name={displayChannelName(name, strip)} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
-        <PlayGlyph />
-        {nowProgress !== undefined && <EdgeProgress value={nowProgress} tone="quiet" />}
-      </div>
-      {/* As every list names a channel: "CBS HD" with a quiet "US" after it, or no tag with the
-          setting that hides them. */}
-      <ChannelName name={name} strip={strip} title={name} className={CAPTION_TITLE} />
-      {now && showSourceWithNow && sourceName ? (
-        // Programme first; the source keeps up to half the line, so it never truncates away.
-        <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
-          <span dir="auto" title={now} className="min-w-0 truncate text-match-parent">
-            {now}
+    // The visible "more" button sits beside the card's button, as on a Continue watching card, so
+    // the menu is there for a mouse and a finger too, not only for right click and the menu key.
+    <div className="group/wide relative min-w-0">
+      <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
+        <div className={cn(CARD_ART, 'aspect-video w-full')}>
+          {/* The name Live TV's row gives its logo, so the card's tint matches the channel's there. */}
+          <LogoArt name={displayChannelName(name, strip)} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
+          <PlayGlyph corner />
+          {nowProgress !== undefined && <EdgeProgress value={nowProgress} tone="quiet" />}
+        </div>
+        {/* As every list names a channel: "CBS HD" with a quiet "US" after it, or no tag with the
+            setting that hides them. */}
+        <ChannelName name={name} strip={strip} title={name} className={CAPTION_TITLE} />
+        {now && showSourceWithNow && sourceName ? (
+          // Programme first; the source keeps up to half the line, so it never truncates away.
+          <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
+            <span dir="auto" title={now} className="min-w-0 truncate text-match-parent">
+              {now}
+            </span>
+            <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+            <span dir="auto" title={sourceName} className="max-w-[50%] shrink-0 truncate text-fg-subtle" data-testid="channel-card-source">
+              {sourceName}
+            </span>
           </span>
-          <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
-          <span dir="auto" title={sourceName} className="max-w-[50%] shrink-0 truncate text-fg-subtle" data-testid="channel-card-source">
-            {sourceName}
+        ) : (
+          <span dir="auto" title={now ?? sourceName} className={CAPTION_META}>
+            {now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}
           </span>
-        </span>
-      ) : (
-        <span dir="auto" title={now ?? sourceName} className={CAPTION_META}>
-          {now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}
-        </span>
-      )}
-    </button>
+        )}
+      </button>
+      {menu && <CardMenuButton label={t('moreActionsFor', { title: name })} tabIndex={rail.tabIndex} onOpen={(el) => menu(buttonMenuAnchor(el))} />}
+    </div>
   );
 }
 
@@ -622,6 +657,8 @@ export interface CardMenuRequest {
   pos: { x: number; y: number };
   label: string;
   items: CardMenuItem[];
+  /** Drawn above the items (a phone's sheet covers the card): the title and its episode or time left. */
+  header?: { title: string; subtitle?: string };
   /** Called once the menu closes (an item ran, Escape, a click elsewhere, another menu opened). */
   onClose?(): void;
 }
@@ -737,9 +774,11 @@ export interface ContinueCardProps {
  * a bar flush with the bottom edge; the episode and the time left are the caption.
  */
 export function ContinueCard({ rail, title, episode, left, progress, posterUrl, backdropUrl, sourceId, ariaLabel, onPlay, menu, saved }: ContinueCardProps) {
-  const { t } = useTranslation('shell');
+  const { t, i18n } = useTranslation('shell');
   const openMenu = useContext(CardMenuContext);
-  const open = openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, label: title, items: menu }) : undefined;
+  const open = openMenu
+    ? (pos: { x: number; y: number }) => openMenu({ pos, label: title, items: menu, header: { title, subtitle: joinList([episode, left], i18n.language) || undefined } })
+    : undefined;
   const [episodeCode, episodeTitle] = splitEpisodeLine(episode);
   return (
     <div className="group/wide relative min-w-0">
@@ -813,6 +852,7 @@ export interface OnNowCardProps {
  * programme title and the channel under it, and how far it has run along the bottom edge.
  */
 export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
+  const { t } = useTranslation('shell');
   const { stripCountryPrefix: strip } = useDisplayPrefs();
   // With several sources Home names the source after the channel ("US| CBS HD, Northwind"): the
   // channel's own name is drawn as every list draws it, the source follows as written.
@@ -826,44 +866,48 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
   const watch = useWatchChannel(onPlay, channel, channel && itemPath(channel.ref));
   const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
   return (
-    <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot} data-on-now="">
-      <div className={cn(CARD_ART, 'aspect-video w-full bg-surface-2')}>
-        {programmeArt ? (
-          <>
-            <Poster src={programmeArt} sourceId={sourceId} alt="" label={programme} aspect="wide" className="h-full after:hidden" rounded="sm" />
-            {/* The channel stays recognisable on the programme's picture: its logo on a glass chip. */}
-            {logoUrl && (
-              <span aria-hidden className="absolute top-2 start-2 flex h-7 w-11 items-center justify-center rounded-sm border border-glass-border bg-glass-strong p-1">
-                <Poster src={logoUrl} sourceId={sourceId} width={44} alt="" label={channelName} aspect="wide" fit="contain" kind="live" className="h-full bg-transparent after:hidden [&_img]:p-0" rounded="sm" />
-              </span>
-            )}
-          </>
-        ) : (
-          <LogoArt name={displayChannelName(shownName, strip)} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
-        )}
-        <PlayGlyph />
-        {progress !== undefined && <EdgeProgress value={progress} tone={programmeArt ? 'glass-quiet' : 'quiet'} />}
-      </div>
-      <span dir="auto" title={programme} className={CAPTION_TITLE}>
-        {programme}
-      </span>
-      <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
-        <span title={channelName} className="flex min-w-0 items-baseline">
-          <ChannelName name={shownName} strip={strip} className="min-w-0 truncate text-match-parent" />
-          {afterName ? (
-            <span dir="auto" className="min-w-0 shrink-[2] truncate text-match-parent">
-              {afterName}
-            </span>
-          ) : null}
+    // Its visible "more" button beside the card's button, as on the channel and Continue cards.
+    <div className="group/wide relative min-w-0">
+      <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot} data-on-now="">
+        <div className={cn(CARD_ART, 'aspect-video w-full bg-surface-2')}>
+          {programmeArt ? (
+            <>
+              <Poster src={programmeArt} sourceId={sourceId} alt="" label={programme} aspect="wide" className="h-full after:hidden" rounded="sm" />
+              {/* The channel stays recognisable on the programme's picture: its logo on a glass chip. */}
+              {logoUrl && (
+                <span aria-hidden className="absolute top-2 start-2 flex h-7 w-11 items-center justify-center rounded-sm border border-glass-border bg-glass-strong p-1">
+                  <Poster src={logoUrl} sourceId={sourceId} width={44} alt="" label={channelName} aspect="wide" fit="contain" kind="live" className="h-full bg-transparent after:hidden [&_img]:p-0" rounded="sm" />
+                </span>
+              )}
+            </>
+          ) : (
+            <LogoArt name={displayChannelName(shownName, strip)} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
+          )}
+          <PlayGlyph corner={!programmeArt} />
+          {progress !== undefined && <EdgeProgress value={progress} tone={programmeArt ? 'glass-quiet' : 'quiet'} />}
+        </div>
+        <span dir="auto" title={programme} className={CAPTION_TITLE}>
+          {programme}
         </span>
-        {left && (
-          <>
-            <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
-            <span className="shrink-0 tabular">{left}</span>
-          </>
-        )}
-      </span>
-    </button>
+        <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
+          <span title={channelName} className="flex min-w-0 items-baseline">
+            <ChannelName name={shownName} strip={strip} className="min-w-0 truncate text-match-parent" />
+            {afterName ? (
+              <span dir="auto" className="min-w-0 shrink-[2] truncate text-match-parent">
+                {afterName}
+              </span>
+            ) : null}
+          </span>
+          {left && (
+            <>
+              <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+              <span className="shrink-0 tabular">{left}</span>
+            </>
+          )}
+        </span>
+      </button>
+      {menu && <CardMenuButton label={t('moreActionsFor', { title: channelName })} tabIndex={rail.tabIndex} onOpen={(el) => menu(buttonMenuAnchor(el))} />}
+    </div>
   );
 }
 
@@ -896,8 +940,8 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
         style={tintVars(source.name)}
       >
         {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
-        <span aria-hidden className="font-display text-4xl font-semibold">{initialsOf(source.name)}</span>
-        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white light:bg-white/70 light:text-fg">
+        <span aria-hidden className="font-display text-headline">{initialsOf(source.name)}</span>
+        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-caption font-semibold text-white light:bg-white/70 light:text-fg">
           {t(kindShortKey(source.kind))}
         </span>
         {source.lastError && (

@@ -47,7 +47,7 @@ const { shellRoutes } = await import('../../routes');
 await import('../ChannelMenuBody');
 const { queryClient } = await import('@/api/query');
 const { useConnectionStore } = await import('../../connection');
-const { firstProgrammeEnd, liveCandidates, onNowItems, trendingMatch } = await import('../DashboardPage');
+const { firstProgrammeEnd, liveCandidates, onNowItems, ownFirst, trendingMatch } = await import('../DashboardPage');
 const { splitEpisodeLine } = await import('../cards');
 const { useToastStore } = await import('@/ui');
 
@@ -354,9 +354,14 @@ describe('On now (CB-PROGRAM-ART)', () => {
     expect(rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext')).toHaveLength(1);
   });
 
-  it('does not repeat a channel another live rail shows: a favourite, or a recent one while its rail is on', async () => {
+  it("leads with the user's own channels on air, tops up from the source only while fewer than four are on, and the rails below repeat none of them", async () => {
     const weather = { sourceId: 's1', contentType: 'live' as const, itemId: 'c3' };
-    const recent: RecentEntry[] = [{ ref: weather, viewedAt: '2026-10-12T00:00:00Z', snapshot: { title: 'Weather Now', contentType: 'live' } }];
+    const quiet = { sourceId: 's1', contentType: 'live' as const, itemId: 'c4' };
+    const recent: RecentEntry[] = [
+      { ref: weather, viewedAt: '2026-10-12T00:00:00Z', snapshot: { title: 'Weather Now', contentType: 'live' } },
+      { ref: news, viewedAt: '2026-10-11T00:00:00Z', snapshot: { title: 'News 24', contentType: 'live' } },
+      { ref: quiet, viewedAt: '2026-10-10T00:00:00Z', snapshot: { title: 'Quiet Channel', contentType: 'live' } },
+    ];
     const nowNext = { 's1|live|c1': onAir('Morning Bulletin'), 's1|live|c2': onAir('Match Day'), 's1|live|c3': onAir('Forecast') };
     home({ favorites: [fav(news, 'News 24')], recent, channels: [channel(news, 'News 24'), channel(sport, 'Sport 1'), channel(weather, 'Weather Now')], nowNext });
     renderRoutes(routes(), '/dashboard');
@@ -364,26 +369,25 @@ describe('On now (CB-PROGRAM-ART)', () => {
     await within(onNow).findByRole('button', { name: /Play Sport 1/ });
     const programmes = (rail: HTMLElement) =>
       [...rail.querySelectorAll('[data-on-now]')].map((b) => ['Morning Bulletin', 'Match Day', 'Forecast'].find((p) => b.textContent!.includes(p)));
-    expect(programmes(onNow)).toEqual(['Match Day']);
-    // The favourites rail just below shows the programme itself; both read the one guide answer.
+    // The recent channel first; one of the user's own is not enough, so the source tops it up.
+    expect(programmes(onNow)).toEqual(['Forecast', 'Match Day']);
+    // The favourites rail just below shows the favourite's programme itself; both read the one guide answer.
     const favorite = within(await screen.findByTestId('dashboard-rail-live-favorites')).getByRole('button', { name: 'Play News 24' });
     await waitFor(() => expect(within(favorite).getByText('Morning Bulletin')).toBeTruthy());
-    // The recent channels rail reads the same answer for its own programmes (round 4).
-    const weatherCard = within(screen.getByTestId('dashboard-rail-recent-live')).getByRole('button', { name: 'Play Weather Now' });
-    expect(within(weatherCard).getByText('Forecast')).toBeTruthy();
+    // Recently watched keeps only what neither rail above shows.
+    const recentRail = await screen.findByTestId('dashboard-rail-recent-live');
+    expect(within(recentRail).getAllByRole('button', { name: /^Play / }).map((b) => b.getAttribute('aria-label'))).toEqual(['Play Quiet Channel']);
     expect(rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext')).toHaveLength(1);
-    cleanup();
-
-    // With the recent channels rail off, On now leads with them again.
-    queryClient.clear();
-    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, recentlyWatchedLive: false } });
-    renderRoutes(routes(), '/dashboard');
-    const again = await screen.findByTestId('dashboard-rail-on-now');
-    await within(again).findByRole('button', { name: /Play Weather Now/ });
-    expect(programmes(again)).toEqual(['Forecast', 'Match Day']);
   });
 
-  it('recent channels say what is on with a quiet bar, as the favourites do, and name the source only with two or more (round 4)', async () => {
+  it('shows only the user’s own channels once four or more are on air', () => {
+    const item = (name: string, fill?: boolean) => ({ name, ...(fill ? { fill } : {}) });
+    expect(ownFirst([item('a'), item('b'), item('c'), item('x', true)]).map((i) => i.name)).toEqual(['a', 'b', 'c', 'x']);
+    expect(ownFirst([item('a'), item('b'), item('c'), item('d'), item('x', true)]).map((i) => i.name)).toEqual(['a', 'b', 'c', 'd']);
+    expect(ownFirst([item('x', true)]).map((i) => i.name)).toEqual(['x']);
+  });
+
+  it('recent channels with nothing on air stay in their own rail, which names the source only with two or more (round 4)', async () => {
     const weather = { sourceId: 's1', contentType: 'live' as const, itemId: 'c3' };
     const quiet = { sourceId: 's1', contentType: 'live' as const, itemId: 'c4' };
     const recent: RecentEntry[] = [
@@ -393,11 +397,11 @@ describe('On now (CB-PROGRAM-ART)', () => {
     ];
     home({ recent, nowNext: { 's1|live|c3': onAir('Forecast') } });
     renderRoutes(routes(), '/dashboard');
+    // The channel on air is in On now, not in the rail under it as well.
+    const onNow = await screen.findByTestId('dashboard-rail-on-now');
+    expect(await within(onNow).findByRole('button', { name: /Play Weather Now/ })).toBeTruthy();
     const rail = await screen.findByTestId('dashboard-rail-recent-live');
-    const weatherCard = await within(rail).findByRole('button', { name: 'Play Weather Now' });
-    await waitFor(() => expect(within(weatherCard).getByText('Forecast')).toBeTruthy());
-    const bar = weatherCard.querySelector<HTMLElement>('[role="progressbar"]')!;
-    expect((bar.firstElementChild as HTMLElement).className).toContain('bg-fg-subtle');
+    expect(within(rail).queryByRole('button', { name: 'Play Weather Now' })).toBeNull();
     // With one source, a card with no programme says Live TV, not the source's name on every card.
     const quietCard = within(rail).getByRole('button', { name: 'Play Quiet Channel' });
     expect(within(quietCard).getByText('Live TV')).toBeTruthy();
@@ -416,8 +420,6 @@ describe('On now (CB-PROGRAM-ART)', () => {
     const again = await screen.findByTestId('dashboard-rail-recent-live');
     const named = await within(again).findByRole('button', { name: 'Play Quiet Channel' });
     expect(within(named).getByText('Night Portal')).toBeTruthy();
-    const withProgramme = within(again).getByRole('button', { name: 'Play Weather Now' });
-    await waitFor(() => expect(within(withProgramme).getByTestId('channel-card-source').textContent).toBe('Night Portal'));
   });
 
   it('with no guide data and nothing watched yet, Home lists the source’s channels (SH-home-empty-m3u)', async () => {
@@ -474,7 +476,8 @@ describe('quiet state and trending', () => {
     rpcMock.handlers['lists.list'] = () => [{ id: 'l1', name: 'Weekend', position: 0, onDashboard: true, itemCount: 2, createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' }];
     rpcMock.handlers['lists.items'] = () => [];
     renderRoutes(routes(), '/dashboard');
-    await screen.findByTestId('dashboard-rail-recent-sources');
+    await screen.findByTestId('dashboard');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'lists.list')).toBe(true));
     await act(() => new Promise((r) => setTimeout(r, 50)));
     expect(screen.queryByTestId('dashboard-quiet')).toBeNull();
   });

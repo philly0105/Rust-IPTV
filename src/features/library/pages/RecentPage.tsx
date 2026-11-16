@@ -359,6 +359,8 @@ export function RecentPage() {
         title={t('clearHistoryTitle')}
         description={source ? t('clearHistorySourceBody', { source: source.name }) : t('clearHistoryBody')}
         confirmLabel={t('clearHistory')}
+        // Cancel, as Watch stats' Clear stats and the app's other confirms say it.
+        cancelLabel={t('common:cancel')}
         onConfirm={() => void clearAll()}
       />
     </Page>

@@ -120,9 +120,9 @@ export function DayStrip({
         id: day,
         label: (
           <span className="flex flex-col items-center gap-0.5 leading-tight" title={f.full.format(at)}>
-            <span className={near ? 'text-xs font-semibold' : 'text-xs font-normal opacity-80'}>{near ?? f.weekday.format(at)}</span>
+            <span className={near ? 'text-xs font-semibold' : 'text-xs font-normal text-fg-subtle in-aria-selected:text-fg'}>{near ?? f.weekday.format(at)}</span>
             {/* Not drawn between the two flex lines, but it keeps the tab's name "Today Oct 25", not "TodayOct 25". */}{' '}
-            <span className="text-xs tabular-nums font-normal opacity-80">{f.date.format(at)}</span>
+            <span className="text-xs tabular-nums font-normal text-fg-subtle in-aria-selected:text-fg">{f.date.format(at)}</span>
           </span>
         ),
       };

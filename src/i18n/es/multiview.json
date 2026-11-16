@@ -41,6 +41,7 @@
   "noSourcesAction": "Añadir una fuente",
   "slotEmptyLabel": "Posición {{slot}}: añadir un canal",
   "tileLabel": "Posición {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Posición {{slot}}",
   "listen": "Escuchar el sonido de {{name}}",
   "hasSound": "{{name}} tiene el sonido",
   "listenShort": "Escuchar el sonido",

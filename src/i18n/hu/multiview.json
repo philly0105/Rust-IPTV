@@ -41,6 +41,7 @@
   "noSourcesAction": "Forrás hozzáadása",
   "slotEmptyLabel": "{{slot}}. hely: csatorna hozzáadása",
   "tileLabel": "{{slot}}. hely: {{name}}",
+  "tileSheetSubtitle": "{{slot}}. hely",
   "listen": "{{name}} hangjának lejátszása",
   "hasSound": "A hang most: {{name}}",
   "listenShort": "Hang lejátszása",

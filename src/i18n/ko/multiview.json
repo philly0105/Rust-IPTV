@@ -41,6 +41,7 @@
   "noSourcesAction": "소스 추가",
   "slotEmptyLabel": "{{slot}}번 자리: 채널 추가",
   "tileLabel": "{{slot}}번 자리: {{name}}",
+  "tileSheetSubtitle": "{{slot}}번 자리",
   "listen": "{{name}} 소리 듣기",
   "hasSound": "{{name}}에서 소리가 납니다",
   "listenShort": "소리 듣기",

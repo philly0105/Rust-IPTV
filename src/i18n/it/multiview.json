@@ -41,6 +41,7 @@
   "noSourcesAction": "Aggiungi una sorgente",
   "slotEmptyLabel": "Posizione {{slot}}: aggiungi un canale",
   "tileLabel": "Posizione {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Posizione {{slot}}",
   "listen": "Ascolta l'audio di {{name}}",
   "hasSound": "{{name}} ha l'audio",
   "listenShort": "Ascolta l'audio",

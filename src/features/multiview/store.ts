@@ -64,6 +64,7 @@ export function cleanInput(ch: MultiviewChannelInput): MultiviewChannelInput {
   if (typeof ch.logo === 'string' && ch.logo.trim()) out.logo = ch.logo.trim();
   if (typeof ch.number === 'number' && Number.isFinite(ch.number)) out.number = ch.number;
   if (typeof ch.categoryId === 'string' && ch.categoryId) out.categoryId = ch.categoryId;
+  if (typeof ch.caption === 'string' && ch.caption.trim()) out.caption = ch.caption.trim();
   return out;
 }
 
@@ -119,6 +120,7 @@ export function parseWall(raw: string | null): WallData {
         ...(typeof t['logo'] === 'string' ? { logo: t['logo'] } : {}),
         ...(typeof t['number'] === 'number' ? { number: t['number'] } : {}),
         ...(typeof t['categoryId'] === 'string' ? { categoryId: t['categoryId'] } : {}),
+        ...(typeof t['caption'] === 'string' ? { caption: t['caption'] } : {}),
       });
       tiles.push({ ...input, key });
     }

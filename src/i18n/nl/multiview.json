@@ -41,6 +41,7 @@
   "noSourcesAction": "Bron toevoegen",
   "slotEmptyLabel": "Plek {{slot}}: zender toevoegen",
   "tileLabel": "Plek {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Plek {{slot}}",
   "listen": "Geluid van {{name}} afspelen",
   "hasSound": "{{name}} heeft het geluid",
   "listenShort": "Geluid afspelen",

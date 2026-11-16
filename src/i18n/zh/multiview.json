@@ -41,6 +41,7 @@
   "noSourcesAction": "添加播放源",
   "slotEmptyLabel": "第 {{slot}} 格：添加频道",
   "tileLabel": "第 {{slot}} 格：{{name}}",
+  "tileSheetSubtitle": "第 {{slot}} 格",
   "listen": "播放 {{name}} 的声音",
   "hasSound": "{{name}} 正在出声",
   "listenShort": "播放声音",

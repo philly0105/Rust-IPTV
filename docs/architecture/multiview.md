@@ -13,7 +13,7 @@
 | `MAX_TILES` | 4. |
 | Types | `MultiviewTile`, `MultiviewLayout`, `MultiviewState`, `MultiviewChannelInput`, `MultiviewAddResult`, `AddOutcome`. |
 
-`MultiviewChannelInput` is `{ref, title, number?, logo?, categoryId?}`. `categoryId` only feeds the parental check (a locked group locks its channels); the tile keeps `{key, ref, title, number?, logo?}`.
+`MultiviewChannelInput` is `{ref, title, number?, logo?, categoryId?, caption?}`. `categoryId` only feeds the parental check (a locked group locks its channels); the tile keeps `{key, ref, title, number?, logo?, caption?}`. `caption` is what the tile shows on: a Sports card passes its matchup ("Chargers at Ravens"), since event channels are often named only "NFL 02". The tile keeps it, saved with the wall, until its channel is replaced.
 
 ## Store
 
@@ -84,7 +84,7 @@ Sound:
 
 Chrome follows the broadcast multiviewer pattern:
 
-- A label strip along the bottom shows the slot plate, logo, number, name and the current programme from `epg.nowNext`.
+- A label strip along the bottom shows the slot plate, logo, number, name and the current programme from `epg.nowNext`. A tile with a caption leads with it, with the channel's number and name on the second line in place of the programme.
 - The tile with sound gets a tally: an accent edge and a lit slot plate.
 - Tool buttons sit at the end of the label strip's row, as the player's controls sit along its bottom: listen, move, replace and close. They appear on hover and focus, and always on touch screens. Under a mouse the hidden tools are out of the row (absolute and transparent), so the strip keeps the row's width and names the channel in full; on hover, on focus or while their menu is open they join the row and the strip gives way. On a tile under 24rem, or on a screen without hover (where the tools never go away), all four fold into one menu ("More actions for <name>"), each item with its key (the slot number, S, R, Delete); on the tile being heard the first item reads "Has the sound" and is disabled (on a muted wall it offers the sound, which unmutes the wall). A wide tile under a mouse shows them as buttons. The keys act on the tile either way. The tools' pill and the strip stretch to one height so their tops line up, and on touch every tool keeps the 44 px floor.
 - The chrome is glass on video: C8 tokens (`--color-glass*`, `--color-on-glass`) with `var()` fallbacks. The label strip and pills, on screen all the time over up to four videos, use the solid `GLASS` (strong fill, no blur); only the hover tools and the error and lock panels use `GLASS_BLUR` (`glass-blur`, Run 3 C5). Both are in `styles.ts`.

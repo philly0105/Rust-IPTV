@@ -41,6 +41,7 @@
   "noSourcesAction": "Quelle hinzufügen",
   "slotEmptyLabel": "Platz {{slot}}: Sender hinzufügen",
   "tileLabel": "Platz {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Platz {{slot}}",
   "listen": "Ton von {{name}} abspielen",
   "hasSound": "{{name}} hat den Ton",
   "listenShort": "Ton abspielen",

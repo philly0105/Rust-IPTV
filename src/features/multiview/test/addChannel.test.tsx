@@ -186,6 +186,13 @@ describe('useMultiviewMenuItem', () => {
     expect(screen.getByTestId('location').textContent).toBe('/live');
   });
 
+  it("passes a Sports card's matchup on to the tile", async () => {
+    const { result } = renderHook(() => useMultiviewMenuItem({ ...input(1), caption: 'Chargers at Ravens' }), { wrapper });
+    act(() => result.current.onSelect());
+    await waitFor(() => expect(toasts).toHaveLength(1));
+    expect(store().tiles[0]!.caption).toBe('Chargers at Ravens');
+  });
+
   it('keeps its identity while the channel fields stay the same', () => {
     const { result, rerender } = renderHook(() => useMultiviewMenuItem({ ...input(1) }), { wrapper });
     const first = result.current;

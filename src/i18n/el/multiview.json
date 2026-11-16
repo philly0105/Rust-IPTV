@@ -41,6 +41,7 @@
   "noSourcesAction": "Προσθήκη πηγής",
   "slotEmptyLabel": "Θέση {{slot}}: προσθήκη καναλιού",
   "tileLabel": "Θέση {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Θέση {{slot}}",
   "listen": "Αναπαραγωγή ήχου από {{name}}",
   "hasSound": "Ο ήχος είναι στο {{name}}",
   "listenShort": "Αναπαραγωγή ήχου",

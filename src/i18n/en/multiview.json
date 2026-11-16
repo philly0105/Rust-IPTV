@@ -41,6 +41,7 @@
   "noSourcesAction": "Add a source",
   "slotEmptyLabel": "Slot {{slot}}: add a channel",
   "tileLabel": "Slot {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Slot {{slot}}",
   "listen": "Play sound from {{name}}",
   "hasSound": "{{name}} has the sound",
   "listenShort": "Play sound",

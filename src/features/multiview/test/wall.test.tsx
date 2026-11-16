@@ -974,8 +974,9 @@ describe('tile panels', () => {
     const centre = within(tileEl(2)).getByTestId('multiview-tile-centre').className.split(/\s+/);
     // bottom-12 clears the bottom row (bottom-2 plus the tools' 2.4rem): neither covers Retry.
     expect(centre).toContain('bottom-12');
-    // On touch the tools' 44 px floor makes the row taller, and the band stops above it there too.
-    expect(centre).toContain('pointer-coarse:bottom-16');
+    // On touch the tools keep their 44 px as a see-through band around a 32 px button, so the row
+    // is as short as under a mouse and the panel keeps the same band.
+    expect(centre.some((c) => c.startsWith('pointer-coarse:bottom'))).toBe(false);
     expect(centre).not.toContain('inset-0');
     // The panel steps up with the tile: the help line only from 26rem.
     const hint = within(tileEl(2)).getByTestId('multiview-tile-error').querySelector('p.text-xs')!;
@@ -1021,6 +1022,16 @@ describe('tile panels', () => {
     ]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Close/ }));
     expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1']);
+  });
+
+  it('leads the label strip with a Sports matchup, the channel under it', async () => {
+    seed([1, 2]);
+    useMultiviewStore.setState((s) => ({ tiles: s.tiles.map((t, i) => (i === 1 ? { ...t, caption: 'Chargers at Ravens' } : t)) }));
+    renderPage();
+    const strip = await waitFor(() => within(tileEl(2)).getByTestId('multiview-tile-strip'));
+    expect(within(strip).getByTestId('multiview-tile-caption').textContent).toBe('Chargers at Ravens');
+    expect(strip.textContent).toContain('Channel 2');
+    expect(within(tileEl(1)).queryByTestId('multiview-tile-caption')).toBeNull();
   });
 
   it('gives a tile the sound from its menu, and the tile with sound says it has it', async () => {

@@ -41,6 +41,7 @@
   "noSourcesAction": "Dodaj źródło",
   "slotEmptyLabel": "Miejsce {{slot}}: dodaj kanał",
   "tileLabel": "Miejsce {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Miejsce {{slot}}",
   "listen": "Odtwarzaj dźwięk z {{name}}",
   "hasSound": "{{name}} ma dźwięk",
   "listenShort": "Odtwarzaj dźwięk",

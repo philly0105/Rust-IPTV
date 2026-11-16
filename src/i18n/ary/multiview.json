@@ -41,6 +41,7 @@
   "noSourcesAction": "زيد مصدر",
   "slotEmptyLabel": "البلاصة {{slot}}: زيد قناة",
   "tileLabel": "البلاصة {{slot}}: {{name}}",
+  "tileSheetSubtitle": "البلاصة {{slot}}",
   "listen": "شغل الصوت ديال {{name}}",
   "hasSound": "الصوت عند {{name}}",
   "listenShort": "شغل الصوت",

@@ -41,6 +41,7 @@
   "noSourcesAction": "إضافة مصدر",
   "slotEmptyLabel": "الموضع {{slot}}: إضافة قناة",
   "tileLabel": "الموضع {{slot}}: {{name}}",
+  "tileSheetSubtitle": "الموضع {{slot}}",
   "listen": "تشغيل صوت {{name}}",
   "hasSound": "الصوت من {{name}}",
   "listenShort": "تشغيل الصوت",

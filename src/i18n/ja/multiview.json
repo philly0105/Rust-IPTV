@@ -41,6 +41,7 @@
   "noSourcesAction": "ソースを追加",
   "slotEmptyLabel": "位置 {{slot}}: チャンネルを追加",
   "tileLabel": "位置 {{slot}}: {{name}}",
+  "tileSheetSubtitle": "位置 {{slot}}",
   "listen": "{{name}} の音声を再生",
   "hasSound": "{{name}} の音声を再生中",
   "listenShort": "音声を再生",

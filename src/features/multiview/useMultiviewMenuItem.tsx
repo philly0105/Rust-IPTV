@@ -80,6 +80,7 @@ export function useMultiviewMenuItem(ch: MultiviewChannelInput | null): MenuActi
   const logo = ch?.logo;
   const number = ch?.number;
   const categoryId = ch?.categoryId;
+  const caption = ch?.caption;
 
   return useMemo((): MenuAction => {
     const action: MenuAction = {
@@ -94,6 +95,7 @@ export function useMultiviewMenuItem(ch: MultiviewChannelInput | null): MenuActi
     if (logo !== undefined) input.logo = logo;
     if (number !== undefined) input.number = number;
     if (categoryId !== undefined) input.categoryId = categoryId;
+    if (caption !== undefined) input.caption = caption;
     return { ...action, onSelect: () => void addFromMenu(input, navigate, t) };
-  }, [t, navigate, accepted, sourceId, itemId, contentType, title, logo, number, categoryId]);
+  }, [t, navigate, accepted, sourceId, itemId, contentType, title, logo, number, categoryId, caption]);
 }

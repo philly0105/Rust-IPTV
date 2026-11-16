@@ -41,6 +41,7 @@
   "noSourcesAction": "Kaynak ekle",
   "slotEmptyLabel": "{{slot}}. yer: kanal ekle",
   "tileLabel": "{{slot}}. yer: {{name}}",
+  "tileSheetSubtitle": "{{slot}}. yer",
   "listen": "{{name}} sesini çal",
   "hasSound": "Ses {{name}} kanalında",
   "listenShort": "Sesi çal",

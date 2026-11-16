@@ -41,6 +41,7 @@
   "noSourcesAction": "Дадаць крыніцу",
   "slotEmptyLabel": "Месца {{slot}}: дадаць канал",
   "tileLabel": "Месца {{slot}}: {{name}}",
+  "tileSheetSubtitle": "Месца {{slot}}",
   "listen": "Слухаць гук {{name}}",
   "hasSound": "Гук у {{name}}",
   "listenShort": "Слухаць гук",

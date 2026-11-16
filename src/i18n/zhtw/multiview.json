@@ -41,6 +41,7 @@
   "noSourcesAction": "新增播放來源",
   "slotEmptyLabel": "第 {{slot}} 格：新增頻道",
   "tileLabel": "第 {{slot}} 格：{{name}}",
+  "tileSheetSubtitle": "第 {{slot}} 格",
   "listen": "播放 {{name}} 的聲音",
   "hasSound": "{{name}} 正在出聲",
   "listenShort": "播放聲音",

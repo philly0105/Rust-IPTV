@@ -67,6 +67,7 @@
   "resumeEpisode": "Devam et: {{code}}",
   "nowPlaying": "Şimdi oynatılıyor",
   "closePlayer": "Oynatıcıyı kapat",
+  "backToDetails": "Ayrıntılara dön",
   "playFailed": "Oynatma başlatılamadı",
   "playsFrom": "Oynatma kaynağı: {{source}}",
   "about": "Hakkında",

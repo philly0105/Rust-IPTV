@@ -79,6 +79,7 @@
   "resumeEpisode": "استئناف {{code}}",
   "nowPlaying": "قيد التشغيل",
   "closePlayer": "إغلاق المشغل",
+  "backToDetails": "العودة إلى التفاصيل",
   "playFailed": "تعذّر بدء التشغيل",
   "playsFrom": "يُشغَّل من {{source}}",
   "about": "نبذة",

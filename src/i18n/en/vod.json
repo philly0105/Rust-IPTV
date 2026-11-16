@@ -67,6 +67,7 @@
   "resumeEpisode": "Resume {{code}}",
   "nowPlaying": "Now playing",
   "closePlayer": "Close player",
+  "backToDetails": "Back to details",
   "playFailed": "Could not start playback",
   "playsFrom": "Plays from {{source}}",
   "about": "About",

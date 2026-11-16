@@ -73,6 +73,7 @@
   "resumeEpisode": "Wznów {{code}}",
   "nowPlaying": "Teraz odtwarzane",
   "closePlayer": "Zamknij odtwarzacz",
+  "backToDetails": "Wróć do szczegółów",
   "playFailed": "Nie udało się rozpocząć odtwarzania",
   "playsFrom": "Odtwarzane z {{source}}",
   "about": "Opis",

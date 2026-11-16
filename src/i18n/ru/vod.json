@@ -73,6 +73,7 @@
   "resumeEpisode": "Возобновить {{code}}",
   "nowPlaying": "Сейчас воспроизводится",
   "closePlayer": "Закрыть плеер",
+  "backToDetails": "Назад к подробностям",
   "playFailed": "Не удалось начать воспроизведение",
   "playsFrom": "Воспроизводится из {{source}}",
   "about": "Описание",

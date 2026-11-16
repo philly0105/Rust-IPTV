@@ -9,6 +9,7 @@ import { cn } from '../cn';
 import { bindInputModality, focusFromPointer, focusIfPlayerOwnsFocus, focusIsLost, formatTime, pressKeepsFocus, SEEK_STEP_JL } from '../format';
 import { showOsd, UP_NEXT_SECONDS, useMediaStore } from '../media';
 import { consumeMenuDismiss } from '../menuDismiss';
+import { useStageEndedAction } from '../stage';
 import { exitPip, usePipStore } from '../pip';
 import {
   cancelUpNext,
@@ -286,15 +287,43 @@ function UpNextCard({ variant = 'overlay', compact = false, short = false }: { v
 /**
  * Over the DOM video once a VOD item finished: one big replay button (the controls stay usable).
  * Under the title bar, and centred in the room above the control bar; a short player (a phone's
- * 16:9) gets the small disc without its label, which the bar's own Replay already names.
+ * 16:9) gets the small disc without its label, which the bar's own Replay already names. A stage
+ * with a way out (a detail page's watch stage) says the item finished and offers it beside Replay,
+ * so a finished movie is not a dead end (PV-09).
  */
 function EndedOverlay({ compact, short = false }: { compact: boolean; short?: boolean }) {
   const { t } = useTranslation('player');
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
   const fullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
+  const action = useStageEndedAction();
   if (!ended || upNext) return null;
   const small = compact || short;
+  if (action && !compact) {
+    return (
+      <div
+        data-testid="ended-overlay"
+        role="status"
+        className={cn(
+          'player-chrome absolute inset-0 z-[8] flex flex-col items-center justify-center bg-black/55 motion-safe:animate-fade-in',
+          short ? 'gap-2 pb-12' : fullscreen ? 'gap-4 pb-36' : 'gap-3 pb-20',
+        )}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <p className={cn('font-medium text-on-glass [text-shadow:0_1px_3px_rgb(0_0_0/0.6)]', short ? 'text-body-sm' : 'text-title-sm')}>{t('playbackFinished')}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button type="button" onClick={replay} className={glassButton('secondary', short ? 'sm' : 'md')}>
+            <RotateCcw aria-hidden />
+            {t('replay')}
+          </button>
+          <button type="button" onClick={action.onClick} className={glassButton('primary', short ? 'sm' : 'md')}>
+            {action.label}
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       data-testid="ended-overlay"

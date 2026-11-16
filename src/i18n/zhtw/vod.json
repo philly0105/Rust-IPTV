@@ -67,6 +67,7 @@
   "resumeEpisode": "繼續播放 {{code}}",
   "nowPlaying": "現正播放",
   "closePlayer": "關閉播放器",
+  "backToDetails": "返回詳細資訊",
   "playFailed": "無法開始播放",
   "playsFrom": "播放來源：{{source}}",
   "about": "簡介",

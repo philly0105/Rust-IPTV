@@ -67,6 +67,7 @@
   "resumeEpisode": "{{code}} 이어 보기",
   "nowPlaying": "지금 재생 중",
   "closePlayer": "플레이어 닫기",
+  "backToDetails": "세부 정보로 돌아가기",
   "playFailed": "재생을 시작할 수 없습니다",
   "playsFrom": "{{source}}에서 재생",
   "about": "정보",

@@ -67,6 +67,7 @@
   "resumeEpisode": "{{code}}を続きから再生",
   "nowPlaying": "再生中",
   "closePlayer": "プレーヤーを閉じる",
+  "backToDetails": "詳細に戻る",
   "playFailed": "再生を開始できませんでした",
   "playsFrom": "{{source}}から再生",
   "about": "概要",

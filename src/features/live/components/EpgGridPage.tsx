@@ -2847,8 +2847,8 @@ const GuideWindowDay = memo(function GuideWindowDay({
               </span>
             </span>
             <span className="hidden max-w-full min-w-0 flex-col items-center leading-tight @min-[11rem]:flex">
-              <span className="max-w-full truncate text-[calc(11rem/15)] text-fg-muted">{date}</span>{' '}
-              <span className="max-w-full truncate text-[calc(13rem/15)] font-medium">{range}</span>
+              <span className="max-w-full truncate text-caption leading-tight text-fg-muted">{date}</span>{' '}
+              <span className="max-w-full truncate text-body-sm leading-tight font-medium">{range}</span>
             </span>
           </span>
           <span className="sr-only">, {tg('jumpTitle')}</span>

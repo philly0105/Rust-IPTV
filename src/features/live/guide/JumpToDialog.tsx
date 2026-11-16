@@ -57,6 +57,15 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
   const [day, setDay] = useState(() => localDayStart(start));
   const [at, setAt] = useState(start);
   const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // A chip's two lines: the weekday (or Today) over the month and day, which never wraps, so a
+  // grid of chips does not mix "Sat, Nov / 14" with "Fri, Nov 20".
+  const chipFormats = useMemo(
+    () => ({
+      weekday: new Intl.DateTimeFormat(intlLocale(lang), { weekday: 'short' }),
+      date: new Intl.DateTimeFormat(intlLocale(lang), { month: 'short', day: 'numeric' }),
+    }),
+    [lang],
+  );
 
   // Each opening starts from the window on screen (or today, when that is outside the chips).
   // Set while rendering, not in an effect: the dialog's first frame, and the focus it gives the
@@ -178,10 +187,11 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
                         : 'border-edge bg-surface-2 text-fg hover:bg-surface-3 active:bg-pressed',
                   )}
                 >
-                  <span className={cn('text-[calc(11rem/15)] leading-tight first-letter:uppercase', selected ? 'text-fg-muted' : diff === 0 ? 'text-live' : 'text-fg-subtle')}>
-                    {rel ?? ' '}
+                  <span aria-hidden className={cn('text-caption first-letter:uppercase', selected ? 'text-fg-muted' : diff === 0 ? 'text-live' : 'text-fg-subtle')}>
+                    {rel ?? chipFormats.weekday.format(d)}
                   </span>
-                  <span className="text-[calc(13rem/15)] leading-tight font-medium tabular-nums">{formatDay(d, lang)}</span>
+                  <span aria-hidden className="text-body-sm font-medium whitespace-nowrap tabular-nums">{chipFormats.date.format(d)}</span>
+                  <span className="sr-only">{rel ? `${rel}, ${formatDay(d, lang)}` : formatDay(d, lang)}</span>
                 </button>
               );
             })}

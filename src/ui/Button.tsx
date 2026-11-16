@@ -32,9 +32,12 @@ const base =
 export const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   // The solid accent pair: bright amber with ink text in dark and light alike (tokens.css). A disabled
   // primary turns neutral rather than a half-transparent amber that reads as olive. Its shadow-1 would
-  // replace the base focus glow, so focus draws the glow itself (DS-FOCUS).
+  // replace the base focus glow, so focus draws the glow itself (DS-FOCUS). In light the bright fill
+  // is 1.5 to 2.2:1 on a white panel and the shadow faint, so an inset hairline in the mark tone
+  // gives it an edge, as the slider thumb and the on switch have.
   primary:
     'bg-accent-solid text-accent-solid-fg shadow-1 hover:bg-accent-solid-hover active:bg-accent-solid-pressed active:shadow-none ' +
+    'light:not-disabled:ring-1 light:not-disabled:ring-inset light:not-disabled:ring-accent-mark/45 ' +
     'focus-visible:shadow-[0_0_0_4px_var(--color-glow)] disabled:bg-surface-3 disabled:text-fg-subtle disabled:shadow-none disabled:opacity-100',
   // A filled surface with the quiet container edge; the 3:1 border belongs to form controls only.
   secondary: 'bg-surface-2 text-fg border border-edge hover:bg-surface-3 active:bg-pressed',

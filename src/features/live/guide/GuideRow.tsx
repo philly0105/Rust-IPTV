@@ -16,7 +16,7 @@ import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/record
 
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, splitPlaceTag } from '../lib/channelName';
 import { CELL_TEXT_MIN_PX, MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
@@ -349,9 +349,21 @@ export const GuideRow = memo(function GuideRow({
             )}
           >
             {compact ? (
-              // Phones: the logo over the number; the name is the button's label and tooltip.
+              // Phones: the logo over the number; the name is the button's label and tooltip. A
+              // channel with no logo shows its name instead: three "ES" monograms could not tell
+              // ESPN HD, ESPNU HD and ESPNews apart.
               <>
-                <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
+                <ChannelLogo
+                  src={ch.logoUrl}
+                  name={chName}
+                  size={32}
+                  sourceId={ch.ref.sourceId}
+                  fallback={
+                    <span aria-hidden dir="auto" data-testid="guide-compact-name" className="line-clamp-2 max-w-full text-center text-caption leading-tight break-words text-fg">
+                      {splitPlaceTag(chName).name}
+                    </span>
+                  }
+                />
                 <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <span className="sr-only">{playing ? `${chName}, ${labels.playingNow}` : chName}</span>
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
@@ -362,11 +374,13 @@ export const GuideRow = memo(function GuideRow({
                 <span className={cn('w-7 shrink-0 text-end font-numeric text-sm tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                 {/* Named as Live TV's list names it: the country tag after the name, quiet, so a
-                    narrow column cuts the tag, not what tells ESPN2 from ESPNU. */}
+                    narrow column cuts the tag, not what tells ESPN2 from ESPNU. Two lines: the row
+                    has room for them, and an event channel's matchup comes after its number. */}
                 <ChannelName
                   name={ch.name}
                   strip={stripCountryPrefix}
-                  className={cn('min-w-0 flex-1 truncate text-body-sm text-match-parent text-fg', playing && 'font-semibold')}
+                  twoLines
+                  className={cn('min-w-0 flex-1 text-body-sm leading-tight text-match-parent text-fg', playing && 'font-semibold')}
                 />
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
                 {playing ? (

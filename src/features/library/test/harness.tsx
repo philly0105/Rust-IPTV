@@ -65,7 +65,14 @@ export const playerModule = {
 };
 
 /** The shell header: pages push title and actions into it; tests render the actions. */
-type FakeHeaderState = { title: string; subtitle?: string; actions?: React.ReactNode; search?: { placeholder: string } } | null;
+type FakeHeaderState = {
+  title: string;
+  subtitle?: string;
+  actions?: React.ReactNode;
+  search?: { placeholder: string };
+  back?: { onClick: () => void; label?: string };
+  section?: string;
+} | null;
 const useFakeHeader = create<{ header: FakeHeaderState }>(() => ({ header: null }));
 const setHeader = (header: FakeHeaderState) => useFakeHeader.setState({ header });
 export const shellModule = {
@@ -76,8 +83,15 @@ function FakeHeader() {
   const header = useFakeHeader((s) => s.header);
   return (
     <header data-testid="fake-header">
+      {/* The detail pages' Back (HeaderState.back), as the real header draws it. */}
+      {header?.back ? (
+        <button type="button" data-testid="header-back" onClick={header.back.onClick}>
+          {header.back.label ?? 'Back'}
+        </button>
+      ) : null}
       {/* Like the real shell header (C16): the title is a paragraph, never a heading; pages own their h1. */}
       <p data-testid="page-title">{header?.title}</p>
+      {header?.section ? <p data-testid="page-section">{header.section}</p> : null}
       {header?.subtitle ? <p data-testid="page-subtitle">{header.subtitle}</p> : null}
       {header?.actions}
       {/* The page's own search, when it puts one in the header (else the shell shows Search everything). */}

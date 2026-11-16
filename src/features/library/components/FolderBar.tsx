@@ -70,7 +70,8 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
     <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-muted" data-testid="downloads-folder">
       <span className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
         <HardDrive aria-hidden size={14} className="shrink-0 text-fg-subtle" />
-        <span className="shrink-0">{t('savingTo')}</span>
+        {/* In a browser the folder is on the server's disk, not on the device in hand. */}
+        <span className="shrink-0">{t(isDesktop ? 'savingTo' : 'savingToServer')}</span>
         {dir.isLoading ? (
           <Skeleton className="h-3.5 w-48" />
         ) : dir.isError && pageError ? (
@@ -92,7 +93,7 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
             </Button>
           </span>
         ) : (
-          <FolderPath path={path} unknown={t('folderUnknown')} />
+          <FolderPath path={path} unknown={t('folderUnknown')} {...(isDesktop ? {} : { hint: t('savingToServerHint') })} />
         )}
       </span>
       {isDesktop && (
@@ -115,13 +116,13 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
  * full path is in the tooltip and, once, for screen readers. Paths read left
  * to right in every locale.
  */
-function FolderPath({ path, unknown }: { path: string | undefined; unknown: string }) {
+function FolderPath({ path, unknown, hint }: { path: string | undefined; unknown: string; hint?: string }) {
   const cls = 'font-mono text-caption text-fg';
   if (!path) return <span className={cls}>{unknown}</span>;
   const { head, tail } = splitPath(path);
   return (
     // An RTL page still lines the path up with its "Saving to" label, on the right.
-    <span dir="ltr" className={`flex min-w-0 rtl:justify-end ${cls}`} title={path} data-testid="downloads-dir">
+    <span dir="ltr" className={`flex min-w-0 rtl:justify-end ${cls}`} title={hint ? `${path}\n${hint}` : path} data-testid="downloads-dir">
       <span className="sr-only">{path}</span>
       {head && (
         <span aria-hidden className="min-w-0 truncate">

@@ -118,15 +118,19 @@ function useTopClearOfZapBanner(ref: RefObject<HTMLElement | null>): number | un
   return top;
 }
 
-/** Big tuner readout after a zap or volume change. */
-function Osd() {
+/**
+ * Big tuner readout after a zap or volume change. `short`: a short player (a phone's stage, the
+ * Live page's stage) has its title bar across the top corner the readout uses, so it shows in the
+ * middle of the picture instead, a size smaller.
+ */
+function Osd({ short = false }: { short?: boolean }) {
   const osd = useMediaStore((s) => s.osd);
   if (!osd) return null;
-  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} />;
+  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} short={short} />;
 }
 
 /** `locked`: a zap passing a channel parental controls lock; a lock stands before its number. */
-function OsdReadout({ primary, secondary, locked = false }: { primary: string; secondary?: string | undefined; locked?: boolean }) {
+function OsdReadout({ primary, secondary, locked = false, short }: { primary: string; secondary?: string | undefined; locked?: boolean; short: boolean }) {
   const { t } = useTranslation('player');
   const ref = useRef<HTMLDivElement>(null);
   const digits = /^\d+$/.test(primary);
@@ -135,15 +139,19 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
     <div
       ref={ref}
       aria-live="polite"
+      data-testid="player-osd"
       // Within the player, whatever its size: long lines (file names, reasons) wrap, never clip.
-      className="player-osd player-chrome pointer-events-none absolute top-5 end-6 z-20 max-w-[min(40rem,calc(100%-3rem))] text-end [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
-      style={top === undefined ? undefined : { top }}
+      className={cn(
+        'player-osd player-chrome pointer-events-none absolute z-20 max-w-[min(40rem,calc(100%-3rem))] [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]',
+        short ? 'inset-x-0 top-1/2 mx-auto w-fit -translate-y-1/2 text-center' : 'top-5 end-6 text-end',
+      )}
+      style={top === undefined || short ? undefined : { top }}
     >
       <div
         className={cn(
           'font-numeric leading-none tabular-nums',
-          digits ? 'text-6xl text-accent-hover' : 'text-2xl',
-          locked && 'flex items-center justify-end gap-3',
+          digits ? 'text-6xl text-accent-hover' : short ? 'text-title' : 'text-2xl',
+          locked && cn('flex items-center gap-3', short ? 'justify-center' : 'justify-end'),
         )}
       >
         {locked && (
@@ -154,7 +162,7 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
         )}
         {primary}
       </div>
-      {secondary && <div className="mt-1 line-clamp-2 text-title-sm">{secondary}</div>}
+      {secondary && <div className={cn('mt-1 line-clamp-2', short ? 'text-body' : 'text-title-sm')}>{secondary}</div>}
     </div>
   );
 }
@@ -608,7 +616,7 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
       {!thumb && (
         <>
           {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
-          <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
+          <StreamInfoPanel big={overlay && !small} className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
           {/*
             Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
             mini player says it in its header instead; a short player gets the one-line chip.
@@ -725,7 +733,7 @@ function UnmutePrompt({ compact }: { compact: boolean }) {
       onDoubleClick={(e) => e.stopPropagation()}
       className={cn(
         'absolute z-[25] inline-flex items-center rounded-full bg-accent-solid font-medium text-accent-solid-fg shadow-2 hover:bg-accent-solid-hover active:bg-accent-solid-pressed motion-safe:animate-pop-in',
-        compact ? 'end-2 top-2 gap-1.5 px-2.5 py-1 text-caption' : 'end-3 top-3 gap-2 px-3.5 py-2 text-body-sm sm:end-4 sm:top-4 pointer-coarse:min-h-11',
+        compact ? 'end-2 top-2 gap-1.5 px-2.5 py-1 text-caption' : 'end-3 top-3 gap-2 px-3.5 py-2 text-body-sm sm:end-4 sm:top-4 pointer-coarse:min-h-[calc(44rem/15)]',
       )}
     >
       <VolumeX aria-hidden className={compact ? 'size-3.5' : 'size-4'} />
@@ -805,6 +813,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const status = usePlayerStore((s) => s.status);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
+  const inStage = usePlayerStore((s) => s.dock === 'stage');
   const panelOpen = useMediaStore((s) => s.channelPanelOpen);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const pip = usePipStore((s) => s.active);
@@ -906,9 +915,15 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const overlays = useMemo(
     () => (
       <>
-        <Osd />
+        <Osd short={shortPlayer} />
         <UnmutePrompt compact={compact} />
-        <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
+        {/* A short player (the Live page's stage) gives it the height above the bar, over the title. */}
+        <StreamInfoPanel
+          big={isFullscreen && !pip}
+          className={
+            compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : shortPlayer ? 'start-3 top-3 max-h-[calc(100%-4.5rem)]' : 'start-4 top-16 max-h-[calc(100%-9rem)]'
+          }
+        />
         {/*
           Zap banner (C5): the title's corner, or the far one while the channel list or stream info
           holds it. The mini player says it in its header instead; a short player gets the
@@ -1037,6 +1052,9 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   // of item (Up next across the top, the replay disc in the middle) has the height to itself too.
   const titleHidden = !chromeVisible || zapShown || shortError || (shortPlayer && (endedNow || upNextShown));
   const liveRef = source.isLive ? source.ref : undefined;
+  // A phone's Live stage: the page's Now strip right under the picture says what airs and how far
+  // in, so the title over a 220 px picture is the channel's name alone.
+  const nameOnly = smallPlayer && inStage && !isFullscreen;
 
   return (
     <div
@@ -1121,7 +1139,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
                   </h2>
                   {/* What airs now, kept current while the channel plays (PL-STALE-PROGRAMME); an episode's line for VOD. */}
                   {liveRef ? (
-                    <LiveProgrammeLine channel={liveRef} fallback={source.subtitle} />
+                    !nameOnly && <LiveProgrammeLine channel={liveRef} fallback={source.subtitle} />
                   ) : (
                     source.subtitle && (
                       <p dir="auto" data-testid="player-subtitle" className="mt-0.5 truncate text-body-sm text-on-glass-muted">

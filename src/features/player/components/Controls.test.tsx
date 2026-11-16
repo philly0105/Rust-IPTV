@@ -585,13 +585,13 @@ describe('Controls in a narrow player', () => {
   it('keeps the core controls in the row and moves the rest into the options menu', () => {
     render(<Controls variant="overlay" visible />);
     for (const name of ['Pause', 'Mute', 'Playback options', 'Fullscreen']) expect(screen.getByRole('button', { name })).toBeTruthy();
-    for (const name of ['Back 10 seconds', 'Picture in picture']) expect(screen.queryByRole('button', { name })).toBeNull();
+    for (const name of ['Back 10 seconds', 'Picture in picture', 'Fill window']) expect(screen.queryByRole('button', { name })).toBeNull();
     expect(screen.queryByTestId('volume-readout')).toBeNull();
 
     openMenu();
     const moved = screen.getByTestId('moved-controls');
     const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
-    expect(names).toEqual(['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture']);
+    expect(names).toEqual(['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture', 'Fill window']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Picture in picture' }));
     expect(commands.togglePip).toHaveBeenCalledTimes(1);
     expect(menu()).toBeNull();
@@ -680,7 +680,7 @@ describe('Controls in a narrow player', () => {
       expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
       openMenu();
       const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
-      expect(names).toEqual(['Picture in picture']);
+      expect(names).toEqual(['Picture in picture', 'Fill window']);
     })();
   });
 
@@ -746,8 +746,22 @@ describe('Controls in a narrow player', () => {
     restore();
     render(<Controls variant="overlay" visible />);
     for (const name of ['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture']) expect(screen.getByRole('button', { name })).toBeTruthy();
+    // Fill window names its key, as Fullscreen does.
+    expect(screen.getByRole('button', { name: 'Fill window' }).getAttribute('aria-keyshortcuts')).toBe('Shift+F');
     openMenu();
     expect(screen.queryByTestId('moved-controls')).toBeNull();
+  });
+
+  it('in fullscreen the bar has no Fill window, and a window-filled bar keeps its way out', () => {
+    restore();
+    act(() => usePlayerStore.setState({ isFullscreen: true }));
+    const { unmount } = render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Fill window' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeTruthy();
+    unmount();
+    act(() => usePlayerStore.setState({ isFullscreen: false, isWindowFilled: true }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByRole('button', { name: 'Exit window fill' })).toBeTruthy();
   });
 });
 

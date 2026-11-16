@@ -16,11 +16,24 @@ import { cn } from '../cn';
  */
 export const SHEET_BELOW_PX = 160;
 
+/**
+ * Below this much room above the bar (CSS px) a docked player's menu drops down from under the
+ * player instead, where the page has more room: the Live page's default stage (330 px tall at
+ * 1440x900) leaves about 260 px, and the options menu (9 rows) and the sleep menu need over 300.
+ */
+export const DROP_BELOW_PX = 360;
+
 export interface MenuFit {
   /** The height the popover may take, from just above the bar up to the top of the player; null until measured. */
   room: number | null;
   /** Too little room above the bar: a sheet from the bottom of the screen instead. */
   sheet: boolean;
+  /**
+   * A short docked player with more room under it than above its bar: the popover hangs from the
+   * player's bottom edge over the page (fixed, out of the player), `room` then measured downward.
+   * Its place in the window (top and one side).
+   */
+  drop?: CSSProperties | undefined;
 }
 
 /** Not measured (a menu rendered on its own, or before layout): a popover with its own cap. */
@@ -37,13 +50,14 @@ export function menuFrameClass(fit: MenuFit, popover: string): string {
     'player-glass-strong player-glass-edge overflow-y-auto overscroll-contain p-1.5',
     fit.sheet
       ? 'player-sheet fixed inset-x-0 bottom-0 z-[60] max-h-[min(80dvh,560px)] rounded-t-xl border-t pb-[max(0.375rem,env(safe-area-inset-bottom))] motion-safe:animate-sheet-in sm:inset-x-auto sm:end-4 sm:bottom-4 sm:w-80 sm:rounded-xl sm:border sm:pb-1.5'
-      : cn('glass-blur rounded-lg border motion-safe:animate-pop-in', popover),
+      : cn('glass-blur rounded-lg border motion-safe:animate-pop-in', fit.drop && 'fixed z-[60]', popover),
   );
 }
 
 /** The popover's height: `caps` (CSS lengths, as in its class) and the room above it, whichever is least. */
 export function menuFrameStyle(fit: MenuFit, caps: string): CSSProperties | undefined {
-  return !fit.sheet && fit.room !== null ? { maxHeight: `min(${caps}, ${fit.room}px)` } : undefined;
+  if (fit.sheet || fit.room === null) return undefined;
+  return { ...fit.drop, maxHeight: `min(${caps}, ${fit.room}px)` };
 }
 
 /**

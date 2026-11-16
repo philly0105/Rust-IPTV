@@ -113,7 +113,7 @@ function ArchiveButton() {
       <button
         type="button"
         onClick={open}
-        className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-body-sm text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:h-11"
+        className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-body-sm text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:h-[calc(44rem/15)]"
         data-testid="panel-browse-archive"
       >
         <CalendarClock className="size-4" aria-hidden />

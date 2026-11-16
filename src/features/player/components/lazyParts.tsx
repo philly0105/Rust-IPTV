@@ -59,6 +59,8 @@ export const AlternatesRow = lazyPart(() => import('./AlternateSources').then((m
 export const AlternatesMenu = lazyPart(() => import('./AlternateSources').then((m) => m.AlternatesMenu));
 export const StreamInfoPanel = lazyPart(() => import('./StreamInfoPanel').then((m) => m.StreamInfoPanel));
 export const VideoContextMenu = lazyPart(() => import('./VideoContextMenu').then((m) => m.VideoContextMenu));
+/** Favourite and Add to multi-view for the live channel playing (the options menu's rows; the multi-view store comes with it). */
+export const ChannelActions = lazyPart(() => import('./ChannelActions').then((m) => m.ChannelActions));
 /** Fullscreen-only; its guide lines pull in the live feature's EPG helpers. */
 export const FullscreenChannelPanel = lazyPart(() => import('./FullscreenChannelPanel').then((m) => m.FullscreenChannelPanel));
 /** The tuner's info banner (C5); mounted with every surface, so it loads right after the player. */

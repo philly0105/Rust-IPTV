@@ -73,7 +73,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
             type="button"
             aria-label={t('dismiss')}
             onClick={() => setDismissed(latest.startedAt)}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg pointer-coarse:size-10"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg pointer-coarse:size-[calc(44rem/15)]"
           >
             <X className="size-4" />
           </button>

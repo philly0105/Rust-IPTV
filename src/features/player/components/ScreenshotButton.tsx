@@ -67,7 +67,7 @@ export function ScreenshotButton({
             'inline-flex shrink-0 items-center justify-center motion-safe:transition-colors',
             // On a stage: the square of the stage's secondary buttons (glassButton); in a bar, the round controls.
             stage
-              ? 'size-10 rounded-md bg-white/10 text-on-glass ring-1 ring-white/20 ring-inset hover:bg-white/16 pointer-coarse:size-11 [&_svg]:size-4'
+              ? 'size-10 rounded-md bg-white/10 text-on-glass ring-1 ring-white/20 ring-inset hover:bg-white/16 pointer-coarse:size-[calc(44rem/15)] [&_svg]:size-4'
               : 'size-10 rounded-full text-on-glass hover:bg-white/12 [&_svg]:size-5',
             (reason || busy) && 'opacity-40',
             reason && 'cursor-not-allowed',

@@ -1,4 +1,4 @@
-import { Camera, ChevronLeft, Copy, Maximize, Maximize2, Minimize, Minimize2, Pause, PictureInPicture2, Play } from 'lucide-react';
+import { AppWindow, Camera, ChevronLeft, Copy, Maximize, Minimize, Minimize2, Pause, PictureInPicture2, Play } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +11,7 @@ import { usePipStore } from '../pip';
 import { canShareSource } from '../shareable';
 import { knownSourceKind, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
+import { ChannelActions } from './lazyParts';
 import { MenuAction, MenuChoice, MenuRow, MenuSeparator, MenuToggle, PictureRows, SpeedRows, usePictureSummary } from './Controls';
 import { playerMenuLayer } from './menuFrame';
 import { SleepMenu, SleepRowValue } from './SleepTimer';
@@ -187,7 +188,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           />
           {!pipActive && (
             <MenuAction
-              icon={isWindowFilled ? <Minimize2 className={icon} aria-hidden /> : <Maximize2 className={icon} aria-hidden />}
+              icon={isWindowFilled ? <Minimize2 className={icon} aria-hidden /> : <AppWindow className={icon} aria-hidden />}
               label={isWindowFilled ? t('exitWindowFill') : t('windowFill')}
               onClick={() => pick(() => usePlayerStore.getState().toggleWindowFill())}
             />
@@ -224,6 +225,8 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
           <MenuSeparator />
+          {/* Live: favourite the channel, put it on the multi-view wall. */}
+          <ChannelActions onDone={onClose} />
           {/* Screenshot (C6): the menu closes first, so it is never in the picture. */}
           <MenuAction icon={<Camera className={icon} aria-hidden />} label={t('screenshot')} shortcut="screenshot" onClick={() => pick(() => void takeScreenshot())} />
           {canShareSource(source, knownSourceKind) && (

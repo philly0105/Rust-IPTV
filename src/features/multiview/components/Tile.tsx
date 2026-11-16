@@ -419,9 +419,18 @@ export const Tile = memo(function Tile({
           </span>
         </div>
       ) : null}
+      {/* A click on the moving tile or Escape cancels too; the button is the way that shows, and the
+          only one on a touch screen. */}
       {isSwapSource ? (
-        <div aria-hidden className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[color:var(--color-glass,rgb(12_19_32/0.72))]">
-          <span className="px-3 text-center text-sm font-semibold text-balance text-[color:var(--color-on-glass,#f4f6fa)]">{t('swapping')}</span>
+        <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-[color:var(--color-glass,rgb(12_19_32/0.72))]">
+          <span aria-hidden className="px-3 text-center text-sm font-semibold text-balance text-[color:var(--color-on-glass,#f4f6fa)]">
+            {t('swapping')}
+          </span>
+          <Tooltip content={t('swapCancel')} shortcut="escape" tone="glass" describe={false}>
+            <button type="button" data-testid="multiview-swap-cancel" className={cn(PANEL_SECONDARY, 'pointer-events-auto')} onClick={onSwapCancel}>
+              {t('common:cancel')}
+            </button>
+          </Tooltip>
         </div>
       ) : null}
       {dropTarget ? <div aria-hidden className={cn('pointer-events-none absolute inset-0 z-20 rounded-md border-2', GLASS_ACCENT_BORDER)} /> : null}

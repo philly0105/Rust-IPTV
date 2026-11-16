@@ -878,6 +878,12 @@ describe('features use the kit controls (DS-DUPLICATE-CONTROLS)', () => {
     expect(bare).toEqual([]);
   });
 
+  // A px text size ignores the UI scale (DayChart's 11 px labels stayed small at 125 %).
+  it('sizes no text in px', () => {
+    const px = files.flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/\btext-\[\d+(?:\.\d+)?px\]/g)].map((m) => `${rel(f)}: ${m[0]}`));
+    expect(px).toEqual([]);
+  });
+
   it('puts no native title on an IconButton', () => {
     const titled = files.filter((f) => /<IconButton\b[^>]*?\btitle=/s.test(readFileSync(f, 'utf8')));
     // IconButtonProps has no `title` (TypeScript rejects it); this keeps a cast from sneaking one in.

@@ -896,7 +896,7 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
         style={tintVars(source.name)}
       >
         {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
-        <span aria-hidden className="font-display text-4xl font-semibold">{initialsOf(source.name)}</span>
+        <span aria-hidden className="font-display text-headline">{initialsOf(source.name)}</span>
         <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white light:bg-white/70 light:text-fg">
           {t(kindShortKey(source.kind))}
         </span>

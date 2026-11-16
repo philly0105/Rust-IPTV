@@ -198,7 +198,7 @@ function MyListRowImpl({
         {/* Two lines before the ellipsis: a phone row is narrow and titles run long. */}
         <span
           dir="auto"
-          className="line-clamp-2 w-full text-match-parent text-[calc(15rem/15)] leading-5 font-medium [overflow-wrap:anywhere] text-fg"
+          className="line-clamp-2 w-full text-match-parent text-body leading-5 font-medium [overflow-wrap:anywhere] text-fg"
           title={title}
           data-testid="mylist-title"
         >

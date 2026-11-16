@@ -241,7 +241,7 @@ export function EpisodeList({
                   <div
                     dir="auto"
                     title={ep.title}
-                    className="line-clamp-2 text-[calc(15rem/15)] leading-5 font-medium [overflow-wrap:anywhere] text-fg text-match-parent sm:line-clamp-1"
+                    className="line-clamp-2 text-body leading-5 font-medium [overflow-wrap:anywhere] text-fg text-match-parent sm:line-clamp-1"
                     data-testid="episode-title"
                   >
                     {ep.title}

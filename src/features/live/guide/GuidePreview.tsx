@@ -186,7 +186,7 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
               {when === 'now' ? t('startOver') : t('watchCatchup')}
             </Button>
           ) : null}
-          {/* A short label: the channel is named above, and a provider's long name filled the row. */}
+          {/* A short label: the channel is named above (and in its accessible name); a provider's long name filled the row. */}
           {when !== 'now' ? (
             <Button
               size="sm"
@@ -194,7 +194,6 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
               icon={<Play size={14} />}
               onClick={() => props.onWatch(channel)}
               aria-label={t('playChannel', { name })}
-              title={t('playChannel', { name })}
             >
               {t('watchChannel')}
             </Button>

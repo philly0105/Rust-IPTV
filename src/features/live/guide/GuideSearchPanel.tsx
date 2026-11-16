@@ -477,18 +477,18 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
         {/* Not what was meant: the same words across the whole library. */}
         {typed ? (
           <div data-hit-row="">
-          <Link
-            to={`/search?q=${encodeURIComponent(typed)}`}
-            onClick={() => onClose(false)}
-            data-hit=""
-            className="flex items-center gap-3 border-t border-divider px-4 py-2.5 text-body-sm text-fg outline-none hover:bg-hover focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
-            data-testid="guide-search-everything"
-          >
-            <Search size={16} aria-hidden className="shrink-0 text-fg-muted" />
-            <span dir="auto" className="min-w-0 truncate">
-              {ts('searchFor', { query: typed })}
-            </span>
-          </Link>
+            <Link
+              to={`/search?q=${encodeURIComponent(typed)}`}
+              onClick={() => onClose(false)}
+              data-hit=""
+              className="flex items-center gap-3 border-t border-divider px-4 py-2.5 text-body-sm text-fg outline-none hover:bg-hover focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+              data-testid="guide-search-everything"
+            >
+              <Search size={16} aria-hidden className="shrink-0 text-fg-muted" />
+              <span dir="auto" className="min-w-0 truncate">
+                {ts('searchFor', { query: typed })}
+              </span>
+            </Link>
           </div>
         ) : null}
       </div>

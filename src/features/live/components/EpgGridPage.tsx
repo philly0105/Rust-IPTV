@@ -3128,14 +3128,13 @@ function ProgramPopover({
           ) : null}
           {when !== 'now' ? (
             // A short label: a provider's long name ("UK| SKY SPORTS PREMIER LEAGUE FHD") filled the
-            // row. The header above names the channel; the button's name and tooltip say it too.
+            // row. The header above names the channel, and so does the button's accessible name.
             <Button
               size="sm"
               variant="ghost"
               icon={<Play className="size-3.5" />}
               onClick={onLive}
               aria-label={t('playChannel', { name: channelName })}
-              title={t('playChannel', { name: channelName })}
               data-autofocus={!catchupOk || undefined}
             >
               {t('watchChannel')}

@@ -48,15 +48,17 @@ const variants = BUTTON_VARIANTS;
 
 /**
  * Touch screens (pointer: coarse) get a 44 px floor (DS-TOUCH-TARGETS), written against the
- * 15 px root so it follows the UI scale but not compact density: a finger does not shrink.
+ * 15 px root so it follows the UI scale but not compact density: a finger does not shrink. Every
+ * size takes it, lg too (h-12 is 39 px in compact). Spacing utilities are not a floor: size-11
+ * is 41 px on the 15 px root, not 44.
  */
 export const TOUCH_TARGET = 'pointer-coarse:min-h-[calc(44rem/15)]';
-const TOUCH_TARGET_SQUARE = 'pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]';
+export const TOUCH_TARGET_SQUARE = 'pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]';
 
 const sizes: Record<ButtonSize, string> = {
   sm: cn('h-8 px-3 text-sm', TOUCH_TARGET),
   md: cn('h-10 px-4 text-sm', TOUCH_TARGET),
-  lg: 'h-12 px-6 text-base',
+  lg: cn('h-12 px-6 text-base', TOUCH_TARGET),
 };
 
 export function buttonClass(variant: ButtonVariant = 'secondary', size: ButtonSize = 'md', className?: string): string {
@@ -132,7 +134,7 @@ export const GHOST_ICON = 'text-fg-muted hover:text-fg active:text-fg';
 const iconSizes: Record<ButtonSize, string> = {
   sm: cn('h-8 w-8', TOUCH_TARGET_SQUARE),
   md: cn('h-10 w-10', TOUCH_TARGET_SQUARE),
-  lg: 'h-12 w-12',
+  lg: cn('h-12 w-12', TOUCH_TARGET_SQUARE),
 };
 
 /**

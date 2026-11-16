@@ -242,6 +242,8 @@ describe('IconButton tooltip', () => {
     expect(cls).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
     expect(cls).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
     expect(buttonClass('secondary', 'md')).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
+    // h-12 is only 39 px in compact density: lg takes the floor too.
+    expect(buttonClass('primary', 'lg')).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
   });
 
   it('gives fields, segmented controls and pill tabs the same 44 px floor, so a touch toolbar lines up', () => {

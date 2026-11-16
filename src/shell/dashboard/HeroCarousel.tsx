@@ -48,7 +48,7 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, tintOf, useImageChain, whenIdle } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, TOUCH_TARGET_SQUARE, Tooltip, cn, tintOf, useImageChain, whenIdle } from '@/ui';
 import { formatTenths } from '@/features/vod/lib/rating';
 
 import { useReducedMotion } from '../theme';
@@ -382,8 +382,9 @@ function posterKind(ref: ItemRef): 'movie' | 'live' | 'radio' {
   return ref.contentType === 'live' ? 'live' : ref.contentType === 'radio' ? 'radio' : 'movie';
 }
 
-/** The hero's secondary buttons on glass: Details and the slide's menu. */
+/** The hero's secondary buttons on glass: Details and the slide's menu. 44 px on touch in compact density too. */
 const GLASS_BUTTON = cn(
+  TOUCH_TARGET_SQUARE,
   'inline-flex h-12 shrink-0 items-center justify-center rounded-md border border-glass-border bg-on-glass/10 text-on-glass select-none',
   'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
 );
@@ -494,6 +495,7 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
               disabled={!canPlay}
               aria-describedby={titleId}
               className={cn(
+                TOUCH_TARGET,
                 'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-glass-accent px-6 text-base font-semibold text-glass-accent-fg shadow-2 select-none max-sm:min-w-0 max-sm:flex-1',
                 'hover:brightness-110 active:brightness-90 disabled:cursor-not-allowed disabled:opacity-50',
                 'motion-safe:transition-[filter,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',

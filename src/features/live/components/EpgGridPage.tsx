@@ -5,6 +5,8 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Copy,
+  Download,
   Heart,
   History,
   LayoutList,
@@ -42,14 +44,16 @@ import { invalidate, queryClient as appQueryClient, rpcKey, useRpcQuery } from '
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Settings, type Source, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, fieldClass, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
+import { copyText } from '@/lib/clipboard';
 import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
+import { useProgrammeActions } from '../hooks/useProgrammeActions';
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { displayPrefsOf, useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
@@ -644,7 +648,7 @@ export function EpgGridPage() {
   const genreNames = useMemo(() => Object.fromEntries(GENRES.map((g) => [g, tg(`genre_${g}`)])) as Record<Genre, string>, [tg]);
   // The strings every render of the grid shows, translated once (a t() call is not free, and the
   // page renders on each change of the visible rows).
-  const text = useMemo(() => ({ guide: t('guide'), copyUrl: t('copyUrl'), close: t('close') }), [t]);
+  const text = useMemo(() => ({ guide: t('guide'), copyProgrammeUrl: t('copyProgrammeUrl'), copyManually: t('copyManually'), copyLink: t('copyLink'), close: t('close') }), [t]);
   const rowLabels = useMemo<GuideRowLabels>(
     () => ({
       onNow: t('onNow'),
@@ -1539,7 +1543,9 @@ export function EpgGridPage() {
 
   // ---- channel row menu (C2: rename and hide from the guide, plus the Live page's other entries) ----
   const [rowMenu, setRowMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; programme?: EpgProgram } | null>(null);
-  const [programmeLink, setProgrammeLink] = useState<string | null>(null);
+  /** A programme link the clipboard refused, offered to copy from a field (see useProgrammeActions). */
+  const [programmeLink, setProgrammeLink] = useState<{ url: string; programme: EpgProgram } | null>(null);
+  const offerProgrammeLink = useCallback((url: string, programme: EpgProgram) => setProgrammeLink({ url, programme }), []);
   const closeRowMenu = useCallback(() => setRowMenu(null), []);
   // "Match guide channel" from the row menu and the no-match notice, as on the Live page.
   const [mapping, setMapping] = useState<Channel | null>(null);
@@ -2366,7 +2372,7 @@ export function EpgGridPage() {
           nowTitle={programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title}
           programme={rowMenu.programme}
           now={now}
-          onProgrammeLink={setProgrammeLink}
+          onProgrammeLink={offerProgrammeLink}
           onPlay={playLive}
           onMapGuide={setMapping}
           onToggleFavorite={toggleFavorite}
@@ -2374,19 +2380,42 @@ export function EpgGridPage() {
         />
       ) : null}
       <MemoMappingDialog channel={mapping} onClose={closeMapping} />
-      <Dialog open={programmeLink !== null} onClose={() => setProgrammeLink(null)} title={text.copyUrl} size="lg">
-        <p className="mb-2 text-sm text-fg-muted">Select the stream address and copy it manually.</p>
+      <Dialog
+        open={programmeLink !== null}
+        onClose={() => setProgrammeLink(null)}
+        title={text.copyProgrammeUrl}
+        description={programmeLink ? joinList([programmeLink.programme.title, `${formatDay(ms(programmeLink.programme.start), i18n.language)} ${formatRange(programmeLink.programme, i18n.language)}`], i18n.language) : undefined}
+        size="lg"
+      >
+        <p className="mb-2 text-body-sm text-fg-muted">{text.copyManually}</p>
         <input
           type="text"
           readOnly
-          value={programmeLink ?? ''}
-          aria-label={text.copyUrl}
+          value={programmeLink?.url ?? ''}
+          aria-label={text.copyProgrammeUrl}
           data-autofocus
+          data-testid="programme-link-field"
           onFocus={(e) => e.currentTarget.select()}
-          className="w-full rounded-md border border-edge bg-bg px-3 py-2 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className={fieldClass('md', 'w-full')}
         />
-        <div className="mt-3 flex justify-end">
-          <Button onClick={() => setProgrammeLink(null)}>{text.close}</Button>
+        <div className="mt-3 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setProgrammeLink(null)}>{text.close}</Button>
+          <Button
+            variant="primary"
+            icon={<Copy className="size-4" />}
+            onClick={() => {
+              // A press of its own: the clipboard takes it now that no request stands between.
+              copyText(programmeLink?.url ?? '').then(
+                () => {
+                  toast({ title: t('urlCopied'), variant: 'success' });
+                  setProgrammeLink(null);
+                },
+                (err: unknown) => toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' }),
+              );
+            }}
+          >
+            {text.copyLink}
+          </Button>
         </div>
       </Dialog>
 
@@ -2399,6 +2428,8 @@ export function EpgGridPage() {
           scroller={scroller.current}
           channelCol={channelCol}
           sheet={compact}
+          source={selection.channel.ref.sourceId === source?.id ? source : undefined}
+          onProgrammeLink={offerProgrammeLink}
           onClose={closePopover}
           onLive={() => {
             playLive(selection.channel);
@@ -2889,7 +2920,7 @@ function GuideRowMenu({
   nowTitle: string | undefined;
   programme?: EpgProgram;
   now: number;
-  onProgrammeLink(url: string): void;
+  onProgrammeLink(url: string, programme: EpgProgram): void;
   onPlay(channel: Channel): void;
   onMapGuide(channel: Channel): void;
   onToggleFavorite(channel: Channel, wasFavorite: boolean): void;
@@ -2912,6 +2943,8 @@ function ProgramPopover({
   scroller,
   channelCol,
   sheet,
+  source,
+  onProgrammeLink,
   onClose,
   onLive,
   onCatchup,
@@ -2925,6 +2958,9 @@ function ProgramPopover({
   channelCol: number;
   /** Phones: a bottom sheet over a scrim instead of a popover beside the cell. */
   sheet: boolean;
+  /** The channel's source (the page's, when the channel is from it): Download and Copy link need it. */
+  source: Source | undefined;
+  onProgrammeLink(url: string, programme: EpgProgram): void;
   onClose(): void;
   onLive(): void;
   onCatchup(): void;
@@ -2939,6 +2975,8 @@ function ProgramPopover({
   const channelName = displayChannelName(channel.name, stripCountryPrefix);
   // The grid comes without descriptions: this one is asked for when the detail opens.
   const { description, pending: descriptionPending } = useProgramDescription(channel.ref, program, epgOffsetMinutes * MINUTE);
+  // An ended programme's archive: download it, copy its link (as the row's menu offers them).
+  const actions = useProgrammeActions(channel, source, program, now, onProgrammeLink);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -3075,6 +3113,16 @@ function ProgramPopover({
           {canBrowseArchive(channel, kind) ? (
             <Button size="sm" variant="ghost" icon={<CalendarClock className="size-3.5" />} onClick={() => navigate(archivePath(channel.ref))} data-testid="program-browse-archive">
               {t('browseArchive')}
+            </Button>
+          ) : null}
+          {when === 'past' && actions.download ? (
+            <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} onClick={actions.download} data-testid="program-download">
+              {t('download', { ns: 'vod' })}
+            </Button>
+          ) : null}
+          {when === 'past' && actions.copy ? (
+            <Button size="sm" variant="ghost" icon={<Copy className="size-3.5" />} onClick={actions.copy} data-testid="program-copy-link">
+              {t('copyLink')}
             </Button>
           ) : null}
           {/* recording: */}

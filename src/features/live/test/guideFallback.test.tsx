@@ -175,6 +175,37 @@ describe('EpgGridPage short-EPG fallback', () => {
     });
   });
 
+  it("offers Download and Copy link in a past archive programme's detail", async () => {
+    handlers(false);
+    const now = Date.now();
+    const past = program('Yesterday news', now - 2 * HOUR, now - HOUR);
+    rpcMock.handlers['epg.grid'] = (a) => Object.fromEntries((a as { refs: ItemRef[] }).refs.map((r) => [
+      `${r.sourceId}|${r.contentType}|${r.itemId}`, r.itemId === 'c0' ? [past] : [],
+    ]));
+    rpcMock.handlers['xtream.catchupUrl'] = () => ({ url: 'http://provider.test/timeshift/news.ts', kind: 'direct' });
+    rpcMock.handlers['downloads.start'] = () => ({ id: 42 });
+    renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: /Yesterday news/ }));
+    const pop = await screen.findByTestId('program-popover');
+    fireEvent.click(within(pop).getByTestId('program-download'));
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'downloads.start')).toHaveLength(1));
+
+    // The clipboard takes the link at once when it can.
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    fireEvent.click(within(pop).getByTestId('program-copy-link'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://provider.test/timeshift/news.ts'));
+    expect(screen.queryByTestId('programme-link-field')).toBeNull();
+
+    // When it refuses, the link is offered in a field with a Copy button.
+    writeText.mockRejectedValue(new Error('denied'));
+    fireEvent.click(within(pop).getByTestId('program-copy-link'));
+    const field = await screen.findByTestId<HTMLInputElement>('programme-link-field');
+    expect(field.value).toBe('http://provider.test/timeshift/news.ts');
+    expect(screen.getByRole('dialog', { name: 'Copy programme link' })).toBeTruthy();
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+  });
+
   it('fills empty rows from the provider and marks them in the programme dialog', async () => {
     renderAt('/epg?source=src1', [
       { path: '/epg', element: <EpgGridPage /> },

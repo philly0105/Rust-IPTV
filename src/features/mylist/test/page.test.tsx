@@ -325,7 +325,7 @@ describe('MyListPage: reorder', () => {
       const target = rowOf(onto);
       target.getBoundingClientRect = () => ({ top: 0, height: 88, bottom: 88, left: 0, right: 600, width: 600, x: 0, y: 0, toJSON: () => ({}) });
       at('dragOver', target, clientY);
-      await waitFor(() => expect(rowOf(onto).querySelector('.bg-accent')).not.toBeNull());
+      await waitFor(() => expect(rowOf(onto).querySelector('.bg-accent-mark')).not.toBeNull());
       at('drop', rowOf(onto), clientY);
     };
 
@@ -333,7 +333,7 @@ describe('MyListPage: reorder', () => {
     expect(data.get('text/plain')).toBe('Blade Runner');
     await waitFor(() => expect(h.titles(core.entries)).toEqual(['Blade Runner', 'Arrival', 'Dark', 'Heat']));
     await waitFor(() => expect(shownTitles()).toEqual(['Blade Runner', 'Arrival', 'Dark', 'Heat']));
-    expect(document.querySelector('.bg-accent')).toBeNull();
+    expect(document.querySelector('.bg-accent-mark')).toBeNull();
 
     await drag('Blade Runner', 'Dark', 70);
     await waitFor(() => expect(h.titles(core.entries)).toEqual(['Arrival', 'Dark', 'Blade Runner', 'Heat']));

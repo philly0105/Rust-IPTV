@@ -78,7 +78,7 @@ const cats: Category[] = Array.from({ length: 4 }, (_, i) => ({
   itemCount: 40,
   position: i,
 }));
-const movie = (id: string): VodItem => ({ ref: { sourceId: 'src1', contentType: 'movie', itemId: id }, title: `Movie ${id}`, categoryId: 'c0', year: 2020 });
+const movie = (id: string): VodItem => ({ ref: { sourceId: 'src1', contentType: 'movie', itemId: id }, title: `Movie ${id}`, categoryId: 'c0', year: 2020, rating: 7 });
 const started: PlaybackPosition = {
   ref: { sourceId: 'src1', contentType: 'movie', itemId: 'p1' },
   positionSeconds: 600,

@@ -38,6 +38,8 @@
   "sortAscending": "Oplopend. Wissel naar aflopend",
   "sortDescending": "Aflopend. Wissel naar oplopend",
   "searchInCategory": "Deze categorie doorzoeken",
+  "searchAllMovies": "Alle films doorzoeken",
+  "searchAllSeries": "Alle series doorzoeken",
   "noSearchMatchTitle": "Niets hier komt overeen met \"{{query}}\"",
   "noSearchMatchHint": "Controleer de spelling, of doorzoek alle bronnen via de kopbalk.",
   "clearSearch": "Zoekopdracht wissen",

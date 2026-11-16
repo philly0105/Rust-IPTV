@@ -1,4 +1,4 @@
-import { ChevronRight, Clapperboard, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
+import { ChevronRight, Clapperboard, EyeOff, Lock, SearchX, Tv } from 'lucide-react';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -14,6 +14,7 @@ import { CatalogRail, type CatalogRailProps } from '../components/CatalogRail';
 import { CategoryIndex, FROM_LANDING, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { itemLanguage } from '../lib/language';
 import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
@@ -23,6 +24,7 @@ import { useClientHeight } from '../hooks/useContainerColumns';
 import { useEdgeFades } from '../hooks/useEdgeFades';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useShowSourceName } from '../hooks/useShowSourceName';
+import { usePosterMenu, type PosterMenuItem } from '../hooks/usePosterMenu';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
@@ -56,6 +58,32 @@ function writeIndexOpen(open: boolean): void {
   } catch {
     // Storage full or blocked: the disclosure still works for this visit.
   }
+}
+
+/** How long the index heading is held at the top after All categories takes it there. */
+const HOLD_AT_TOP_MS = 1000;
+
+/**
+ * Keeps `el` at the top of `scroller` while the content above it changes height, for
+ * {@link HOLD_AT_TOP_MS} or until the user wheels, touches, clicks or presses a key. Returns the stop.
+ */
+function holdAtTop(scroller: HTMLElement, el: HTMLElement): () => void {
+  const content = scroller.firstElementChild;
+  if (!content || typeof ResizeObserver === 'undefined') return () => undefined;
+  const ro = new ResizeObserver(() => {
+    const drift = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    if (Math.abs(drift - (parseFloat(getComputedStyle(el).scrollMarginTop) || 0)) > 1) el.scrollIntoView({ block: 'start' });
+  });
+  ro.observe(content);
+  const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+  const stop = () => {
+    ro.disconnect();
+    clearTimeout(timer);
+    for (const type of events) scroller.removeEventListener(type, stop);
+  };
+  const timer = setTimeout(stop, HOLD_AT_TOP_MS);
+  for (const type of events) scroller.addEventListener(type, stop, { passive: true });
+  return stop;
 }
 
 export function VodLandingPage({ kind }: { kind: VodKind }) {
@@ -126,7 +154,13 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     toggle.focus({ preventScroll: true });
     // Pressed while the categories load (IDX-M1): their rails go in above the index when they
     // arrive, so the heading is taken to the top once more then.
-    if (catsLoaded) revealPending.current = false;
+    if (!catsLoaded) return;
+    revealPending.current = false;
+    // The rails the jump passed mount as it lands (or go away when empty), and a mounted rail is
+    // a little shorter or taller than its placeholder, so the heading drifts under the header.
+    // For a moment it is held at the top, until the page settles or the user scrolls or types.
+    const scroller = scrollRef.current;
+    if (scroller) return holdAtTop(scroller, toggle);
   }, [indexAsked, catsLoaded]);
   const recent = useRecentlyAdded(source.data, kind);
   const resume = useResumeMap(sourceId, kind);
@@ -203,13 +237,21 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     [sourceKind, kind, sourceId, minRating, hideWatched],
   );
   // Categories with titles (a Stalker portal may not count them), in the provider's order. Locked
-  // categories stay out of the rails: their posters would show before the PIN is asked.
+  // categories stay out of the rails: their posters would show before the PIN is asked. A category
+  // that holds every title shown here gets none either when Recently added shows them already (an
+  // m3u playlist without dates has no Recently added, and then the category's rail is the one).
+  const recentShown = (recent.data?.length ?? 0) > 0;
   const railCats = useMemo(
     () =>
       (shownCats ?? [])
-        .filter((c) => (c.itemCount > 0 || sourceKind === 'stalker') && !locks.categoryLocked(c.id))
+        .filter(
+          (c) =>
+            (c.itemCount > 0 || sourceKind === 'stalker') &&
+            !locks.categoryLocked(c.id) &&
+            !(recentShown && c.itemCount > 0 && c.itemCount === visibleCount),
+        )
         .slice(0, CATEGORY_RAIL_LIMIT),
-    [shownCats, sourceKind, locks],
+    [shownCats, sourceKind, locks, visibleCount, recentShown],
   );
 
   // The chip row: the shown categories with titles in the provider's order, locked ones marked.
@@ -218,8 +260,8 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
       (shownCats ?? [])
         .filter((c) => c.itemCount > 0 || sourceKind === 'stalker')
         .slice(0, CATEGORY_CHIP_LIMIT)
-        .map((c) => ({ id: c.id, name: c.name, locked: locks.categoryLocked(c.id) })),
-    [shownCats, sourceKind, locks],
+        .map((c) => ({ id: c.id, name: c.name, label: sectionlessCategoryName(c.name, kind), locked: locks.categoryLocked(c.id) })),
+    [shownCats, sourceKind, locks, kind],
   );
   const manageLabel = hiddenCount > 0 ? t('manageCategoriesHidden', { count: hiddenCount }) : t('manageCategories');
 
@@ -236,6 +278,15 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
       />
     ),
     [resume, locks, sourceKind],
+  );
+
+  // The posters' menu (right click, the menu key, a long press), as in a category grid.
+  const posterMenu = usePosterMenu({ sourceKind, resume, openDetails: (ref) => void navigate(detailHref(ref) ?? '#') });
+  const openPosterMenu = posterMenu.open;
+  const railMenu = useCallback(
+    (item: VodItem | SeriesItem, i: number, pos: { x: number; y: number }) =>
+      openPosterMenu({ ref: item.ref, name: item.titleBase || item.title, title: item.title, year: item.year, posterUrl: item.posterUrl, categoryId: item.categoryId }, i, pos),
+    [openPosterMenu],
   );
 
   if (source.isError) {
@@ -280,10 +331,10 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               loading={allCats.isPending}
               hrefFor={hrefFor}
               onShowAll={showIndex}
-              manage={<IconButton size="sm" label={manageLabel} icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0 max-md:order-last" />}
+              manage={<IconButton size="sm" label={manageLabel} icon={<EyeOff aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0 max-md:order-last" />}
             />
             {/* CB-VOD-LANDING: rails first, the way Plex and Apple TV open a library. */}
-            {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} />}
+            {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} menu={openPosterMenu} />}
             <PosterRail<VodItem | SeriesItem>
               title={t('recentlyAdded')}
               seeAll={{ to: allHref }}
@@ -293,6 +344,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               loading={recent.isPending}
               empty={recent.isError ? <ErrorState size="inline" error={recent.error} onRetry={() => void recent.refetch()} /> : undefined}
               myList={myListTarget}
+              menu={railMenu}
               render={(item, i, rail) => card(item, i, rail, watched.has(itemKey(item.ref)))}
             />
             {/* A Stalker portal sorts by name or by date added only: its "top rated" would be the newest. */}
@@ -305,12 +357,13 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                 sort="rating"
                 rootRef={scrollRef}
                 card={card}
+                menu={railMenu}
               />
             )}
             {railCats.map((c) => (
               <LandingRail
                 key={c.id}
-                title={c.name}
+                title={sectionlessCategoryName(c.name, kind)}
                 count={c.itemCount > 0 ? fmt.format(c.itemCount) : undefined}
                 seeAllTo={hrefFor(c.id)}
                 grid={grid}
@@ -318,6 +371,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                 sort="added"
                 rootRef={scrollRef}
                 card={card}
+                menu={railMenu}
               />
             ))}
 
@@ -342,6 +396,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
           </>
         )}
       </Page>
+      {posterMenu.element}
       <HiddenCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
     </div>
   );
@@ -364,6 +419,7 @@ const LandingRail = memo(function LandingRail({
   sort,
   rootRef,
   card,
+  menu,
 }: {
   title: string;
   count?: string | undefined;
@@ -373,10 +429,11 @@ const LandingRail = memo(function LandingRail({
   sort: GridQueryInput['sort'];
   rootRef: RefObject<HTMLDivElement | null>;
   card: CatalogRailProps['card'];
+  menu: CatalogRailProps['menu'];
 }) {
   const input = useMemo(() => (grid ? { ...grid, categoryId, sort } : undefined), [grid, categoryId, sort]);
   const seeAll = useMemo(() => ({ to: seeAllTo }), [seeAllTo]);
-  return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={card} />;
+  return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={card} menu={menu} />;
 });
 
 /**
@@ -487,7 +544,12 @@ function CategoryIndexSection({
   const viewport = useClientHeight(scrollRef, open);
 
   const entries = useMemo<CategoryEntry[]>(() => {
-    const list = categoryEntries(shownCats ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));
+    const list = categoryEntries(shownCats ?? [], filter).map((e) => ({
+      ...e,
+      name: sectionlessCategoryName(e.name, kind),
+      fullName: e.name,
+      ...(locks.categoryLocked(e.id) ? { locked: true } : {}),
+    }));
     if (filter.trim()) return list;
     const all: CategoryEntry = {
       id: ALL_CATEGORIES,
@@ -525,7 +587,8 @@ function CategoryIndexSection({
               if (!open && lower) onShowIndex();
               else onOpenChange(!open);
             }}
-            className="-ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
+            // scroll-mt: taken to the top, the heading keeps a little room under the header.
+            className="-ms-2 inline-flex scroll-mt-2 items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
           >
             <ChevronRight aria-hidden size={18} className={cn('text-fg-muted motion-safe:transition-transform rtl:rotate-180', open && 'rotate-90 rtl:rotate-90')} />
             {t('browseAllCategories')}
@@ -534,7 +597,7 @@ function CategoryIndexSection({
         {shownCats && <span className="tabular text-sm text-fg-subtle">{t('categoryCount', { count: shownCats.length })}</span>}
         <div className="ms-auto flex flex-wrap items-center gap-2">
           {open && <SearchInput value={filter} onChange={setFilter} size="sm" placeholder={t('filterCategories')} className="w-56 max-sm:w-full" />}
-          <Button size="sm" variant="ghost" icon={<ListFilter aria-hidden size={16} />} onClick={onManage}>
+          <Button size="sm" variant="ghost" icon={<EyeOff aria-hidden size={16} />} onClick={onManage}>
             {manageLabel}
           </Button>
         </div>
@@ -595,7 +658,8 @@ function CategoryChips({
 }: {
   /** The title count (after the source's name when there are others), shown below md, where the header does not show it. */
   lead?: string | undefined;
-  cats: readonly { id: string; name: string; locked: boolean }[];
+  /** `label` is what the chip shows (the name without the section's word), `name` the provider's. */
+  cats: readonly { id: string; name: string; label: string; locked: boolean }[];
   total: number | undefined;
   loading: boolean;
   hrefFor: (id: string) => string;
@@ -630,7 +694,7 @@ function CategoryChips({
                 <Link to={hrefFor(c.id)} state={FROM_LANDING} className={filterChipClass(false, 'max-w-[16rem]')} title={c.name} data-testid="vod-category-chip">
                   {c.locked && <Lock aria-hidden size={14} className="shrink-0" />}
                   <span dir="auto" className="truncate">
-                    {c.name}
+                    {c.label}
                   </span>
                   {c.locked && <span className="sr-only">, {t('locked')}</span>}
                 </Link>
@@ -663,10 +727,12 @@ const ContinueSectionRail = memo(function ContinueSectionRail({
   positions,
   locked,
   sourceKind,
+  menu,
 }: {
   positions: PlaybackPosition[];
   locked: (item: { ref: PlaybackPosition['ref'] }) => boolean;
   sourceKind: SourceKind | undefined;
+  menu: (item: PosterMenuItem, index: number, pos: { x: number; y: number }) => void;
 }) {
   const { t } = useTranslation('vod');
   const myList = (p: PlaybackPosition) => {
@@ -681,6 +747,10 @@ const ContinueSectionRail = memo(function ContinueSectionRail({
       items={positions}
       bleed
       myList={myList}
+      menu={(p, i, pos) => {
+        const name = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;
+        menu({ ref: p.ref, name, posterUrl: p.snapshot?.posterUrl }, i, pos);
+      }}
       render={(p, i, rail) => {
         const name = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;
         const left = p.durationSeconds ? Math.max(0, p.durationSeconds - p.positionSeconds) : 0;

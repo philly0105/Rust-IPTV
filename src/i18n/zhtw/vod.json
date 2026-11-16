@@ -38,6 +38,8 @@
   "sortAscending": "遞增。切換為遞減",
   "sortDescending": "遞減。切換為遞增",
   "searchInCategory": "搜尋此類別",
+  "searchAllMovies": "搜尋所有電影",
+  "searchAllSeries": "搜尋所有影集",
   "noSearchMatchTitle": "沒有符合「{{query}}」的內容",
   "noSearchMatchHint": "請檢查拼字，或從頂端搜尋所有播放來源。",
   "clearSearch": "清除搜尋",

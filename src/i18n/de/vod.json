@@ -38,6 +38,8 @@
   "sortAscending": "Aufsteigend. Zu absteigend wechseln",
   "sortDescending": "Absteigend. Zu aufsteigend wechseln",
   "searchInCategory": "Diese Kategorie durchsuchen",
+  "searchAllMovies": "Alle Filme durchsuchen",
+  "searchAllSeries": "Alle Serien durchsuchen",
   "noSearchMatchTitle": "Nichts passt zu „{{query}}“",
   "noSearchMatchHint": "Prüfen Sie die Schreibweise oder durchsuchen Sie über die Kopfzeile alle Quellen.",
   "clearSearch": "Suche löschen",

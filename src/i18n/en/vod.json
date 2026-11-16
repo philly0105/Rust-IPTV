@@ -38,6 +38,8 @@
   "sortAscending": "Ascending. Switch to descending",
   "sortDescending": "Descending. Switch to ascending",
   "searchInCategory": "Search this category",
+  "searchAllMovies": "Search all movies",
+  "searchAllSeries": "Search all series",
   "noSearchMatchTitle": "Nothing here matches \"{{query}}\"",
   "noSearchMatchHint": "Check the spelling, or search every source from the header.",
   "clearSearch": "Clear search",

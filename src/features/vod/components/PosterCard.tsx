@@ -1,5 +1,5 @@
 import { Bookmark, BookmarkCheck, BookmarkPlus, Lock, Star } from 'lucide-react';
-import { createContext, memo, useContext, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { createContext, memo, useContext, useMemo, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -82,6 +82,17 @@ export interface PosterCardProps {
 const WRAPPER_HOVER_ART = 'group-hover/poster:shadow-2 group-hover/poster:ring-fg-subtle motion-safe:group-hover/poster:-translate-y-0.5';
 const WRAPPER_HOVER_LAYER =
   'motion-safe:transition-[translate] motion-safe:duration-(--duration-fast) motion-safe:ease-enter motion-safe:group-hover/poster:-translate-y-0.5 motion-safe:group-has-[a:active]/poster:translate-y-0';
+
+/**
+ * Over a pale initials tile in light (no artwork, or it failed), a dark glass band was the heaviest
+ * thing on the page: there the bar is the theme's amber on the theme's track, flush with the foot,
+ * as Home's ContinueCard draws it. Over artwork, and in dark, it stays glass.
+ */
+// Whole class names, so Tailwind finds them in the source.
+const FALLBACK_LIGHT_BAND = 'light:group-has-[[data-poster-fallback]]/art:bg-transparent light:group-has-[[data-poster-fallback]]/art:p-0';
+const FALLBACK_LIGHT_BAR =
+  'light:group-has-[[data-poster-fallback]]/art:h-1 light:group-has-[[data-poster-fallback]]/art:rounded-none light:group-has-[[data-poster-fallback]]/art:bg-surface-3 ' +
+  'light:group-has-[[data-poster-fallback]]/art:[&>div]:rounded-none light:group-has-[[data-poster-fallback]]/art:[&>div]:bg-accent-mark';
 
 /**
  * A My List corner that only hover brings up never shows on a screen without hover (Tailwind's
@@ -246,7 +257,17 @@ function PosterCardBody({
   // A linked card in a shared list knows whether its title is saved; a grid cell is told (GridPosterCardWith).
   const saved = savedProp ?? (!!myList && !!list && list.status === 'ready' && list.keys.has(itemKey(myList.itemRef)));
   const ownIntent = usePrefetchIntent(intent ? null : (prefetch ?? null));
-  const { onPointerEnter, onPointerLeave, onFocus, onBlur } = intent ?? ownIntent;
+  const { onPointerEnter: warm, onPointerLeave, onFocus, onBlur } = intent ?? ownIntent;
+  // A native tooltip only when it adds something: the provider's fuller name, or a caption cut at
+  // two lines (measured as the pointer comes in). Otherwise it repeated the caption under it.
+  // "Harbor Lights (2021)" over the caption "Harbor Lights" and the year line adds nothing.
+  const tip = fullTitle && fullTitle !== title && fullTitle !== `${title} (${year})` ? fullTitle : undefined;
+  const onPointerEnter = (e: PointerEvent<HTMLElement>) => {
+    warm(e);
+    if (tip) return;
+    const caption = e.currentTarget.querySelector('.line-clamp-2');
+    e.currentTarget.title = caption && caption.scrollHeight > caption.clientHeight + 1 ? title : '';
+  };
   const artSourceId = sourceId ?? prefetch?.ref.sourceId ?? myList?.itemRef.sourceId;
   const r = formatRating(rating, locale);
   const langName = language ? languageName(language, locale, (g) => t(`languageGroup_${g}`)) : undefined;
@@ -269,7 +290,7 @@ function PosterCardBody({
   const secondary = meta ?? year;
   const content = (
     <>
-      <div className={cn(CARD_ART, interactive && myList && WRAPPER_HOVER_ART, active && CARD_ART_CURSOR)}>
+      <div className={cn(CARD_ART, 'group/art', interactive && myList && WRAPPER_HOVER_ART, active && CARD_ART_CURSOR)}>
         {/* The frame's ring is the edge; the poster's own hairline would double it. */}
         <Poster src={posterUrl} sourceId={artSourceId} alt="" label={title} aspect="poster" className="after:hidden" />
         {(badge || locked) && (
@@ -319,8 +340,8 @@ function PosterCardBody({
         )}
         {hasProgress && (
           // Glass on the artwork in every theme; the link's name already says how far, so the bar is drawn only.
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-glass/60 px-1.5 pb-1.5 pt-1">
-            <ProgressBar value={progress} max={1} tone="glass" decorative />
+          <div className={cn('pointer-events-none absolute inset-x-0 bottom-0 bg-glass/60 px-1.5 pb-1.5 pt-1', FALLBACK_LIGHT_BAND)}>
+            <ProgressBar value={progress} max={1} tone="glass" decorative className={FALLBACK_LIGHT_BAR} />
           </div>
         )}
         {artCorner}
@@ -352,7 +373,7 @@ function PosterCardBody({
         data-grid-index={index}
         data-poster-card=""
         className={classes}
-        title={fullTitle ?? title}
+        title={tip}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
       >
@@ -372,7 +393,7 @@ function PosterCardBody({
       tabIndex={tabIndex}
       // The focus ring is drawn on the artwork (group-focus-visible below), not around the caption.
       className={classes}
-      title={fullTitle ?? title}
+      title={tip}
       aria-label={fullLabel}
     >
       {content}

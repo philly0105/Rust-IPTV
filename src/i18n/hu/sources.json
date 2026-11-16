@@ -1,5 +1,7 @@
 {
   "title": "Források",
+  "sourceCount_one": "{{count, number}} forrás",
+  "sourceCount_other": "{{count, number}} forrás",
   "listLabel": "Saját források",
   "add": "Forrás hozzáadása",
   "addSource": "Forrás hozzáadása",

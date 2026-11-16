@@ -1,5 +1,11 @@
 {
   "title": "المصادر",
+  "sourceCount_zero": "{{count, number}} مصدر",
+  "sourceCount_one": "مصدر واحد",
+  "sourceCount_two": "مصدران",
+  "sourceCount_few": "{{count, number}} مصادر",
+  "sourceCount_many": "{{count, number}} مصدرًا",
+  "sourceCount_other": "{{count, number}} مصدر",
   "listLabel": "مصادرك",
   "add": "إضافة مصدر",
   "addSource": "إضافة مصدر",

@@ -1,5 +1,7 @@
 {
   "title": "Kaynaklar",
+  "sourceCount_one": "{{count, number}} kaynak",
+  "sourceCount_other": "{{count, number}} kaynak",
   "listLabel": "Kaynaklarınız",
   "add": "Kaynak ekle",
   "addSource": "Kaynak ekle",

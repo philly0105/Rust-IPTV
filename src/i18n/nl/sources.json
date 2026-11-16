@@ -1,5 +1,7 @@
 {
   "title": "Bronnen",
+  "sourceCount_one": "{{count, number}} bron",
+  "sourceCount_other": "{{count, number}} bronnen",
   "listLabel": "Je bronnen",
   "add": "Bron toevoegen",
   "addSource": "Een bron toevoegen",

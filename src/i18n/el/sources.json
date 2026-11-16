@@ -1,5 +1,7 @@
 {
   "title": "Πηγές",
+  "sourceCount_one": "{{count, number}} πηγή",
+  "sourceCount_other": "{{count, number}} πηγές",
   "listLabel": "Οι πηγές σας",
   "add": "Προσθήκη πηγής",
   "addSource": "Προσθήκη πηγής",

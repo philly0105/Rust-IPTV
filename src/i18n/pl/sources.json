@@ -1,5 +1,9 @@
 {
   "title": "Źródła",
+  "sourceCount_one": "{{count, number}} źródło",
+  "sourceCount_few": "{{count, number}} źródła",
+  "sourceCount_many": "{{count, number}} źródeł",
+  "sourceCount_other": "{{count, number}} źródła",
   "listLabel": "Twoje źródła",
   "add": "Dodaj źródło",
   "addSource": "Dodaj źródło",

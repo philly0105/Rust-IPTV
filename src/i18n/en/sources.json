@@ -1,5 +1,7 @@
 {
   "title": "Sources",
+  "sourceCount_one": "{{count, number}} source",
+  "sourceCount_other": "{{count, number}} sources",
   "listLabel": "Your sources",
   "add": "Add source",
   "addSource": "Add a source",

@@ -61,10 +61,10 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the header', () => {
-  it('shows the count as a bare number, not "3 sources" after "Sources"', async () => {
+  it('shows the count with its noun, as every header does', async () => {
     renderAt(sourcesRoutes, '/sources');
     await screen.findAllByTestId('source-card');
-    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('3'));
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('3 sources'));
     expect(useShellStore.getState().header?.title).toBe('Sources');
   });
 

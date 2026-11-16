@@ -573,8 +573,8 @@ export function SourcesPage() {
   useEffect(() => {
     setHeader({
       title: t('title'),
-      // The count as a bare number beside the title, as PageHeader shows one; none while empty.
-      subtitle: hasSources ? formatCount(sources.length, i18n.language) : undefined,
+      // The count with its noun, as every header's scope reads ("3 sources"); none while empty.
+      subtitle: hasSources ? t('sourceCount', { count: sources.length }) : undefined,
       // On a phone the page's actions are header buttons, so the cards start right under the header
       // (no full-width Add bar above them). Wider windows keep them in the toolbar.
       actions:

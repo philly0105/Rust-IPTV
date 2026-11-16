@@ -693,7 +693,7 @@ describe('artwork fallback tint (src/ui/tint.ts)', () => {
       expect(light).toContain(`light:max-md:${v}`);
     }
     // Under them, in every theme and so on the stage, the deep stops and white initials.
-    expect(TINT_THEME.split(' ')).toEqual(expect.arrayContaining(['[background-image:var(--tint-dark)]', 'text-white/90']));
+    expect(TINT_THEME.split(' ')).toEqual(expect.arrayContaining(['[background-image:var(--tint-dark)]', 'text-white/75']));
   });
 
   it('a tile on glass keeps the deep stops in every theme', () => {
@@ -757,6 +757,29 @@ describe('icon stroke (DS-ICON-STROKE)', () => {
     expect(strokeOf(icon('class-5'))).toBe('1.75');
     expect(strokeOf(icon('own'))).toBe('own');
     expect(strokeOf(icon('player'))).toBe('own');
+  });
+});
+
+describe('icon size utilities (DS-ICON-SCALE)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  // The unlayered rule that sizes an icon, as px at 100 % ('' when none matches).
+  const rules = [...globals.matchAll(/^(svg\.lucide\.size-[^{]+)\{\s*width: calc\(([\d.]+)rem \/ 15\);/gm)].map((m) => [m[1]!.trim(), m[2]!] as const);
+  const sizeOf = (el: Element) => rules.find(([sel]) => el.matches(sel))?.[1] ?? '';
+
+  it('puts size-3 to size-6 on Lucide icons on the 12/14/16/18/24 scale, and leaves variant sizes alone', () => {
+    const { container } = render(
+      <>
+        <House data-i="3" className="size-3" />
+        <House data-i="3.5" className="size-3.5" />
+        <House data-i="4" className="size-4 text-fg-muted" />
+        <House data-i="5" className="size-5" />
+        <House data-i="6" className="size-6" />
+        <House data-i="coarse" className="size-4 pointer-coarse:size-5" />
+      </>,
+    );
+    const icon = (k: string) => container.querySelector(`[data-i="${k}"]`)!;
+    expect(['3', '3.5', '4', '5', '6'].map((k) => sizeOf(icon(k)))).toEqual(['12', '14', '16', '18', '24']);
+    expect(sizeOf(icon('coarse'))).toBe('');
   });
 });
 

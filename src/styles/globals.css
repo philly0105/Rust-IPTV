@@ -364,7 +364,8 @@
    * button that had grown by a quarter. These rules restate each size in use in rem against the
    * 15 px root: 16 px at 100 %, 20 px at 125 %. The scale for new icons: 12 (inline meta), 14
    * (dense rows), 16 (buttons, menus; the default), 18 (rail, header, dialog close), 24 (hero and
-   * empty-state art). A size utility on the icon (size-4, h-5 w-5) is in a later layer and wins.
+   * empty-state art). A size utility on the icon (h-5 w-5) is in a later layer and wins; size-3 to
+   * size-6 land on the same scale (the unlayered rules after this layer).
    */
   svg.lucide[width='11'] {
     width: calc(11rem / 15);
@@ -481,6 +482,35 @@
     outline: 2px solid Highlight !important;
     outline-offset: 2px;
   }
+}
+
+/*
+ * Icons sized with a spacing utility land on the icon scale (DS-ICON-SCALE). Spacing steps are
+ * rem on the 15 px root, so size-4 drew a 15 px icon beside 16 px size={16} ones, size-3.5 13 px,
+ * size-6 22.5 px, and compact density shrank them all by an eighth while size={n} icons kept
+ * theirs. On a Lucide icon each one means its step of the scale (12, 14, 16, 18, 24 px at 100 %),
+ * following the UI scale only. Unlayered: the utilities layer would beat a base-layer rule. An
+ * icon that changes size with a variant (pointer-coarse:size-5) keeps the utilities.
+ */
+svg.lucide.size-3:not([class*=':size-']) {
+  width: calc(12rem / 15);
+  height: calc(12rem / 15);
+}
+svg.lucide.size-3\.5:not([class*=':size-']) {
+  width: calc(14rem / 15);
+  height: calc(14rem / 15);
+}
+svg.lucide.size-4:not([class*=':size-']) {
+  width: calc(16rem / 15);
+  height: calc(16rem / 15);
+}
+svg.lucide.size-5:not([class*=':size-']) {
+  width: calc(18rem / 15);
+  height: calc(18rem / 15);
+}
+svg.lucide.size-6:not([class*=':size-']) {
+  width: calc(24rem / 15);
+  height: calc(24rem / 15);
 }
 
 /*

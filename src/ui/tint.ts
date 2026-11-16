@@ -66,7 +66,11 @@ export interface Tint {
   hue: number;
   /** The HSL hue of the dark top stop, for a glow written in hsl(). */
   hslHue: number;
-  /** For white initials: a top stop at L 0.42 and a bottom one at L 0.26, a little further round. */
+  /**
+   * For white initials: a top stop at L 0.38 and a bottom one at L 0.26, a little further round. Low
+   * in chroma (0.045 and 0.035): with artwork missing, a row of fuller slabs out-shouted the titles,
+   * the one primary action and the real artwork beside them in a dark room.
+   */
   dark: readonly [string, string];
   /** The light theme's: pale (L 0.93 and 0.86) and low in chroma, so a grid of them stays quiet. */
   light: readonly [string, string];
@@ -84,7 +88,7 @@ export function tintOf(name: string): Tint {
   let tint = tints.get(hue);
   if (!tint) {
     const second = hue + 25;
-    const dark = [oklchHex(0.42, 0.07, hue), oklchHex(0.26, 0.05, second)] as const;
+    const dark = [oklchHex(0.38, 0.045, hue), oklchHex(0.26, 0.035, second)] as const;
     tint = {
       hue,
       hslHue: hslHueOf(dark[0]),
@@ -113,7 +117,7 @@ export function tintVars(name: string): CSSProperties {
 
 /**
  * A tile in the name's tint ({@link tintVars} on the same element) with its initials in the right
- * colour: white on the deep stops, and in the light theme the pale stops with the hue's own ink.
+ * colour: white at 75 % on the deep stops (bright enough to read, quiet enough for a fallback), and in the light theme the pale stops with the hue's own ink.
  * Deep slabs were the heaviest things on the light theme's pale page.
  *
  * Inside the player's stage (`data-player-stage`, black in every theme) the tile keeps the deep
@@ -123,9 +127,9 @@ export function tintVars(name: string): CSSProperties {
  * surface instead (LiveStageColumn), so there the tile follows the theme again.
  */
 export const TINT_THEME =
-  '[background-image:var(--tint-dark)] text-white/90 ' +
+  '[background-image:var(--tint-dark)] text-white/75 ' +
   'light:not-in-data-player-stage:[background-image:var(--tint-light)] light:not-in-data-player-stage:[color:var(--tint-ink)] ' +
   'light:max-md:[background-image:var(--tint-light)] light:max-md:[color:var(--tint-ink)]';
 
 /** The deep stops in every theme, for a tile on glass or over video (Home's hero). */
-export const TINT_DARK = '[background-image:var(--tint-dark)] text-white/90';
+export const TINT_DARK = '[background-image:var(--tint-dark)] text-white/75';

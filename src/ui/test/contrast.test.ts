@@ -664,11 +664,11 @@ describe('artwork fallback tints', () => {
 
   it('covers all twelve hues', () => expect(names).toHaveLength(12));
 
-  it('white initials at 90% reach 4.5:1 on both deep stops of every hue', () => {
+  it('white initials at 75% reach 4.5:1 on both deep stops of every hue', () => {
     for (const name of names) {
       for (const stop of tintOf(name).dark) {
         const bg = hex(stop);
-        expect(contrast(over(white, 0.9, bg), bg), `${tintOf(name).hue}: ${stop}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(over(white, 0.75, bg), bg), `${tintOf(name).hue}: ${stop}`).toBeGreaterThanOrEqual(4.5);
       }
     }
   });

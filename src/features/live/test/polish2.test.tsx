@@ -898,10 +898,11 @@ describe('guide grid', () => {
     const cell = cells[0]!;
     const text = within(cell).getByTestId('cell-text');
     // Native sticky positioning holds the title at the visible edge; the programme clips it
-    // when the cell ends, with no per-scroll width calculation.
+    // when the cell ends. At rest the cut title is narrowed to what shows of its cell, so it
+    // ends in an ellipsis rather than losing its first letters (guide-01); no width per scroll frame.
     expect(text.className).toContain('sticky');
     expect(parseFloat(text.style.insetInlineStart)).toBeGreaterThan(0);
-    expect(text.style.maxWidth).toBe('');
+    expect(text.style.maxWidth).toMatch(/^\d+px$/);
     // The guide's pickers (LG-11): same accessible name, with a chevron like the kit Select's. One
     // source here, so the group picker leads (the source picker shows only with a choice).
     const group = screen.getByRole('combobox', { name: 'Group' });

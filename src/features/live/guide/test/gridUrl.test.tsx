@@ -102,17 +102,19 @@ const showsLiveData = () => {
 
 describe('the window in the URL', () => {
   it('stays three hours earlier when moving back from the live window', async () => {
-    const live = defaultStart(Date.now());
+    const trackStart = defaultStart(Date.now());
     renderGuide({ path: '/epg?source=src1', routes: GRID });
     await screen.findByText('Channel 0');
     const grid = screen.getByTestId('epg-grid');
     showsWindow(Number(grid.dataset.viewAt));
+    // The steps go from the slot the guide opened on, not the window's start (guide-21).
+    const live = floorLocal(Number(grid.dataset.viewAt), GRID_SLOT_MIN);
 
     fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
     expect(atOf()).toBe(live - 3 * HOUR);
     await waitFor(() => showsWindow(live - 3 * HOUR));
     expect(Number(grid.dataset.viewAt)).toBe(live - 3 * HOUR);
-    expect(grid.scrollLeft).toBe(GRID_TRACK_BEFORE / MINUTE * 5 - 3 * HOUR / MINUTE * 5);
+    expect(grid.scrollLeft).toBe((GRID_TRACK_BEFORE + live - trackStart - 3 * HOUR) / MINUTE * 5);
     await waitFor(() => expect(gridFroms()).toContain(dataFrom(live - 3 * HOUR)));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
     showsWindow(live - 3 * HOUR);

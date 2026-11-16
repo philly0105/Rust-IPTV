@@ -543,7 +543,7 @@ function showsProgress(progress: number | undefined, watched: boolean | undefine
 export function PosterCardSkeleton({ className }: { className?: string }) {
   return (
     <div aria-hidden className={cn('flex min-w-0 flex-col gap-2', className)}>
-      <div className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: 2 / 3 }} />
+      <div className="skeleton-surface w-full rounded-lg motion-safe:animate-shimmer" style={{ aspectRatio: 2 / 3 }} />
       <Skeleton className="h-3.5 w-4/5" />
       <Skeleton className="h-3 w-2/5 opacity-70" />
     </div>

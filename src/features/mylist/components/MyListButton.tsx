@@ -177,7 +177,7 @@ function MyListButtonBody({
       <Button
         size={size}
         variant="secondary"
-        icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} className={cn(inList && 'text-accent')} />}
+        icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} />}
         // Spinner in place of the glyph, aria-disabled and aria-busy while the list loads.
         loading={loading}
         aria-pressed={pressed}
@@ -188,7 +188,8 @@ function MyListButtonBody({
         data-variant="button"
         data-state={status}
         data-in-list={inList || undefined}
-        className={cn(inList && 'border-accent/70', (pending || loading) && 'cursor-progress', className)}
+        // Saved is a state, not an action: the neutral selected fill, as the round variant draws it.
+        className={cn(inList && 'bg-selected text-fg', (pending || loading) && 'cursor-progress', className)}
       >
         {t('buttonLabel')}
       </Button>

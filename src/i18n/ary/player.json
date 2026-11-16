@@ -78,6 +78,7 @@
   "playNow": "شغّل دابا",
   "cancel": "إلغاء",
   "resumedAt": "كمّل من {{time}}",
+  "resumePastEnd": "البلاصة المحفوظة من بعد آخر هاد الملف، كيبدا من الأول",
   "externalPlaying": "كيتشغل ف {{player}}",
   "externalStopHint": "وقّف من هنا، ولا سد النافذة ديال {{player}}.",
   "externalExited": "{{player}} تسد",

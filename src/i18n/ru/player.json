@@ -78,6 +78,7 @@
   "playNow": "Смотреть сейчас",
   "cancel": "Отмена",
   "resumedAt": "Продолжено с {{time}}",
+  "resumePastEnd": "Сохранённое место дальше конца этого файла, воспроизведение с начала",
   "externalPlaying": "Воспроизводится в {{player}}",
   "externalStopHint": "Остановите воспроизведение здесь или закройте окно {{player}}.",
   "externalExited": "{{player}} закрыт",

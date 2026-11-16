@@ -78,6 +78,7 @@
   "playNow": "Nu afspelen",
   "cancel": "Annuleren",
   "resumedAt": "Hervat op {{time}}",
+  "resumePastEnd": "Opgeslagen punt ligt na het einde van dit bestand, afspelen vanaf het begin",
   "externalPlaying": "Speelt af in {{player}}",
   "externalStopHint": "Stop hier of sluit het {{player}}-venster.",
   "externalExited": "{{player}} is gesloten",

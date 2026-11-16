@@ -172,6 +172,16 @@ let allowedRefKey: string | null = null;
 let startOverKey: string | null = null;
 /** Saved positions this close to the start are not worth a resume (and no "Resumed at 0:03"). */
 export const MIN_RESUME_SECONDS = 5;
+/** Whether a resume point lies inside a file of `durationSeconds` (one that does not is not applied). */
+export function resumeFits(resumeSeconds: number, durationSeconds: number): boolean {
+  return resumeSeconds < durationSeconds - 2;
+}
+/**
+ * Playback this short of a resume point that was not applied (it lies past the end of the file)
+ * does not replace the saved spot: a provider's listed runtime that differs from the file must
+ * not cost the user their place on one click.
+ */
+const RESUME_KEEP_SECONDS = 10;
 /**
  * The double-click window: above the longest double-click time Windows allows (900 ms), so a
  * slow double click still counts. A click on an ended item waits this long before it replays
@@ -498,6 +508,7 @@ function savePosition(): Promise<void> {
   if (!tracksPosition(source)) return Promise.resolve();
   const pos = Math.floor(positionSeconds);
   if (pos <= 0 || pos === lastSavedPosition) return Promise.resolve();
+  if (source.resumeSeconds && pos < Math.min(source.resumeSeconds, RESUME_KEEP_SECONDS)) return Promise.resolve();
   lastSavedPosition = pos;
   const args: Parameters<typeof rpc<'positions.set'>>[1] = {
     ref: source.ref,

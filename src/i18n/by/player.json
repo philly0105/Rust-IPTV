@@ -78,6 +78,7 @@
   "playNow": "Прайграць зараз",
   "cancel": "Скасаваць",
   "resumedAt": "Працягнута з {{time}}",
+  "resumePastEnd": "Захаванае месца за канцом гэтага файла, прайграванне з пачатку",
   "externalPlaying": "Прайграецца ў {{player}}",
   "externalStopHint": "Спыніце прайграванне тут або закрыйце акно {{player}}.",
   "externalExited": "{{player}} закрыты",

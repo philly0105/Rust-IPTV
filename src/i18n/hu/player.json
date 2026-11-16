@@ -78,6 +78,7 @@
   "playNow": "Lejátszás most",
   "cancel": "Mégse",
   "resumedAt": "Folytatva innen: {{time}}",
+  "resumePastEnd": "A mentett pont a fájl vége után van, lejátszás az elejéről",
   "externalPlaying": "Lejátszás folyamatban: {{player}}",
   "externalStopHint": "Állítsa le itt, vagy zárja be ezt az ablakot: {{player}}.",
   "externalExited": "{{player}} bezárult",

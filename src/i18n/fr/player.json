@@ -78,6 +78,7 @@
   "playNow": "Lire maintenant",
   "cancel": "Annuler",
   "resumedAt": "Repris à {{time}}",
+  "resumePastEnd": "Le point enregistré se trouve après la fin de ce fichier, lecture depuis le début",
   "externalPlaying": "Lecture dans {{player}}",
   "externalStopHint": "Arrêtez ici, ou fermez la fenêtre {{player}}.",
   "externalExited": "{{player}} fermé",

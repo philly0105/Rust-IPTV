@@ -78,6 +78,7 @@
   "playNow": "今すぐ再生",
   "cancel": "キャンセル",
   "resumedAt": "{{time}}から再開しました",
+  "resumePastEnd": "保存位置がこのファイルの終わりより後のため、最初から再生します",
   "externalPlaying": "{{player}}で再生中",
   "externalStopHint": "ここで停止するか、{{player}}のウィンドウを閉じてください。",
   "externalExited": "{{player}}が終了しました",

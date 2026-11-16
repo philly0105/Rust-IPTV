@@ -16,6 +16,7 @@ import {
   MIN_RESUME_SECONDS,
   playUpNextNow,
   replay,
+  resumeFits,
   selectEnded,
   setPaused,
   usePlayerStore,
@@ -889,15 +890,18 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
     if (host) host.dataset['idle'] = String(!chromeVisible);
   }, [chromeVisible]);
 
-  // Resume notice for VOD.
+  // Resume notice for VOD, once the file's length is known: a saved spot past its end is not
+  // applied (InlinePlayer), so it says playback starts at the beginning instead of "Resumed at".
   const resumedFrom = source?.resumeSeconds;
+  const lengthKnown = usePlayerStore((s) => !!s.durationSeconds && Number.isFinite(s.durationSeconds));
   useEffect(() => {
-    if (source?.url && resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
-      showOsd(t('resumedAt', { time: formatTime(resumedFrom) }));
+    if (source?.url && lengthKnown && resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
+      const length = usePlayerStore.getState().durationSeconds ?? 0;
+      showOsd(resumeFits(resumedFrom, length) ? t('resumedAt', { time: formatTime(resumedFrom) }) : t('resumePastEnd'));
     }
-    // Only when a new item starts.
+    // Only when a new item starts and its length is known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source?.url]);
+  }, [source?.url, lengthKnown]);
 
   // Chrome that follows the stores itself, made once per change of what it is given: the surface
   // re-renders for each step of a zap (the next channel's title, the loading and playing status),

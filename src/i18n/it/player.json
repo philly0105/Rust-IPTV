@@ -78,6 +78,7 @@
   "playNow": "Riproduci ora",
   "cancel": "Annulla",
   "resumedAt": "Ripreso da {{time}}",
+  "resumePastEnd": "Il punto salvato è oltre la fine di questo file, riproduzione dall'inizio",
   "externalPlaying": "In riproduzione in {{player}}",
   "externalStopHint": "Interrompi qui oppure chiudi la finestra di {{player}}.",
   "externalExited": "{{player}} chiuso",

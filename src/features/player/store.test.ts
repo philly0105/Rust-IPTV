@@ -508,6 +508,23 @@ describe('resume persistence', () => {
     expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
   });
 
+  it('a resume that was not applied keeps the saved spot through the first seconds (PV-03)', async () => {
+    vi.useFakeTimers();
+    // Saved at 30:00, but the file is 10:00 long: playback starts at 0.
+    await usePlayerStore.getState().play(vod('1', { resumeSeconds: 1800 }));
+    store.reportStatus('playing');
+    store.reportProgress(4, 600);
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS);
+    usePlayerStore.getState().stop();
+    expect(calls('positions.set')).toEqual([]);
+
+    await usePlayerStore.getState().play(vod('1', { resumeSeconds: 1800 }));
+    store.reportStatus('playing');
+    store.reportProgress(12, 600);
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS);
+    expect(calls('positions.set').at(-1)).toMatchObject({ positionSeconds: 12 });
+  });
+
   it('tray Quit saves a seek made since the last 5 s save, and the quit waits for it', async () => {
     const { QUIT_FLUSH_EVENT } = await import('@/api/window');
     let landed = false;

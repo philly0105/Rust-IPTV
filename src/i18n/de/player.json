@@ -78,6 +78,7 @@
   "playNow": "Jetzt abspielen",
   "cancel": "Abbrechen",
   "resumedAt": "Fortgesetzt bei {{time}}",
+  "resumePastEnd": "Gespeicherte Stelle liegt hinter dem Ende dieser Datei, Wiedergabe von vorn",
   "externalPlaying": "Wird in {{player}} abgespielt",
   "externalStopHint": "Stoppen Sie hier oder schließen Sie das {{player}}-Fenster.",
   "externalExited": "{{player}} geschlossen",

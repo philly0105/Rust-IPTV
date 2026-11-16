@@ -78,6 +78,7 @@
   "playNow": "Şimdi oynat",
   "cancel": "İptal",
   "resumedAt": "{{time}} noktasından devam ediliyor",
+  "resumePastEnd": "Kayıtlı konum bu dosyanın sonundan sonra, baştan oynatılıyor",
   "externalPlaying": "{{player}} ile oynatılıyor",
   "externalStopHint": "Buradan durdurun veya {{player}} penceresini kapatın.",
   "externalExited": "{{player}} kapandı",

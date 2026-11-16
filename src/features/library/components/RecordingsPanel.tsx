@@ -4,7 +4,7 @@
  * Recycle Bin on Windows) with Undo; a file that went missing says so.
  */
 
-import { Disc3, FolderOpen, Play, Trash2 } from 'lucide-react';
+import { Disc3, Download as DownloadIcon, FolderOpen, Play, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -15,9 +15,11 @@ import type { RecordingFile } from '@/api/types';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { scheduleRemoval, usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { buttonClass } from '@/ui/Button';
+import { Tooltip } from '@/ui/Tooltip';
 
 import { Badge, EmptyState, ErrorState, IconButton, SkeletonList, playSource, useToast, errorDescription } from '../deps';
 import { formatBytes, formatDuration } from '../lib/format';
+import { fileTitle } from '../lib/myvideos';
 
 /** Entries whose name, channel or title contains `query` (case-insensitive). */
 export function filterRecordings(files: readonly RecordingFile[], query: string): RecordingFile[] {
@@ -90,8 +92,9 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
   const { t, i18n } = useTranslation('library');
   const { toast } = useToast();
   const lang = i18n.language;
-  // The programme title leads and the channel sits in the line under it, as on the Scheduled page.
-  const name = f.title ?? f.channelName ?? f.fileName;
+  // The programme title leads and the channel sits in the line under it, as on the Scheduled page;
+  // a loose file is named as the All view's card names it.
+  const name = f.title ?? f.channelName ?? fileTitle(f.fileName);
   const writing = f.status === 'recording';
   const date = dateTimeFormat(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
   const duration = f.durationSeconds ? formatDuration(f.durationSeconds, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) : '';
@@ -136,9 +139,10 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
             {name}
           </span>
           {f.part ? <span className="shrink-0 text-xs text-fg-muted">{t('recPart', { n: f.part })}</span> : null}
+          {/* The same mark as Scheduled's Recording now rows. */}
           {writing ? (
-            <Badge variant="live" className="shrink-0">
-              {t('recStatusRecording')}
+            <Badge variant="live" className="shrink-0 font-numeric uppercase tracking-wide">
+              {t('scheduledRec')}
             </Badge>
           ) : null}
           {!f.fileAvailable ? (
@@ -156,11 +160,22 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
           <span className="shrink-0 tabular-nums">{date}</span>
           {duration ? <span className="shrink-0 tabular-nums">{duration}</span> : null}
           {f.fileAvailable ? <span className="shrink-0 font-display tabular-nums">{formatBytes(f.sizeBytes, lang)}</span> : null}
-          <span dir="auto" className="hidden truncate text-fg-subtle lg:inline">
-            {f.fileName}
-          </span>
         </span>
       </div>
+      {/* In a browser the file is on the server: this copies it to the device in hand. */}
+      {!isDesktop && f.fileAvailable && !writing ? (
+        <Tooltip content={t('recSaveToDevice', { name: f.fileName })} describe={false}>
+          <a
+            href={`/api/recordings/${encodeURIComponent(f.id)}`}
+            download={f.fileName}
+            aria-label={t('recSaveToDevice', { name: f.fileName })}
+            className={buttonClass('ghost', 'md', 'w-10 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)]')}
+            data-testid="recording-save"
+          >
+            <DownloadIcon size={16} aria-hidden />
+          </a>
+        </Tooltip>
+      ) : null}
       {isDesktop && f.fileAvailable ? (
         <IconButton label={t('recReveal', { name: f.fileName })} icon={<FolderOpen size={16} aria-hidden />} onClick={() => void reveal()} data-testid="recording-reveal" />
       ) : null}

@@ -327,7 +327,9 @@ describe('Scheduled says the padding once and stops with a labelled button', () 
     renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
     const note = await screen.findByRole('note');
     expect(note.dataset['testid']).toBe('scheduled-no-recording');
-    expect(note.textContent).toBe('Recording is unavailable because the server has no mpv. Reminders still work.');
+    expect(note.textContent).toBe("This server can't record TV. Reminders still work. (The server needs mpv installed.)");
+    // The empty state below asks only for what works without recording.
+    expect(screen.getByText('Open the TV guide and choose Remind me on a programme.')).toBeTruthy();
     // Not a page-wide card over the empty state.
     expect(note.className).not.toMatch(/\bborder\b|bg-surface/);
   });

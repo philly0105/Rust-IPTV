@@ -244,12 +244,31 @@ describe('ScheduledPage', () => {
     expect(done.map(statusOf)).toEqual(['Stopped early', 'Completed']);
   });
 
+  it('plays a finished recording from its row, and says a series will record its next airing', async () => {
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.list'] = () => [
+      rec({ id: 'r1', status: 'completed', start: at(-200), end: at(-140), fileNames: ['a.ts'], bytes: 2_500_000 }),
+      rec({ id: 'r2', title: 'Gold Rush', status: 'missed', start: at(-400), end: at(-340), ruleId: 'rule1', errorCode: 'missedNotRunning', error: 'x' }),
+    ];
+    rpc.handlers['recordings.library'] = () => [file({ id: 'r.r1.2', part: 2 }), file({ id: 'r.r1.1', part: 1 })];
+    rpc.handlers['recordings.playSource'] = (args) => ({ url: `http://x/${(args as { id: string }).id}`, kind: 'vod', title: 'Film' });
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const finished = await screen.findByTestId('scheduled-finished');
+    // The first part plays; the list entry's X leaves the files where they are.
+    fireEvent.click(await within(finished).findByRole('button', { name: 'Play Film' }));
+    await waitFor(() => expect(fakePlayer.played.map((x) => x.url)).toEqual(['http://x/r.r1.1']));
+    expect(within(finished).getByRole('link', { name: 'In My videos' }).getAttribute('href')).toBe('/my-videos?filter=recordings');
+    expect(within(finished).getByText('The series will record the next airing.')).toBeTruthy();
+    // The page's first line links to where recordings end up.
+    expect(screen.getByTestId('scheduled-recordings-link').getAttribute('href')).toBe('/my-videos?filter=recordings');
+  });
+
   it('explains when the server cannot record', async () => {
     rpc.handlers['recordings.capabilities'] = () => ({ supported: false, mpv: false, reason: 'no mpv' });
     rpc.handlers['reminders.list'] = () => [{ id: 'm1', ref, channelName: 'Alpha', title: 'News', start: at(30), end: at(60), status: 'pending' }];
     rpc.handlers['recordings.list'] = () => [];
     renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
-    expect(await screen.findByText(/server has no mpv/)).toBeTruthy();
+    expect(await screen.findByText(/This server can't record TV/)).toBeTruthy();
   });
 });
 

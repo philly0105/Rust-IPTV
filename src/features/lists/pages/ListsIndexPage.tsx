@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router';
 
-import { Button, EmptyState, ErrorState, Skeleton, useShell } from '../deps';
+import { Button, EmptyState, ErrorState, Page, Skeleton, useShell } from '../deps';
 import { useLists } from '../hooks/useLists';
 import { listPath } from '../paths';
 import { openCreateList } from '../store';
@@ -23,7 +23,9 @@ export function ListsIndexPage() {
   if (first) return <Navigate to={listPath(first.id)} replace />;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-y-auto bg-bg p-6" data-testid="lists-index">
+    // Under the header like the other Library pages' empty states (library-13), not centred in the
+    // window, so moving between them does not make the content jump.
+    <Page width="default" className="flex min-w-0 flex-col" data-testid="lists-index">
       <h1 className="sr-only">{t('title')}</h1>
       {lists.error ? (
         <ErrorState error={lists.error} title={t('loadFailed')} hint={t('localDataHint')} onRetry={() => void lists.refetch()} />
@@ -45,6 +47,6 @@ export function ListsIndexPage() {
           }
         />
       )}
-    </div>
+    </Page>
   );
 }

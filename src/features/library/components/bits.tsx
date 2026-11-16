@@ -70,6 +70,11 @@ export interface ConfirmDialogProps {
   title: string;
   description: ReactNode;
   confirmLabel: string;
+  /**
+   * The way out. "Keep" by default, for a confirm whose action is itself a cancel ("Cancel this
+   * download?"); a clear names its own action, so it takes the app's usual "Cancel".
+   */
+  cancelLabel?: string;
   danger?: boolean;
   busy?: boolean;
   children?: ReactNode;
@@ -77,7 +82,7 @@ export interface ConfirmDialogProps {
   onClose: () => void;
 }
 
-export function ConfirmDialog({ open, title, description, confirmLabel, danger, busy, children, onConfirm, onClose }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, description, confirmLabel, cancelLabel, danger, busy, children, onConfirm, onClose }: ConfirmDialogProps) {
   const { t } = useTranslation('library');
   return (
     <Dialog
@@ -89,7 +94,7 @@ export function ConfirmDialog({ open, title, description, confirmLabel, danger, 
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            {t('keep')}
+            {cancelLabel ?? t('keep')}
           </Button>
           <Button variant={danger ? 'danger' : 'primary'} loading={busy} onClick={onConfirm}>
             {confirmLabel}

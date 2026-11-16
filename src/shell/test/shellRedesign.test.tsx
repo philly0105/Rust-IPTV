@@ -109,12 +109,12 @@ describe('rail (SH-rail-ia)', () => {
       'Multi-view',
     ]);
     // On Favorites the less used pages stay folded under More, which opens them in place.
-    expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual(['My List', 'Favorites', 'Lists', 'Recently watched']);
+    expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual(['My List', 'Favorites', 'Channel lists', 'Recently watched']);
     fireEvent.click(within(group('Library')).getByRole('button', { name: 'More' }));
     expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual([
       'My List',
       'Favorites',
-      'Lists',
+      'Channel lists',
       'Recently watched',
       'Downloads',
       'My videos',
@@ -167,7 +167,7 @@ describe('rail (SH-rail-ia)', () => {
     const dimmed = (name: string) => within(nav).getByRole('link', { name }).className.includes('text-fg-subtle');
     // (Favorites is the page on show, so it wears the current mark instead.)
     for (const name of ['My List', 'Recently watched', 'TV guide', 'Multi-view']) expect(dimmed(name), name).toBe(true);
-    for (const name of ['Lists', 'Home', 'Sports']) expect(dimmed(name), name).toBe(false);
+    for (const name of ['Channel lists', 'Home', 'Sports']) expect(dimmed(name), name).toBe(false);
     // Live TV, Movies and Series step back too, and lead to the Sources page, as the phone tab does.
     const watch = within(nav).getByRole('group', { name: 'Watch' });
     for (const name of ['Live TV', 'Movies', 'Series']) {

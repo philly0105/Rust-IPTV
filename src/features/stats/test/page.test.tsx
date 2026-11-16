@@ -274,7 +274,8 @@ describe('stats page', () => {
     const rows = within(list).getAllByTestId('stats-channel');
     expect(rows.map((r) => r.querySelector('p')!.textContent)).toEqual(['BBC One', 'Jazz FM', 'Old Channel']);
     expect(rows[0]!.textContent).toContain('2 hr');
-    expect(rows[0]!.textContent).toContain('Home portal');
+    // One source set up: its name on every row would only repeat (library-09).
+    expect(rows[0]!.textContent).not.toContain('Home portal');
     await waitFor(() => expect(within(list).getAllByTestId('stats-play')).toHaveLength(2));
     expect(within(rows[2]!).queryByTestId('stats-play')).toBeNull();
 

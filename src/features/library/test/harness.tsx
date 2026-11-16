@@ -8,6 +8,10 @@ import { create } from 'zustand';
 import { queryClient } from '@/api/query';
 import type { PlayerSource } from '@/api/types';
 import library from '@/i18n/en/library.json';
+// A channel row's menu is Live TV's (library-04), with the list and multi-view entries.
+import lists from '@/i18n/en/lists.json';
+import live from '@/i18n/en/live.json';
+import multiview from '@/i18n/en/multiview.json';
 // The shared no-source state's actions come from the sources feature, in its namespace.
 import sources from '@/i18n/en/sources.json';
 
@@ -15,9 +19,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['library', 'sources'],
+  ns: ['library', 'sources', 'live', 'lists', 'multiview'],
   defaultNS: 'library',
-  resources: { en: { library, sources } },
+  resources: { en: { library, sources, live, lists, multiview } },
   interpolation: { escapeValue: false },
   initAsync: false,
 });

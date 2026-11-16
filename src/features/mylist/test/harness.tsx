@@ -19,9 +19,11 @@ import { queryClient } from '@/api/query';
 import { RpcError } from '@/api/transport';
 import { DEFAULT_SETTINGS, sameRef, type ItemRef, type ItemSnapshot, type Settings, type Source, type WatchlistEntry } from '@/api/types';
 import common from '@/i18n/en/common.json';
+import library from '@/i18n/en/library.json';
 import mylist from '@/i18n/en/mylist.json';
 // The shared no-source state (sources feature) draws its actions in its own namespace.
 import sources from '@/i18n/en/sources.json';
+import vod from '@/i18n/en/vod.json';
 import { shortcutRegistry } from '@/shell/shortcuts';
 import { useShellStore } from '@/shell/store';
 import { useToastStore } from '@/ui';
@@ -30,9 +32,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['mylist', 'common', 'sources'],
+  ns: ['mylist', 'common', 'sources', 'vod', 'library'],
   defaultNS: 'mylist',
-  resources: { en: { mylist, common, sources } },
+  resources: { en: { mylist, common, sources, vod, library } },
   interpolation: { escapeValue: false },
   initAsync: false,
 });

@@ -22,6 +22,14 @@ describe('formatWatchTime', () => {
     expect(formatWatchTime(-5, 'en')).toBe('0 min');
   });
 
+  it('keeps the seconds of a small total when asked, so its parts add up', () => {
+    expect(formatWatchTime(190, 'en', { seconds: true })).toBe('3 min 10 sec');
+    expect(formatWatchTime(162, 'en', { seconds: true })).toBe('2 min 42 sec');
+    expect(formatWatchTime(120, 'en', { seconds: true })).toBe('2 min');
+    expect(formatWatchTime(28, 'en', { seconds: true })).toBe('28 sec');
+    expect(formatWatchTime(12_000, 'en', { seconds: true })).toBe('3 hr 20 min');
+  });
+
   it('uses the locale’s own unit words', () => {
     const hr = new Intl.NumberFormat('de', { style: 'unit', unit: 'hour', unitDisplay: 'short' }).format(3);
     const min = new Intl.NumberFormat('de', { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(20);

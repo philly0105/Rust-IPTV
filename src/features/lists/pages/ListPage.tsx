@@ -5,7 +5,7 @@
  * Channels the provider dropped sit under the list, greyed, with Remove.
  */
 
-import { ListOrdered, ListTree, ListVideo, Plus, Settings2, Trash2, X } from 'lucide-react';
+import { ChevronDown, ListOrdered, ListTree, ListVideo, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
@@ -366,7 +366,6 @@ export function ListPage() {
             size="sm"
             icon={<ListOrdered className="size-4" />}
             onClick={() => openEditListItems(list.id)}
-            title={t('editChannels')}
             className="max-sm:hidden"
           >
             {t('editChannels')}
@@ -377,7 +376,6 @@ export function ListPage() {
               size="sm"
               icon={<Settings2 className="size-4" />}
               onClick={() => openManageLists(list.id)}
-              title={t('manageLists')}
             >
               {t('manageLists')}
             </Button>
@@ -518,13 +516,34 @@ export function ListPage() {
       >
         {/* The list's name is in the header (and on its sidebar row): the bar holds the tools. */}
         <div className="flex items-center gap-2 border-b border-divider px-2 py-2">
-          <IconButton
-            size="sm"
-            label={sidebarVisible || drawerOpen ? t('hideLists') : t('showLists')}
-            aria-expanded={sidebarVisible || drawerOpen}
-            icon={<ListTree className="size-4" />}
-            onClick={toggleSidebar}
-          />
+          {!sidebarVisible && list ? (
+            // The lists folded away (a tablet, a phone, or folded by hand): the button names the list
+            // that is open and is the way to the others, as Live's groups button names its group.
+            <Button
+              variant="ghost"
+              size="sm"
+              className="max-w-[55%] min-w-0 shrink gap-1.5 px-2"
+              icon={<ListTree className="size-4 shrink-0" />}
+              aria-expanded={drawerOpen}
+              aria-haspopup={wide ? undefined : 'dialog'}
+              onClick={toggleSidebar}
+              data-testid="lists-toggle"
+            >
+              <span className="sr-only">{`${t('showLists')}: `}</span>
+              <span dir="auto" className="truncate">
+                {list.name}
+              </span>
+              <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
+            </Button>
+          ) : (
+            <IconButton
+              size="sm"
+              label={sidebarVisible || drawerOpen ? t('hideLists') : t('showLists')}
+              aria-expanded={sidebarVisible || drawerOpen}
+              icon={<ListTree className="size-4" />}
+              onClick={toggleSidebar}
+            />
+          )}
           {composition.length > 1 ? (
             // Where the list's channels come from: each source's monogram (the rail's mark) with its
             // count, so every source fits beside the tools; the name is spoken and shows on hover.

@@ -15,7 +15,7 @@
  * of their own under the title, always visible.
  */
 
-import { Check, ChevronDown, ChevronUp, CircleCheck, Clapperboard, Film, GripVertical, Play, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, CircleCheck, Clapperboard, EllipsisVertical, Film, GripVertical, Play, X } from 'lucide-react';
 import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -68,6 +68,11 @@ export interface MyListRowProps {
   onOpen: (entry: WatchlistEntry) => void;
   onRemove: (entry: WatchlistEntry) => void;
   onToggleWatched: (entry: WatchlistEntry) => void;
+  /**
+   * The title's menu at `pos` (library-05/07): a right click, or on touch the row's one ⋮ button,
+   * which stands in for the inline move, watched and remove buttons.
+   */
+  onMenu?: ((entry: WatchlistEntry, pos: { x: number; y: number }) => void) | undefined;
   /** Plays the title, resuming a saved position; absent when it cannot play from here (a series not started). */
   onPlay?: ((entry: WatchlistEntry) => void) | undefined;
   /** 0..1 of the saved position, drawn as a bar under the facts. */
@@ -82,6 +87,9 @@ export interface MyListRowProps {
  */
 const revealOnFine =
   'sm:pointer-fine:opacity-0 sm:pointer-fine:group-hover:opacity-100 sm:pointer-fine:in-focus-visible:opacity-100 sm:pointer-fine:focus-within:opacity-100 motion-safe:transition-opacity';
+
+/** On touch these sit in the row's one menu (library-07) instead of on the row. */
+const TOUCH_IN_MENU = 'pointer-coarse:hidden';
 
 /** The artwork's box, `w-12 sm:w-14`: spacing steps of 3.75 px at 100 % scale. */
 const ART_PX = 45;
@@ -104,6 +112,7 @@ function MyListRowImpl({
   onOpen: openEntry,
   onRemove: removeEntry,
   onToggleWatched: toggleEntry,
+  onMenu,
   onPlay: playEntry,
   progress,
   progressLabel,
@@ -135,6 +144,14 @@ function MyListRowImpl({
       onDragOver={reorder ? (e) => reorder.onDragOver(entry, e) : undefined}
       onDrop={reorder ? (e) => reorder.onDrop(entry, e) : undefined}
       onDoubleClick={onOpen}
+      onContextMenu={
+        onMenu
+          ? (e) => {
+              e.preventDefault();
+              onMenu(entry, { x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
     >
       {reorder && dropTarget && (
         <div
@@ -249,11 +266,12 @@ function MyListRowImpl({
             icon={<Play aria-hidden size={14} className="fill-current" />}
             disabled={busy}
             onClick={() => playEntry(entry)}
-            className={cn('rounded-full', revealOnFine)}
+            // On touch the Play circle stays only for a title with progress to resume (library-07).
+            className={cn('rounded-full', revealOnFine, onMenu && !(progress && progress > 0) && 'pointer-coarse:hidden')}
             data-action="play"
           />
         ) : (
-          <span aria-hidden className="h-8 w-8 shrink-0" />
+          <span aria-hidden className={cn('h-8 w-8 shrink-0', onMenu && 'pointer-coarse:hidden')} />
         )}
         {movie ? (
           <IconButton
@@ -266,33 +284,35 @@ function MyListRowImpl({
             // One glyph in both states (an empty circle read as a radio button); the colour and the pressed state carry it.
             icon={<CircleCheck aria-hidden size={18} />}
             onClick={() => toggleEntry(entry)}
-            className={cn(watched ? 'bg-transparent text-success hover:text-success' : cn('text-fg-subtle', revealOnFine))}
+            className={cn(watched ? 'bg-transparent text-success hover:text-success' : cn('text-fg-subtle', revealOnFine), onMenu && TOUCH_IN_MENU)}
             data-action="watched"
           />
         ) : (
           // Series are marked watched on their own page, episode by episode; keep the columns aligned.
-          <span aria-hidden className="h-8 w-8 shrink-0" />
+          <span aria-hidden className={cn('h-8 w-8 shrink-0', onMenu && TOUCH_IN_MENU)} />
         )}
         {reorder && (
-          <div className={cn('order-first flex gap-1 sm:order-none sm:flex-col sm:gap-0', revealOnFine)} data-testid="mylist-move">
+          <div className={cn('order-first flex gap-1 sm:order-none sm:flex-col sm:gap-0', revealOnFine, onMenu && TOUCH_IN_MENU)} data-testid="mylist-move">
             <IconButton
               size="sm"
               tabIndex={-1}
               label={t('moveUp', { title })}
-              icon={<ChevronUp aria-hidden size={16} />}
+              icon={<ArrowUp aria-hidden size={14} />}
               disabled={!canUp || busy}
               onClick={() => reorder.onMove(entry, -1)}
-              className="sm:h-7 sm:rounded-b-none"
+              // The end a row cannot move past is not drawn (library-08), as on Favorites; invisible,
+              // so the other arrow keeps its place in the stack.
+              className={cn('sm:h-7 sm:rounded-b-none', !canUp && 'invisible')}
               data-action="move-up"
             />
             <IconButton
               size="sm"
               tabIndex={-1}
               label={t('moveDown', { title })}
-              icon={<ChevronDown aria-hidden size={16} />}
+              icon={<ArrowDown aria-hidden size={14} />}
               disabled={!canDown || busy}
               onClick={() => reorder.onMove(entry, 1)}
-              className="sm:h-7 sm:rounded-t-none"
+              className={cn('sm:h-7 sm:rounded-t-none', !canDown && 'invisible')}
               data-action="move-down"
             />
           </div>
@@ -304,9 +324,25 @@ function MyListRowImpl({
           icon={<X aria-hidden size={16} />}
           disabled={busy}
           onClick={() => removeEntry(entry)}
-          className={cn('ms-auto hover:text-danger sm:ms-0', revealOnFine)}
+          className={cn('ms-auto hover:text-danger sm:ms-0', revealOnFine, onMenu && TOUCH_IN_MENU)}
           data-action="remove"
         />
+        {onMenu && (
+          // Touch: one button for the moves, the watched mark and remove, as a Favorites row has
+          // (library-07): five always-visible targets put remove a thumb away from Play.
+          <IconButton
+            tabIndex={-1}
+            label={t('library:entryMenu', { title })}
+            aria-haspopup="menu"
+            icon={<EllipsisVertical aria-hidden size={18} />}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu(entry, { x: document.documentElement.dir === 'rtl' ? r.right : r.left, y: r.bottom + 2 });
+            }}
+            className="ms-auto shrink-0 not-pointer-coarse:hidden sm:ms-0"
+            data-action="menu"
+          />
+        )}
       </div>
     </div>
   );

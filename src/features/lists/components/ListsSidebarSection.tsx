@@ -193,6 +193,8 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
         <IconButton size="sm" label={t('newList')} icon={<ListPlus className="size-4" />} onClick={() => openCreateList({ openAfter: isPage })} />
         <IconButton size="sm" label={t('manageLists')} icon={<Settings2 className="size-4" />} onClick={() => openManageLists(activeListId)} />
       </div>
+      {/* Under the heading, what a channel list is (library-01): the page is titled by the list. */}
+      {isPage ? <p className="-mt-1 px-3 pb-2 text-caption text-fg-subtle">{t('lead')}</p> : null}
       <div id={bodyId} hidden={folded} className={cn(isPage && 'flex min-h-0 flex-1 flex-col')}>
         {body}
       </div>

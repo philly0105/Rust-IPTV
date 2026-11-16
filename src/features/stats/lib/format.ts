@@ -26,6 +26,11 @@ function unit(locale: string, u: 'hour' | 'minute' | 'second', display: 'short' 
 export interface WatchTimeOptions {
   /** `short` (default) for text, `narrow` for tight spots like axis labels, `long` for screen readers. */
   display?: 'short' | 'narrow' | 'long';
+  /**
+   * Keep the seconds under an hour ("2 min 42 sec"), for small totals whose parts are shown beside
+   * them: rounded to whole minutes, "3 min" read as "3 min" live plus "28 sec" of movies.
+   */
+  seconds?: boolean;
 }
 
 /**
@@ -39,6 +44,11 @@ export function formatWatchTime(seconds: number, language: string | undefined, o
   const s = Math.max(0, Math.round(seconds));
   if (s === 0) return unit(locale, 'minute', display).format(0);
   if (s < 60) return unit(locale, 'second', display).format(s);
+  if (opts.seconds && s < 3600) {
+    const sec = s % 60;
+    const min = unit(locale, 'minute', display).format(Math.floor(s / 60));
+    return sec > 0 ? `${min} ${unit(locale, 'second', display).format(sec)}` : min;
+  }
   const totalMinutes = Math.round(s / 60);
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;

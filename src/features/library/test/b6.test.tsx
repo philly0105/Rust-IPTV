@@ -280,7 +280,7 @@ describe('continue watching (D18, series queue)', () => {
   const watchedNow = (p: ReturnType<typeof makePosition>): RecentEntry => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! });
   const forget = async (title: string) => {
     fireEvent.click((await screen.findAllByRole('button', { name: `Actions for ${title}` }))[0]!);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear progress' }));
   };
   const series = {
     ...makePosition('show1', 300, 1800),
@@ -323,7 +323,7 @@ describe('continue watching (D18, series queue)', () => {
     renderAt('/recent', recentRoute);
 
     await forget('Show One');
-    await waitFor(() => expect(lastToast()?.title).toBe('Removed Show One from continue watching'));
+    await waitFor(() => expect(lastToast()?.title).toBe('Cleared progress on Show One'));
     expect(rpc.callsOf('positions.remove')).toEqual([{ ref: series.ref, allEpisodes: true }]);
 
     lastToast()!.action!.onClick();

@@ -18,6 +18,7 @@ import { intlLocale } from '@/lib/intl';
 import {
   Button,
   ChannelLogo,
+  ChannelName,
   Dialog,
   EmptyState,
   ErrorState,
@@ -184,9 +185,10 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
                 >
                   <ChannelLogo src={ch.logoUrl} name={name} size={36} sourceId={ch.ref.sourceId} />
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span dir="auto" className="truncate text-sm font-medium text-fg">
-                      {ch.number !== undefined ? <span className="me-2 font-numeric tabular-nums text-fg-muted">{ch.number}</span> : null}
-                      {name}
+                    <span className="flex min-w-0 items-baseline text-sm font-medium text-fg">
+                      {ch.number !== undefined ? <span className="me-2 shrink-0 font-numeric tabular-nums text-fg-muted">{ch.number}</span> : null}
+                      {/* The provider's place tag after the name, quiet, as in Live TV's rows. */}
+                      <ChannelName name={ch.name} strip={stripCountryPrefix} className="min-w-0 flex-1 truncate" />
                     </span>
                     <span dir="auto" className="truncate text-xs text-fg-muted">
                       {nowTitle ?? ch.categoryName}

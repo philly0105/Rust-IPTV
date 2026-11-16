@@ -15,7 +15,7 @@
  * names were cut off in German, Greek, Polish and Belarusian.
  */
 
-import { CalendarRange, ChevronRight, House, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
+import { CalendarRange, ChevronRight, House, Menu as MenuIcon, Plus, Search, Server, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
@@ -377,7 +377,7 @@ function MoreSheet({
       <ul className="flex flex-col gap-0.5 border-t border-divider pt-3">
         {(
           [
-            ...(lone ? [] : [{ to: '/sources', label: t('manageSources'), icon: ListVideo }]),
+            ...(lone ? [] : [{ to: '/sources', label: t('manageSources'), icon: Server }]),
             { to: '/settings', label: t('navSettings'), icon: SettingsIcon },
           ] as const
         ).map(({ to, label, icon: Icon }) => (

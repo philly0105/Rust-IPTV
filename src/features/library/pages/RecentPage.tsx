@@ -5,8 +5,8 @@
  */
 
 import { k } from '../lib/keys';
-import { History, Trash } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { History, Trash, Trash2 } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
 
@@ -24,6 +24,7 @@ import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
 import { formatClock } from '../lib/format';
+import { addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../lib/entryMenu';
 import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
 import {
   buildRecentRows,
@@ -37,6 +38,8 @@ import {
   type PositionCalls,
   type RecentRow,
 } from '../lib/recent';
+
+const EntryChannelMenu = lazy(() => import('../components/EntryChannelMenu').then((m) => ({ default: m.EntryChannelMenu })));
 
 const positionCalls: PositionCalls = {
   forSeries: (a) => rpc('positions.forSeries', a),
@@ -72,6 +75,11 @@ export function RecentPage() {
   const [search, setSearch] = useUrlSearch();
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [menu, setMenu] = useState<EntryMenuRequest | null>(null);
+  // The channel menu's code (Live TV's menu, lists, multi-view, edits) loads with the first menu.
+  const [menuUsed, setMenuUsed] = useState(false);
+  if (menu && !menuUsed) setMenuUsed(true);
+  const closeMenu = useCallback(() => setMenu(null), []);
   // An empty history may be the Live TV quality filter's doing: it leaves out the channels it hides.
   const quality = useLiveQuality();
 
@@ -162,7 +170,7 @@ export function RecentPage() {
       const removed = await removeContinueCard(p, positionCalls);
       const label = p.snapshot ? snapshotTitle(p.ref, p.snapshot.title).title : '';
       toast({
-        title: t('continueRemoved', { title: label }),
+        title: t('progressCleared', { title: label }),
         variant: 'info',
         action: {
           label: t('undo'),
@@ -233,7 +241,8 @@ export function RecentPage() {
   const searchable = !query.data || count > 0 || search !== '';
   usePageHeader(
     title,
-    query.data && count > 0 ? t('recentCount', { count }) : undefined,
+    // After the count, what the page is for (library-01), as on Favorites and My List.
+    query.data && count > 0 ? `${t('recentCount', { count })} · ${t('recentLead')}` : t('recentLead'),
     headerActions,
     searchable ? { value: search, onChange: setSearch, placeholder: t('searchRecent') } : undefined,
   );
@@ -262,6 +271,18 @@ export function RecentPage() {
     };
   };
 
+  /** A channel's menu is Live TV's (library-04), with Remove from history among Organize. */
+  const openChannelMenu = (e: RecentEntry, pos: { x: number; y: number }) =>
+    setMenu({
+      pos,
+      ref: e.ref,
+      snapshot: e.snapshot,
+      nowTitle: nowOn.get(itemKey(e.ref))?.title,
+      onPlay: () => activate(e),
+      organize: [{ id: 'remove-history', label: t('removeFromHistory'), icon: <Trash2 className="size-4" />, danger: true, onSelect: () => remove(e) }],
+    });
+  const isChannel = (e: RecentEntry) => e.ref.contentType === 'live' || e.ref.contentType === 'radio';
+
   const renderRow = (row: RecentRow) => {
     if (row.kind === 'header') return <SectionHeading title={t(k('bucket', row.bucket))} count={row.count} />;
     const e = row.entry;
@@ -281,6 +302,7 @@ export function RecentPage() {
         resume={resumeOf(e, title)}
         onOpen={() => activate(e)}
         onRemove={() => remove(e)}
+        onChannelMenu={isChannel(e) ? (pos) => openChannelMenu(e, pos) : undefined}
       />
     );
   };
@@ -334,6 +356,13 @@ export function RecentPage() {
           } else if (ev.key === 'Delete') {
             ev.preventDefault();
             remove(r.entry);
+          } else if (isChannel(r.entry) && isMenuKey(ev)) {
+            ev.preventDefault();
+            const box = (ev.target as HTMLElement).getBoundingClientRect();
+            openChannelMenu(r.entry, { x: box.left + 16, y: box.bottom - 8 });
+          } else if (isChannel(r.entry) && isAddToListKey(ev)) {
+            ev.preventDefault();
+            addEntryToList(r.entry.ref, r.entry.snapshot);
           }
         }}
       />
@@ -351,6 +380,11 @@ export function RecentPage() {
         </div>
       ) : null}
       {body}
+      {menuUsed ? (
+        <Suspense fallback={null}>
+          <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
+        </Suspense>
+      ) : null}
       <ConfirmDialog
         open={confirmClear}
         onClose={() => setConfirmClear(false)}
@@ -359,6 +393,8 @@ export function RecentPage() {
         title={t('clearHistoryTitle')}
         description={source ? t('clearHistorySourceBody', { source: source.name }) : t('clearHistoryBody')}
         confirmLabel={t('clearHistory')}
+        // Cancel, as Watch stats' Clear stats and the app's other confirms say it.
+        cancelLabel={t('common:cancel')}
         onConfirm={() => void clearAll()}
       />
     </Page>

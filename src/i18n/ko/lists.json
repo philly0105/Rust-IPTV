@@ -1,5 +1,6 @@
 {
-  "title": "목록",
+  "title": "채널 목록",
+  "lead": "직접 만든 채널 묶음",
   "newList": "새 목록",
   "newListName": "새 목록 이름",
   "createList": "목록 만들기",

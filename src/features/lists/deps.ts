@@ -16,6 +16,7 @@ export {
   ErrorState,
   IconButton,
   Input,
+  Page,
   SearchInput,
   Select,
   Skeleton,
@@ -39,7 +40,7 @@ export { DashboardRail } from '@/shell/dashboard/DashboardRail';
 export { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 export { ChannelCard } from '@/shell/dashboard/cards';
 export { ChannelList } from '@/features/live/components/ChannelList';
-export { ChannelLogo } from '@/features/live/components/ChannelLogo';
+export { ChannelLogo, ChannelName } from '@/features/live/components/ChannelLogo';
 export { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from '@/features/live/components/ChannelRow';
 export { ContextMenu, type MenuEntry, type MenuItem } from '@/features/live/components/ContextMenu';
 export { ScopePicker } from '@/features/live/components/ScopePicker';

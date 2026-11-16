@@ -13,6 +13,7 @@ import { itemKey, type CustomListEntry } from '@/api/types';
 import {
   Button,
   ChannelLogo,
+  ChannelName,
   Dialog,
   EmptyState,
   ErrorState,
@@ -92,12 +93,21 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
         entry={entry}
         index={index}
         name={nameOf(entry)}
-        source={entry.available ? (sourceName.get(entry.ref.sourceId) ?? t('unknownSource')) : t('unavailableHeading')}
+        rawName={entry.channel?.name ?? entry.snapshot.title}
+        strip={strip}
+        // The source only when more than one is set up (the header rule); with one, the channel's group.
+        source={
+          !entry.available
+            ? t('unavailableHeading')
+            : sourceName.size > 1
+              ? (sourceName.get(entry.ref.sourceId) ?? t('unknownSource'))
+              : (entry.channel?.categoryName ?? entry.snapshot.subtitle ?? '')
+        }
         removeLabel={t('removeNamed', { name: nameOf(entry) })}
         onRemove={onRemove}
       />
     ),
-    [nameOf, sourceName, t, onRemove],
+    [nameOf, sourceName, strip, t, onRemove],
   );
 
   let body;
@@ -186,6 +196,8 @@ function EditItemRow({
   entry,
   index,
   name,
+  rawName,
+  strip,
   source,
   removeLabel,
   onRemove,
@@ -193,6 +205,9 @@ function EditItemRow({
   entry: CustomListEntry;
   index: number;
   name: string;
+  /** The provider's name, which ChannelName draws with its place tag quiet after it. */
+  rawName: string;
+  strip: boolean;
   source: string;
   removeLabel: string;
   onRemove(entry: CustomListEntry, index: number): void;
@@ -202,12 +217,12 @@ function EditItemRow({
       <span className={cn('flex min-w-0 flex-1 items-center gap-3 px-1', !entry.available && 'opacity-60 grayscale')}>
         <ChannelLogo src={entry.channel?.logoUrl ?? entry.snapshot.posterUrl} name={name} size={32} sourceId={entry.ref.sourceId} />
         <span className="min-w-0">
-          <span dir="auto" className="block truncate text-sm font-medium text-fg">
-            {name}
-          </span>
-          <span dir="auto" className="block truncate text-xs text-fg-subtle">
-            {source}
-          </span>
+          <ChannelName name={rawName} strip={strip} className="block truncate text-sm font-medium text-fg" />
+          {source ? (
+            <span dir="auto" className="block truncate text-xs text-fg-subtle">
+              {source}
+            </span>
+          ) : null}
         </span>
       </span>
       <IconButton

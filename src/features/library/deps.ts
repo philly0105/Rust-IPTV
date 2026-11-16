@@ -28,6 +28,7 @@ export {
   usePosterWidthBox,
   useScaledPx,
   useToast,
+  TEXT_LINK,
 } from '@/ui';
 export type { MenuItem, TabsProps } from '@/ui';
 export { useShell, useShortcut } from '@/shell';

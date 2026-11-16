@@ -143,14 +143,14 @@ describe('sidebar section', () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
     const first = h.renderAt('/live', routes);
     await screen.findByTestId('lists-sidebar');
-    const fold = screen.getByRole('button', { name: 'Lists' });
+    const fold = screen.getByRole('button', { name: 'Channel lists' });
     expect(fold.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(fold);
     expect(fold.getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByTestId('lists-sidebar').closest('[hidden]')).not.toBeNull();
     first.unmount();
     h.renderAt('/live', routes);
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Lists/ }).getAttribute('aria-expanded')).toBe('false'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Channel lists/ }).getAttribute('aria-expanded')).toBe('false'));
   });
 
   it('empty: invites a new list; New list and Manage open their dialogs', async () => {

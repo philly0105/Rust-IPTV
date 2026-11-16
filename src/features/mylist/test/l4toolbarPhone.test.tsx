@@ -22,8 +22,6 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
         hideWatched={false}
         counts={{ all: 2, movie: 1, series: 1 }}
         watchedCount={1}
-        query=""
-        onQuery={noop}
         onFilter={noop}
         onSort={noop}
         onHideWatched={noop}
@@ -46,8 +44,6 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
         hideWatched={false}
         counts={{ all: 2, movie: 1, series: 1 }}
         watchedCount={0}
-        query=""
-        onQuery={noop}
         onFilter={noop}
         onSort={noop}
         onHideWatched={noop}
@@ -55,8 +51,9 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
       />,
     );
     const classes = (el: Element) => el.className.split(/\s+/);
-    // The field and the menu are h-10, as tall as a pill tab's track and the md segmented control.
-    expect(classes(screen.getByTestId('mylist-search'))).toContain('h-10');
+    // The menu is h-10, as tall as a pill tab's track and the md segmented control. The search is
+    // in the shell header (library-06).
+    expect(screen.queryByTestId('mylist-search')).toBeNull();
     expect(classes(screen.getByTestId('mylist-sort'))).toContain('h-10');
     expect(classes(screen.getByTestId('mylist-sort'))).not.toContain('h-9');
     // The view switch keeps the default (md) size: no compact track.

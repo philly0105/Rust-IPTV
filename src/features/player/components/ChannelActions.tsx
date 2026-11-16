@@ -45,7 +45,7 @@ function FavoriteAction({ channel, onDone }: { channel: ItemRef; onDone(): void 
     let live = true;
     const args = { refs: [channel] };
     queryClient
-      .fetchQuery({ queryKey: rpcKey('favorites.contains', args), queryFn: () => rpc('favorites.contains', args), staleTime: 30_000 })
+      .fetchQuery({ queryKey: rpcKey('favorites.contains', args), queryFn: () => rpc('favorites.contains', args), staleTime: 30_000, retry: false })
       .then(
         (found) => {
           if (live) setFavorite(found.length > 0);

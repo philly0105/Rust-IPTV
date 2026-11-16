@@ -188,11 +188,11 @@ function useScopeName(sourceId: string | undefined, categoryId: string | undefin
     if (!enabled || (!categoryId && !listId) || !sourceId) return;
     let live = true;
     const found = listId
-      ? queryClient.fetchQuery({ queryKey: rpcKey('lists.list'), queryFn: () => rpc('lists.list'), staleTime: 60_000 }).then((ls) => ls.find((l) => l.id === listId)?.name)
+      ? queryClient.fetchQuery({ queryKey: rpcKey('lists.list'), queryFn: () => rpc('lists.list'), staleTime: 60_000, retry: false }).then((ls) => ls.find((l) => l.id === listId)?.name)
       : (() => {
           const args = { sourceId, contentType: 'live' as const };
           return queryClient
-            .fetchQuery({ queryKey: rpcKey('catalog.categories', args), queryFn: () => rpc('catalog.categories', args), staleTime: 60_000 })
+            .fetchQuery({ queryKey: rpcKey('catalog.categories', args), queryFn: () => rpc('catalog.categories', args), staleTime: 60_000, retry: false })
             .then((cs) => cs.find((c) => c.id === categoryId)?.name);
         })();
     found.then(

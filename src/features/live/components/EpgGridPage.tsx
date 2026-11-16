@@ -36,6 +36,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router';
 
@@ -47,7 +48,8 @@ import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, t
 import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, fieldClass, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 import { copyText } from '@/lib/clipboard';
-import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
+import { formatDurationParts } from '@/lib/duration';
+import { dateTimeFormat, intlLocale, listSeparator, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
@@ -79,6 +81,7 @@ import {
   formatDay,
   formatRange,
   formatTimeRange,
+  hasUsableArchive,
   localDayDiff,
   localDayKey,
   ms,
@@ -92,6 +95,7 @@ import { archivePath, canBrowseArchive } from '../lib/archive';
 import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 import { GuideUnavailableNotice } from './ChannelList';
+import { ChannelName } from './ChannelLogo';
 import { ContextMenu } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { ScopePicker, type PickerSection } from './ScopePicker';
@@ -1848,6 +1852,14 @@ export function EpgGridPage() {
       missing();
     }
   });
+  /** A channel the search panel found: its row, at the cursor's time, as a typed number moves there. */
+  const selectChannel = useStable((ch: Channel) => {
+    const time = cursorRef.current.time ?? Date.now();
+    const inView = view ? paged.indexOf?.(ch.ref) !== undefined : !categoryId || ch.categoryId === categoryId;
+    if (!inView) goTo(time, { category: null });
+    setHighlight(null);
+    setReveal({ key: itemKey(ch.ref), ref: ch.ref, number: ch.number, time, channelName: displayChannelName(ch.name, prefs.stripCountryPrefix), categoryId: inView ? categoryId : undefined });
+  });
   const digits = useDigitEntry((n) => void jumpToNumber(n));
   useEffect(() => {
     if (!digits.buffer) return;
@@ -2054,6 +2066,7 @@ export function EpgGridPage() {
         now={now}
         stripCountryPrefix={prefs.stripCountryPrefix}
         onSelect={selectHit}
+        onSelectChannel={selectChannel}
         onWatch={watchHit}
       />
     </>
@@ -2368,8 +2381,13 @@ export function EpgGridPage() {
         <GuideRowMenu
           menu={rowMenu}
           source={rowMenu.channel.ref.sourceId === source?.id ? source : undefined}
-          // The grid shows the channel's programmes anyway; the header names the airing one.
-          nowTitle={programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title}
+          // Opened on a programme: the header names it, since its entries (catch-up, download, link)
+          // act on it. On the channel cell: the airing one.
+          nowTitle={
+            rowMenu.programme
+              ? joinList([rowMenu.programme.title, formatRange(rowMenu.programme, i18n.language)], i18n.language)
+              : programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title
+          }
           programme={rowMenu.programme}
           now={now}
           onProgrammeLink={offerProgrammeLink}
@@ -2967,6 +2985,7 @@ function ProgramPopover({
 }) {
   const { t, i18n } = useTranslation('live');
   const navigate = useNavigate(); // guide: "Browse catch-up"
+  const location = useLocation(); // the archive's Back returns here
   const ref = useRef<HTMLDivElement>(null);
   const { program, channel, anchor } = selection;
   const when = programWhen(program, now);
@@ -2986,7 +3005,9 @@ function ProgramPopover({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.querySelector<HTMLElement>('button')?.focus();
+    // The main action (Watch live, Play from catch-up, else Watch channel), so Enter on a cell and
+    // Enter again watches; the Close button only when there is no action.
+    (el.querySelector<HTMLElement>('[data-autofocus]') ?? el.querySelector<HTMLElement>('button'))?.focus();
     if (sheet) return;
     const place = () => {
       const a = anchor.getBoundingClientRect();
@@ -3063,24 +3084,25 @@ function ProgramPopover({
         }}
         className={
           sheet
-            ? 'fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-xl border-t border-edge bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-fg shadow-3 motion-safe:animate-sheet-in'
+            ? 'fixed inset-x-0 bottom-0 z-50 max-h-[80dvh] overflow-y-auto rounded-t-xl border-t border-edge bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-fg shadow-3 motion-safe:animate-sheet-in'
             : 'fixed z-50 w-[min(360px,calc(100vw-16px))] rounded-lg border border-edge bg-surface p-4 text-fg shadow-2'
         }
         data-testid="program-popover"
         data-sheet={sheet ? '' : undefined}
       >
-        {sheet ? <span aria-hidden className="mx-auto -mt-1 mb-3 block h-1 w-10 rounded-full bg-border" /> : null}
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <p className="text-xs tabular-nums text-fg-muted">{joinList([channelName, formatRange(program, i18n.language)], i18n.language)}</p>
+            {/* The channel as the grid's column names it: the place tag after the name, quiet. */}
+            <p className="flex min-w-0 items-baseline text-caption tabular-nums text-fg-muted">
+              <ChannelName name={channel.name} strip={stripCountryPrefix} className="min-w-0 truncate" />
+              <span className="shrink-0 whitespace-pre">{`${listSeparator(i18n.language)}${formatRange(program, i18n.language)}`}</span>
+            </p>
             <h3 dir="auto" className="mt-0.5 text-base font-semibold text-match-parent">{program.title}</h3>
             {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}
             {/* guide: programmes from the provider's own guide, not XMLTV. */}
             {program.fromProvider ? <p className="text-xs text-fg-subtle" data-testid="program-from-provider">{t('fromProvider')}</p> : null}
           </div>
-          <button type="button" aria-label={t('close')} onClick={onClose} className="rounded-md p-1 text-fg-muted hover:bg-hover">
-            <X className="size-4" />
-          </button>
+          <IconButton size="sm" label={t('close')} icon={<X size={16} />} onClick={onClose} className="-me-2 -mt-1.5" />
         </div>
         {description ? (
           <p dir="auto" data-testid="program-description" className="mt-2 line-clamp-6 text-sm text-fg-muted text-match-parent motion-safe:animate-fade-in">
@@ -3095,23 +3117,33 @@ function ProgramPopover({
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           {when === 'now' ? (
-            <Button size="sm" variant="primary" icon={<Radio className="size-3.5" />} onClick={onLive}>
+            <Button size="sm" variant="primary" icon={<Radio className="size-3.5" />} onClick={onLive} data-autofocus>
               {t('watchLive')}
             </Button>
           ) : null}
           {catchupOk ? (
-            <Button size="sm" variant={when === 'now' ? 'secondary' : 'primary'} icon={<History className="size-3.5" />} onClick={onCatchup}>
+            <Button size="sm" variant={when === 'now' ? 'secondary' : 'primary'} icon={<History className="size-3.5" />} onClick={onCatchup} data-autofocus={when !== 'now' || undefined}>
               {when === 'now' ? t('startOver') : t('watchCatchup')}
             </Button>
           ) : null}
           {when !== 'now' ? (
-            <Button size="sm" variant="ghost" icon={<Play className="size-3.5" />} onClick={onLive}>
-              {t('playChannel', { name: channelName })}
+            // A short label: a provider's long name ("UK| SKY SPORTS PREMIER LEAGUE FHD") filled the
+            // row. The header above names the channel; the button's name and tooltip say it too.
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Play className="size-3.5" />}
+              onClick={onLive}
+              aria-label={t('playChannel', { name: channelName })}
+              title={t('playChannel', { name: channelName })}
+              data-autofocus={!catchupOk || undefined}
+            >
+              {t('watchChannel')}
             </Button>
           ) : null}
           {/* guide: K6, the one archive entry point of the programme dialog. */}
           {canBrowseArchive(channel, kind) ? (
-            <Button size="sm" variant="ghost" icon={<CalendarClock className="size-3.5" />} onClick={() => navigate(archivePath(channel.ref))} data-testid="program-browse-archive">
+            <Button size="sm" variant="ghost" icon={<CalendarClock className="size-3.5" />} onClick={() => navigate(archivePath(channel.ref), { state: { from: location.pathname + location.search } })} data-testid="program-browse-archive">
               {t('browseArchive')}
             </Button>
           ) : null}
@@ -3127,13 +3159,22 @@ function ProgramPopover({
           ) : null}
           {/* recording: */}
           <ProgramActions channelRef={channel.ref} channelName={channelName} program={program} now={now} />
-          {when === 'past' && !catchupOk ? <p className="w-full text-xs text-fg-subtle">{t('noCatchup')}</p> : null}
-          {when === 'future' ? <p className="w-full text-xs text-fg-subtle">{t('startsAt', { time: formatClock(ms(program.start), i18n.language) })}</p> : null}
+          {/* A channel without catch-up has no window for the programme to fall out of. */}
+          {when === 'past' && !catchupOk ? <p className="w-full text-xs text-fg-subtle">{t(hasUsableArchive(channel, kind) ? 'noCatchup' : 'noCatchupChannel')}</p> : null}
+          {/* The header gives the start time; this says how far off it is. */}
+          {when === 'future' ? <p className="w-full text-xs text-fg-subtle">{t('startsIn', { duration: startsIn(ms(program.start) - now, i18n.language, t) })}</p> : null}
         </div>
       </div>
     </>,
     portalContainer(),
   );
+}
+
+/** How long until a programme starts, in whole minutes rounded up ("2h 40m"; days and hours from a day). */
+function startsIn(leftMs: number, lang: string, t: TFunction): string {
+  const mins = Math.max(1, Math.ceil(leftMs / MINUTE));
+  const parts = mins >= 24 * 60 ? { days: Math.floor(mins / (24 * 60)), hours: Math.floor(mins / 60) % 24 } : { hours: Math.floor(mins / 60), minutes: mins % 60 };
+  return formatDurationParts(parts, { locale: lang, t: (key, vars) => t(key, { ns: 'vod', ...vars }) });
 }
 
 /** Whether `cell` still shows in the grid's track: below the time header and clear of the channel column. */

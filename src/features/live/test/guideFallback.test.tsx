@@ -178,7 +178,8 @@ describe('EpgGridPage short-EPG fallback', () => {
   it("offers Download and Copy link in a past archive programme's detail", async () => {
     handlers(false);
     const now = Date.now();
-    const past = program('Yesterday news', now - 2 * HOUR, now - HOUR);
+    // Ended a few minutes ago: inside the window the guide opens on.
+    const past = program('Yesterday news', now - 40 * MINUTE, now - 5 * MINUTE);
     rpcMock.handlers['epg.grid'] = (a) => Object.fromEntries((a as { refs: ItemRef[] }).refs.map((r) => [
       `${r.sourceId}|${r.contentType}|${r.itemId}`, r.itemId === 'c0' ? [past] : [],
     ]));

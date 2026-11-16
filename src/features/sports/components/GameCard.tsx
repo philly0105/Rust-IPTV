@@ -1,7 +1,7 @@
 /**
  * One game, compact: a status line (the league when every league shows, LIVE with the clock, the
  * final, the start time in the user's language and zone, or a postponement, then the networks and a
- * menu to put the game's best stream on the multi-view wall while it is on, follow either team or
+ * menu to put the game's best stream on the multi-view wall until it is over, follow either team or
  * open ESPN's Gamecast), both teams with logos, ranks, records, scores
  * and a star on a followed team, ESPN's notes, then the matched streams. Team names, notes and
  * network names are ESPN's English text and stay as they are (dir="auto").
@@ -39,7 +39,7 @@ function GameStatus({ game }: { game: Game }) {
         <span className="flex min-w-0 items-center gap-2">
           <LivePill dot="still" />
           {/* ESPN's own clock line ("Q3 5:42", "Top 5th", "Halftime"). */}
-          <span dir="auto" className="truncate font-medium text-fg tabular-nums" data-testid="sports-clock">
+          <span dir="auto" className="truncate text-body font-semibold text-fg tabular-nums" data-testid="sports-clock">
             {game.shortDetail || game.displayClock}
           </span>
         </span>
@@ -92,13 +92,13 @@ function TeamRow({ team, game, followed }: { team: GameTeam; game: Game; followe
         {team.record ? <span className="shrink-0 text-caption text-fg-subtle tabular-nums">{team.record}</span> : null}
         {followed ? (
           <span className="shrink-0 self-center" data-testid="sports-team-followed">
-            <Star aria-hidden size={12} className="fill-accent text-accent" />
+            <Star aria-hidden size={12} className="fill-current text-fg-subtle" />
             <span className="sr-only">{t('following')}</span>
           </span>
         ) : null}
       </span>
       {team.score !== null ? (
-        <span className={cn('shrink-0 text-title-sm tabular-nums', lost ? 'text-fg-muted' : 'text-fg')} data-testid="sports-score">
+        <span className={cn('shrink-0 text-title tabular-nums', lost ? 'text-fg-muted' : 'text-fg')} data-testid="sports-score">
           {team.score}
         </span>
       ) : null}
@@ -137,14 +137,17 @@ export const GameCard = memo(function GameCard({ game, streams, streamsLoading, 
     return {
       id: `follow-${team.id}`,
       label: t(on ? 'unfollowTeam' : 'followTeam', { team: team.displayName }),
-      icon: <Star aria-hidden size={15} className={cn(on && 'fill-accent text-accent')} />,
+      icon: <Star aria-hidden size={15} className={cn(on && 'fill-current')} />,
       onSelect: () => setFollowed(teamKey(game.league, team), !on),
     };
   });
   const gamecast = game.gamecastUrl;
-  // While Watch is on offer (the game is on, or starts within 15 minutes), the menu puts the best
-  // stream that plays it on the multi-view wall, so a Sunday's games can share the screen.
-  const wallStream = streams?.find((m) => streamAction(game, m, ctx.now, ctx.canRecord, title)?.kind === 'watch');
+  // Until the game is over, the menu puts the stream Watch plays (or, before Watch is on offer, the
+  // best one) on the multi-view wall, so a Sunday's games can share the screen, set up ahead of kickoff.
+  const wallStream =
+    game.phase === 'live' || game.phase === 'scheduled'
+      ? (streams?.find((m) => streamAction(game, m, ctx.now, ctx.canRecord, title)?.kind === 'watch') ?? streams?.[0])
+      : undefined;
   const wallItem = useMultiviewMenuItem(
     wallStream
       ? {
@@ -199,6 +202,8 @@ export const GameCard = memo(function GameCard({ game, streams, streamsLoading, 
         </div>
         <Menu
           label={t('gameMenu', { title })}
+          // On a phone the menu is a sheet over the card: it names the game it is for.
+          sheetHeader={{ title, ...(networks.length > 0 ? { subtitle: networks.join(' · ') } : {}) }}
           align="end"
           triggerClassName="-my-1.5 -me-1.5 size-8 shrink-0 text-fg-muted"
           items={[

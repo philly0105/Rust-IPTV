@@ -7,11 +7,12 @@
  * archive once it is over, Record before it starts. The player loads on the press.
  */
 
-import { ChevronDown, ChevronUp, Circle, Clock, History, Play } from 'lucide-react';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { ChevronDown, ChevronUp, Circle, Clock, History, Play, TriangleAlert, Volume2 } from 'lucide-react';
+import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 
-import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type Settings } from '@/api/types';
+import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type PlayerSource, type Settings } from '@/api/types';
 // Straight from its module (sports/deps.ts re-exports only ChannelLogo from it), the same chunk.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { channelQuality } from '@/lib/channelQuality';
@@ -27,7 +28,9 @@ import {
   errorDescription,
   formatClock,
   formatTimeRange,
+  PHONE_QUERY,
   loadPlayback,
+  loadPlayerStage,
   loadPlayerStore,
   markFor,
   ms,
@@ -57,7 +60,7 @@ export const QUALITY_LABEL: Record<ChannelQuality, string> = { sd: 'SD', hd: '72
 
 function QualityTag({ quality }: { quality: ChannelQuality }) {
   return (
-    <span className="rounded-xs border border-edge px-1 text-2xs leading-4 font-semibold text-fg-muted tabular-nums" data-testid="sports-stream-quality">
+    <span className="rounded-xs border border-edge px-1 text-caption leading-4 font-semibold text-fg-muted tabular-nums" data-testid="sports-stream-quality">
       {QUALITY_LABEL[quality]}
     </span>
   );
@@ -73,6 +76,8 @@ export interface StreamContext {
   canRecord: boolean;
   /** The Live TV quality filter is on, so a missing event channel may be its doing. */
   qualityFiltered: boolean;
+  /** What the player plays, once a Watch or Replay on this page has loaded it; the row it came from says so. */
+  playing: PlayerSource | undefined;
   /** A recording is waiting or running for this programme on this channel. */
   isRecording(ref: ItemRef, program: EpgProgram): boolean;
   watch(match: StreamMatch, title: string, name: string): Promise<void>;
@@ -82,6 +87,17 @@ export interface StreamContext {
 
 const selectMinQuality = (s: Settings) => s.liveMinQuality ?? null;
 
+type PlayerStore = Awaited<ReturnType<typeof loadPlayerStore>>['usePlayerStore'];
+const noSubscription = () => () => {};
+
+/**
+ * The player's source, read from its store once a press here has loaded it: the page never loads the
+ * player itself (deps.ts), so until then nothing plays that this page started.
+ */
+function usePlayingSource(store: PlayerStore | null): PlayerSource | undefined {
+  return useSyncExternalStore(store ? store.subscribe : noSubscription, () => store?.getState().source);
+}
+
 export function useStreamContext(now: number, sourceCount: number): StreamContext {
   const { t } = useTranslation('sports');
   const { toast } = useToast();
@@ -90,28 +106,41 @@ export function useStreamContext(now: number, sourceCount: number): StreamContex
   const index = useScheduleIndex();
   const actions = useScheduleActions();
   const qualityFiltered = useSettingsValue(selectMinQuality).data != null;
+  const navigate = useNavigate();
+  const [store, setStore] = useState<PlayerStore | null>(null);
+  const playing = usePlayingSource(store);
 
   const watch = useCallback(
     async (m: StreamMatch, title: string, name: string) => {
       try {
         const [{ playChannel }, { usePlayerStore }] = await Promise.all([loadPlayback(), loadPlayerStore()]);
+        setStore(() => usePlayerStore);
         await playChannel(m.channel, m.sourceKind, title, name);
         // Channel up and down then walk the channel's group, not the last Live category. Only when this
         // channel is the one playing: a refused PIN leaves what played alone.
         if (sameRef(usePlayerStore.getState().source?.ref, m.channel.ref)) {
-          usePlayerStore.setState({ zapContext: { sourceId: m.sourceId, ...(m.channel.categoryId ? { categoryId: m.channel.categoryId } : {}) } });
+          const zapContext = { sourceId: m.sourceId, ...(m.channel.categoryId ? { categoryId: m.channel.categoryId } : {}) };
+          usePlayerStore.setState({ zapContext });
+          // On a phone the mini player is a thumbnail over the tab bar, and nobody watches a game in
+          // that: Watch goes on to the big picture, where the bar's Expand would take it.
+          if (window.matchMedia?.(PHONE_QUERY).matches) {
+            const { expandPath } = await loadPlayerStage();
+            const path = expandPath(usePlayerStore.getState().source, zapContext);
+            if (path) void navigate(path);
+          }
         }
       } catch (err) {
         toast({ variant: 'error', title: t('playFailed', { name }), description: errorDescription(err) });
       }
     },
-    [t, toast],
+    [t, toast, navigate],
   );
 
   const replay = useCallback(
     async (m: StreamMatch, program: EpgProgram, name: string) => {
       try {
-        const { playCatchup } = await loadPlayback();
+        const [{ playCatchup }, { usePlayerStore }] = await Promise.all([loadPlayback(), loadPlayerStore()]);
+        setStore(() => usePlayerStore);
         await playCatchup(m.channel, m.sourceKind, program, Date.now(), name);
       } catch (err) {
         toast({ variant: 'error', title: t('replayFailed'), description: errorDescription(err) });
@@ -130,8 +159,8 @@ export function useStreamContext(now: number, sourceCount: number): StreamContex
   const isRecording = useCallback((ref: ItemRef, program: EpgProgram) => !!markFor(index, ref, program).recording, [index]);
 
   return useMemo(
-    () => ({ now, strip: prefs.stripCountryPrefix, multiSource: sourceCount > 1, canRecord, qualityFiltered, isRecording, watch, replay, record }),
-    [now, prefs.stripCountryPrefix, sourceCount, canRecord, qualityFiltered, isRecording, watch, replay, record],
+    () => ({ now, strip: prefs.stripCountryPrefix, multiSource: sourceCount > 1, canRecord, qualityFiltered, playing, isRecording, watch, replay, record }),
+    [now, prefs.stripCountryPrefix, sourceCount, canRecord, qualityFiltered, playing, isRecording, watch, replay, record],
   );
 }
 
@@ -222,8 +251,22 @@ function StreamRow({
     void work().finally(() => setBusy(false));
   };
 
+  // The row whose stream the player has on: its action gives way to a quiet "Playing", in the accent
+  // as Live TV marks its playing row, so with several games on the user sees which one this is.
+  const playing =
+    ctx.playing !== undefined &&
+    sameRef(ctx.playing.ref, match.channel.ref) &&
+    ((action?.kind === 'watch' && ctx.playing.isLive) || (action?.kind === 'replay' && !ctx.playing.isLive));
+
   let button = null;
-  if (action?.kind === 'watch') {
+  if (playing) {
+    button = (
+      <span className="inline-flex h-8 items-center gap-1.5 px-2 text-body-sm font-medium text-accent" data-testid="sports-playing">
+        <Volume2 aria-hidden size={16} />
+        {t('playing')}
+      </span>
+    );
+  } else if (action?.kind === 'watch') {
     button = (
       <Button
         size="sm"
@@ -280,39 +323,56 @@ function StreamRow({
   // only repeats the start time above, the third time on the card with the Watch clock, so it goes.
   const slotRepeatsStart =
     program !== null && game.phase === 'scheduled' && game.timeValid && !game.timeNote && Math.abs(ms(program.start) - game.startMs) < MINUTE;
+  const slot = program && !slotRepeatsStart ? formatTimeRange(ms(program.start), ms(program.end), i18n.language) : null;
+  const reason = t(REASON_KEYS[match.reason]);
+  // A guide slot already says the match came from the guide, so it stands in for "In guide": the
+  // reason stays its tooltip and is read before it.
+  const slotIsReason = slot !== null && match.reason === 'guide';
   return (
-    <li className="flex min-w-0 items-center gap-3 py-2" data-testid="sports-stream" data-reason={match.reason}>
+    <li className="flex min-w-0 items-center gap-3 py-2" aria-current={playing ? 'true' : undefined} data-testid="sports-stream" data-reason={match.reason}>
       <ChannelLogo src={match.channel.logoUrl} name={name} size={32} sourceId={match.sourceId} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         {/* Named as Live TV's list names it: the country tag after the name, quiet. */}
         <ChannelName name={match.channel.name} strip={ctx.strip} className="truncate text-body-sm font-medium text-fg" testId="sports-stream-name" />
-        {/* Wraps as a whole: where the details and the toggle don't fit beside an action, the toggle
-            goes under them rather than the details breaking in two. */}
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+        {/* One line: where the details don't fit beside an action, the last one truncates and the
+            toggle keeps its place at the end, so the row never grows a line that starts with a dot. */}
+        <span className="flex min-w-0 items-center gap-1.5">
           <MetaLine
             as="span"
+            className="flex-nowrap [&>span]:shrink-0 [&>span:last-child]:shrink"
             items={[
               // First, so the rows' qualities line up down the list; the name's own marker is often cut
               // off or a superscript ("ᴴᴰ").
               quality ? <QualityTag key="quality" quality={quality} /> : null,
-              // Why it matched is quiet text: a badge on every card made status green the page's loudest
-              // colour. Only the regional warning stays a badge, since it may be the wrong game.
-              <span key="reason" data-testid="sports-reason">
-                {t(REASON_KEYS[match.reason])}
-              </span>,
+              // The regional warning, since it may be the wrong game: warning-toned text, not a filled
+              // badge, as on an NFL Sunday nearly every card carries it. Before the reason, so where the
+              // line runs short the warning is never what truncates.
               match.regional ? (
-                <Badge key="regional" variant="warning" title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')} data-testid="sports-regional">
-                  {t('regional')}
-                </Badge>
+                <span
+                  key="regional"
+                  className="flex min-w-0 items-center gap-1 text-warning"
+                  title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')}
+                  data-testid="sports-regional"
+                >
+                  <TriangleAlert aria-hidden size={12} className="shrink-0" />
+                  <span className="truncate">{t('regional')}</span>
+                </span>
               ) : null,
+              // Why it matched is quiet text: a badge on every card made status green the page's loudest colour.
+              slotIsReason ? null : (
+                <span key="reason" className="block truncate" data-testid="sports-reason">
+                  {reason}
+                </span>
+              ),
               ctx.multiSource ? (
-                <span key="source" dir="auto" data-testid="sports-stream-source">
+                <span key="source" dir="auto" className="block truncate" data-testid="sports-stream-source">
                   {match.sourceName}
                 </span>
               ) : null,
-              program && !slotRepeatsStart ? (
-                <span key="time" className="tabular-nums" data-testid="sports-stream-slot">
-                  {formatTimeRange(ms(program.start), ms(program.end), i18n.language)}
+              slot ? (
+                <span key="time" className="block truncate tabular-nums" title={slotIsReason ? reason : undefined} data-testid="sports-stream-slot">
+                  {slotIsReason ? <span className="sr-only">{`${reason}, `}</span> : null}
+                  {slot}
                 </span>
               ) : null,
             ]}
@@ -382,9 +442,8 @@ export function StreamList({
   // The rest of the streams open from a small "+2" at the end of the best row's metadata, not a row
   // of its own under it: on most cards that row was a fifth of the card. It stays where it is once
   // open (a chevron up), so the same press closes the list again. Its hit area reaches 44 px on
-  // touch screens without making the line taller. Only for a coarse pointer, as the kit's
-  // TOUCH_TARGET: for a mouse it would reach up over the channel name, and hovering a long name
-  // would light the chip and open its tooltip.
+  // touch screens and 24 px for a mouse without making the line taller. Only 24 for a mouse: more
+  // would reach up over the channel name, and hovering a long name would light the chip.
   const toggle =
     more > 0 ? (
       <Tooltip content={toggleLabel} describe={false}>
@@ -393,7 +452,7 @@ export function StreamList({
           aria-label={toggleLabel}
           aria-expanded={all}
           onClick={() => setAll((v) => !v)}
-          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums pointer-coarse:after:absolute pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-3 hover:bg-surface-3 active:bg-pressed"
+          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums after:absolute after:inset-x-0 after:-inset-y-0.5 pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-3 hover:bg-surface-3 active:bg-pressed"
           data-testid="sports-show-all"
         >
           {all ? null : <span aria-hidden>{`+${more}`}</span>}

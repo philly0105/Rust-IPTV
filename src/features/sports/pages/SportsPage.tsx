@@ -28,10 +28,11 @@ import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/component
 
 import { DayStrip } from '../components/DayStrip';
 import { GameCard } from '../components/GameCard';
-import { LeagueFilter } from '../components/LeagueFilter';
-import { SportsSkeleton } from '../components/SportsSkeleton';
+import { LEAGUE_KEYS, LeagueFilter } from '../components/LeagueFilter';
+import { GRID_COLUMNS, SportsSkeleton } from '../components/SportsSkeleton';
 import { QUALITY_LABEL, useStreamContext, type StreamContext } from '../components/StreamList';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, useLiveQuality, useNow, useShell, useVisibleSources } from '../deps';
+import { WeekSearch } from '../components/WeekSearch';
+import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, intlLocale, useLiveQuality, useNow, useShell, useVisibleSources } from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -94,9 +95,10 @@ function GameGrid({
   // height and their status lines, teams, notes and streams line up across it. The grid has no row
   // gap, since a subgrid's tracks keep its parent's gutters and a card without notes would show
   // two of them around its empty track: the cards' bottom margin spaces the rows instead, and the
-  // list takes the last one back.
+  // list takes the last one back. The columns follow the page's width, not the window's: as many
+  // cards of at least 22rem as fit, so a card keeps room for a stream row beside the rail.
   return (
-    <ul className={cn('-mb-3 grid gap-x-3 md:grid-cols-2 xl:grid-cols-3', CLEAR_PINNED)} data-testid="sports-grid">
+    <ul className={cn('-mb-3 grid gap-x-3', GRID_COLUMNS, CLEAR_PINNED)} data-testid="sports-grid">
       {games.map((g) => (
         <GameCard key={g.key} game={g} {...streamsOf(g)} showStreams={showStreams} showLeague={showLeague} ctx={ctx} />
       ))}
@@ -114,7 +116,7 @@ function Section({ id, title, count, children }: { id: string; title: string; co
 }
 
 export function SportsPage() {
-  const { t } = useTranslation('sports');
+  const { t, i18n } = useTranslation('sports');
   const { setHeader } = useShell();
   const title = t('title');
   const placeholder = t('searchTeams');
@@ -217,9 +219,20 @@ export function SportsPage() {
   const live = keep(sections.live);
   const upcoming = keep(sections.upcoming);
   const final = keep(sections.final);
-  const watchable = hasSources && !matching ? [...sections.live, ...sections.upcoming, ...sections.final].filter(hasStream).length : undefined;
+  const { loading, error, refetch, failedLeagues } = allDay;
+  const failed = error !== null && error !== undefined;
+  // Nothing counted yet (the day still loading, or ESPN failed with nothing to show): no number, not a 0.
+  const uncounted = allDay.games.length === 0 && (loading || failed);
+  const watchable =
+    hasSources && !matching && !uncounted ? [...sections.live, ...sections.upcoming, ...sections.final].filter(hasStream).length : undefined;
 
-  const counts = allDay.games.length > 0 || !allDay.loading ? leagueCounts(allDay.games) : undefined;
+  // A league that failed with no games kept has no count either; the others still have theirs.
+  const counts = useMemo(() => {
+    if (uncounted) return undefined;
+    const all: Partial<Record<League, number>> = leagueCounts(allDay.games);
+    for (const l of failedLeagues) delete all[l];
+    return all;
+  }, [uncounted, allDay.games, failedLeagues]);
   const liveLeagues = useMemo(() => new Set<League>(allLive.games.map((g) => g.league)), [allLive.games]);
   const showLeague = league === null;
   const myTeamsCount = useMemo(
@@ -243,6 +256,32 @@ export function SportsPage() {
     if (!bar || !main || main.scrollTop === 0) return;
     if (Math.abs(bar.getBoundingClientRect().top - main.getBoundingClientRect().top) < 1) main.scrollTop = 0;
   };
+  // A team search with no game on the picked day can look through the days after it (on a press:
+  // up to 28 scoreboards), and a game found there opens its day, in every league if need be.
+  const [weekSearch, setWeekSearch] = useState(false);
+  if (weekSearch && !query.trim()) setWeekSearch(false);
+  const dayAt = days.indexOf(day);
+  const weekDays = useMemo(() => days.slice(dayAt + 1, dayAt + 8), [days, dayAt]);
+  const openWeekGame = (g: Game) => {
+    backToTop();
+    pickDay(g.etDate);
+    const otherLeague = league !== null && g.league !== league;
+    if (otherLeague) {
+      rememberLeague(null);
+      setRemembered(null);
+    }
+    // One update for both, or the second would bring back what the first took out.
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (otherLeague) p.delete('league');
+        if (g.etDate === today) p.delete('day');
+        else p.set('day', g.etDate);
+        return p;
+      },
+      { replace: true },
+    );
+  };
   const clearFilters = () => {
     setQuery('');
     toggleStreamsOnly(false);
@@ -250,8 +289,12 @@ export function SportsPage() {
     pickLeague(null);
   };
 
-  const { loading, error, refetch } = allDay;
-  const failed = error !== null && error !== undefined;
+  // A league that failed while others answered is named, so its missing games and count are explained.
+  const failedNames = failedLeagues.map((l) => t(LEAGUE_KEYS[l]));
+  const errorTitle =
+    failedNames.length > 0 && failedNames.length < LEAGUES.length
+      ? t('errorLeague', { league: new Intl.ListFormat(intlLocale(i18n.language), { type: 'conjunction' }).format(failedNames) })
+      : t('errorTitle');
   const grid = (games: Game[]) => <GameGrid games={games} streamsOf={streamsOf} showStreams={hasSources} showLeague={showLeague} ctx={ctx} />;
   let body: ReactNode;
   if (allDay.games.length === 0 && loading) {
@@ -260,6 +303,48 @@ export function SportsPage() {
     body = <ErrorState error={error} title={t('errorTitle')} hint={t('errorHint')} onRetry={refetch} />;
   } else if (allDay.games.length === 0) {
     body = <EmptyState icon={<CalendarX2 />} title={t('emptyDay')} description={t('emptyDayHint')} />;
+  } else if (league !== null && leagueDay.length === 0 && failedLeagues.includes(league)) {
+    body = <ErrorState error={error} title={errorTitle} hint={t('errorHint')} onRetry={refetch} />;
+  } else if (league !== null && leagueDay.length === 0 && !query.trim() && !filterStreams && !filterMyTeams) {
+    // The league has no games that day: nothing was filtered, so there is nothing to clear.
+    body = (
+      <EmptyState
+        icon={<CalendarX2 />}
+        title={t('emptyLeagueDay', { league: t(LEAGUE_KEYS[league]) })}
+        description={t('emptyLeagueDayHint')}
+        action={
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              backToTop();
+              pickLeague(null);
+            }}
+            data-testid="sports-all-leagues"
+          >
+            {t('showAllLeagues')}
+          </Button>
+        }
+      />
+    );
+  } else if (query.trim() !== '' && filterGames(leagueDay, null, query).length === 0) {
+    // The search names no game of the day: the question is mostly when the team plays next.
+    body = weekSearch ? (
+      <WeekSearch days={weekDays} query={query} onPick={openWeekGame} />
+    ) : (
+      <EmptyState
+        icon={<SearchX />}
+        title={t('noTeamGame', { query: query.trim() })}
+        description={weekDays.length > 0 ? t('noTeamGameHint') : t('noMatchesHint')}
+        action={
+          weekDays.length > 0 ? (
+            <Button size="sm" variant="secondary" onClick={() => setWeekSearch(true)} data-testid="sports-search-week">
+              {t('searchWeek')}
+            </Button>
+          ) : undefined
+        }
+      />
+    );
   } else if (keep(dayGames).length === 0) {
     // Every game of the day is filtered away; Live now may still show games of today or yesterday above.
     body = (
@@ -280,7 +365,7 @@ export function SportsPage() {
     body = (
       <>
         {/* A league that failed while others answered: its last good games stay, with a way to ask again. */}
-        {failed ? <ErrorState size="inline" error={error} title={t('errorTitle')} hint={t('errorHint')} onRetry={refetch} /> : null}
+        {failed ? <ErrorState size="inline" error={error} title={errorTitle} hint={t('errorHint')} onRetry={refetch} /> : null}
         {upcoming.length > 0 ? (
           <Section id="upcoming" title={t('upcoming')} count={upcoming.length}>
             {grid(upcoming)}

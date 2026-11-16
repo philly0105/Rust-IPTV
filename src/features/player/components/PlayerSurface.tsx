@@ -137,7 +137,14 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
       ref={ref}
       aria-live="polite"
       // Within the player, whatever its size: long lines (file names, reasons) wrap, never clip.
-      className="player-osd player-chrome pointer-events-none absolute top-5 end-6 z-20 max-w-[min(40rem,calc(100%-3rem))] text-end [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
+      // PV-06: words sit on a glass plate, so "Forward 10 seconds" reads over a bright picture; a
+      // channel number keeps the tuner's big digits with only a shadow.
+      className={cn(
+        'player-osd player-chrome pointer-events-none absolute top-5 end-6 z-20 max-w-[min(40rem,calc(100%-3rem))] text-end [overflow-wrap:anywhere]',
+        digits
+          ? '[text-shadow:0_2px_12px_rgb(0_0_0/0.8)]'
+          : 'rounded-lg border border-glass-border bg-glass-strong px-3 py-2 text-on-glass shadow-2',
+      )}
       style={top === undefined ? undefined : { top }}
     >
       <div

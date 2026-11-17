@@ -87,7 +87,7 @@ export function ActorPage() {
       />
     );
   } else if (person.isError) {
-    body = <TmdbErrorState error={person.error} onRetry={() => void person.refetch()} />;
+    body = <TmdbErrorState error={person.error} onRetry={() => person.refetch()} />;
   } else if (!valid || person.data === null) {
     body = <EmptyState icon={<UserRound size={28} />} title={t('personNotFound')} />;
   } else if (!person.data) {

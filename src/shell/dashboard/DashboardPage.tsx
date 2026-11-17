@@ -564,7 +564,7 @@ function DashboardBody() {
         />
       );
     }
-    return <ErrorState error={sources.error} onRetry={() => void sources.refetch()} />;
+    return <ErrorState error={sources.error} onRetry={() => sources.refetch()} />;
   }
 
   // Continue watching leads the rotation and gates the layout below the hero. New arrivals
@@ -998,7 +998,7 @@ const ContinueWatchingRail = memo(function ContinueWatchingRail({
       loaded={loaded}
       error={error}
       errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
-      onRetry={() => void refetch()}
+      onRetry={() => refetch()}
       // The whole list, with remove and clear, is on Recently watched.
       seeAll={{ to: '/recent' }}
       getKey={continueKey}
@@ -1094,7 +1094,7 @@ const LiveFavoritesRail = memo(function LiveFavoritesRail({
       loaded={loaded}
       error={error}
       errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
-      onRetry={() => void refetch()}
+      onRetry={() => refetch()}
       seeAll={{ to: '/favorites' }}
       getKey={refKey}
       cardWidth={CHANNEL_CARD}
@@ -1191,7 +1191,7 @@ const RecentLiveRail = memo(function RecentLiveRail({
       loaded={loaded}
       error={error}
       errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
-      onRetry={() => void refetch()}
+      onRetry={() => refetch()}
       seeAll={{ to: '/recent' }}
       getKey={refKey}
       cardWidth={CHANNEL_CARD}
@@ -1238,7 +1238,7 @@ const FavoriteVodRail = memo(function FavoriteVodRail({ items, loading, loaded, 
         loaded={loaded}
         error={error}
         errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
-        onRetry={() => void refetch()}
+        onRetry={() => refetch()}
         seeAll={{ to: '/favorites' }}
         getKey={refKey}
         cardWidth={168}
@@ -1304,7 +1304,7 @@ const RecentlyAddedRail = memo(function RecentlyAddedRail({
         loaded={loaded}
         error={error}
         errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
-        onRetry={() => void refetch()}
+        onRetry={() => refetch()}
         getKey={refKey}
         cardWidth={168}
         skeletonAspect={2 / 3}
@@ -1446,7 +1446,7 @@ const TrendingRail = memo(function TrendingRail({
         loading={loading}
         loaded={loaded}
         error={error}
-        onRetry={() => void refetch()}
+        onRetry={() => refetch()}
         getKey={trendingKey}
         cardWidth={168}
         skeletonAspect={2 / 3}

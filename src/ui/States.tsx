@@ -1,6 +1,6 @@
 import i18next from 'i18next';
 import { CircleAlert, RotateCw } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isDesktop, RpcError } from '@/api/transport';
@@ -89,7 +89,11 @@ export const ERROR_TITLE_KEYS: Record<RpcErrorCode, string> = {
 
 export interface ErrorStateProps {
   error: unknown;
-  onRetry?: () => void;
+  /**
+   * Try again. Return the refetch's promise (`() => query.refetch()`) and the button spins
+   * until it settles; a retry that fails again is announced again.
+   */
+  onRetry?: () => unknown;
   /** Extra action next to Retry (e.g. a link to source settings). */
   action?: ReactNode;
   className?: string;
@@ -101,7 +105,10 @@ export interface ErrorStateProps {
    * (local library vs provider). The unreachable-server hint still wins: it is more specific.
    */
   hint?: ReactNode;
-  /** A retry is in flight: Retry shows a spinner and ignores presses (focus stays on it). */
+  /**
+   * A retry is in flight: Retry shows a spinner and ignores presses (focus stays on it). Only
+   * for a caller whose retry does not return its promise.
+   */
   retrying?: boolean;
 }
 
@@ -167,6 +174,22 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
   const unreachable = isServerUnreachable(err);
   // Asking again cannot bring back something that is not there.
   const retry = err.code === 'not_found' ? undefined : onRetry;
+  // A network or timeout retry backs off for seconds: the button spins until the promise the
+  // retry returned settles. Still here afterwards means it failed again: the hint is drawn anew
+  // (a new key) so the alert says so again instead of nothing visibly happening.
+  const [busy, setBusy] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const run = () => {
+    const p = retry?.();
+    if (!p || typeof (p as { finally?: unknown }).finally !== 'function') return;
+    setBusy(true);
+    void (p as Promise<unknown>)
+      .catch(() => undefined)
+      .finally(() => {
+        setBusy(false);
+        setAttempts((n) => n + 1);
+      });
+  };
   return (
     <div
       role="alert"
@@ -188,7 +211,7 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
       <div className="flex max-w-lg flex-col gap-1.5">
         <h2 className={cn(size === 'page' ? 'text-title-sm' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code] ?? 'errorTitleInternal')}</h2>
         {unreachable && <p className="text-sm break-words text-fg-muted">{t('errorBodyServerUnreachable')}</p>}
-        <p className="text-sm text-fg">
+        <p key={attempts} className="text-sm text-fg">
           {unreachable ? t('errorHintServerUnreachable') : (hint ?? t(hintKey(err)))}
         </p>
         {/* The code and raw message are what support asks for; they stay folded away so the translated text leads. */}
@@ -211,8 +234,8 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
               variant="primary"
               size={size === 'page' ? 'md' : 'sm'}
               icon={<RotateCw size={16} aria-hidden />}
-              loading={retrying}
-              onClick={retry}
+              loading={retrying || busy}
+              onClick={run}
             >
               {t('retry')}
             </Button>

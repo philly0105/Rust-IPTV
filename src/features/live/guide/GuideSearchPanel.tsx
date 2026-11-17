@@ -364,7 +364,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
     );
   } else if (search.error && !pending) {
     state = 'error';
-    body = <ErrorState size="inline" error={search.error} retrying={search.isFetching} onRetry={() => void search.refetch()} />;
+    body = <ErrorState size="inline" error={search.error} retrying={search.isFetching} onRetry={() => search.refetch()} />;
   } else if (!hits || !q || (hits.length === 0 && pending)) {
     state = 'loading';
     body = (

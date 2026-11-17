@@ -671,7 +671,7 @@ export function SourcesPage() {
 
   let body: ReactNode;
   if (query.isPending) body = <SourcesSkeleton />;
-  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => query.refetch()} />;
   else if (sources.length === 0) body = <Onboarding section={forSection} onPick={(kind) => openAdd(kind)} />;
   else
     body = (

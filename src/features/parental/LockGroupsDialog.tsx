@@ -312,7 +312,7 @@ function GroupList({
     initialRect: { width: 480, height: 360 },
   });
 
-  if (cats.error) return <ErrorState size="inline" error={cats.error} onRetry={() => void cats.refetch()} />;
+  if (cats.error) return <ErrorState size="inline" error={cats.error} onRetry={() => cats.refetch()} />;
   if (!cats.data) {
     return (
       <div className="flex flex-col gap-2" aria-busy="true" aria-label={t('loadingGroups')}>

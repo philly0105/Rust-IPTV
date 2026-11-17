@@ -771,7 +771,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   );
   hrefForCategoryRef.current = hrefForCategory;
   const refetchCategories = allCategories.refetch;
-  const retryCategories = useCallback(() => void refetchCategories(), [refetchCategories]);
+  const retryCategories = useCallback(() => refetchCategories(), [refetchCategories]);
   const onPlayLive = useCallback((c: Channel) => play(c), [play]);
 
   // Parental Hide mode can leave a source's list empty: say so, and offer the PIN, rather than
@@ -954,7 +954,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     return (
       <div className="flex h-full items-center justify-center">
         {heading}
-        <ErrorState error={source.error} onRetry={() => void source.refetch()} />
+        <ErrorState error={source.error} onRetry={() => source.refetch()} />
       </div>
     );
   }

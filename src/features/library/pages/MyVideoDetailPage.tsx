@@ -229,7 +229,7 @@ export function MyVideoDetailPage() {
     return (
       <>
         <PageTitle>{pageTitle}</PageTitle>
-        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+        <ErrorState error={query.error} onRetry={() => query.refetch()} />
       </>
     );
   if (!entry) {

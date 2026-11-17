@@ -9,7 +9,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
 
-import { IconButton, ToastViewport, toast, useBusyButtons, useToastStore } from '..';
+import { RpcError } from '@/api/transport';
+
+import { ErrorState, IconButton, ToastViewport, toast, useBusyButtons, useToastStore } from '..';
 
 afterEach(() => {
   cleanup();
@@ -73,5 +75,25 @@ describe('toasts with an action (states-feedback-03)', () => {
     expect(useToastStore.getState().toasts.map((t) => t.title)).toEqual(['Removed Heat from My List']);
     act(() => vi.advanceTimersByTime(4500));
     expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+});
+
+describe('ErrorState retry (states-feedback-04)', () => {
+  it('spins Try again until the returned promise settles, then reads the hint again', async () => {
+    let settle: () => void = () => undefined;
+    const onRetry = vi.fn(() => new Promise<void>((r) => (settle = r)));
+    render(<ErrorState error={new RpcError('network', 'fetch failed', true)} onRetry={onRetry} />);
+    const btn = screen.getByRole('button', { name: 'Try again' });
+    const hint = btn.closest('[role="alert"]')!.querySelector('p.text-fg')!;
+    btn.focus();
+    fireEvent.click(btn);
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(btn);
+    fireEvent.click(btn);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    await act(async () => settle());
+    expect(btn.getAttribute('aria-busy')).toBeNull();
+    // Failed again: the hint is a new node, so the alert announces it again.
+    expect(btn.closest('[role="alert"]')!.querySelector('p.text-fg')).not.toBe(hint);
   });
 });

@@ -502,7 +502,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       />
     );
   } else if (catalog.isError && !anyResults) {
-    body = <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />;
+    body = <ErrorState error={catalog.error} onRetry={() => catalog.refetch()} />;
   } else if (loading && programmeHits.length === 0) {
     body = <SearchSkeleton />;
   } else if (!anyResults && stalker.error) {

@@ -67,7 +67,7 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
       loaded={items.isSuccess}
       error={items.error ?? undefined}
       errorHint={t('localDataHint')}
-      onRetry={() => void items.refetch()}
+      onRetry={() => items.refetch()}
       seeAll={{ to: listPath(list.id) }}
       meta={<span className="shrink-0 text-caption tabular-nums text-fg-subtle">{t('channelCount', { count: itemCount, formatted: fmt.format(itemCount) })}</span>}
       getKey={(c) => itemKey(c.ref)}

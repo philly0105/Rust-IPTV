@@ -100,7 +100,7 @@ export function AboutSection(_props: SectionProps) {
           <Skeleton className="h-40 rounded-lg" />
         </div>
       ) : info.isError ? (
-        <ErrorState error={info.error} onRetry={() => void info.refetch()} />
+        <ErrorState error={info.error} onRetry={() => info.refetch()} />
       ) : (
         <>
           <div className="flex flex-col gap-5 rounded-lg border border-edge bg-surface p-5 @md:flex-row @md:items-start" data-testid="about-product">

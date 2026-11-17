@@ -16,7 +16,7 @@ import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/record
 
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName, splitPlaceTag } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, plainChannelName, separatorLabel, splitPlaceTag } from '../lib/channelName';
 import { CELL_TEXT_MIN_PX, MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
@@ -83,11 +83,17 @@ export function createStickyTitleManager() {
   // ellipsis) and hidden when that is too narrow to read, which leaves a plain block. The cell
   // sits at left + 1 with 8 px padding and its title sticks 8 px past the edge: 17 px of the
   // cell are not text room. While moving, the title is left alone (no style write per frame).
+  // A ruler label carries the range of starts the now pill covers (data-cover-from/-to); stuck
+  // at the edge it starts at the scroll position, so it is hidden there by that range, and
+  // shown otherwise even where its slot line would be covered (its data-covered class).
   const setCap = ({ el, left, width }: Cell, scroll: number) => {
     const full = width - 18;
     const room = Math.floor(Math.min(left + width - scroll - 17, full));
     const max = `${Math.max(0, room)}px`;
-    const visibility = room < Math.min(CELL_TEXT_MIN_PX, full) ? 'hidden' : '';
+    const { coverFrom, coverTo } = el.dataset;
+    const ruler = coverTo !== undefined;
+    const covered = ruler && scroll > Number(coverFrom) && scroll < Number(coverTo);
+    const visibility = covered || room < Math.min(CELL_TEXT_MIN_PX, full) ? 'hidden' : ruler && el.dataset.covered !== undefined ? 'visible' : '';
     if (el.style.maxWidth !== max) el.style.maxWidth = max;
     if (el.style.visibility !== visibility) el.style.visibility = visibility;
   };
@@ -270,8 +276,11 @@ export const GuideRow = memo(function GuideRow({
   handlers,
 }: GuideRowProps) {
   // LG-04: touch has no right click; a long press on the channel cell opens the same menu.
+  // A provider's heading row ("#### SKY SPORTS ####") is no channel: a quiet caption with no
+  // programmes, no play and no menu, as Live TV's list draws it.
+  const heading = !!ch && isSeparatorName(ch.name);
   const longPress = useLongPress((x, y) => {
-    if (ch) handlers.menu(ch, x, y);
+    if (ch && !heading) handlers.menu(ch, x, y);
   });
   // And on a programme: the same menu with that programme, as a right click on the cell gives.
   const cellPress = useLongPress((x, y) => {
@@ -280,6 +289,8 @@ export const GuideRow = memo(function GuideRow({
     handlers.menu(ch, x, y, cell ? programs?.find((p) => p.start === cell.dataset.start) : undefined);
   });
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
+  // Screen readers hear the cleaned name ("ESPN HD (US)"); the tooltip keeps the provider's.
+  const srName = plainChannelName(ch?.name, stripCountryPrefix);
   // Catch-up remains in the accessible name and tooltip.
   const archive = !!ch && hasUsableArchive(ch, kind);
   const channelKey = ch ? `${ch.ref.sourceId}|${ch.ref.contentType}|${ch.ref.itemId}` : null;
@@ -317,6 +328,7 @@ export const GuideRow = memo(function GuideRow({
       onContextMenu={(e: MouseEvent) => {
         if (!ch) return;
         e.preventDefault();
+        if (heading) return;
         // Keep the programme under the pointer when the context menu is opened from a cell. The
         // row itself still opens the channel menu, while a programme can resolve its archive URL.
         const cell = e.target instanceof Element ? e.target.closest<HTMLButtonElement>('button[data-start]') : null;
@@ -329,7 +341,9 @@ export const GuideRow = memo(function GuideRow({
         role="rowheader"
         className={cn(
           // Pinned at the visible edge: an offset box at rest, native sticky while moving.
-          'relative start-0 z-10 in-data-[guide-moving]:sticky border-e border-divider select-none [-webkit-touch-callout:none] motion-safe:transition-colors motion-safe:duration-500',
+          'relative start-0 z-10 in-data-[guide-moving]:sticky select-none [-webkit-touch-callout:none] motion-safe:transition-colors motion-safe:duration-500',
+          // A heading's caption may run on past the column over its empty track.
+          !heading && 'border-e border-divider',
           // Playing: the "you are here" of every list (LG-01, LG-15); a search hit's row flashes.
           playing ? 'tuning-tick bg-selected' : highlighted ? 'bg-surface-3' : 'bg-surface',
         )}
@@ -338,7 +352,11 @@ export const GuideRow = memo(function GuideRow({
       >
         {/* guide search: the row a hit moved to, marked for a moment. */}
         {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent-mark" /> : null}
-        {ch ? (
+        {ch && heading ? (
+          <span data-testid="guide-separator" dir="auto" className="flex h-full items-end ps-3 pb-2 text-caption font-semibold tracking-wide whitespace-nowrap text-fg-subtle uppercase">
+            {separatorLabel(ch.name)}
+          </span>
+        ) : ch ? (
           <button
             type="button"
             data-channel-row={index}
@@ -371,7 +389,7 @@ export const GuideRow = memo(function GuideRow({
                   }
                 />
                 <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
-                <span className="sr-only">{playing ? `${chName}, ${labels.playingNow}` : chName}</span>
+                <span className="sr-only">{playing ? `${srName}, ${labels.playingNow}` : srName}</span>
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
               </>
             ) : (
@@ -386,6 +404,7 @@ export const GuideRow = memo(function GuideRow({
                   name={ch.name}
                   strip={stripCountryPrefix}
                   twoLines
+                  srName={srName}
                   className={cn('min-w-0 flex-1 text-body-sm leading-tight text-match-parent text-fg', playing && 'font-semibold')}
                 />
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
@@ -407,7 +426,7 @@ export const GuideRow = memo(function GuideRow({
       {/* Clips the cells outside the window without becoming a scroll container, so the cell text
           still sticks to the grid's own scroll. */}
       <div role="gridcell" className="relative overflow-x-clip" style={{ width: 'var(--grid-track-width)' }}>
-        {programs === undefined ? (
+        {heading ? null : programs === undefined ? (
           // Guide data still on its way: a cell-shaped skeleton, like the channel column's, so a row
           // that waits after a fast fling does not read as an empty guide (L4-live-3).
           <div data-testid="row-guide-pending" className="absolute inset-1.5 flex items-center rounded-md bg-surface-2/60" aria-hidden>
@@ -595,17 +614,20 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 ? // Filtered to another genre: quiet text in an outlined box of the page's own
                   // colour (opaque, so the now line stays off it). Plain text with no edge turned a
                   // guide without genre tags into loose words with no cells.
-                  'bg-bg text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-2'
+                  // In light its edge is half strength: matching cells are white there.
+                  'bg-bg text-fg-subtle inset-ring inset-ring-edge/50 hover:bg-surface-2 dark:inset-ring-edge'
                 : // On now: the raised cell (white with a shadow in light, the next surface step
                   // in dark), never a grey or amber wash. Light rows sit on the grey page:
                   // there a cell is the white panel; dark keeps the lifted surface step. Later
                   // and ended cells in light are 1.05:1 against the page, so an inset edge
                   // draws them; dark's surface steps separate on their own.
+                  // With a genre chosen, a matching cell in light is the white panel too: on
+                  // surface-2 it was 1.04:1 from the page-coloured cells the filter dims.
                   b.when === 'now'
                   ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
                   : b.when === 'past'
-                    ? 'bg-surface-2 text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3'
-                    : 'bg-surface-2 text-fg inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3',
+                    ? cn(genreFilter ? 'bg-surface' : 'bg-surface-2', 'text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3')
+                    : cn(genreFilter ? 'bg-surface' : 'bg-surface-2', 'text-fg inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3'),
             )}
             style={{ ...inlineStart(b.left - chunk.left + 1, rtl), width: Math.max(2, b.width - 2) }}
           >

@@ -207,14 +207,27 @@ describe('GuideSearchPanel results', () => {
     expect(Date.parse(chosen.program.start)).toBe(Date.parse(HITS[1]!.program.start) + 30 * MINUTE);
   });
 
-  it('says when the results are cut at the limit', async () => {
+  it('says when the results are cut at the limit: the count is a floor and the end says how far it got (v-guide-04)', async () => {
+    // Each show airs on two channels at once, so the 100 airings fold into 50 rows.
     rpc.handlers['epg.search'] = () =>
-      Array.from({ length: SEARCH_LIMIT }, (_, i) =>
-        hit(`News ${i}`, NOW_PLUS(HOUR + i * MINUTE), NOW_PLUS(2 * HOUR + i * MINUTE), { ref: { sourceId: 'src1', contentType: 'live', itemId: `c${i}` } }),
-      );
+      Array.from({ length: SEARCH_LIMIT }, (_, i) => {
+        const k = Math.floor(i / 2);
+        return hit(`News ${k}`, NOW_PLUS(HOUR + k * MINUTE), NOW_PLUS(2 * HOUR + k * MINUTE), { ref: { sourceId: 'src1', contentType: 'live', itemId: `c${i}` } });
+      });
     panel();
     await waitFor(() => expect(state()).toBe('results'));
-    expect(screen.getByText(`First ${SEARCH_LIMIT} shown. Refine the search.`)).toBeTruthy();
+    expect(screen.getByTestId('guide-search-count').textContent).toBe('50+ results');
+    // The last airing listed starts at 11:51 AM (10:02 + 1 h + 49 min).
+    expect(screen.getByTestId('guide-search-more').textContent).toMatch(/^Showing airings up to .+ 11:51\sAM\. See all results for more\.$/);
+    expect(screen.queryByText(/Refine the search/)).toBeNull();
+  });
+
+  it('results under the limit are counted plainly, with no end note', async () => {
+    rpc.handlers['epg.search'] = () => [hit('News', NOW_PLUS(HOUR), NOW_PLUS(2 * HOUR))];
+    panel();
+    await waitFor(() => expect(state()).toBe('results'));
+    expect(screen.getByTestId('guide-search-count').textContent).toBe('1 result');
+    expect(screen.queryByTestId('guide-search-more')).toBeNull();
   });
 
   // Review round 1: the heading's join came from code (`${rel}, ${date}`), so ja, zh and ar showed
@@ -250,7 +263,8 @@ describe('GuideSearchPanel results', () => {
     expect(rpc.of('catalog.channels')[0]).toMatchObject({ sourceId: 'src1', query: { offset: 0, limit: 5, search: 'espn' } });
     const channels = await screen.findByTestId('guide-search-channels');
     // Under a matching channel, the programmes' empty state is one quiet line.
-    expect(screen.getByTestId('guide-search-no-programmes').textContent).toBe('Nothing matches “espn”');
+    // It speaks of programme titles: the channels above it do match (v-guide-03).
+    expect(screen.getByTestId('guide-search-no-programmes').textContent).toBe('No programme titles match “espn”');
     fireEvent.click(within(channels).getByTestId('guide-search-channel'));
     expect(onSelectChannel).toHaveBeenCalledWith(expect.objectContaining({ ref: espn }));
   });
@@ -428,7 +442,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
 describe('guide search hits name a channel as Live TV does (round 5)', () => {
   const tagged = [hit('Evening News', NOW_PLUS(-12 * MINUTE), NOW_PLUS(18 * MINUTE), { channelName: 'US| Alpha HD', channelNumber: 1, ref: { sourceId: 'src1', contentType: 'live', itemId: 'a' } })];
 
-  it('draws the country tag after the name, quiet, and keeps the provider name for screen readers', async () => {
+  it('draws the country tag after the name, quiet, and names the channel for screen readers as toasts do (w-a11y-03)', async () => {
     rpc.handlers['epg.search'] = () => tagged;
     panel();
     await waitFor(() => expect(state()).toBe('results'));
@@ -437,7 +451,8 @@ describe('guide search hits name a channel as Live TV does (round 5)', () => {
     expect(tag.textContent).toBe('US');
     expect(tag.previousElementSibling!.textContent).toBe('Alpha HD');
     expect(tag.className).toContain('text-fg-subtle');
-    expect(within(row).getAllByRole('button', { name: /US\| Alpha HD/ }).length).toBeGreaterThan(0);
+    expect(within(row).getAllByRole('button', { name: /Alpha HD \(US\)/ }).length).toBeGreaterThan(0);
+    expect(within(row).queryAllByRole('button', { name: /US\|/ })).toHaveLength(0);
   });
 
   it('leaves the tag out with "Hide country tags" on', async () => {

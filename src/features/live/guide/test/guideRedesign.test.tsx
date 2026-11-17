@@ -143,9 +143,12 @@ describe('genre buckets (CB-GUIDE-GENRE)', () => {
     expect(movie.className).toContain('text-fg-subtle');
     // A cell of another genre stays a (faint) box: a guide without genre tags would otherwise
     // lose every cell edge (guide-05).
-    expect(movie.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-bg', 'inset-ring', 'inset-ring-edge']));
+    // Its edge is half strength in light, and a matching cell there is the white panel, so the
+    // two do not read alike (v-guide-02).
+    expect(movie.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-bg', 'inset-ring', 'inset-ring-edge/50', 'dark:inset-ring-edge']));
     expect(screen.queryByTestId('guide-genre-hint')).toBeNull();
     expect(within(sports).getByTestId('cell-genre')).toBeTruthy();
+    expect(sports.className.split(/\s+/)).toContain('bg-surface');
     // Remembered for the next visit; pressing the chosen chip again shows everything.
     expect(localStorage.getItem('guide.genreFilter')).toBe('sports');
     fireEvent.click(within(chips).getByRole('button', { name: 'Sports' }));
@@ -331,9 +334,17 @@ describe('the channel column names a channel as Live TV does (round 5)', () => {
     const row = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
     const tag = within(row).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
-    expect(tag.previousElementSibling!.textContent).toBe('Channel 0');
+    // Running text over two lines (v-guide-11): the tag follows the name after an ordinary space,
+    // so a wrapped tag starts flush, and stays with the quality words in a no-wrap tail.
+    const drawn = tag.closest<HTMLElement>('[aria-hidden]')!;
+    expect(drawn.textContent).toBe('Channel 0 US');
+    expect(drawn.className).toContain('line-clamp-2');
+    expect(drawn.querySelector('[dir="auto"]')!.textContent).toBe('Channel 0');
+    expect(tag.parentElement!.className).toContain('whitespace-nowrap');
     expect(tag.className).toContain('text-fg-subtle');
     expect(row.title).toBe('Play US| Channel 0');
+    // Screen readers hear the cleaned name, as toasts give it (w-a11y-03); the tooltip keeps the provider's.
+    expect(screen.getByRole('button', { name: /Channel 0 \(US\)/ })).toBe(row);
   });
 
   it('leaves the tag out with "Hide country tags" on', async () => {
@@ -371,13 +382,14 @@ describe('the preview band (CB-GUIDE-PREVIEW)', () => {
 
     // The toggle's name says what a press does, with no pressed or expanded state beside it.
     const toggle = screen.getByTestId('guide-preview-toggle');
-    expect(toggle.textContent).toBe('Hide preview');
+    // By name: the other label sits invisible beside it, holding the button's width (v-guide-13).
+    expect(screen.getByRole('button', { name: 'Hide preview' })).toBe(toggle);
     expect(toggle.hasAttribute('aria-pressed')).toBe(false);
     expect(toggle.hasAttribute('aria-expanded')).toBe(false);
     fireEvent.click(toggle);
     expect(screen.queryByTestId('guide-preview')).toBeNull();
     expect(localStorage.getItem('guide.preview')).toBe('0');
-    expect(screen.getByTestId('guide-preview-toggle').textContent).toBe('Show preview');
+    expect(screen.getByRole('button', { name: 'Show preview' })).toBe(screen.getByTestId('guide-preview-toggle'));
   });
 
   it('starts hidden on a window under 1000 px tall until the user opens it (review round 2)', async () => {

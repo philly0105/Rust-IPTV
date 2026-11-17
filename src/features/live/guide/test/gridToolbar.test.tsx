@@ -258,20 +258,34 @@ describe('the toolbar at narrow widths', () => {
     expect(picker.className).not.toContain('bg-fg');
     fireEvent.click(picker);
     fireEvent.click(await screen.findByRole('option', { name: 'Sports' }));
-    // Chosen: the trigger names the genre and is inverted, as a chosen chip is.
+    // Chosen: the trigger names the genre to screen readers and fills quietly, not inverted (it
+    // was the loudest thing on the screen); the toolbar shows the genre as its pressed chip (v-guide-15).
     await waitFor(() => expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).textContent).toBe('Sports'));
-    expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).className).toContain('bg-fg');
+    expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).className).not.toContain('bg-fg');
     expect(localStorage.getItem('guide.genreFilter')).toBe('sports');
+    const active = screen.getByTestId('guide-genre-active');
+    expect(within(active).getByRole('button', { name: 'Sports', pressed: true })).toBeTruthy();
     fireEvent.click(within(time).getByRole('combobox', { name: 'Filter by genre' }));
     fireEvent.click(await screen.findByRole('option', { name: 'All genres' }));
     await waitFor(() => expect(localStorage.getItem('guide.genreFilter')).toBeNull());
+    expect(screen.queryByTestId('guide-genre-active')).toBeNull();
+    // A tap on the chip clears the filter too.
+    fireEvent.click(within(time).getByRole('combobox', { name: 'Filter by genre' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Sports' }));
+    fireEvent.click(within(await screen.findByTestId('guide-genre-active')).getByRole('button', { name: 'Sports' }));
+    await waitFor(() => expect(localStorage.getItem('guide.genreFilter')).toBeNull());
+    expect(screen.queryByTestId('guide-genre-active')).toBeNull();
   });
 
-  it("a phone's time scale is one header action that switches between the widest view and the default (guide-14)", async () => {
+  it("a phone's time scale is one button in the ruler's corner that switches between the widest view and the default (guide-14, v-themes-locales-04)", async () => {
     localStorage.removeItem('tsrust.guideZoom');
     pageWidth(318);
     await openGuide();
-    const actions = await screen.findByTestId('header-actions');
+    // Not a header action: a third icon there cut the longer locales' page title. Nor on the
+    // toolbar, where it sent the time controls to a second row.
+    expect(within(await screen.findByTestId('header-actions')).queryByRole('button', { name: /^Zoom/ })).toBeNull();
+    expect(within(screen.getByTestId('guide-time')).queryByRole('button', { name: /^Zoom/ })).toBeNull();
+    const actions = screen.getAllByRole('columnheader')[0]!;
     fireEvent.click(within(actions).getByRole('button', { name: 'Zoom out' }));
     await waitFor(() => expect(localStorage.getItem('tsrust.guideZoom')).toBe('0'));
     fireEvent.click(within(actions).getByRole('button', { name: 'Zoom in' }));

@@ -68,7 +68,7 @@ export function useProgrammeActions(
       }
       try {
         await copyText(url);
-        toast({ title: t('urlCopied'), variant: 'success' });
+        toast({ title: t('programmeLinkCopied'), variant: 'success' });
       } catch (err) {
         if (onLink) onLink(url, programme);
         else toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });

@@ -70,7 +70,8 @@ const NAME_MARKERS = /^(?:sd|hd|fhd|uhd|qhd|4k|8k|hevc|hdr|raw|\d{3,4}[pi]|\d+fp
 
 /**
  * The words a name's initials come from: compatibility-folded ("ᴴᴰ" is "HD"), with the punctuation
- * around each word trimmed ("(Backup)" is "Backup") and the markers above dropped, unless the name
+ * around each word trimmed ("(Backup)" is "Backup") and the markers above dropped, a backup's number
+ * too ("PBS HD (BACKUP 2)" is "PBS", so a backup feed keeps its station's letters), unless the name
  * is nothing but markers. Shared with Live's channel monograms (live/lib/monogram.ts).
  */
 /** A quality or copy marker, or "the" (`NAME_MARKERS`). */
@@ -86,7 +87,7 @@ export function initialWords(text: string): string[] {
     // initial, as in "🎵 Music".
     .map((w) => w.replace(/^[\p{P}\p{Sm}\p{Sk}]+|[\p{P}\p{Sm}\p{Sk}]+$/gu, ''))
     .filter(Boolean);
-  const named = words.filter((w) => !NAME_MARKERS.test(w));
+  const named = words.filter((w, i) => !NAME_MARKERS.test(w) && !(i > 0 && /^\d{1,2}$/.test(w) && /^(?:backup|bkp)$/i.test(words[i - 1]!)));
   return named.length > 0 ? named : words;
 }
 

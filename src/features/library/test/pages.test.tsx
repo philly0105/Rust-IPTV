@@ -85,8 +85,9 @@ describe('DownloadsPage', () => {
         .getAllByRole('button')
         .map((b) => b.dataset['action'])
         .filter(Boolean);
-    // Download speed first, so the queue actions keep their places at the row's end.
-    expect(actions('downloading')).toEqual(['speed', 'pause', 'cancel']);
+    // Download speed first, so the queue actions keep their places at the row's end. A running
+    // download's speed details come before it, as catch-up's Watch does.
+    expect(actions('downloading')).toEqual(['details', 'speed', 'pause', 'cancel']);
     expect(actions('queued')).toEqual(['speed', 'pause', 'cancel', 'next']);
     expect(actions('paused')).toEqual(['speed', 'resume', 'remove']);
     expect(actions('failed')).toEqual(['retry', 'remove']);

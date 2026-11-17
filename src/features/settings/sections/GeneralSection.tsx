@@ -9,7 +9,8 @@ import { Select, Slider } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { clampRating, type SettingsPatch } from '../lib/patch';
-import { DownloadConnectionsRows } from './DownloadConnectionsRows';
+import { DownloadConnectionsRows, DownloadMaxConnectionsRow, DownloadMirrorRows } from './DownloadConnectionsRows';
+import { DownloadSourcesRows } from './DownloadSourcesRows';
 import { DownloadSpeedRow } from './DownloadSpeedRow';
 import { DownloadsFolderRow } from './DownloadsFolderRow';
 // account:
@@ -144,8 +145,12 @@ export function GeneralSection({ settings, update }: SectionProps) {
       <SettingsGroup title={t('downloads')}>
         <DownloadsFolderRow custom={Boolean(settings.downloadsDir?.trim())} />
         <DownloadSpeedRow settings={settings} />
+        <DownloadMaxConnectionsRow settings={settings} update={update} />
         <DownloadConnectionsRows settings={settings} update={update} />
+        <DownloadMirrorRows settings={settings} update={update} />
       </SettingsGroup>
+      {/* Xtream and Stalker sources only: testing for more connections than the account reports. */}
+      <DownloadSourcesRows settings={settings} update={update} />
     </SettingsSection>
   );
 }

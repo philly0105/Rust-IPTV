@@ -49,7 +49,7 @@ import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, fieldClass, Fi
 import { portalContainer } from '@/ui/portal';
 import { copyText } from '@/lib/clipboard';
 import { formatDurationParts } from '@/lib/duration';
-import { dateTimeFormat, intlLocale, listSeparator, relativeTimeFormat } from '@/lib/intl';
+import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
@@ -3251,9 +3251,10 @@ function ProgramPopover({
             {/* The channel as the grid's column names it: the place tag after the name, quiet. */}
             <p className="flex min-w-0 items-baseline text-caption tabular-nums text-fg-muted">
               <ChannelName name={channel.name} strip={stripCountryPrefix} className="min-w-0 truncate" />
-              {/* Each part isolated (the name by its dir="auto"), joined by the locale's separator, as joinList does. */}
+              {/* Each part isolated (the name by its dir="auto"). A middot, not the locale's list
+                  comma: after the quiet place tag a comma read as "US, 2:00 – 3:00 PM" (v-guide-09). */}
               <span className="shrink-0 whitespace-pre">
-                {listSeparator(i18n.language)}
+                <span aria-hidden className="px-1.5 text-fg-subtle">·</span>
                 <bdi>{formatRange(program, i18n.language)}</bdi>
               </span>
             </p>

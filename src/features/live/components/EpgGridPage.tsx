@@ -64,7 +64,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
 import { useXtreamGridPrograms } from '../hooks/useXtreamGridPrograms';
 import { useShortEpgEnabled, useShortEpgPreviews } from '../hooks/useShortEpg';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, plainChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
 import { hasGuideGap } from '../lib/guideCoverage';
 import { hasProgramInRange, programsInRange } from '../lib/guideProgramIndex';
@@ -1577,7 +1577,7 @@ export function EpgGridPage() {
   const [mapping, setMapping] = useState<Channel | null>(null);
   const closeMapping = useCallback(() => setMapping(null), []);
   const toggleFavorite = useStable(async (channel: Channel, wasFavorite: boolean) => {
-    const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+    const name = plainChannelName(channel.name, prefs.stripCountryPrefix);
     try {
       const res = await rpc('favorites.toggle', {
         ref: channel.ref,
@@ -1787,7 +1787,7 @@ export function EpgGridPage() {
     const group = view ? undefined : groupForHit(categoryId, hit);
     goTo(time, { category: group === categoryId && !view ? undefined : null });
     setHighlight(null);
-    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time, channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId: group });
+    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time, channelName: plainChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId: group });
   });
 
   // A programme opened from the global search or the palette (`guideHitLink`): the URL already
@@ -1800,7 +1800,7 @@ export function EpgGridPage() {
     const hit = location.state.guideHit;
     if (hit.ref.sourceId !== sourceId) return;
     setHighlight(null);
-    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time: ms(hit.program.start), channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId });
+    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time: ms(hit.program.start), channelName: plainChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId });
   }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // LG-01: Live's guide link names the channel playing there (`focus`): the guide opens at its row,
@@ -1828,7 +1828,7 @@ export function EpgGridPage() {
         handledFocus.current = link;
         if (!item || !('isRadio' in item)) return;
         const ch = item as Channel;
-        setReveal({ key: itemKey(ref), ref, number: ch.number, time: Date.now(), channelName: displayChannelName(ch.name, prefs.stripCountryPrefix), categoryId, quiet: true });
+        setReveal({ key: itemKey(ref), ref, number: ch.number, time: Date.now(), channelName: plainChannelName(ch.name, prefs.stripCountryPrefix), categoryId, quiet: true });
       })
       .catch(() => undefined);
     return () => {
@@ -1859,7 +1859,7 @@ export function EpgGridPage() {
       const inView = view ? paged.indexOf?.(ch.ref) !== undefined : !categoryId || ch.categoryId === categoryId;
       if (!inView) goTo(time, { category: null });
       setHighlight(null);
-      setReveal({ key, ref: ch.ref, number: ch.number, time, channelName: displayChannelName(ch.name, prefs.stripCountryPrefix), categoryId: inView ? categoryId : undefined });
+      setReveal({ key, ref: ch.ref, number: ch.number, time, channelName: plainChannelName(ch.name, prefs.stripCountryPrefix), categoryId: inView ? categoryId : undefined });
     } catch {
       missing();
     }
@@ -1870,7 +1870,7 @@ export function EpgGridPage() {
     const inView = view ? paged.indexOf?.(ch.ref) !== undefined : !categoryId || ch.categoryId === categoryId;
     if (!inView) goTo(time, { category: null });
     setHighlight(null);
-    setReveal({ key: itemKey(ch.ref), ref: ch.ref, number: ch.number, time, channelName: displayChannelName(ch.name, prefs.stripCountryPrefix), categoryId: inView ? categoryId : undefined });
+    setReveal({ key: itemKey(ch.ref), ref: ch.ref, number: ch.number, time, channelName: plainChannelName(ch.name, prefs.stripCountryPrefix), categoryId: inView ? categoryId : undefined });
   });
   const digits = useDigitEntry((n) => void jumpToNumber(n));
   useEffect(() => {
@@ -1954,7 +1954,7 @@ export function EpgGridPage() {
     const kind = ownKind(channel);
     if (!kind) return;
     playChannel(channel, kind, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
-      toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err), variant: 'error' }),
+      toast({ title: t('playFailed', { name: plainChannelName(channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err), variant: 'error' }),
     );
   });
   /** Watch on an airing search hit: the hit carries what playback needs of the channel. */

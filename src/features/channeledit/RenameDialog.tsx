@@ -8,7 +8,7 @@ import { trimName } from '@/lib/names';
 import { Button, Dialog, Input, cn } from '@/ui';
 
 import { failureText, renameChannel, renamedToast } from './actions';
-import { findEdit, useDisplayName, useSourceEdits } from './edits';
+import { findEdit, useToastName, useSourceEdits } from './edits';
 import { NAME_MAX, nameLength, planRename, type RenamePlan } from './name';
 
 export interface RenameDialogProps {
@@ -26,7 +26,7 @@ export interface RenameDialogProps {
  */
 export function RenameDialog({ channel, onClose }: RenameDialogProps) {
   const { t } = useTranslation('channels');
-  const display = useDisplayName();
+  const display = useToastName();
   const formId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const edits = useSourceEdits(channel.ref.sourceId);

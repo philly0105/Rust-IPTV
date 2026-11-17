@@ -18,7 +18,7 @@ import type { Channel, ItemRef, Source } from '@/api/types';
 import { ContextMenu } from '@/features/live/components/ContextMenu';
 import { channelMenuHeader, useChannelMenuItems } from '@/features/live/hooks/useChannelMenuItems';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/features/live/lib/channelName';
+import { displayChannelName, plainChannelName } from '@/features/live/lib/channelName';
 
 import { errorDescription, useToast } from '../deps';
 import { snapshotChannel, type EntryMenuRequest } from '../lib/entryMenu';
@@ -50,7 +50,7 @@ export function EntryChannelMenu({ request, sources, onClose }: { request: Entry
         request.removeFavorite();
         return;
       }
-      const name = displayChannelName(c.name, stripCountryPrefix);
+      const name = plainChannelName(c.name, stripCountryPrefix);
       void rpc('favorites.toggle', { ref: c.ref, snapshot: { title: c.name, subtitle: c.categoryName, posterUrl: c.logoUrl, contentType: c.ref.contentType } })
         .then((res) => toast({ title: res.isFavorite ? tl('favoriteAdded', { name }) : tl('favoriteRemoved', { name }), variant: 'success' }))
         .catch((err: unknown) =>

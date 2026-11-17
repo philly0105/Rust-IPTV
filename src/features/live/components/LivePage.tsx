@@ -58,7 +58,7 @@ import { STALKER_RIBBON_LIMIT } from '../hooks/useChannelPrograms';
 import { usePortalEpg } from '../hooks/usePortalEpg';
 import { useRemoteBridge } from '../hooks/useRemoteBridge';
 import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, plainChannelName } from '../lib/channelName';
 import { groupRegions, readRegion } from '../lib/groupRegion';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { canCatchUp, MINUTE } from '../lib/epgTime';
@@ -381,7 +381,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             usePlayerStore.setState({ zapContext: { sourceId: channel.ref.sourceId, favorites: { sourceId: channel.ref.sourceId } } });
           }
         })
-        .catch((err: unknown) => toast({ title: t('playFailed', { name }), description: errorDescription(err), variant: 'error' }));
+        .catch((err: unknown) =>
+          toast({ title: t('playFailed', { name: plainChannelName(channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err), variant: 'error' }),
+        );
     },
     [kind, source.data?.id, prefs.stripCountryPrefix, t, toast, queryClient, liveView],
   );
@@ -650,7 +652,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         });
         setOverride(key, res.isFavorite);
         await invalidate('favorites.');
-        const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+        // As toasts name a channel: the place tag after the name ("CBS HD (US)").
+        const name = plainChannelName(channel.name, prefs.stripCountryPrefix);
         toast({ title: res.isFavorite ? t('favoriteAdded', { name }) : t('favoriteRemoved', { name }), variant: 'success' });
       } catch (err) {
         toast({

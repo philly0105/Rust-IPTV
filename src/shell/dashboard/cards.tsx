@@ -772,6 +772,9 @@ function CardMenuButton({ label, tabIndex, onOpen }: { label: string; tabIndex: 
         className={cn(
           'absolute top-1.5 end-1.5 z-[1] inline-flex size-8 items-center justify-center rounded-full border border-glass-border bg-glass-strong text-on-glass shadow-1',
           'opacity-0 group-hover/wide:opacity-100 group-focus-within/wide:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100',
+          // On touch it is on every card at once: a lighter disc with no rim or shadow, so a rail of
+          // them does not read as a row of dark dots (the strongest on the light theme's pale tiles).
+          '[@media(hover:none)]:border-transparent [@media(hover:none)]:bg-glass/50 [@media(hover:none)]:shadow-none',
           'hover:bg-glass active:scale-95 motion-safe:transition-[opacity,transform] motion-safe:duration-(--duration-fast)',
         )}
       >

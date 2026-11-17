@@ -44,6 +44,28 @@ export function writeStreamsOnly(on: boolean): void {
   }
 }
 
+/**
+ * Whether "1080p+" hides the streams whose channel name marks a lower quality: the page's own filter,
+ * kept on this device like "With streams". Live TV's quality filter is a setting of its own.
+ */
+const HD_ONLY_KEY = 'tsrust.sportsHdOnly';
+
+export function readHdOnly(): boolean {
+  try {
+    return localStorage.getItem(HD_ONLY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeHdOnly(on: boolean): void {
+  try {
+    localStorage.setItem(HD_ONLY_KEY, on ? '1' : '0');
+  } catch {
+    // storage blocked: the filter still applies, until the page opens again
+  }
+}
+
 /** Whether "My teams" shows only the games of the teams the user follows (hooks/useFollowedTeams.ts). */
 const MY_TEAMS_ONLY_KEY = 'tsrust.sportsMyTeamsOnly';
 

@@ -74,7 +74,7 @@ export interface StreamContext {
   /** More than one source: rows name theirs. */
   multiSource: boolean;
   canRecord: boolean;
-  /** The Live TV quality filter is on, so a missing event channel may be its doing. */
+  /** Live TV's quality filter or the page's "1080p+" is on, so a missing stream may be its doing. */
   qualityFiltered: boolean;
   /** What the player plays, once a Watch or Replay on this page has loaded it; the row it came from says so. */
   playing: PlayerSource | undefined;
@@ -98,14 +98,14 @@ function usePlayingSource(store: PlayerStore | null): PlayerSource | undefined {
   return useSyncExternalStore(store ? store.subscribe : noSubscription, () => store?.getState().source);
 }
 
-export function useStreamContext(now: number, sourceCount: number): StreamContext {
+export function useStreamContext(now: number, sourceCount: number, hdOnly = false): StreamContext {
   const { t } = useTranslation('sports');
   const { toast } = useToast();
   const prefs = useDisplayPrefs();
   const canRecord = useRecordingCapabilities().data?.supported === true;
   const index = useScheduleIndex();
   const actions = useScheduleActions();
-  const qualityFiltered = useSettingsValue(selectMinQuality).data != null;
+  const qualityFiltered = useSettingsValue(selectMinQuality).data != null || hdOnly;
   const navigate = useNavigate();
   const [store, setStore] = useState<PlayerStore | null>(null);
   const playing = usePlayingSource(store);

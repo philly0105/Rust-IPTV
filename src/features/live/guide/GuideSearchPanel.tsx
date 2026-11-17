@@ -25,7 +25,7 @@ import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useDebounced } from '../hooks/useDebounced';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, isSeparatorName } from '../lib/channelName';
 import { formatClock, formatDay, localDayDiff, ms, programWhen } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { displayHits, foldHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchWindow } from './search';
@@ -282,7 +282,8 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
     { sourceId, query: { offset: 0, limit: CHANNEL_HITS, search: q ?? '' } },
     { enabled: !!q && !!sourceId, staleTime: 60_000, keepPrevious: true },
   );
-  const channels = q ? (channelSearch.data?.items ?? []) : [];
+  // A provider's heading row ("#### SKY SPORTS ####") is no channel to jump to.
+  const channels = q ? (channelSearch.data?.items ?? []).filter((c) => !isSeparatorName(c.name)) : [];
   // The same show on several channels at once is one row (the Search page's folding).
   const hits = useMemo(() => (search.data ? foldHits(displayHits(search.data, offsetMinutes)) : undefined), [search.data, offsetMinutes]);
   // A new answer mounts its first hits at once and the rest a batch per frame.

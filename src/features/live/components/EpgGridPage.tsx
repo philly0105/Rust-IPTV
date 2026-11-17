@@ -66,7 +66,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
 import { useXtreamGridPrograms } from '../hooks/useXtreamGridPrograms';
 import { useShortEpgEnabled, useShortEpgPreviews } from '../hooks/useShortEpg';
-import { displayChannelName, plainChannelName } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, plainChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
 import { hasGuideGap } from '../lib/guideCoverage';
 import { hasProgramInRange, programsInRange } from '../lib/guideProgramIndex';
@@ -1183,6 +1183,27 @@ export function EpgGridPage() {
     return !!ch && dataStart === wantedDataStart && dataEnd === wantedDataEnd && (gridEntry(itemKey(ch.ref)).fresh || !!gridError);
   };
 
+  /**
+   * `row`, or the nearest row from it in the direction `dir` (then back the other way) that is not
+   * a provider's heading: those rows hold no cell to land on. A row not loaded yet counts.
+   */
+  const cursorRowFrom = (row: number, dir: 1 | -1) => {
+    for (const d of [dir, -dir]) {
+      for (let j = row; j >= 0 && j < count; j += d) {
+        const ch = paged.getChannel(j);
+        if (!ch || !isSeparatorName(ch.name)) return j;
+      }
+    }
+    return row;
+  };
+  // A heading under the cursor (the first row of many providers' lists, or one a list change put
+  // there) hands it to the channel below, so the grid keeps a cell to tab to.
+  const cursorOnHeading = !!paged.getChannel(cursor.row) && isSeparatorName(paged.getChannel(cursor.row)!.name);
+  useEffect(() => {
+    if (cursorOnHeading) setCursor((c) => ({ ...c, row: cursorRowFrom(c.row, 1) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursorOnHeading]);
+
   // Key repeat can outrun renders: keys read the cursor from here, not from a stale render.
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
@@ -1710,6 +1731,8 @@ export function EpgGridPage() {
         return;
     }
     e.preventDefault();
+    // Up and down pass over provider headings.
+    if (row !== cursorRef.current.row) row = cursorRowFrom(row, row > cursorRef.current.row ? 1 : -1);
     cursorRef.current = { row, time };
     focusPending.current = true;
     virtualizer.scrollToIndex(row, { align: 'auto' });

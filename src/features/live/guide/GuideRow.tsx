@@ -16,7 +16,7 @@ import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/record
 
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName, splitPlaceTag } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, separatorLabel, splitPlaceTag } from '../lib/channelName';
 import { CELL_TEXT_MIN_PX, MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
@@ -276,8 +276,11 @@ export const GuideRow = memo(function GuideRow({
   handlers,
 }: GuideRowProps) {
   // LG-04: touch has no right click; a long press on the channel cell opens the same menu.
+  // A provider's heading row ("#### SKY SPORTS ####") is no channel: a quiet caption with no
+  // programmes, no play and no menu, as Live TV's list draws it.
+  const heading = !!ch && isSeparatorName(ch.name);
   const longPress = useLongPress((x, y) => {
-    if (ch) handlers.menu(ch, x, y);
+    if (ch && !heading) handlers.menu(ch, x, y);
   });
   // And on a programme: the same menu with that programme, as a right click on the cell gives.
   const cellPress = useLongPress((x, y) => {
@@ -323,6 +326,7 @@ export const GuideRow = memo(function GuideRow({
       onContextMenu={(e: MouseEvent) => {
         if (!ch) return;
         e.preventDefault();
+        if (heading) return;
         // Keep the programme under the pointer when the context menu is opened from a cell. The
         // row itself still opens the channel menu, while a programme can resolve its archive URL.
         const cell = e.target instanceof Element ? e.target.closest<HTMLButtonElement>('button[data-start]') : null;
@@ -335,7 +339,9 @@ export const GuideRow = memo(function GuideRow({
         role="rowheader"
         className={cn(
           // Pinned at the visible edge: an offset box at rest, native sticky while moving.
-          'relative start-0 z-10 in-data-[guide-moving]:sticky border-e border-divider select-none [-webkit-touch-callout:none] motion-safe:transition-colors motion-safe:duration-500',
+          'relative start-0 z-10 in-data-[guide-moving]:sticky select-none [-webkit-touch-callout:none] motion-safe:transition-colors motion-safe:duration-500',
+          // A heading's caption may run on past the column over its empty track.
+          !heading && 'border-e border-divider',
           // Playing: the "you are here" of every list (LG-01, LG-15); a search hit's row flashes.
           playing ? 'tuning-tick bg-selected' : highlighted ? 'bg-surface-3' : 'bg-surface',
         )}
@@ -344,7 +350,11 @@ export const GuideRow = memo(function GuideRow({
       >
         {/* guide search: the row a hit moved to, marked for a moment. */}
         {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent-mark" /> : null}
-        {ch ? (
+        {ch && heading ? (
+          <span data-testid="guide-separator" dir="auto" className="flex h-full items-end ps-3 pb-2 text-caption font-semibold tracking-wide whitespace-nowrap text-fg-subtle uppercase">
+            {separatorLabel(ch.name)}
+          </span>
+        ) : ch ? (
           <button
             type="button"
             data-channel-row={index}
@@ -413,7 +423,7 @@ export const GuideRow = memo(function GuideRow({
       {/* Clips the cells outside the window without becoming a scroll container, so the cell text
           still sticks to the grid's own scroll. */}
       <div role="gridcell" className="relative overflow-x-clip" style={{ width: 'var(--grid-track-width)' }}>
-        {programs === undefined ? (
+        {heading ? null : programs === undefined ? (
           // Guide data still on its way: a cell-shaped skeleton, like the channel column's, so a row
           // that waits after a fast fling does not read as an empty guide (L4-live-3).
           <div data-testid="row-guide-pending" className="absolute inset-1.5 flex items-center rounded-md bg-surface-2/60" aria-hidden>

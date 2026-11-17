@@ -448,6 +448,40 @@ describe('rows waiting for guide data (L4-live-3)', () => {
   });
 });
 
+describe('provider heading rows (w-realdata-01)', () => {
+  it('draw as a quiet caption with no programmes, play or menu, and the cursor passes over them', async () => {
+    const list = [{ ...makeChannel(0), name: '######## ALL CHANNELS ########' }, ...CHANNELS.slice(1)];
+    rpc.handlers['catalog.channels'] = (a) => {
+      const { query: q } = a as { query: PageQuery };
+      return { items: list.slice(q.offset, q.offset + q.limit), total: list.length, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
+    };
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    const caption = screen.getByTestId('guide-separator');
+    expect(caption.textContent).toBe('ALL CHANNELS');
+    const row = caption.closest<HTMLElement>('[role="row"]')!;
+    expect(within(row).queryAllByRole('button')).toHaveLength(0);
+    expect(within(row).queryByTestId('no-guide-band')).toBeNull();
+    fireEvent.contextMenu(caption);
+    expect(screen.queryByRole('menu')).toBeNull();
+    // The grid's tab stop is on the first channel, not on the heading, and Up from there stays.
+    const stop = await waitFor(() => {
+      const el = screen.getByTestId('epg-grid').querySelector<HTMLElement>('[tabindex="0"]');
+      expect(el?.getAttribute('aria-label')).toMatch(/^c1 /);
+      return el!;
+    });
+    act(() => stop.focus());
+    fireEvent.keyDown(stop, { key: 'ArrowUp' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 /));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c2 /));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 /));
+  });
+});
+
 describe('time ruler (L4-live-4)', () => {
   it('keeps a bounded set of labels on the fixed track while the browser scrolls', async () => {
     const at = defaultStart(Date.now());

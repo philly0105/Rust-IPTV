@@ -405,7 +405,14 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // section read as "nothing is on".
   const programmesFailed = !!programmes.error;
   const programmesTab = programmeHits.length > 0 || programmesFailed;
-  const programmeError = programmesFailed ? <ProgrammeSearchError error={programmes.error} onRetry={programmes.retry} /> : null;
+  // One element per failure, so typing does not re-render the memoized Top results.
+  const retryProgrammes = programmes.retry;
+  const programmeError = useMemo(
+    () => (programmes.error ? <ProgrammeSearchError error={programmes.error} onRetry={retryProgrammes} /> : null),
+    // A new error brings its own retry; the retry of a render with the same error asks the same queries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [programmes.error],
+  );
   // Top results (critique: search): when the answer spans more than one type, the page opens on a
   // slice of each (a rail of movies, of series, the first channels and programmes), each with
   // "See all" to its tab, instead of the first type alone and a mostly empty screen.

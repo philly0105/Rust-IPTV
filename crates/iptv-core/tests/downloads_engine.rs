@@ -2,12 +2,18 @@
 //! first `206`, the per-file connection cap, overlap checks on a file
 //! without validators, sidecar v1 and v2 resumes, redirect pinning with a
 //! token that expires, reopening a slow connection on the host's next
-//! address, and the once-a-second breakdown.
+//! address, and the once-a-second breakdown. Then the review's findings:
+//! spread runs never stitch two copies or use a copy that changed, probes
+//! and mirrors follow the settings live, a dead address is not a refusal,
+//! and the mirror search runs again.
 
 mod dl_panel;
 
-use dl_panel::{Panel, PanelOptions, Redirect, Validators, Variant};
-use iptv_core::model::{Download, DownloadStatus};
+use dl_panel::{
+    add_movie, add_xtream_source, movie_ref, Panel, PanelOptions, Redirect, Validators, Variant,
+};
+use iptv_core::downloads::{mirrors, shared};
+use iptv_core::model::{CopyRef, Download, DownloadStatus};
 use iptv_core::rpc::RpcRouter;
 use iptv_core::{AppState, BroadcastSink};
 use serde_json::{json, Value};
@@ -463,4 +469,475 @@ async fn a_split_transfer_publishes_its_breakdown_once_a_second() {
     assert_eq!(rpc["id"], d.id);
     let path = c.completed(d.id).await;
     dl_panel::is_exact(1, size, &path).unwrap();
+}
+
+// Review round 1 (amendment A8): spread runs, live settings, dead
+// addresses and the mirror search.
+
+/// A context with the Xtream module, for sources with a catalog.
+async fn xctx() -> Ctx {
+    let c = ctx().await;
+    iptv_core::xtream::init(c.state.clone()).await.unwrap();
+    c
+}
+
+impl Ctx {
+    async fn start_movie(&self, source: &str, file: u32, url: &str) -> Download {
+        let v = self
+            .ok(
+                "downloads.start",
+                json!({
+                    "ref": {"sourceId": source, "contentType": "movie", "itemId": file.to_string()},
+                    "title": format!("Movie {file}"),
+                    "url": url,
+                }),
+            )
+            .await;
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// Panels `a` and `b` with movie 1 under the same title, verified
+    /// identical (three samples) for the copy on `a`. Returns both sources
+    /// and the copy on `a`.
+    async fn copies(&self, a: &Panel, b: &Panel, tag: &str) -> (String, String, CopyRef) {
+        let sa = add_xtream_source(&self.state, &format!("{tag}-a"), a).await;
+        let sb = add_xtream_source(&self.state, &format!("{tag}-b"), b).await;
+        for s in [&sa, &sb] {
+            add_movie(&self.state, s, 1, "Two Copies (2022)", Some(2022), "mp4").await;
+        }
+        self.state.settings.write().download_probe_disabled = vec![sa.clone(), sb.clone()];
+        let own = CopyRef::new(movie_ref(&sa, 1), None);
+        let ep = shared::resolve(&self.state, &own).await.unwrap();
+        let fp = mirrors::fingerprint(&self.state, &ep).await.unwrap();
+        let (k, f) = (own.clone(), fp.clone());
+        self.state
+            .db_call(move |c| mirrors::store_fingerprint(c, &k, &f))
+            .await
+            .unwrap();
+        let mgr = iptv_core::downloads::manager::manager(&self.state);
+        let found = mirrors::identical_copies(&self.state, &mgr, &own, &fp, &[]).await;
+        assert_eq!(found.len(), 1, "the copy on b is verified identical");
+        (sa, sb, own)
+    }
+
+    async fn identical(&self, own: &CopyRef) -> Vec<CopyRef> {
+        let o = own.clone();
+        self.state
+            .db_call(move |c| mirrors::cached_identical(c, &o))
+            .await
+            .unwrap()
+    }
+}
+
+/// The file at `path` is one copy of file 1 throughout: the canonical one
+/// or `variant`, never parts of both.
+fn one_copy(path: &Path, size: u64, variant: Variant) -> Result<(), String> {
+    let Err(e) = dl_panel::is_exact(1, size, path) else {
+        return Ok(());
+    };
+    let got = std::fs::read(path).unwrap();
+    if got == dl_panel::variant_content(1, variant, size, 0, size as usize) {
+        return Ok(());
+    }
+    Err(e)
+}
+
+/// The row's `.part` was written on A in one stream (no sidecar). A plays
+/// and the row is spread to B, whose copy matched the samples of A but
+/// differs elsewhere: bytes from B never continue those from A.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_plain_part_is_never_continued_on_a_spread_copy() {
+    let c = xctx().await;
+    let size = 48 * MIB;
+    let (a, b) = (Panel::spawn(40).await, Panel::spawn(41).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+        p.set_validators(Validators::None);
+    }
+    a.file(1, size, 4 * 1024);
+    b.file_variant(1, size, 4 * 1024, Variant::DiffersOutsideSamples);
+    let (sa, _sb, _) = c.copies(&a, &b, "plain").await;
+    c.state.settings.write().download_single_connection = vec![sa.clone()];
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "reached 12 MiB on A", |d| {
+        d.bytes_downloaded >= 12 * MIB as i64
+    })
+    .await;
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    // Spread to B, or kept waiting for A: either way A frees up later.
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline && b.log().iter().all(|l| l.route != "movie") {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    let path = c.completed(d.id).await;
+    one_copy(&path, size, Variant::DiffersOutsideSamples).unwrap();
+}
+
+/// The reverse: a run spread to B streams on one connection, then the row
+/// goes home to A. The bytes from B are compared with A before they count.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_spread_single_stream_is_compared_when_the_row_goes_home() {
+    let c = xctx().await;
+    let size = 48 * MIB;
+    let (a, b) = (Panel::spawn(42).await, Panel::spawn(43).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+        p.set_validators(Validators::None);
+    }
+    a.file(1, size, 4 * 1024);
+    b.file_variant(1, size, 4 * 1024, Variant::DiffersOutsideSamples);
+    let (sa, sb, _) = c.copies(&a, &b, "home").await;
+    c.state.settings.write().download_single_connection = vec![sb.clone()];
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "reached 12 MiB on B", |d| {
+        d.served_by.as_deref() == Some(sb.as_str()) && d.bytes_downloaded >= 12 * MIB as i64
+    })
+    .await;
+    // Playback moves to B: the row yields there, and A is free.
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sb.clone()]).await;
+    let path = c.completed(d.id).await;
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    one_copy(&path, size, Variant::DiffersOutsideSamples).unwrap();
+}
+
+/// The file on B changed after the pair was verified. A run spread to B
+/// sees another total, drops the verdict of the pair and goes back to the
+/// queue; the row ends with the file from A.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_spread_copy_that_changed_since_it_was_verified_is_not_used() {
+    let c = xctx().await;
+    let (size, grown) = (24 * MIB, 30 * MIB);
+    let (a, b) = (Panel::spawn(44).await, Panel::spawn(45).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 8 * 1024);
+    b.file(1, size, 8 * 1024);
+    let (sa, _sb, own) = c.copies(&a, &b, "changed").await;
+    b.file_variant(1, grown, 8 * 1024, Variant::Differs);
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    let deadline = Instant::now() + WAIT;
+    while !c.identical(&own).await.is_empty() {
+        let row = c.get(d.id).await;
+        assert_ne!(
+            row.status,
+            DownloadStatus::Completed,
+            "completed from B: {row:?}"
+        );
+        assert!(Instant::now() < deadline, "the verdict stayed: {row:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    let path = c.completed(d.id).await;
+    dl_panel::is_exact(1, size, &path).unwrap();
+}
+
+/// "Use identical copies" turned off while a mirror serves part of the
+/// file: the mirror leaves within a few ticks.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn turning_mirrors_off_drops_a_running_mirror() {
+    let c = xctx().await;
+    let size = 96 * MIB;
+    let (a, b) = (Panel::spawn(46).await, Panel::spawn(47).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 3 * 1024);
+    b.file(1, size, 3 * 1024);
+    let (sa, _sb, _) = c.copies(&a, &b, "off").await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "used the mirror", |d| d.sources == Some(2))
+        .await;
+    c.state.settings.write().download_use_mirrors = false;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let row = c.get(d.id).await;
+    let before = b.log().len();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let after = b.log().len();
+    let open = b.open();
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    assert_ne!(row.sources, Some(2), "{row:?}");
+    assert_eq!(before, after, "the mirror still got requests");
+    assert_eq!(open, 0, "the mirror still holds a connection");
+}
+
+const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// Requests of the probe of a `size`-byte file 1.
+fn probe_requests(panel: &Panel, size: u64) -> usize {
+    let at = size - 32 * MIB;
+    panel
+        .log()
+        .iter()
+        .filter(|l| l.file == 1 && l.range == Some((at, Some(size - 1))))
+        .count()
+}
+
+/// Waits until a probe learned the limit of `source`.
+async fn learned(c: &Ctx, source: &str) {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let limits = iptv_core::downloads::connection_limits(&c.state)
+            .await
+            .unwrap();
+        if limits
+            .iter()
+            .any(|l| l.source_id == source && l.learned.is_some())
+        {
+            return;
+        }
+        assert!(Instant::now() < deadline, "never probed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A probing transfer of 96 MiB on a new source `source` (one connection
+/// reported), and the panel.
+async fn probing(c: &Ctx, source: &str, seed: u64) -> (Panel, Download) {
+    iptv_core::downloads::set_probe_timing(&c.state, Duration::from_millis(200), WEEK);
+    let panel = Panel::with(PanelOptions {
+        seed,
+        validators: Validators::None,
+        ..PanelOptions::default()
+    })
+    .await;
+    panel.set_reported(1);
+    panel.set_enforced(1);
+    add_xtream_source(&c.state, source, &panel).await;
+    panel.file(1, 96 * MIB, 1024);
+    add_movie(&c.state, source, 1, "Movie 1", None, "mp4").await;
+    let d = c.start_movie(source, 1, &panel.movie_url(1)).await;
+    learned(c, source).await;
+    (panel, d)
+}
+
+/// Pauses the probing transfer once the probe learned the limit, runs
+/// `setup`, makes the retest due and resumes: no probe request follows.
+async fn no_probe_after_resume(c: &Ctx, source: &str, seed: u64, setup: impl Fn(&Ctx)) {
+    let (panel, d) = probing(c, source, seed).await;
+    let part = c.pause(d.id).await;
+    assert!(sidecar(&part).exists(), "a sidecar after the split");
+    let before = probe_requests(&panel, 96 * MIB);
+    setup(c);
+    iptv_core::downloads::age_connection_limit(&c.state, source, WEEK + Duration::from_secs(60))
+        .await
+        .unwrap();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let after = probe_requests(&panel, 96 * MIB);
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    assert_eq!(after, before, "a probe ran: {:?}", panel.log());
+}
+
+/// A probe never runs where the transfer may not split: a resumed split
+/// file under a global speed cap.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_probe_runs_on_a_resumed_file_under_a_speed_cap() {
+    let c = xctx().await;
+    no_probe_after_resume(&c, "nr", 48, |c| {
+        c.state.settings.write().download_rate_limit_bps = 2 * MIB
+    })
+    .await;
+}
+
+/// The same for a source set to one connection per download.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_probe_runs_on_a_resumed_file_of_a_single_connection_source() {
+    let c = xctx().await;
+    no_probe_after_resume(&c, "ns", 49, |c| {
+        c.state.settings.write().download_single_connection = vec!["ns".into()]
+    })
+    .await;
+}
+
+/// A speed cap set on a running split transfer: the weekly retest that
+/// comes due then waits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_probe_runs_in_flight_under_a_per_download_speed_cap() {
+    let c = xctx().await;
+    let (panel, d) = probing(&c, "nq", 50).await;
+    c.ok(
+        "downloads.setRateLimit",
+        json!({"id": d.id, "bytesPerSecond": 2 * MIB}),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let before = probe_requests(&panel, 96 * MIB);
+    iptv_core::downloads::age_connection_limit(&c.state, "nq", WEEK + Duration::from_secs(60))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let after = probe_requests(&panel, 96 * MIB);
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    assert_eq!(after, before, "a probe ran: {:?}", panel.log());
+}
+
+/// The second address of the host has nothing listening. A slow
+/// connection reopened there goes the usual way instead, and the transfer
+/// keeps its connections: a dead address is not the provider refusing one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dead_address_is_skipped_and_never_taken_for_a_refusal() {
+    let c = ctx().await;
+    c.limit(3).await;
+    let panel = Panel::spawn(53).await;
+    let port = panel.port();
+    iptv_core::http::set_dns_override(
+        &c.state,
+        "localhost",
+        vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), port),
+        ],
+    );
+    iptv_core::downloads::manager::manager(&c.state)
+        .set_ramp_timing(Duration::from_secs(1), Duration::from_millis(500));
+    let size = 64 * MIB;
+    panel.file(1, size, 2048);
+    let head = panel.hold_next_head();
+    let d = c.start(&format!("http://localhost:{port}/f/1")).await;
+    head.held().await;
+    panel.set_speed(1, 64);
+    head.release();
+    until("split", || panel.log().len() >= 2).await;
+    // The slow connection is reopened (on the dead address) after about
+    // five seconds, and its request goes out after the close grace.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    c.drain_events();
+    let stats = c
+        .collect("downloads.stats", d.id, Duration::from_secs(6))
+        .await;
+    panel.set_speed(1, 1024);
+    let path = c.completed(d.id).await;
+    dl_panel::is_exact(1, size, &path).unwrap();
+    for s in &stats {
+        let notes = s["notes"].as_array().cloned().unwrap_or_default();
+        assert!(
+            !notes.iter().any(|n| n["kind"] == "oneConnection"),
+            "fell to one connection: {notes:?}"
+        );
+    }
+    let last = stats.last().expect("a breakdown");
+    assert_eq!(last["connections"].as_array().unwrap().len(), 2, "{last}");
+}
+
+/// The mirror search runs again while no mirror serves the transfer: B
+/// was busy when the transfer started and is free a while later.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn the_mirror_search_runs_again_while_no_mirror_serves() {
+    let c = xctx().await;
+    let size = 96 * MIB;
+    let (a, b) = (Panel::spawn(54).await, Panel::spawn(55).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 512);
+    b.file(1, size, 512);
+    let sa = add_xtream_source(&c.state, "again-a", &a).await;
+    let sb = add_xtream_source(&c.state, "again-b", &b).await;
+    for s in [&sa, &sb] {
+        add_movie(&c.state, s, 1, "Busy Copy (2021)", Some(2021), "mp4").await;
+    }
+    c.state.settings.write().download_probe_disabled = vec![sa.clone(), sb.clone()];
+    // B plays: the first search cannot verify its copy.
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sb.clone()]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "started", |d| d.bytes_downloaded > MIB as i64)
+        .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_ne!(c.get(d.id).await.sources, Some(2));
+    // B is free, and the verdict that it was busy has run out.
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    mirrors::age_records(&c.state, Duration::from_secs(3 * 3600))
+        .await
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(80);
+    loop {
+        let row = c.get(d.id).await;
+        if row.sources == Some(2) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no second search: {row:?}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+}
+
+/// Breakdowns of `id` over `d` that ran `n` connections.
+async fn breakdowns_at(c: &Ctx, id: i64, n: usize, d: Duration) -> Vec<Value> {
+    c.collect("downloads.stats", id, d)
+        .await
+        .into_iter()
+        .filter(|s| s["connections"].as_array().map(Vec::len) == Some(n))
+        .collect()
+}
+
+/// Three accounts that allow one connection each serve one file: every
+/// source is at its allowance, and what holds the speed back is each
+/// connection's speed, not the row's own account.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn connections_on_several_accounts_are_limited_per_connection() {
+    let c = xctx().await;
+    let size = 64 * MIB;
+    let panels = [
+        Panel::spawn(56).await,
+        Panel::spawn(57).await,
+        Panel::spawn(58).await,
+    ];
+    let mut sources = Vec::new();
+    for (i, p) in panels.iter().enumerate() {
+        p.set_reported(1);
+        p.set_enforced(1);
+        p.file(1, size, 1024);
+        let s = add_xtream_source(&c.state, &format!("each-{i}"), p).await;
+        add_movie(&c.state, &s, 1, "Each Its Own (2020)", Some(2020), "mp4").await;
+        sources.push(s);
+    }
+    c.state.settings.write().download_probe_disabled = sources.clone();
+    iptv_core::downloads::manager::manager(&c.state)
+        .set_ramp_timing(Duration::from_millis(500), Duration::from_millis(500));
+    let d = c.start_movie(&sources[0], 1, &panels[0].movie_url(1)).await;
+    let deadline = Instant::now() + WAIT;
+    let full = loop {
+        assert!(Instant::now() < deadline, "never three connections");
+        let got = breakdowns_at(&c, d.id, 3, Duration::from_millis(1500)).await;
+        if !got.is_empty() {
+            break got;
+        }
+    };
+    let more = breakdowns_at(&c, d.id, 3, Duration::from_secs(2)).await;
+    for s in full.iter().chain(&more) {
+        assert_eq!(s["limiting"]["kind"], "perConnection", "{s}");
+    }
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+}
+
+/// One account allows three connections, so a download gets two: its
+/// account limit is what holds it back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_account_at_its_allowance_is_limited_by_the_account() {
+    let c = ctx().await;
+    c.limit(3).await;
+    let panel = Panel::spawn(59).await;
+    let size = 48 * MIB;
+    panel.file(1, size, 1024);
+    iptv_core::downloads::manager::manager(&c.state)
+        .set_ramp_timing(Duration::from_millis(500), Duration::from_millis(500));
+    let d = c.start(&panel.url(1)).await;
+    until("split", || panel.log().len() >= 2).await;
+    let full = breakdowns_at(&c, d.id, 2, Duration::from_secs(3)).await;
+    assert!(!full.is_empty(), "no breakdown with two connections");
+    for s in &full {
+        assert_eq!(s["limiting"]["kind"], "accountLimit", "{s}");
+        assert_eq!(s["limiting"]["limit"], 3, "{s}");
+    }
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
 }

@@ -3,12 +3,14 @@
 //! resolved ahead for the next row.
 //!
 //! A plan lists, per queued row, the copies it may run on besides its home:
-//! copies with a fresh Identical verdict (of its origin, when it has one),
-//! and for a row without an origin, copies with an Equivalent verdict. The
+//! copies with a standing Identical verdict (of its origin, when it has
+//! one), and for a row without an origin, copies with an Equivalent verdict.
+//! A row moves to another copy only while it is fresh (no bytes, no `.part`
+//! content, no sidecar) or its `.part` has a valid sidecar, which records
+//! the copy each range came from; a plain `.part` stays on its home. The
 //! pump uses equivalent copies only while `download_allow_equivalent` is on
-//! and the row is fresh (no bytes, no `.part` content, no sidecar); the
-//! claim checks freshness again and stores the copy as the row's origin in
-//! the same write.
+//! and the row is fresh; the claim checks both again and stores an
+//! equivalent copy as the row's origin in the same write.
 
 use super::{manager, DownloadManager, Policy, TaskCtl};
 use crate::downloads::shared::{self, Endpoint, MirrorRecord, Verdict};
@@ -48,6 +50,8 @@ pub(super) struct Plan {
     pub(super) equivalent: Vec<CopyRef>,
     /// The row has no bytes yet, so it may still adopt an equivalent copy.
     pub(super) fresh: bool,
+    /// The row may run on another copy at all ([`may_move`]).
+    pub(super) movable: bool,
 }
 
 impl Plan {
@@ -57,13 +61,14 @@ impl Plan {
             identical: Vec::new(),
             equivalent: Vec::new(),
             fresh: false,
+            movable: false,
         }
     }
 
     /// Whether the row could start on `source` under `policy`.
     pub(super) fn targets(&self, source: &str, policy: &Policy, has_origin: bool) -> bool {
         let on = |copies: &[CopyRef]| copies.iter().any(|c| c.source_id() == source);
-        on(&self.identical)
+        self.movable && on(&self.identical)
             || policy.allow_equivalent && self.fresh && !has_origin && on(&self.equivalent)
     }
 }
@@ -105,15 +110,29 @@ pub(super) fn is_fresh(d: &Download) -> bool {
     empty && !segments::ranges_path(&part).exists()
 }
 
-/// Copies `copy`'s mirror record lists with a `wanted` verdict that still
-/// counts: the newest entry per copy, younger than [`VERDICT_TTL`], and for
-/// Identical, of the record's fingerprint total. Reads the record directly,
-/// beside [`mirrors::cached_identical`].
-fn recorded(conn: &Connection, copy: &CopyRef, wanted: Verdict) -> CoreResult<Vec<CopyRef>> {
+/// True when row `d` may run on a copy other than the one its bytes came
+/// from: it is [fresh](is_fresh), or its `.part` has a valid sidecar, which
+/// records the copy each range came from. A plain `.part` would be
+/// continued with another copy's bytes.
+pub(super) fn may_move(d: &Download) -> bool {
+    if is_fresh(d) {
+        return true;
+    }
+    let Some(path) = d.file_path.as_deref() else {
+        return false;
+    };
+    let part = naming::part_path(Path::new(path));
+    matches!(segments::load(&part), segments::Sidecar::Valid(_))
+}
+
+/// Copies `copy`'s mirror record lists as Equivalent: the newest entry per
+/// copy, younger than [`VERDICT_TTL`], and still standing against the
+/// copy's own cached fingerprint (the total and validator compared), as
+/// the mirrors' own verdict checks require.
+fn equivalent_copies(conn: &Connection, copy: &CopyRef) -> CoreResult<Vec<CopyRef>> {
     let Some(record) = shared::read_record::<MirrorRecord>(conn, &shared::mirror_key(copy))? else {
         return Ok(Vec::new());
     };
-    let total = record.fingerprint.as_ref().map(|f| f.total);
     let cutoff = chrono::Utc::now() - VERDICT_TTL;
     let mut newest: Vec<(
         &CopyRef,
@@ -130,15 +149,23 @@ fn recorded(conn: &Connection, copy: &CopyRef, wanted: Verdict) -> CoreResult<Ve
             None => newest.push((&e.copy, at, e)),
         }
     }
-    Ok(newest
-        .into_iter()
-        .filter(|(_, at, e)| {
-            e.verdict == wanted
-                && *at >= cutoff
-                && (wanted != Verdict::Identical || total.is_none() || e.total == total)
-        })
-        .map(|(c, ..)| c.clone())
-        .collect())
+    let mut out = Vec::new();
+    for (c, at, e) in newest {
+        if e.verdict != Verdict::Equivalent || at < cutoff {
+            continue;
+        }
+        let standing = mirrors::cached_fingerprint(conn, c)?.is_none_or(|fp| {
+            e.total.is_none_or(|t| t == fp.total)
+                && match (&e.validator, &fp.validator) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => true,
+                }
+        });
+        if standing {
+            out.push(c.clone());
+        }
+    }
+    Ok(out)
 }
 
 /// Row `id`'s origin and plan, from the database.
@@ -146,12 +173,12 @@ fn plan_for(conn: &Connection, id: i64) -> CoreResult<(Option<CopyRef>, Plan)> {
     let d = store::get(conn, id)?.download;
     let own = CopyRef::new(d.item_ref.clone(), d.episode_id.clone());
     let base = d.origin.clone().unwrap_or_else(|| own.clone());
+    // Standing verdicts only: a copy whose cached fingerprint shows other
+    // bytes than the ones compared is left out.
     let mut identical = mirrors::cached_identical(conn, &base)?;
-    identical.extend(recorded(conn, &base, Verdict::Identical)?);
-    let mut seen = HashSet::new();
-    identical.retain(|c| *c != base && *c != own && seen.insert(c.clone()));
+    identical.retain(|c| *c != base && *c != own);
     let equivalent = if d.origin.is_none() {
-        recorded(conn, &own, Verdict::Equivalent)?
+        equivalent_copies(conn, &own)?
     } else {
         Vec::new()
     };
@@ -160,6 +187,7 @@ fn plan_for(conn: &Connection, id: i64) -> CoreResult<(Option<CopyRef>, Plan)> {
         identical,
         equivalent,
         fresh: is_fresh(&d),
+        movable: may_move(&d),
     };
     Ok((d.origin, plan))
 }

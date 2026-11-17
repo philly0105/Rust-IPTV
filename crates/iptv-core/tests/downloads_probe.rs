@@ -23,8 +23,10 @@ use iptv_core::{AppState, BroadcastSink};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const WAIT: Duration = Duration::from_secs(90);
 const MIB: u64 = 1024 * 1024;
@@ -499,6 +501,12 @@ async fn mirror_allowance_follows_each_source() {
     assert_eq!(c.mgr.allowance_on(&ctl, "mb"), 1);
     drop(hold);
     assert_eq!(c.mgr.allowance_on(&ctl, "mb"), 2);
+    // Turning mirrors off applies at once.
+    c.state.settings.write().download_use_mirrors = false;
+    assert_eq!(c.mgr.allowance_on(&ctl, "mb"), 0);
+    assert_eq!(c.mgr.spare_on("ma", "mb"), 0);
+    c.state.settings.write().download_use_mirrors = true;
+    assert_eq!(c.mgr.allowance_on(&ctl, "mb"), 2);
     // A refused mirror connection: none for two minutes, holds neither.
     c.mgr.mirror_refused("mb");
     assert_eq!(c.mgr.allowance_on(&ctl, "mb"), 0);
@@ -666,4 +674,152 @@ async fn equivalent_copies_take_only_fresh_rows_and_only_when_allowed() {
     assert_eq!(d.origin, None);
     assert_ne!(d.served_by.as_deref(), Some("eb"));
     c.ok("downloads.cancel", json!({"id": first.id})).await;
+}
+
+/// A loopback server answering every request with `status` and an empty
+/// body. Returns its base URL and the count of requests it answered.
+async fn answering(status: u16) -> (String, Arc<AtomicUsize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let count = Arc::new(AtomicUsize::new(0));
+    let seen = count.clone();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let (mut buf, mut got) = ([0u8; 4096], Vec::new());
+                while !got.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match sock.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => got.extend_from_slice(&buf[..n]),
+                    }
+                }
+                seen.fetch_add(1, Ordering::SeqCst);
+                let head = format!(
+                    "HTTP/1.1 {status} No\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                );
+                let _ = sock.write_all(head.as_bytes()).await;
+            });
+        }
+    });
+    (base, count)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fast_panel_finishing_a_probe_range_is_not_a_kick() {
+    let c = ctx().await;
+    // 40 MiB/s per connection: a probe's 32 MiB range would end within a
+    // step if anything read it.
+    const FAST: u64 = 40 * 1024;
+    let panel = c.panel("xf", 1, 3, &[1], 40 * MIB, FAST).await;
+    iptv_core::downloads::set_probe_timing(&c.state, Duration::from_secs(3), WEEK);
+    let ctl = TaskCtl::detached("xf");
+    // The transfer's stream, held open (unread, so it cannot end either).
+    let main = reqwest::get(panel.movie_url(1)).await.unwrap();
+    assert!(main.status().is_success());
+    let ep = c.endpoint("xf", 1).await;
+
+    assert_eq!(c.probe(&ctl, &ep).await, Some(ProbeOutcome::Refused));
+    let l = c.limit("xf").await;
+    assert_eq!(
+        (l.learned, l.mode),
+        (Some(3), Some(ConnectionLimitMode::Refuse))
+    );
+    assert_eq!(panel.kicked(), 0);
+    assert_eq!(c.mgr.effective_limit("xf"), (Some(3), LimitKind::Learned));
+    drop(main);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn any_failed_probe_answer_counts_as_a_refusal() {
+    let c = ctx().await;
+    let panel = c.panel("xe", 1, 1, &[1], BIG, 512).await;
+    let ctl = TaskCtl::detached("xe");
+    let main = hold_stream(&panel.movie_url(1), ctl.clone(), "xe").await;
+    // The probe's connection lands on a server answering 500.
+    let (base, answered) = answering(500).await;
+    let mut ep = c.endpoint("xe", 1).await;
+    ep.url = format!("{base}/movie/u/p/1.mp4");
+
+    assert_eq!(c.probe(&ctl, &ep).await, Some(ProbeOutcome::Refused));
+    assert_eq!(answered.load(Ordering::SeqCst), 1);
+    let l = c.limit("xe").await;
+    assert_eq!(
+        (l.learned, l.mode),
+        (Some(1), Some(ConnectionLimitMode::Refuse))
+    );
+    assert!(l.next_probe_at.is_some());
+    // Recorded, so not again before the retest.
+    assert_eq!(c.probe(&ctl, &ep).await, None);
+    assert_eq!(answered.load(Ordering::SeqCst), 1);
+    main.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn spreading_takes_only_rows_that_may_move_onto_copies_that_still_stand() {
+    let c = ctx().await;
+    const SIZE: u64 = 2 * MIB;
+    c.state.settings.write().download_probe_disabled = vec!["ra".into(), "rb".into()];
+    // Row 1 keeps A busy; B has rows 2 to 4 only, so nothing mirrors row 1.
+    let a = c.panel("ra", 1, 0, &[1, 2, 3, 4], SIZE, 64).await;
+    c.panel("rb", 1, 1, &[2, 3, 4], SIZE, 256).await;
+    for f in [2, 3, 4] {
+        let copy = CopyRef::new(movie_ref("rb", f), None);
+        c.verdicts(
+            CopyRef::new(movie_ref("ra", f), None),
+            SIZE as i64,
+            vec![copy],
+            Verdict::Identical,
+        )
+        .await;
+    }
+    // B's copy of 3 has changed since: its cached fingerprint shows another
+    // total than the one compared.
+    c.verdicts(
+        CopyRef::new(movie_ref("rb", 3), None),
+        SIZE as i64 + 1,
+        Vec::new(),
+        Verdict::Identical,
+    )
+    .await;
+    // B is busy while the rows queue, so none spreads before row 2 holds
+    // bytes of its own (a plain `.part` from A).
+    iptv_core::downloads::set_playback(&c.state, "player", vec!["rb".into()]).await;
+    let first = c.start("ra", 1, &a.movie_url(1)).await;
+    c.wait_until(first.id, "started", |d| {
+        d.status == DownloadStatus::Downloading
+    })
+    .await;
+    let second = c.start("ra", 2, &a.movie_url(2)).await;
+    let id = second.id;
+    c.state
+        .db_write(move |conn| {
+            conn.execute(
+                "UPDATE downloads SET bytes_downloaded = 4096 WHERE id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let third = c.start("ra", 3, &a.movie_url(3)).await;
+    let fourth = c.start("ra", 4, &a.movie_url(4)).await;
+    iptv_core::downloads::set_playback(&c.state, "player", Vec::new()).await;
+
+    // Only the fresh row with a standing copy moves to B.
+    let d = c
+        .wait_until(fourth.id, "spread", |d| {
+            d.status == DownloadStatus::Downloading
+        })
+        .await;
+    assert_eq!(d.served_by.as_deref(), Some("rb"));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    for row in [second.id, third.id] {
+        let d = c.get(row).await;
+        assert_eq!(d.status, DownloadStatus::Queued, "row {row}");
+        assert_eq!(d.served_by, None, "row {row}");
+    }
+    for row in [first.id, second.id, third.id, fourth.id] {
+        c.ok("downloads.cancel", json!({"id": row})).await;
+    }
 }

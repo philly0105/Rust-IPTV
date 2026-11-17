@@ -130,7 +130,7 @@ describe('Record series', () => {
     actions();
     fireEvent.click(await seriesButton());
     fireEvent.click(await screen.findByTestId('series-confirm-ok'));
-    await waitFor(() => expect(toastTitles()).toContain('Could not add the series'));
+    await waitFor(() => expect(toastTitles()).toContain('Couldn\'t add the series'));
     expect(render(<>{useToastStore.getState().toasts.at(-1)!.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('disk is full');
   });
 

@@ -313,6 +313,6 @@ describe('library removals can be undone', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Watched a from history' }));
     await waitFor(() => expect(lastToast()?.action).toBeTruthy());
     lastToast()!.action!.onClick();
-    await waitFor(() => expect(lastToast()?.title).toBe('Could not undo that'));
+    await waitFor(() => expect(lastToast()?.title).toBe('Couldn\'t undo that'));
   });
 });

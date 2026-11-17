@@ -111,7 +111,7 @@
   "ambientMode": "Tryb ambient",
   "ambientModeHint": "Barwi przestrzeń wokół wideo jego kolorami.",
   "fullscreenChannelPanel": "Lista kanałów na pełnym ekranie",
-  "fullscreenChannelPanelHint": "Pokazuje listę kanałów z boku, gdy poruszysz kursorem na pełnym ekranie.",
+  "fullscreenChannelPanelHint": "Pokazuje listę kanałów z boku na pełnym ekranie, gdy przesuniesz kursor do krawędzi lub naciśniesz przycisk listy kanałów.",
   "zapBanner": "Pokazuj informacje o kanale przy przełączaniu",
   "zapBannerHint": "Po każdej zmianie kanału przez kilka sekund pokazuje logo, numer oraz bieżący i następny program.",
   "showCaptions": "Pokazuj napisy",
@@ -387,7 +387,7 @@
   "resetDone": "Przywrócono ustawienia domyślne",
   "resetFailed": "Nie udało się zresetować ustawień",
   "streamReconnect": "Ponownie łącz zerwane strumienie",
-  "streamReconnectHint": "Gdy strumień się zrywa lub zawiesza, jest po cichu ponawiany kilka razy, zanim pojawi się błąd. Filmy wznawiają się w miejscu zatrzymania.",
+  "streamReconnectHint": "Gdy kanał, film lub odcinek się zrywa lub zawiesza, odtwarzanie jest po cichu ponawiane kilka razy, zanim pojawi się błąd. Filmy i odcinki wznawiają się w miejscu zatrzymania.",
   "liveFailover": "Przełączaj kanały na żywo na inne źródło",
   "liveFailoverHint": "Gdy kanał na żywo przestaje działać, ten sam kanał jest odtwarzany z innego źródła. Przełączenie można cofnąć.",
 

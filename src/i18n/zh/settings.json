@@ -111,7 +111,7 @@
   "ambientMode": "氛围模式",
   "ambientModeHint": "用视频的颜色为其周围区域着色。",
   "fullscreenChannelPanel": "全屏频道列表",
-  "fullscreenChannelPanelHint": "全屏时移动指针，会在侧边显示频道列表。",
+  "fullscreenChannelPanelHint": "全屏时将指针移到边缘或按频道列表按钮，会在侧边显示频道列表。",
   "zapBanner": "切换频道时显示频道信息",
   "zapBannerHint": "每次切换频道后，显示几秒钟台标、频道号以及当前和下一个节目。",
   "showCaptions": "显示字幕",
@@ -377,7 +377,7 @@
   "resetDone": "设置已恢复为默认值",
   "resetFailed": "无法重置设置",
   "streamReconnect": "自动重连中断的流",
-  "streamReconnectHint": "流中断或卡住时，先在后台重试几次，再显示错误。电影会从中断处继续播放。",
+  "streamReconnectHint": "频道、电影或剧集中断或卡住时，先在后台重试几次，再显示错误。电影和剧集会从中断处继续播放。",
   "liveFailover": "直播频道切换到其他来源",
   "liveFailoverHint": "直播频道无法播放时，从其他来源播放同一频道。切换可以撤销。",
 

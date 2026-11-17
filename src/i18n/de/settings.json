@@ -111,7 +111,7 @@
   "ambientMode": "Ambient-Modus",
   "ambientModeHint": "Färbt den Bereich um das Video in dessen Farben.",
   "fullscreenChannelPanel": "Senderliste im Vollbild",
-  "fullscreenChannelPanelHint": "Zeigt die Senderliste am Rand an, wenn Sie im Vollbild den Mauszeiger bewegen.",
+  "fullscreenChannelPanelHint": "Zeigt im Vollbild die Senderliste am Rand an, wenn Sie den Mauszeiger an den Rand bewegen oder die Schaltfläche für die Senderliste drücken.",
   "zapBanner": "Senderinfo beim Umschalten anzeigen",
   "zapBannerHint": "Zeigt nach jedem Senderwechsel einige Sekunden lang Logo, Nummer sowie die aktuelle und die nächste Sendung.",
   "showCaptions": "Untertitel anzeigen",
@@ -377,7 +377,7 @@
   "resetDone": "Einstellungen auf Standard zurückgesetzt",
   "resetFailed": "Einstellungen konnten nicht zurückgesetzt werden",
   "streamReconnect": "Abgebrochene Streams neu verbinden",
-  "streamReconnectHint": "Bricht ein Stream ab oder hängt, wird er ein paar Mal still neu versucht, bevor ein Fehler erscheint. Filme laufen an der Stelle weiter, an der sie stoppten.",
+  "streamReconnectHint": "Bricht ein Sender, ein Film oder eine Folge ab oder hängt, wird still ein paar Mal neu versucht, bevor ein Fehler erscheint. Filme und Folgen laufen an der Stelle weiter, an der sie stoppten.",
   "liveFailover": "Live-Sender auf eine andere Quelle umschalten",
   "liveFailoverHint": "Fällt ein Live-Sender aus, läuft derselbe Sender von einer anderen Quelle. Der Wechsel lässt sich rückgängig machen.",
 

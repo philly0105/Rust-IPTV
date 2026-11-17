@@ -111,7 +111,7 @@
   "ambientMode": "Ambient mode",
   "ambientModeHint": "Tints the space around the video with its colors.",
   "fullscreenChannelPanel": "Channel list in fullscreen",
-  "fullscreenChannelPanelHint": "Shows the channel list at the side when you move the pointer in fullscreen.",
+  "fullscreenChannelPanelHint": "Shows the channel list at the side in fullscreen when you move the pointer to the edge or press the channel list button.",
   "zapBanner": "Show channel info when switching channels",
   "zapBannerHint": "Shows the logo, number and what's on now and next for a few seconds after each channel change.",
   "showCaptions": "Show captions",
@@ -377,7 +377,7 @@
   "resetDone": "Settings reset to defaults",
   "resetFailed": "Couldn't reset settings",
   "streamReconnect": "Reconnect dropped streams",
-  "streamReconnectHint": "When a stream drops or stalls, retry it quietly a few times before showing an error. Movies resume where they stopped.",
+  "streamReconnectHint": "When a channel, movie or episode drops or stalls, retry it quietly a few times before showing an error. Movies and episodes pick up where they stopped.",
   "liveFailover": "Switch live channels to another source",
   "liveFailoverHint": "When a live channel stops working, play the same channel from another source. You can undo the switch.",
 

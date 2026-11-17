@@ -111,7 +111,7 @@
   "ambientMode": "氛圍模式",
   "ambientModeHint": "以影片的色彩為周圍區域染色。",
   "fullscreenChannelPanel": "全螢幕頻道清單",
-  "fullscreenChannelPanelHint": "全螢幕時移動指標，就會在側邊顯示頻道清單。",
+  "fullscreenChannelPanelHint": "全螢幕時將指標移到邊緣或按頻道清單按鈕，就會在側邊顯示頻道清單。",
   "zapBanner": "切換頻道時顯示頻道資訊",
   "zapBannerHint": "每次切換頻道後，顯示幾秒鐘台標、頻道號碼以及目前和下一個節目。",
   "showCaptions": "顯示字幕",
@@ -377,7 +377,7 @@
   "resetDone": "設定已還原為預設值",
   "resetFailed": "無法重設設定",
   "streamReconnect": "自動重新連線中斷的串流",
-  "streamReconnectHint": "串流中斷或卡住時，先在背景重試幾次，再顯示錯誤。電影會從中斷處繼續播放。",
+  "streamReconnectHint": "頻道、電影或劇集中斷或卡住時，先在背景重試幾次，再顯示錯誤。電影和劇集會從中斷處繼續播放。",
   "liveFailover": "直播頻道切換到其他來源",
   "liveFailoverHint": "直播頻道無法播放時，從其他來源播放同一頻道。切換可以復原。",
 

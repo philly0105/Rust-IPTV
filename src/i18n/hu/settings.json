@@ -111,7 +111,7 @@
   "ambientMode": "Ambiens mód",
   "ambientModeHint": "A videó körüli területet a videó színeivel színezi.",
   "fullscreenChannelPanel": "Csatornalista teljes képernyőn",
-  "fullscreenChannelPanelHint": "Teljes képernyős módban oldalt megjeleníti a csatornalistát, ha megmozdítja az egérmutatót.",
+  "fullscreenChannelPanelHint": "Teljes képernyős módban oldalt megjeleníti a csatornalistát, ha az egérmutatót a szélére viszi, vagy megnyomja a csatornalista gombját.",
   "zapBanner": "Csatornainfó megjelenítése csatornaváltáskor",
   "zapBannerHint": "Minden csatornaváltás után néhány másodpercig mutatja a logót, a számot, valamint az aktuális és a következő műsort.",
   "showCaptions": "Feliratok megjelenítése",
@@ -377,7 +377,7 @@
   "resetDone": "Beállítások alapértékre állítva",
   "resetFailed": "Nem sikerült visszaállítani a beállításokat",
   "streamReconnect": "Megszakadt adások újracsatlakoztatása",
-  "streamReconnectHint": "Ha egy adás megszakad vagy elakad, néhányszor csendben újrapróbálja, mielőtt hibát mutatna. A filmek ott folytatódnak, ahol megálltak.",
+  "streamReconnectHint": "Ha egy csatorna, film vagy epizód megszakad vagy elakad, néhányszor csendben újrapróbálja, mielőtt hibát mutatna. A filmek és epizódok ott folytatódnak, ahol megálltak.",
   "liveFailover": "Élő csatornák átváltása másik forrásra",
   "liveFailoverHint": "Ha egy élő csatorna leáll, ugyanaz a csatorna szól egy másik forrásból. Az átváltás visszavonható.",
 

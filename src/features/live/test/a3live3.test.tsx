@@ -206,9 +206,9 @@ describe('the idle stage while the channel last watched is looked up (w-realdata
 });
 
 describe('group names (w-realdata-13)', () => {
-  it("draw the place's tag after the name, quiet, as channel rows do; the provider's name stays whole for readers", () => {
+  it("draw the place's tag after the name, quiet, as channel rows do; readers hear the tag after the name too (w-a11y-03)", () => {
     renderAt('/', [{ path: '/', element: <ChannelName name="US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ" className="truncate" /> }]);
     expect(screen.getByTestId('channel-name-tag').textContent).toBe('US');
-    expect(screen.getByText('US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ').className).toContain('sr-only');
+    expect(screen.getByText('PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ (US)').className).toContain('sr-only');
   });
 });

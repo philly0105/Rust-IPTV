@@ -279,7 +279,7 @@ describe('arrows between the group column and the channel list (a11y-keyboard-02
         />
       </>,
     );
-    const group = await screen.findByRole('link', { name: /UK\| SPORTS/ });
+    const group = await screen.findByRole('link', { name: /SPORTS \(UK\)/ });
     group.focus();
     fireEvent.keyDown(group, { key: 'ArrowRight' });
     expect(document.activeElement).toBe(row(0));

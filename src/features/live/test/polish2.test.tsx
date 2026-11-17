@@ -451,7 +451,7 @@ describe('groups drawer below 1024 px', () => {
     rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: 200 }), cat(2, { name: 'US| SPORTS', itemCount: 200 })];
     renderIn('/s/src1/live/g2', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
     await screen.findByText('Channel 0');
-    const toggle = await screen.findByRole('button', { name: /^Groups:\s*US\| SPORTS$/ });
+    const toggle = await screen.findByRole('button', { name: /^Groups:\s*SPORTS \(US\)$/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     // A long name truncates the label, never the icon.
     expect(toggle.querySelector('.lucide-list-tree')?.getAttribute('class')).toContain('shrink-0');

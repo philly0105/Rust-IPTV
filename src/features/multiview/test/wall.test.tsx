@@ -1300,8 +1300,8 @@ describe('picker browsing (LG-19)', () => {
     fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));
     const region = (await screen.findByTestId('scope-region')) as HTMLSelectElement;
     expect(region.value).toBe('UK');
-    expect(screen.queryByRole('option', { name: /US\| SPORTS/ })).toBeNull();
-    expect(screen.getByRole('option', { name: /UK\| SPORTS/ })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /SPORTS \(US\)/ })).toBeNull();
+    expect(screen.getByRole('option', { name: /SPORTS \(UK\)/ })).toBeTruthy();
     localStorage.removeItem('tsrust.liveRegion:m3u1:live');
   });
 });

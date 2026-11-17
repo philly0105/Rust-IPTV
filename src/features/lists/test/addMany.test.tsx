@@ -141,9 +141,9 @@ describe('Add channels on a list', () => {
     expect(region.value).toBe('UK');
     // A group's provider name is its title (the drawn name puts the place's tag after it).
     expect(screen.getAllByRole('option').map((o) => o.querySelector('[title]')?.getAttribute('title'))).toEqual(expect.arrayContaining(['UK| SPORTS', 'UK| NEWS']));
-    expect(screen.queryByRole('option', { name: /US\| SPORTS/ })).toBeNull();
+    expect(screen.queryByRole('option', { name: /SPORTS \(US\)/ })).toBeNull();
     fireEvent.change(region, { target: { value: '' } });
-    expect(await screen.findByRole('option', { name: /US\| SPORTS/ })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: /SPORTS \(US\)/ })).toBeTruthy();
     expect(localStorage.getItem('tsrust.liveRegion:src1:live')).toBeNull();
   });
 

@@ -331,7 +331,6 @@
   "removedUndoHint": "Its channels, favorites, watch history and My List titles go with it.",
   "undo": "Undo",
   "removeFailedKept": "The source is back in your list.",
-  "removedAnnouncement": "{{name}} removed. Press F8 to reach Undo.",
   "restoredAnnouncement": "{{name}} restored",
   "errorFileTooLarge": "This file is {{size}}, too large to open here. Put it at a web address and add it as a URL.",
   "progressBytes": "{{size}} downloaded",

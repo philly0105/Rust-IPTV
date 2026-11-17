@@ -16,6 +16,7 @@
   "noActions": "Нет доступных действий",
   "dismiss": "Скрыть",
   "notifications": "Уведомления",
+  "toastActionHint": "Нажмите F8, чтобы перейти к кнопке «{{action}}».",
   "pagination": "Навигация по страницам",
   "paginationRange": "{{from}}–{{to}} из {{total}}",
   "previousPage": "Предыдущая страница",

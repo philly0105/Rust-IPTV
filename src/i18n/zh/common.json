@@ -16,6 +16,7 @@
   "noActions": "没有可用的操作",
   "dismiss": "关闭",
   "notifications": "通知",
+  "toastActionHint": "按 F8 可转到“{{action}}”。",
   "pagination": "分页",
   "paginationRange": "第 {{from}}–{{to}} 项，共 {{total}} 项",
   "previousPage": "上一页",

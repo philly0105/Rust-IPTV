@@ -20,7 +20,7 @@ export interface ToastOptions {
   action?: { label: string; onClick: () => void };
   /** Reuse an id to update a toast in place (progress toasts). */
   id?: string;
-  /** Auto-dismiss after ms; `0` keeps it until dismissed. Default 5000 (errors 8000, progress 0). */
+  /** Auto-dismiss after ms; `0` keeps it until dismissed. Default 5000 (errors 8000, with an action 10000, progress 0). */
   duration?: number;
   /** Determinate progress (`max` defaults to 100) or indeterminate when `value` is undefined. */
   progress?: { value?: number; max?: number };
@@ -181,6 +181,8 @@ export function useToast(): { toast: (opts: ToastOptions) => string; dismiss: (i
 function defaultDuration(t: ToastRecord): number {
   if (t.duration !== undefined) return t.duration;
   if (t.progress) return 0;
+  // Reaching Undo takes F8 or a trip to the corner, which a TV remote rarely makes in 5 s.
+  if (t.action) return 10000;
   return t.variant === 'error' ? 8000 : 5000;
 }
 
@@ -559,6 +561,8 @@ export function ToastViewport() {
       <p key={a.seq}>
         {a.toast.title}
         {a.toast.description ? <>. {a.toast.description}</> : null}
+        {/* The action is a button in the corner: say it is there and how to reach it. */}
+        {a.toast.action ? <>. {t('toastActionHint', { action: a.toast.action.label })}</> : null}
       </p>
     );
   return createPortal(

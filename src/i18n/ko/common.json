@@ -16,6 +16,7 @@
   "noActions": "사용 가능한 작업이 없습니다",
   "dismiss": "닫기",
   "notifications": "알림",
+  "toastActionHint": "F8 키를 눌러 '{{action}}' 버튼으로 이동하세요.",
   "pagination": "페이지 탐색",
   "paginationRange": "{{total}}개 중 {{from}}-{{to}}",
   "previousPage": "이전 페이지",

@@ -16,6 +16,7 @@
   "noActions": "利用できる操作はありません",
   "dismiss": "閉じる",
   "notifications": "通知",
+  "toastActionHint": "F8 キーで「{{action}}」に移動できます。",
   "pagination": "ページ切り替え",
   "paginationRange": "{{total}}件中 {{from}}～{{to}}件",
   "previousPage": "前のページ",

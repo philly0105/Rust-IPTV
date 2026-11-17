@@ -16,6 +16,7 @@
   "noActions": "Kullanılabilir işlem yok",
   "dismiss": "Kapat",
   "notifications": "Bildirimler",
+  "toastActionHint": "{{action}} düğmesine ulaşmak için F8 tuşuna bas.",
   "pagination": "Sayfalama",
   "paginationRange": "{{from}}-{{to}} / {{total}}",
   "previousPage": "Önceki sayfa",

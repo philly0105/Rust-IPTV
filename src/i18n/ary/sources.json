@@ -403,7 +403,6 @@
   "removedUndoHint": "القنوات ديالو والمفضلة وسجل المشاهدة والعناوين ديالو فالليستة ديالي غادي يتمسحو معاه.",
   "undo": "رجّع",
   "removeFailedKept": "المصدر رجع للقائمة ديالك.",
-  "removedAnnouncement": "تحيّد {{name}}. ضغط F8 باش توصل لـ «رجّع».",
   "restoredAnnouncement": "رجع {{name}}",
   "errorFileTooLarge": "هاد الملف فيه {{size}}، كبير بزاف باش يتحل هنا. حطو فشي عنوان ويب وزيدو كـ URL.",
   "progressBytes": "تحمّل {{size}}",

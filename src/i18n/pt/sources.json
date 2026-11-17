@@ -349,7 +349,6 @@
   "removedUndoHint": "Os canais, favoritos, histórico e títulos da Minha lista dela também são removidos.",
   "undo": "Desfazer",
   "removeFailedKept": "A fonte voltou para a sua lista.",
-  "removedAnnouncement": "{{name}} removida. Pressione F8 para chegar a Desfazer.",
   "restoredAnnouncement": "{{name}} restaurada",
   "errorFileTooLarge": "Este arquivo tem {{size}}, grande demais para abrir aqui. Coloque-o num endereço web e adicione como URL.",
   "progressBytes": "{{size}} baixados",

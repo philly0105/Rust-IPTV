@@ -16,6 +16,7 @@
   "noActions": "Geen acties beschikbaar",
   "dismiss": "Sluiten",
   "notifications": "Meldingen",
+  "toastActionHint": "Druk op F8 om bij {{action}} te komen.",
   "pagination": "Paginering",
   "paginationRange": "{{from}} tot {{to}} van {{total}}",
   "previousPage": "Vorige pagina",

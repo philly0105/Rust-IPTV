@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
 /**
- * The kit's feedback states (states-feedback audit): busy icon buttons keep focus.
+ * The kit's feedback states (states-feedback audit): busy icon buttons keep focus, Undo toasts
+ * stay long enough to reach and say how to reach them.
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
 
-import { IconButton, useBusyButtons } from '..';
+import { IconButton, ToastViewport, toast, useBusyButtons, useToastStore } from '..';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  useToastStore.setState({ toasts: [] });
+});
 
 describe('IconButton loading (states-feedback-01)', () => {
   it('spins, ignores presses and keeps focus instead of going native-disabled', () => {
@@ -54,5 +59,19 @@ describe('useBusyButtons', () => {
     expect(document.activeElement).toBe(watched);
     fireEvent.click(remove);
     expect(onRemove).not.toHaveBeenCalled();
+  });
+});
+
+describe('toasts with an action (states-feedback-03)', () => {
+  it('stay 10 s instead of 5, and the live region says how to reach the action', () => {
+    vi.useFakeTimers();
+    render(<ToastViewport />);
+    act(() => void toast({ title: 'Removed Heat from My List', action: { label: 'Undo', onClick: () => undefined } }));
+    expect(document.querySelector('[data-toast-live="polite"]')?.textContent).toBe('Removed Heat from My List. Press F8 to reach Undo.');
+    act(() => void toast({ title: 'Saved' }));
+    act(() => vi.advanceTimersByTime(6000));
+    expect(useToastStore.getState().toasts.map((t) => t.title)).toEqual(['Removed Heat from My List']);
+    act(() => vi.advanceTimersByTime(4500));
+    expect(useToastStore.getState().toasts).toHaveLength(0);
   });
 });

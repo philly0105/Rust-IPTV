@@ -16,6 +16,7 @@
   "noActions": "Nessuna azione disponibile",
   "dismiss": "Ignora",
   "notifications": "Notifiche",
+  "toastActionHint": "Premi F8 per raggiungere {{action}}.",
   "pagination": "Paginazione",
   "paginationRange": "{{from}}-{{to}} di {{total}}",
   "previousPage": "Pagina precedente",

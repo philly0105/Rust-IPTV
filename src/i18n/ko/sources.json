@@ -331,7 +331,6 @@
   "removedUndoHint": "채널, 즐겨찾기, 시청 기록, 내 목록의 작품도 함께 삭제됩니다.",
   "undo": "실행 취소",
   "removeFailedKept": "소스가 목록에 다시 표시됩니다.",
-  "removedAnnouncement": "{{name}}을(를) 제거했습니다. F8 키를 눌러 실행 취소로 이동하세요.",
   "restoredAnnouncement": "{{name}}을(를) 복원했습니다",
   "errorFileTooLarge": "이 파일은 {{size}}로 여기서 열기에는 너무 큽니다. 웹 주소에 올린 뒤 URL로 추가하세요.",
   "progressBytes": "{{size}} 다운로드됨",

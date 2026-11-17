@@ -331,7 +331,6 @@
   "removedUndoHint": "De zenders, favorieten, kijkgeschiedenis en titels in Mijn lijst ervan gaan mee.",
   "undo": "Ongedaan maken",
   "removeFailedKept": "De bron staat weer in je lijst.",
-  "removedAnnouncement": "{{name}} verwijderd. Druk op F8 om bij Ongedaan maken te komen.",
   "restoredAnnouncement": "{{name}} hersteld",
   "errorFileTooLarge": "Dit bestand is {{size}}, te groot om hier te openen. Zet het op een webadres en voeg het toe als URL.",
   "progressBytes": "{{size}} gedownload",

@@ -331,7 +331,6 @@
   "removedUndoHint": "其頻道、收藏、觀看紀錄和我的片單中的影片會一併刪除。",
   "undo": "復原",
   "removeFailedKept": "此來源已回到清單中。",
-  "removedAnnouncement": "已移除 {{name}}。按 F8 可前往「復原」。",
   "restoredAnnouncement": "已還原 {{name}}",
   "errorFileTooLarge": "此檔案大小為 {{size}}，太大，無法在這裡開啟。請放到網址上，再以 URL 方式新增。",
   "progressBytes": "已下載 {{size}}",

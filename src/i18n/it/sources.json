@@ -349,7 +349,6 @@
   "removedUndoHint": "Con essa vengono rimossi canali, preferiti, cronologia e titoli nella mia lista.",
   "undo": "Annulla",
   "removeFailedKept": "La sorgente è di nuovo nel tuo elenco.",
-  "removedAnnouncement": "{{name}} rimossa. Premi F8 per raggiungere Annulla.",
   "restoredAnnouncement": "{{name}} ripristinata",
   "errorFileTooLarge": "Questo file è di {{size}}, troppo grande da aprire qui. Mettilo a un indirizzo web e aggiungilo come URL.",
   "progressBytes": "{{size}} scaricati",

@@ -16,6 +16,7 @@
   "noActions": "Keine Aktionen verfügbar",
   "dismiss": "Ausblenden",
   "notifications": "Benachrichtigungen",
+  "toastActionHint": "Mit F8 erreichen Sie „{{action}}“.",
   "pagination": "Seitennavigation",
   "paginationRange": "{{from}} bis {{to}} von {{total}}",
   "previousPage": "Vorherige Seite",

@@ -16,6 +16,7 @@
   "noActions": "Δεν υπάρχουν διαθέσιμες ενέργειες",
   "dismiss": "Απόρριψη",
   "notifications": "Ειδοποιήσεις",
+  "toastActionHint": "Πατήστε F8 για να φτάσετε στην επιλογή «{{action}}».",
   "pagination": "Σελιδοποίηση",
   "paginationRange": "{{from}} έως {{to}} από {{total}}",
   "previousPage": "Προηγούμενη σελίδα",

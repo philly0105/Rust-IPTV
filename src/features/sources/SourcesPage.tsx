@@ -464,7 +464,6 @@ export function SourcesPage() {
         void invalidate('sources.');
       },
     });
-    setAnnouncement(t('removedAnnouncement', { name: target.name }));
     nextFrame(() => {
       const cards = listRef.current?.querySelectorAll<HTMLElement>('[data-source-id]') ?? [];
       const card = [...cards].find((el) => el.dataset.sourceId === neighbour);

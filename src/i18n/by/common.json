@@ -16,6 +16,7 @@
   "noActions": "Няма даступных дзеянняў",
   "dismiss": "Схаваць",
   "notifications": "Апавяшчэнні",
+  "toastActionHint": "Націсніце F8, каб перайсці да «{{action}}».",
   "pagination": "Старонкі",
   "paginationRange": "{{from}}–{{to}} з {{total}}",
   "previousPage": "Папярэдняя старонка",

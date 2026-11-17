@@ -16,6 +16,7 @@
   "noActions": "ما كاين حتى إجراء متوفر",
   "dismiss": "تجاهل",
   "notifications": "الإشعارات",
+  "toastActionHint": "ضغط F8 باش توصل لـ «{{action}}».",
   "pagination": "الصفحات",
   "paginationRange": "{{from}} حتى {{to}} من {{total}}",
   "previousPage": "الصفحة اللي قبل",

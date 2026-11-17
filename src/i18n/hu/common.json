@@ -16,6 +16,7 @@
   "noActions": "Nincs elérhető művelet",
   "dismiss": "Elvetés",
   "notifications": "Értesítések",
+  "toastActionHint": "Az F8 billentyűvel érheted el: {{action}}.",
   "pagination": "Lapozás",
   "paginationRange": "{{from}}–{{to}}, összesen: {{total}}",
   "previousPage": "Előző oldal",

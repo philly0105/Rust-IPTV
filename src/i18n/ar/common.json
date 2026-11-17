@@ -16,6 +16,7 @@
   "noActions": "لا توجد إجراءات متاحة",
   "dismiss": "تجاهل",
   "notifications": "الإشعارات",
+  "toastActionHint": "اضغط F8 للوصول إلى «{{action}}».",
   "pagination": "ترقيم الصفحات",
   "paginationRange": "{{from}} إلى {{to}} من {{total}}",
   "previousPage": "الصفحة السابقة",

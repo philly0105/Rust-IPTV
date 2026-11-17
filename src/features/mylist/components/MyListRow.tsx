@@ -12,7 +12,8 @@
  * drag, and on touch they stay visible, since there is no hover. Below `sm`
  * (a phone, or a narrow window) the title gets the row's full width: the rank
  * sits on the poster's corner, the grip is gone, and the actions take a line
- * of their own under the title, always visible.
+ * of their own under the title, always visible. On touch the ⋮ stands in for
+ * them beside the title, and a tap anywhere on the row opens it.
  */
 
 import { ArrowDown, ArrowUp, Check, CircleCheck, Clapperboard, EllipsisVertical, Film, GripVertical, Play, X } from 'lucide-react';
@@ -94,6 +95,14 @@ const TOUCH_IN_MENU = 'pointer-coarse:hidden';
 /** The artwork's box, `w-12 sm:w-14`: spacing steps of 3.75 px at 100 % scale. */
 const ART_PX = 45;
 const ART_SM_PX = 52.5;
+/** Below sm on touch with the ⋮: title and actions side by side, both centred on the poster. */
+const TOUCH_ONE_LINE = 'pointer-coarse:grid-cols-[3rem_minmax(0,1fr)_auto]';
+const TOUCH_ACTIONS_BESIDE = 'relative z-[1] pointer-coarse:col-start-3 pointer-coarse:row-span-2 pointer-coarse:row-start-1 pointer-coarse:self-center';
+/**
+ * On touch the title's button stretches over the whole row, so a tap anywhere on it opens the title
+ * (the row had only onDoubleClick); the actions sit above it.
+ */
+const TOUCH_ROW_TARGET = "pointer-coarse:row-span-2 pointer-coarse:self-center pointer-coarse:after:absolute pointer-coarse:after:inset-0 pointer-coarse:after:content-['']";
 /** Tailwind's `sm` breakpoint. */
 const SM_QUERY = '(min-width: 40rem)';
 
@@ -134,6 +143,9 @@ function MyListRowImpl({
         // Below sm a grid: the poster spans two lines, the title above the actions. From sm up one flex line.
         'group relative grid h-full grid-cols-[3rem_minmax(0,1fr)] content-center items-center gap-x-3 gap-y-1 rounded-lg px-1.5',
         'sm:flex sm:gap-4 sm:px-3',
+        // Touch with the one ⋮ (library-07): the actions line held nothing else, so the ⋮ (and a
+        // started title's Play) take a third column beside the title instead of the row's far corner.
+        onMenu && TOUCH_ONE_LINE,
         'hover:bg-hover in-focus-visible:bg-hover motion-safe:transition-colors',
         dragging && 'opacity-40',
         busy && 'cursor-progress',
@@ -169,7 +181,7 @@ function MyListRowImpl({
         <span
           aria-hidden
           className={cn(
-            'leading-none font-medium tabular',
+            'pointer-events-none leading-none font-medium tabular',
             // Below sm: a small plate on the poster's top corner, so the title keeps the width.
             'absolute start-2.5 top-[calc(50%-32px)] z-10 min-w-5 rounded-sm bg-glass-strong px-1 py-0.5 text-center text-xs text-on-glass',
             'sm:static sm:w-6 sm:min-w-0 sm:shrink-0 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-end sm:text-sm sm:text-fg-subtle',
@@ -209,7 +221,7 @@ function MyListRowImpl({
         type="button"
         tabIndex={-1}
         onClick={onOpen}
-        className="col-start-2 row-start-1 flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-sm text-start sm:gap-1"
+        className={cn('col-start-2 row-start-1 flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-sm text-start sm:gap-1', onMenu && TOUCH_ROW_TARGET)}
         data-action="open"
         data-testid="mylist-open"
       >
@@ -257,7 +269,7 @@ function MyListRowImpl({
       </button>
 
       {/* Below sm the actions line sits under the title (grid column 2); move first, remove at the far end. */}
-      <div className="col-start-2 row-start-2 flex min-w-0 items-center gap-1 sm:shrink-0" data-testid="mylist-actions">
+      <div className={cn('col-start-2 row-start-2 flex min-w-0 items-center gap-1 sm:shrink-0', onMenu && TOUCH_ACTIONS_BESIDE)} data-testid="mylist-actions">
         {playEntry ? (
           <IconButton
             size="sm"

@@ -1,6 +1,8 @@
 import { initialWords, isNameMarker, twoInitials } from '@/ui/Poster';
 import { tintFill, tintOf } from '@/ui/tint';
 
+import { channelNameParts } from './channelName';
+
 /**
  * A channel's monogram (LG-14): two letters on its name's tint (src/ui/tint.ts), the one every
  * fallback tile uses, so the same name gets the same colour everywhere: the list, the guide, the
@@ -74,5 +76,8 @@ export function monogramText(name: string): string {
     const home = sideInitial(game.slice(split.index + split[0].length));
     if (away && home) return (away + home).toUpperCase();
   }
-  return twoInitials(initialWords(untagged || name));
+  // The station without its feed's quality and copy words ("PBS HD (BACKUP 2)" -> "PBS"), so a
+  // backup's number never becomes a letter: its tile reads "PB" like the station's other feeds.
+  const station = untagged ? channelNameParts(untagged, false).name : '';
+  return twoInitials(initialWords(station || untagged || name));
 }

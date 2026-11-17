@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "Tam ekran burada kullanılamıyor",
   "clearWall": "Duvarı temizle",
   "emptyBody": "İki ila dört canlı kanal seçin. Tüm kutucuklar oynar; ses, tıkladığınız kutucuktadır.",
+  "emptyBodyTouch": "İki ila dört canlı kanal seçin. Tüm kutucuklar oynar; ses, dokunduğunuz kutucuktadır.",
   "quickPicksTitle": "Son izlenen ve favori kanallar",
   "moreChannels": "Diğer kanallar…",
   "slotMoreLabel": "{{slot}}. yer için diğer kanallar",

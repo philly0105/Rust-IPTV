@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "Lo schermo intero non è disponibile qui",
   "clearWall": "Svuota la parete",
   "emptyBody": "Scegli da due a quattro canali in diretta. Tutti i riquadri vanno in riproduzione; quello che clicchi ha l'audio.",
+  "emptyBodyTouch": "Scegli da due a quattro canali in diretta. Tutti i riquadri vanno in riproduzione; quello che tocchi ha l'audio.",
   "quickPicksTitle": "Canali recenti e preferiti",
   "moreChannels": "Altri canali…",
   "slotMoreLabel": "Altri canali per la posizione {{slot}}",

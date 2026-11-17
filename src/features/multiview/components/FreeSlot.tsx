@@ -93,7 +93,8 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, limite
   const hint = (shown: string) =>
     explains ? (
       <span id={hintId} data-testid="multiview-empty-hint" className={cn('max-w-[28rem] text-center text-sm font-normal text-pretty text-fg-muted', shown)}>
-        {t('emptyBody')}
+        <span className="pointer-coarse:hidden">{t('emptyBody')}</span>
+        <span className="hidden pointer-coarse:inline">{t('emptyBodyTouch')}</span>
       </span>
     ) : null;
 

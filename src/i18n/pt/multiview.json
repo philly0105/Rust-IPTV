@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "A tela cheia não está disponível aqui",
   "clearWall": "Limpar o mural",
   "emptyBody": "Escolha de dois a quatro canais ao vivo. Todos os quadros tocam; o que você clicar fica com o som.",
+  "emptyBodyTouch": "Escolha de dois a quatro canais ao vivo. Todos os quadros tocam; o que você tocar fica com o som.",
   "quickPicksTitle": "Canais recentes e favoritos",
   "moreChannels": "Mais canais…",
   "slotMoreLabel": "Mais canais para a posição {{slot}}",

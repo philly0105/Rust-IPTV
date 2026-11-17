@@ -695,12 +695,18 @@ describe('empty wall', () => {
     await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
     // A fitted wall says how it works in the toolbar, where sound and clear go later, at any
     // window size; it is the first slot's description for screen readers.
+    const touch = 'Pick two to four live channels. Every tile plays; the one you tap has the sound.';
+    // A touch screen says "tap" for "click": the line swaps with the pointer.
+    const said = (el: HTMLElement) => [...el.children].map((c) => [c.textContent, c.className]);
     const line = screen.getByTestId('multiview-toolbar-hint');
-    expect(line.textContent).toBe(body);
+    expect(said(line)).toEqual([
+      [body, 'pointer-coarse:hidden'],
+      [touch, 'hidden pointer-coarse:inline'],
+    ]);
     expect(line.getAttribute('aria-hidden')).toBe('true');
     expect(line.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', '@[45rem]/stage:block']));
     const hint = screen.getByTestId('multiview-empty-hint');
-    expect(hint.textContent).toBe(body);
+    expect(said(hint)).toEqual(said(line));
     expect(hint.className.split(/\s+/)).toContain('@[45rem]/stage:sr-only');
     const slots = screen.getAllByTestId('multiview-empty-slot');
     expect(slots[0]!.getAttribute('aria-describedby')).toBe(hint.id);

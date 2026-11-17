@@ -131,7 +131,8 @@ export function WallToolbar({
           data-testid="multiview-toolbar-hint"
           className="ms-auto hidden min-w-[14rem] flex-1 text-end text-caption text-balance text-fg-muted @[45rem]/stage:block"
         >
-          {t('emptyBody')}
+          <span className="pointer-coarse:hidden">{t('emptyBody')}</span>
+          <span className="hidden pointer-coarse:inline">{t('emptyBodyTouch')}</span>
         </p>
       ) : null}
       {count > 0 ? (

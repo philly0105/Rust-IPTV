@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "La pantalla completa no está disponible aquí",
   "clearWall": "Vaciar el muro",
   "emptyBody": "Elige de dos a cuatro canales en vivo. Todos los mosaicos se reproducen; el que pulses tiene el sonido.",
+  "emptyBodyTouch": "Elige de dos a cuatro canales en vivo. Todos los mosaicos se reproducen; el que toques tiene el sonido.",
   "quickPicksTitle": "Canales recientes y favoritos",
   "moreChannels": "Más canales…",
   "slotMoreLabel": "Más canales para la posición {{slot}}",

@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "Volledig scherm is hier niet beschikbaar",
   "clearWall": "Wand leegmaken",
   "emptyBody": "Kies twee tot vier livezenders. Elke tegel speelt; de tegel waarop je klikt heeft het geluid.",
+  "emptyBodyTouch": "Kies twee tot vier livezenders. Elke tegel speelt; de tegel waarop je tikt heeft het geluid.",
   "quickPicksTitle": "Recente en favoriete zenders",
   "moreChannels": "Meer zenders…",
   "slotMoreLabel": "Meer zenders voor plek {{slot}}",

@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "這裡無法使用全螢幕",
   "clearWall": "清空電視牆",
   "emptyBody": "選擇兩到四個直播頻道。每個畫面都會播放，你點選的那個畫面出聲。",
+  "emptyBodyTouch": "選擇兩到四個直播頻道。每個畫面都會播放，你輕觸的那個畫面出聲。",
   "quickPicksTitle": "最近觀看和我的最愛頻道",
   "moreChannels": "更多頻道…",
   "slotMoreLabel": "第 {{slot}} 格的更多頻道",

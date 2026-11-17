@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "A teljes képernyő itt nem érhető el",
   "clearWall": "Fal ürítése",
   "emptyBody": "Válasszon két-négy élő csatornát. Minden csempe lejátszik; a hangot az kapja, amelyikre kattint.",
+  "emptyBodyTouch": "Válasszon két-négy élő csatornát. Minden csempe lejátszik; a hangot az kapja, amelyikre koppint.",
   "quickPicksTitle": "Legutóbbi és kedvenc csatornák",
   "moreChannels": "További csatornák…",
   "slotMoreLabel": "További csatornák ({{slot}}. hely)",

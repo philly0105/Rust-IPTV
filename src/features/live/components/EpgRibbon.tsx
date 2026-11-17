@@ -66,6 +66,8 @@ type Mode = 'timeline' | 'list';
  * an error, no channel yet), so the video above never resizes on a zap or a source switch.
  */
 const BODY_HEIGHT: Record<Mode, string> = { timeline: 'h-[104px]', list: 'h-56' };
+/** The compact ribbon's body: one height for both views (the list shows two whole rows of 52 px). */
+const COMPACT_BODY_HEIGHT = 'h-[104px]';
 
 export interface EpgRibbonProps {
   channel?: Channel;
@@ -96,6 +98,12 @@ export interface EpgRibbonProps {
    * (LG-17).
    */
   details?: boolean;
+  /**
+   * The stage column stacked over the list (a portrait tablet): the Now card without its
+   * description, the timeline (or two rows of the list) and no Up next, so the ribbon is always
+   * whole under the full-width picture instead of a strip cut through its text.
+   */
+  compact?: boolean;
 }
 
 /** What the ribbon reads from the player, for `channel`: primitives, compared one by one. */
@@ -282,6 +290,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
   // plays, and the ribbon follows the list's cursor.
   const liveName = props.watchingArchive || !channelName ? liveLabel : [liveLabel, channelName].join(listSeparator(i18n.language));
   const details = !!props.details;
+  const compact = details && !!props.compact;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
   const titleLine = shown ? (
     <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:text-title-sm')}>
@@ -462,7 +471,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       {/* The Now card's description spans the card under the art, the title and the buttons, so a
           narrow stage column does not wrap it a few words to a line beside them. Three lines are
           kept from md up whether or not there is one, so a zap never moves what is under it. */}
-      {details ? (
+      {details && !compact ? (
         <p
           dir="auto"
           className="line-clamp-1 basis-full text-match-parent text-xs text-fg-muted md:line-clamp-3 md:min-h-[3.75rem] md:text-body-sm"
@@ -587,17 +596,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
   }
 
   // The list view already lists every programme, so Up next comes with the timeline only.
-  const showUpNext = details && mode === 'timeline' && !!channel && !locked && list.length > 0;
+  // The compact ribbon leaves it out: the List view lists them.
+  const showUpNext = details && !compact && mode === 'timeline' && !!channel && !locked && list.length > 0;
   return (
     <section
       aria-label={t('guide')}
       data-testid="epg-ribbon"
       // The Now card lays itself out by the stage column's width (`now`), not the window's.
-      className={cn('flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface', details && '@container/now md:flex-1')}
+      className={cn('flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface', details && '@container/now', details && !compact && 'md:flex-1')}
     >
       {phoneLine}
       {header}
-      <div className={cn(BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
+      <div className={cn(compact ? COMPACT_BODY_HEIGHT : BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
         {body}
       </div>
       {showUpNext ? <UpNext programs={list} now={now} guideTime={playbackAt} after={timelineEnd} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}

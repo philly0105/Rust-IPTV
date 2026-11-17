@@ -637,6 +637,7 @@ export function ListPage() {
             onMapEpg={setMapping}
             guideHref={ribbonChannel ? `/epg?${new URLSearchParams({ source: ribbonChannel.ref.sourceId, view: `list:${listId}`, focus: ribbonChannel.ref.itemId }).toString()}` : undefined}
             details
+            compact={stacked}
           />
         }
       />

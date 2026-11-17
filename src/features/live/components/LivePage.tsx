@@ -864,9 +864,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         guideHref={ribbon.guideHref}
         playback={ribbon.playback}
         details
+        compact={stacked}
       />
     ),
-    [ribbon, ribbonSourceKind, onPlayLive],
+    [ribbon, ribbonSourceKind, onPlayLive, stacked],
   );
 
   // The list's toolbar, made once per change: a zap re-renders the page, and the groups button,

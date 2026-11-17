@@ -10,19 +10,21 @@
  */
 
 import { Bell, BellOff, ChevronDown, ChevronUp, Circle, Clock, History, Play, TriangleAlert, Volume2 } from 'lucide-react';
-import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type PlayerSource, type Reminder, type Settings } from '@/api/types';
 // Straight from its module (sports/deps.ts re-exports only ChannelLogo from it), the same chunk.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { plainChannelName } from '@/lib/channelName';
 import { channelQuality } from '@/lib/channelQuality';
 
 import {
   Badge,
   Button,
   ChannelLogo,
+  cn,
   MetaLine,
   Tooltip,
   canCatchUp,
@@ -142,10 +144,10 @@ export function useStreamContext(now: number, sourceCount: number, hdOnly = fals
           }
         }
       } catch (err) {
-        toast({ variant: 'error', title: t('playFailed', { name }), description: errorDescription(err) });
+        toast({ variant: 'error', title: t('playFailed', { name: plainChannelName(m.channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err) });
       }
     },
-    [t, toast, navigate],
+    [t, toast, navigate, prefs.stripCountryPrefix],
   );
 
   const replay = useCallback(
@@ -281,6 +283,8 @@ function StreamRow({
   const { t, i18n } = useTranslation('sports');
   const [busy, setBusy] = useState(false);
   const name = displayChannelName(match.channel.name, ctx.strip) || match.channel.name;
+  // What a screen reader hears: the cleaned name toasts use ("ESPN HD (US)"), not the provider's "US| ESPN HD".
+  const spoken = plainChannelName(match.channel.name, ctx.strip);
   const action = streamAction(game, match, ctx.now, ctx.canRecord, title);
   const run = (work: () => Promise<unknown>) => {
     setBusy(true);
@@ -309,7 +313,7 @@ function StreamRow({
         variant="secondary"
         icon={<Play size={16} aria-hidden />}
         loading={busy}
-        aria-label={t('watchLabel', { title, name })}
+        aria-label={t('watchLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.watch(match, title, name))}
         data-testid="sports-watch"
       >
@@ -324,7 +328,7 @@ function StreamRow({
         variant="secondary"
         icon={<History size={16} aria-hidden />}
         loading={busy}
-        aria-label={t('replayLabel', { title, name })}
+        aria-label={t('replayLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.replay(match, program, name))}
         data-testid="sports-replay"
       >
@@ -343,7 +347,7 @@ function StreamRow({
         variant="secondary"
         icon={<Circle size={14} aria-hidden className="fill-live text-live" />}
         loading={busy}
-        aria-label={t('recordLabel', { title, name })}
+        aria-label={t('recordLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.record(match, program, name))}
         data-testid="sports-record"
       >
@@ -367,7 +371,7 @@ function StreamRow({
           icon={reminder ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
           aria-pressed={!!reminder}
           loading={busy}
-          aria-label={reminder ? undefined : t('remindLabel', { title, name })}
+          aria-label={reminder ? undefined : t('remindLabel', { title, name: spoken })}
           onClick={() => run(() => ctx.remind(match, remindProgram, name, reminder))}
           data-testid="sports-remind"
         >
@@ -385,22 +389,35 @@ function StreamRow({
   const slotRepeatsStart =
     program !== null && game.phase === 'scheduled' && game.timeValid && !game.timeNote && Math.abs(ms(program.start) - game.startMs) < MINUTE;
   const slot = program && !slotRepeatsStart ? formatTimeRange(ms(program.start), ms(program.end), i18n.language) : null;
+  const slotStart = program && !slotRepeatsStart ? formatClock(ms(program.start), i18n.language) : null;
   const reason = t(REASON_KEYS[match.reason]);
   // A guide slot already says the match came from the guide, so it stands in for "In guide": the
-  // reason stays its tooltip and is read before it.
+  // reason stays its tooltip and is read before it. So does the regional warning, whose tooltip says
+  // why the channel matched: on the line, the reason is what pushed the slot or the warning to "N.".
   const slotIsReason = slot !== null && match.reason === 'guide';
+  const reasonHidden = slotIsReason || match.regional;
   return (
     <li className="flex min-w-0 items-center gap-3 py-2" aria-current={playing ? 'true' : undefined} data-testid="sports-stream" data-reason={match.reason}>
       <ChannelLogo src={match.channel.logoUrl} name={name} size={32} sourceId={match.sourceId} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      {/* A container, so the line below fits what it says to the room the row's action leaves. */}
+      <div className="@container flex min-w-0 flex-1 flex-col gap-1">
         {/* Named as Live TV's list names it: the country tag after the name, quiet. */}
         <ChannelName name={match.channel.name} strip={ctx.strip} className="truncate text-body-sm font-medium text-fg" testId="sports-stream-name" />
-        {/* One line: where the details don't fit beside an action, the last one truncates and the
-            toggle keeps its place at the end, so the row never grows a line that starts with a dot. */}
+        {/* One line: the quality, the warning and the slot's time keep their width, and only the
+            source's name (or the reason) truncates; the toggle keeps its place at the end, so the row
+            never grows a line that starts with a dot. Where the line is short (a phone, a card with an
+            action), the slot shows its start only, its range in the tooltip, and "Best" goes after a
+            quality tag: the order and the "+2" beside it already say this one is first. With a slot
+            or the regional warning beside it, the source's name is then only read: the room left
+            drew it as one letter. */}
         <span className="flex min-w-0 items-center gap-1.5">
           <MetaLine
             as="span"
-            className="flex-nowrap [&>span]:shrink-0 [&>span:last-child]:shrink"
+            className={cn(
+              'flex-nowrap [&>span]:shrink-0 [&>span:has([data-meta-shrink])]:shrink',
+              quality && '@max-[15rem]:[&>span:has([data-testid=sports-best])]:hidden',
+              (slot || match.regional) && '@max-[15rem]:[&>span:has([data-testid=sports-stream-source])]:sr-only',
+            )}
             items={[
               // First, so the rows' qualities line up down the list; the name's own marker is often cut
               // off or a superscript ("ᴴᴰ").
@@ -416,31 +433,40 @@ function StreamRow({
               // badge, as on an NFL Sunday nearly every card carries it. Before the reason, so where the
               // line runs short the warning is never what truncates.
               match.regional ? (
-                <span
-                  key="regional"
-                  className="flex min-w-0 items-center gap-1 text-warning"
-                  title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')}
-                  data-testid="sports-regional"
-                >
-                  <TriangleAlert aria-hidden size={12} className="shrink-0" />
-                  <span className="truncate">{t('regional')}</span>
-                </span>
+                <Fragment key="regional">
+                  <span
+                    className="flex min-w-0 items-center gap-1 text-warning"
+                    title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')}
+                    data-testid="sports-regional"
+                  >
+                    <TriangleAlert aria-hidden size={12} className="shrink-0" />
+                    <span className="truncate">{t('regional')}</span>
+                  </span>
+                  {slotIsReason ? null : <span className="sr-only">{`, ${reason}`}</span>}
+                </Fragment>
               ) : null,
               // Why it matched is quiet text: a badge on every card made status green the page's loudest colour.
-              slotIsReason ? null : (
-                <span key="reason" className="block truncate" data-testid="sports-reason">
+              reasonHidden ? null : (
+                <span key="reason" className="block truncate" data-meta-shrink="" data-testid="sports-reason">
                   {reason}
                 </span>
               ),
               ctx.multiSource ? (
-                <span key="source" dir="auto" className="block truncate" data-testid="sports-stream-source">
+                <span key="source" dir="auto" className="block truncate" data-meta-shrink="" data-testid="sports-stream-source">
                   {match.sourceName}
                 </span>
               ) : null,
               slot ? (
-                <span key="time" className="block truncate tabular-nums" title={slotIsReason ? reason : undefined} data-testid="sports-stream-slot">
+                <span
+                  key="time"
+                  className="block truncate tabular-nums"
+                  title={slotIsReason ? `${reason}: ${slot}` : slot}
+                  data-meta-shrink=""
+                  data-testid="sports-stream-slot"
+                >
                   {slotIsReason ? <span className="sr-only">{`${reason}, `}</span> : null}
-                  {slot}
+                  <span className="@max-[15rem]:hidden">{slot}</span>
+                  <span className="@min-[15rem]:hidden">{slotStart}</span>
                 </span>
               ) : null,
             ]}
@@ -516,8 +542,9 @@ export function StreamList({
   // The rest of the streams open from a small "+2" at the end of the best row's metadata, not a row
   // of its own under it: on most cards that row was a fifth of the card. It stays where it is once
   // open (a chevron up), so the same press closes the list again. Its hit area reaches 44 px on
-  // touch screens and 24 px for a mouse without making the line taller. Only 24 for a mouse: more
-  // would reach up over the channel name, and hovering a long name would light the chip.
+  // touch screens (12.625px either side of its 18.75px box) and 24 px for a mouse without making
+  // the line taller. Only 24 for a mouse: more would reach up over the channel name, and hovering
+  // a long name would light the chip.
   const toggle =
     more > 0 ? (
       <Tooltip content={toggleLabel} describe={false}>
@@ -526,7 +553,7 @@ export function StreamList({
           aria-label={toggleLabel}
           aria-expanded={all}
           onClick={() => setAll((v) => !v)}
-          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums after:absolute after:inset-x-0 after:-inset-y-0.5 pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-3 hover:bg-surface-3 active:bg-pressed"
+          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums after:absolute after:inset-x-0 after:-inset-y-0.5 pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-[calc(12.625rem/15)] hover:bg-surface-3 active:bg-pressed"
           data-testid="sports-show-all"
         >
           {all ? null : <span aria-hidden>{`+${more}`}</span>}

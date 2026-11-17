@@ -6,7 +6,7 @@
  */
 
 import { hashKey, useQueries, type QueryKey, type UseQueryResult } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { rpcKey } from '@/api/query';
 import type { EpgProgram, ItemKey, ItemRef, Settings } from '@/api/types';
@@ -30,11 +30,21 @@ const selectOffset = (s: Settings) => s.epgOffsetMinutes;
 interface GridAnswers {
   grids: (Grid | undefined)[];
   pending: boolean;
+  /** The first failed chunk's error, or null. */
+  error: unknown;
+  /** Reads the failed chunks again. */
+  refetchFailed: (() => unknown)[];
 }
 
 // Module-level, so useQueries re-runs it only when an answer changes.
 function combineGrids(results: UseQueryResult<Grid>[]): GridAnswers {
-  return { grids: results.map((r) => r.data), pending: results.some((r) => r.isPending) };
+  const failed = results.filter((r) => r.isError);
+  return {
+    grids: results.map((r) => r.data),
+    pending: results.some((r) => r.isPending),
+    error: failed[0]?.error ?? null,
+    refetchFailed: failed.map((r) => r.refetch),
+  };
 }
 
 const hashes = new WeakMap<readonly ItemRef[], Map<string, string>>();
@@ -77,14 +87,15 @@ const NO_PROGRAMS = new Map<ItemKey, EpgProgram[]>();
  * the guide shows them). The request window is the display window moved back by the offset, as the guide
  * asks; channels without a guide are left out of the map. The map stays empty until every chunk has
  * answered, so the games are matched against the guide once rather than once per chunk. The chunks wait
- * their turn in the page's read limit (sportsRead.ts), first chunk first.
+ * their turn in the page's read limit (sportsRead.ts), first chunk first. A chunk that failed leaves its
+ * channels out, and `error` says so, with `retry` to read the failed chunks again.
  */
 export function useGuideWindow(
   channels: readonly IndexedChannel[],
   from: number,
   to: number,
   enabled: boolean,
-): { programs: Map<ItemKey, EpgProgram[]>; loading: boolean } {
+): { programs: Map<ItemKey, EpgProgram[]>; loading: boolean; error: unknown; retry: () => void } {
   const settings = useSettingsValue(selectOffset);
   const offset = settings.data ?? 0;
   const end = Math.ceil(to / WINDOW_STEP) * WINDOW_STEP;
@@ -118,5 +129,9 @@ export function useGuideWindow(
     }
     return map;
   }, [answers.grids, answers.pending, offset]);
-  return { programs, loading: on && answers.pending };
+  const { refetchFailed } = answers;
+  const retry = useCallback(() => {
+    for (const refetch of refetchFailed) void refetch();
+  }, [refetchFailed]);
+  return { programs, loading: on && answers.pending, error: on ? answers.error : null, retry };
 }

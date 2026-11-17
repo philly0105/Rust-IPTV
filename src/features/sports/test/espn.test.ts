@@ -432,6 +432,32 @@ describe('normalizeScoreboard: live and unusual statuses', () => {
     expect(g.away.score).toBe(68);
   });
 
+  it("reads a live game's clock from the status, for the card to say in the user's language", () => {
+    expect(withStatus('STATUS_IN_PROGRESS', 'in', false).clock).toEqual({ kind: 'running', period: 3, clock: '5:12' });
+    expect(withStatus('STATUS_HALFTIME', 'in', false).clock).toEqual({ kind: 'halftime' });
+    expect(withStatus('STATUS_END_PERIOD', 'in', false).clock).toEqual({ kind: 'endOfPeriod', period: 3 });
+    // A delay is ESPN's own words; a final has no clock.
+    expect(withStatus('STATUS_RAIN_DELAY', 'in', false).clock).toBeUndefined();
+    expect(withStatus('STATUS_FINAL', 'post', true).clock).toBeUndefined();
+
+    // College overtime has no clock to show.
+    const ot = eventOf(cfb, (cfb.events[0] as { id: string }).id);
+    comp(ot).status = { displayClock: '0:00', period: 6, type: { name: 'STATUS_IN_PROGRESS', state: 'in', completed: false, shortDetail: '2OT' } };
+    expect(normalizeScoreboard('cfb', board(ot))[0]!.clock).toEqual({ kind: 'running', period: 6, clock: null });
+
+    // Baseball's half inning is only in the short detail's first word.
+    const inning = (shortDetail: string, name = 'STATUS_IN_PROGRESS') => {
+      const e = eventOf(mlb, '401815137');
+      comp(e).status = { displayClock: '0:00', period: 5, type: { name, state: 'in', completed: false, shortDetail } };
+      return normalizeScoreboard('mlb', board(e))[0]!.clock;
+    };
+    expect(inning('Top 5th')).toEqual({ kind: 'inning', half: 'top', inning: 5 });
+    expect(inning('Bot 5th')).toEqual({ kind: 'inning', half: 'bottom', inning: 5 });
+    expect(inning('Mid 5th')).toEqual({ kind: 'inning', half: 'middle', inning: 5 });
+    expect(inning('End 5th', 'STATUS_END_PERIOD')).toEqual({ kind: 'inning', half: 'end', inning: 5 });
+    expect(inning('Rain Delay', 'STATUS_RAIN_DELAY')).toBeUndefined();
+  });
+
   it('treats any in-progress status name as live (halftime, delays)', () => {
     expect(withStatus('STATUS_HALFTIME', 'in', false).phase).toBe('live');
     expect(withStatus('STATUS_RAIN_DELAY', 'in', false).phase).toBe('live');

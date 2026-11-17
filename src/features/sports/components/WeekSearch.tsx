@@ -54,21 +54,25 @@ export function WeekSearch({ days, query, onPick }: { days: readonly string[]; q
       <ul className="flex max-w-2xl flex-col divide-y divide-divider overflow-hidden rounded-lg border border-edge bg-surface">
         {found.map((g) => {
           const time = g.timeValid && !g.timeNote ? formatClock(g.startMs, lang) : t('tbd');
+          const leagueName = t(LEAGUE_SHORT_KEYS[g.league]);
+          // On a phone the date sits over the matchup, with the league after it: in one row the date
+          // column left the matchup half the width and cut every opponent ("Utah Jazz at Los An…").
           return (
             <li key={g.key}>
               <button
                 type="button"
                 onClick={() => onPick(g)}
-                className="flex w-full min-w-0 items-center gap-3 px-3.5 py-2.5 text-start hover:bg-hover active:bg-active"
+                className="flex w-full min-w-0 flex-col items-start gap-0.5 px-3.5 py-2.5 text-start hover:bg-hover active:bg-active sm:flex-row sm:items-center sm:gap-3"
                 data-testid="sports-week-game"
               >
-                <span className="w-36 shrink-0 text-caption text-fg-muted tabular-nums">
+                <span className="shrink-0 text-caption text-fg-muted tabular-nums sm:w-36">
                   {formatDay(localNoon(g.etDate), lang)} · {time}
+                  <span className="sm:hidden"> · {leagueName}</span>
                 </span>
-                <span dir="auto" className="min-w-0 flex-1 truncate text-body-sm font-medium text-fg">
+                <span dir="auto" className="w-full min-w-0 truncate text-body-sm font-medium text-fg sm:w-auto sm:flex-1">
                   {t('matchup', { away: g.away.displayName, home: g.home.displayName })}
                 </span>
-                <span className="shrink-0 text-caption font-semibold text-fg-subtle">{t(LEAGUE_SHORT_KEYS[g.league])}</span>
+                <span className="shrink-0 text-caption font-semibold text-fg-subtle max-sm:hidden">{leagueName}</span>
               </button>
             </li>
           );

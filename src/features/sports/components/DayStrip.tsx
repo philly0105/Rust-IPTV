@@ -110,6 +110,20 @@ export function DayStrip({
     ro.observe(list);
     return () => ro.disconnect();
   }, [value, days]);
+  // When the strip's box changes width (on a phone, a filter chip beside it turned on shows its name),
+  // the picked day is put back in the middle rather than left under the fade.
+  useLayoutEffect(() => {
+    const list = boxRef.current?.querySelector<HTMLElement>('[role=tablist]');
+    if (!list || typeof ResizeObserver === 'undefined') return;
+    let width = -1;
+    const ro = new ResizeObserver(([entry]) => {
+      const next = Math.round(entry?.contentRect.width ?? 0);
+      if (width >= 0 && next !== width) centreTab(list, false);
+      width = next;
+    });
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, []);
   const items = useMemo(() => {
     const f = formattersFor(lang);
     return days.map((day) => {

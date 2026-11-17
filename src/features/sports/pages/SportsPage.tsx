@@ -18,7 +18,7 @@
  * the league and search leave on screen.
  */
 
-import { CalendarX2, Hd, SearchX, Star, Tv } from 'lucide-react';
+import { CalendarX2, Hd, SearchX, Star, TriangleAlert, Tv } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
@@ -33,7 +33,23 @@ import { LEAGUE_KEYS, LeagueFilter } from '../components/LeagueFilter';
 import { GRID_COLUMNS, SportsSkeleton } from '../components/SportsSkeleton';
 import { QUALITY_LABEL, useStreamContext, type StreamContext } from '../components/StreamList';
 import { WeekSearch } from '../components/WeekSearch';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SearchEverythingLink, SectionHeader, cn, intlLocale, useNow, useSettingsValue, useShell, useToast, useVisibleSources } from '../deps';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  FilterChip,
+  Page,
+  SearchEverythingLink,
+  SectionHeader,
+  TEXT_LINK,
+  cn,
+  intlLocale,
+  useNow,
+  useSettingsValue,
+  useShell,
+  useToast,
+  useVisibleSources,
+} from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -68,11 +84,14 @@ const PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:sticky [@media(
 const CLEAR_PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:[&_button]:scroll-mt-32';
 
 /**
- * A filter chip on a phone, beside the day strip: its icon and count, with the label hidden but still
- * the chip's name. The label's empty box would leave two gaps between the icon and the count, so the
- * gap goes and the icon keeps one of its own.
+ * A filter chip on a phone, beside the day strip, while it is off: its icon and count, with the label
+ * hidden but still the chip's name. The label's empty box would leave two gaps between the icon and the
+ * count, so the gap goes and the icon keeps one of its own. Turned on, the chip says its name, so what
+ * hides games is never only an icon.
  */
 const COMPACT_CHIP = 'max-sm:gap-0 max-sm:px-3 max-sm:[&>svg]:me-1.5';
+const compactChip = (pressed: boolean) => (pressed ? undefined : COMPACT_CHIP);
+const compactLabel = (pressed: boolean) => (pressed ? undefined : 'max-sm:sr-only');
 
 /** What the quality chip turns on: Full HD (1080p) and up. */
 const QUALITY_FLOOR: ChannelQuality = 'fhd';
@@ -233,6 +252,12 @@ export function SportsPage() {
   );
   // Part of the channel index failed: a game with no stream may have one the page couldn't look through.
   const streamsError = hasSources ? (dayStreams.error ?? liveStreams.error ?? null) : null;
+  // Part of the guide failed: games still match by channel name, and the page says so once, quietly.
+  const guideError = hasSources && streamsError === null ? (dayStreams.guideError ?? liveStreams.guideError ?? null) : null;
+  const retryStreams = () => {
+    dayStreams.retry();
+    liveStreams.retry();
+  };
   const ctx = useStreamContext(now, sourceCount, hdOnly, streamsError !== null);
   // Live TV's filter has already left the lower qualities out of the index.
   const floorStreams = hdOnly && !liveFloor;
@@ -262,14 +287,15 @@ export function SportsPage() {
   const watchable =
     hasSources && !matching && !uncounted && streamsError === null ? [...sections.live, ...sections.upcoming, ...sections.final].filter(hasStream).length : undefined;
 
-  // A league that failed with no games kept has no count either; the others still have theirs.
+  // A league that failed with no games kept has no count either; the others still have theirs. While a
+  // team search is on, the tabs count the games it finds, as With streams does: one toolbar, one kind of number.
   const counts = useMemo(() => {
     if (uncounted) return undefined;
-    const all: Partial<Record<League, number>> = leagueCounts(allDay.games);
+    const all: Partial<Record<League, number>> = leagueCounts(filterGames(allDay.games, null, query));
     for (const l of failedLeagues) delete all[l];
     return all;
-  }, [uncounted, allDay.games, failedLeagues]);
-  const liveLeagues = useMemo(() => new Set<League>(allLive.games.map((g) => g.league)), [allLive.games]);
+  }, [uncounted, allDay.games, failedLeagues, query]);
+  const liveLeagues = useMemo(() => new Set<League>(filterGames(allLive.games, null, query).map((g) => g.league)), [allLive.games, query]);
   const showLeague = league === null;
   const myTeamsCount = useMemo(
     () => (followed.size > 0 ? [...new Set([...leagueLive, ...leagueDay].filter((g) => followsGame(followed, g)).map((g) => g.key))].length : 0),
@@ -426,8 +452,8 @@ export function SportsPage() {
           the league tabs (the margin takes back the padding where it is not pinned). The day tabs'
           rule is its bottom edge.
           On a phone it is two rows, not three: the league tabs across the width, then the day strip
-          with the filter chips at its end, drawn as their icon and count (their label stays their
-          name). The chips' own row held a sixth of the first screen for one or two small chips. The
+          with the filter chips at its end, drawn as their icon and count while off (their label stays
+          their name) and "1080p+" in words. The chips' own row held a sixth of the first screen for one or two small chips. The
           first row's box steps aside there (display: contents), so its two parts sit on the grid. */}
       <div
         ref={toolbarRef}
@@ -454,13 +480,13 @@ export function SportsPage() {
                     backToTop();
                     toggleMyTeamsOnly(!myTeamsOnly);
                   }}
-                  className={COMPACT_CHIP}
+                  className={compactChip(myTeamsOnly)}
                   icon={<Star aria-hidden size={14} className={myTeamsOnly ? 'shrink-0 fill-current' : 'shrink-0'} />}
                   count={myTeamsCount}
                   title={t('myTeamsHint')}
                   data-testid="sports-my-teams"
                 >
-                  <span className="max-sm:sr-only">{t('myTeams')}</span>
+                  <span className={compactLabel(myTeamsOnly)}>{t('myTeams')}</span>
                 </FilterChip>
               ) : null}
               {hasSources ? (
@@ -470,13 +496,13 @@ export function SportsPage() {
                     backToTop();
                     toggleStreamsOnly(!streamsOnly);
                   }}
-                  className={COMPACT_CHIP}
+                  className={compactChip(streamsOnly)}
                   icon={<Tv aria-hidden size={14} className="shrink-0" />}
                   count={watchable}
                   title={t('withStreamsHint')}
                   data-testid="sports-streams-only"
                 >
-                  <span className="max-sm:sr-only">{t('withStreamsFilter')}</span>
+                  <span className={compactLabel(streamsOnly)}>{t('withStreamsFilter')}</span>
                 </FilterChip>
               ) : null}
               {hasSources ? (
@@ -493,12 +519,14 @@ export function SportsPage() {
                     writeHdOnly(!hdOnly);
                     setHdOnly(!hdOnly);
                   }}
-                  className={COMPACT_CHIP}
-                  icon={<Hd aria-hidden size={14} className="shrink-0" />}
+                  // On a phone, the words alone: an HD glyph said nothing on a touch screen, where its
+                  // tooltip never shows, and "1080p+" is about as narrow.
+                  className="max-sm:px-3"
+                  icon={<Hd aria-hidden size={14} className="shrink-0 max-sm:hidden" />}
                   title={liveFloor ? t('qualityLiveOn', { quality: qualityLabel }) : t('qualityHint', { quality: qualityLabel })}
                   data-testid="sports-quality"
                 >
-                  <span className="max-sm:sr-only">{`${qualityLabel}+`}</span>
+                  {`${qualityLabel}+`}
                 </FilterChip>
               ) : null}
             </div>
@@ -527,11 +555,19 @@ export function SportsPage() {
           size="inline"
           error={streamsError}
           title={t('streamsErrorTitle')}
-          onRetry={() => {
-            dayStreams.retry();
-            liveStreams.retry();
-          }}
+          onRetry={retryStreams}
         />
+      ) : null}
+      {guideError !== null && allDay.games.length > 0 ? (
+        <p role="status" className="-mt-2 flex items-start gap-2 text-caption text-fg-muted" data-testid="sports-guide-failed">
+          <TriangleAlert aria-hidden size={14} className="mt-px shrink-0 text-warning" />
+          <span>
+            {t('guideErrorNote')}{' '}
+            <button type="button" className={TEXT_LINK} onClick={retryStreams} data-testid="sports-guide-retry">
+              {t('common:retry')}
+            </button>
+          </span>
+        </p>
       ) : null}
       {live.length > 0 ? (
         <Section id="live" title={t('liveNow')} count={live.length}>

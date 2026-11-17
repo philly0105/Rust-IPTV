@@ -6,6 +6,8 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import deSports from '@/i18n/de/sports.json';
+
 import type { Game, League } from '../lib/types';
 import type { StreamMatch } from '../lib/match';
 
@@ -31,6 +33,7 @@ const data = vi.hoisted(() => ({
   streams: new Map<string, unknown[]>(),
   streamsLoading: false,
   streamsError: null as unknown,
+  guideError: null as unknown,
   streamRetries: 0,
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
@@ -65,8 +68,8 @@ vi.mock('../hooks/useGameStreams', () => ({
     data.streamCalls.push({ keys: games.map((g) => g.key), enabled });
     const retry = () => void data.streamRetries++;
     return enabled
-      ? { streams: data.streams, loading: data.streamsLoading, error: data.streamsError, retry }
-      : { streams: new Map(), loading: false, error: null, retry };
+      ? { streams: data.streams, loading: data.streamsLoading, error: data.streamsError, guideError: data.guideError, retry }
+      : { streams: new Map(), loading: false, error: null, guideError: null, retry };
   },
 }));
 
@@ -189,6 +192,7 @@ beforeEach(() => {
   data.streams = new Map();
   data.streamsLoading = false;
   data.streamsError = null;
+  data.guideError = null;
   data.streamRetries = 0;
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
@@ -242,6 +246,8 @@ describe('sports page', () => {
     expect(tabs[7]!.textContent).toMatch(/^Today \w{3} \d{1,2}$/);
     expect(screen.getByRole('tab', { name: TODAY }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByTestId('sports-day-panel').getAttribute('aria-labelledby')).toBe(`sports-day-tab-${today()}`);
+    // Only the picked day's panel exists, so only its tab points at one (w-a11y-11).
+    expect(tabs.filter((t) => t.hasAttribute('aria-controls')).map((t) => t.getAttribute('aria-controls'))).toEqual([screen.getByTestId('sports-day-panel').id]);
 
     fireEvent.click(screen.getByRole('tab', { name: /^Tomorrow / }));
     await waitFor(() => expect(h.location.current).toBe(`/sports?day=${tomorrow}`));
@@ -296,6 +302,12 @@ describe('sports page', () => {
     expect(within(screen.getByTestId('sports-leagues')).getByRole('tablist').className).toContain('flex-wrap');
     // Every league is on show: each card names its own.
     expect(within(card(nfl)).getByTestId('sports-game-league').textContent).toBe('NFL');
+    // A team search counts the games it finds, as With streams does, and marks only the leagues where one
+    // it finds is on; the counts come back with it cleared.
+    act(() => useShellStore.getState().header!.search!.onChange('bears'));
+    await waitFor(() => expect(pills.map((p) => p.textContent)).toEqual(['All 1', 'NFL 1', 'NCAAFCollege Football 0', 'NBA 0', 'MLB 0']));
+    act(() => useShellStore.getState().header!.search!.onChange(''));
+    await waitFor(() => expect(pills[3]!.textContent).toBe('NBA 1'));
 
     fireEvent.click(screen.getByRole('tab', { name: /^NBA / }));
     await waitFor(() => expect(h.location.current).toBe('/sports?league=nba'));
@@ -386,6 +398,25 @@ describe('sports page', () => {
     data.cache.clear();
     open();
     expect(within(card(nfl)).getByTestId('sports-notes').textContent).toBe('2nd & 7 at NO 35');
+  });
+
+  it("says a live game's clock in the user's language, from ESPN's status, and keeps ESPN's words it can't read", async () => {
+    const running = h.liveGame('1', { clock: { kind: 'running', period: 3, clock: '5:42' } });
+    const overtime = h.liveGame('2', { league: 'nfl', clock: { kind: 'endOfPeriod', period: 6 }, shortDetail: 'End of 2OT', home: h.team('NO', 'New Orleans Saints'), away: h.team('PIT', 'Pittsburgh Steelers') });
+    const inning = h.liveGame('3', { league: 'mlb', clock: { kind: 'inning', half: 'bottom', inning: 7 }, shortDetail: 'Bot 7th', home: h.team('NYY', 'New York Yankees'), away: h.team('BOS', 'Boston Red Sox') });
+    const delayed = h.liveGame('4', { league: 'mlb', shortDetail: 'Rain Delay', home: h.team('CHC', 'Chicago Cubs'), away: h.team('STL', 'St. Louis Cardinals') });
+    setDay([running, overtime, inning, delayed]);
+    open();
+    const clocks = () => [running, overtime, inning, delayed].map((g) => within(card(g)).getByTestId('sports-clock').textContent);
+    // English keeps ESPN's own line.
+    expect(clocks()).toEqual(['Q3 5:42', 'End of 2OT', 'Bot 7th', 'Rain Delay']);
+    h.i18n.addResourceBundle('de', 'sports', deSports);
+    await act(() => h.i18n.changeLanguage('de'));
+    try {
+      expect(clocks()).toEqual(['3. Viertel 5:42', 'Ende 2. Verlängerung', '7. Inning unten', 'Rain Delay']);
+    } finally {
+      await act(() => h.i18n.changeLanguage('en'));
+    }
   });
 
   it("puts a live game's best stream on the multi-view wall from its menu", async () => {
@@ -543,6 +574,12 @@ describe('sports page', () => {
       expect(chip.querySelector('svg')).toBeTruthy();
       expect(classes(within(chip).getByText(label))).toContain('max-sm:sr-only');
       expect(screen.getByRole('button', { name: new RegExp(`^${label} ?\\d+$`) })).toBe(chip);
+      // Turned on, it says its name there too: what hides games is never only an icon.
+      fireEvent.click(chip);
+      expect(chip.getAttribute('aria-pressed')).toBe('true');
+      expect(classes(within(chip).getByText(label))).not.toContain('max-sm:sr-only');
+      expect(classes(chip)).not.toContain('max-sm:gap-0');
+      fireEvent.click(chip);
     }
   });
 
@@ -748,9 +785,9 @@ describe('sports page', () => {
     const chip = screen.getByTestId('sports-quality');
     expect(chip.getAttribute('aria-pressed')).toBe('false');
     expect(chip.getAttribute('title')).toBe('Hide streams whose channel name marks a quality below 1080p. Only on this page: Live TV keeps its own filter.');
-    // On a phone it is its icon, its label hidden but still its name.
-    expect(chip.querySelector('svg')).toBeTruthy();
-    expect(within(chip).getByText('1080p+').className.split(' ')).toContain('max-sm:sr-only');
+    // On a phone it is its words: the HD glyph said nothing where no tooltip shows.
+    expect(chip.querySelector('svg')!.getAttribute('class')).toContain('max-sm:hidden');
+    expect(within(chip).getByText('1080p+').className.split(' ')).not.toContain('max-sm:sr-only');
     const names = () => {
       const list = within(card(g)).getByTestId('sports-streams');
       const toggle = within(list).queryByTestId('sports-show-all');
@@ -857,7 +894,7 @@ describe('sports page', () => {
     expect(more.getAttribute('aria-expanded')).toBe('false');
     // Its hit area reaches 44 px on touch, and 24 px for a mouse, just short of the name above it.
     const hit = more.className.split(' ');
-    expect(hit).toEqual(expect.arrayContaining(['after:absolute', 'after:-inset-y-0.5', 'pointer-coarse:after:-inset-y-3']));
+    expect(hit).toEqual(expect.arrayContaining(['after:absolute', 'after:-inset-y-0.5', 'pointer-coarse:after:-inset-y-[calc(12.625rem/15)]']));
     fireEvent.click(more);
     rows = within(list).getAllByTestId('sports-stream');
     // The toggle stays put in the first row, so the same press closes the list again.
@@ -866,13 +903,19 @@ describe('sports page', () => {
     // A guide match's slot stands in for "In guide", which stays its tooltip and is read before it.
     expect(within(rows[0]!).queryByTestId('sports-reason')).toBeNull();
     const slot = within(rows[0]!).getByTestId('sports-stream-slot');
-    expect(slot.getAttribute('title')).toBe('In guide');
+    expect(slot.getAttribute('title')).toMatch(/^In guide: \d.*–.*\d/);
     expect(slot.textContent).toMatch(/^In guide, \d/);
+    // Where the line is short the slot shows its start only; the range is kept for a wide line.
+    expect([...slot.children].map((e) => e.className)).toEqual(['sr-only', '@max-[15rem]:hidden', '@min-[15rem]:hidden']);
+    expect(slot.children[2]!.textContent).not.toContain('–');
     // The reason is quiet text, and the regional warning warning-toned text: neither is a badge.
     expect(within(rows[1]!).getByTestId('sports-reason').className).toBe('block truncate');
     expect(within(rows[2]!).getByTestId('sports-regional').className).toContain('text-warning');
     expect(within(rows[1]!).getByText('Event channel')).toBeTruthy();
-    expect(within(rows[2]!).getByText('Network')).toBeTruthy();
+    // A regional row's reason is read, not drawn: the warning's tooltip explains it, and on the line
+    // the reason cut the warning or the slot to "N.".
+    expect(within(rows[2]!).queryByTestId('sports-reason')).toBeNull();
+    expect(within(rows[2]!).getByText(', Network').className).toBe('sr-only');
     expect(within(rows[2]!).getByTestId('sports-regional').textContent).toBe('Regional');
     expect(within(rows[2]!).getByTestId('sports-regional').getAttribute('title')).toBe('This channel may show a different regional game.');
     expect(within(rows[0]!).queryByTestId('sports-regional')).toBeNull();
@@ -908,10 +951,18 @@ describe('sports page', () => {
     rpc.handlers['sources.list'] = () => h.TWO_SOURCES;
     const g = h.liveGame('1');
     setDay([g]);
-    setStreams(g, [h.match(ESPN), h.match(h.channel('7', 'ESPN', { ref: { sourceId: 'src2', contentType: 'live', itemId: '7' } }), { sourceId: 'src2', sourceKind: 'm3u', sourceName: 'Backup list' })]);
+    setStreams(g, [
+      h.match(ESPN),
+      h.match(h.channel('7', 'ESPN', { ref: { sourceId: 'src2', contentType: 'live', itemId: '7' } }), { sourceId: 'src2', sourceKind: 'm3u', sourceName: 'Backup list', regional: true }),
+    ]);
     open();
     fireEvent.click(await within(card(g)).findByRole('button', { name: 'Show all 2 streams' }));
     await waitFor(() => expect(within(card(g)).getAllByTestId('sports-stream-source').map((s) => s.textContent)).toEqual(['Home portal', 'Backup list']));
+    // Where the line is short, a row with the regional warning (or a slot) leaves its source's name to
+    // screen readers rather than draw it as one letter; a row without either keeps it on screen.
+    const lines = within(card(g)).getAllByTestId('sports-stream').map((r) => r.querySelector('[data-testid=sports-stream-source]')!.closest('span.flex-nowrap')!.className);
+    expect(lines[0]).not.toContain('sports-stream-source])]:sr-only');
+    expect(lines[1]).toContain('@max-[15rem]:[&>span:has([data-testid=sports-stream-source])]:sr-only');
   });
 
   it('watches a live game, then zaps through the channel group', async () => {
@@ -1068,6 +1119,8 @@ describe('sports page', () => {
     expect(tag.className).toContain('text-fg-subtle');
     // Screen readers get the provider's name as it is.
     expect(within(row).getByTestId('sports-stream-name').querySelector('.sr-only')!.textContent).toBe('US| ESPN HD');
+    // Its Watch names the channel as toasts do, cleaned, never "US| ESPN HD" (w-a11y-03).
+    expect(within(row).getByTestId('sports-watch').getAttribute('aria-label')).toBe('Watch Boston Celtics at New York Knicks on ESPN HD (US)');
   });
 
   it("puts the rows that can act first: a final game's one archived copy is not hidden behind Show all", async () => {
@@ -1198,6 +1251,28 @@ describe('sports page', () => {
     expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
     fireEvent.click(within(alert!).getByRole('button', { name: 'Try again' }));
     expect(data.streamRetries).toBeGreaterThan(0);
+  });
+
+  it('says once, quietly, when the guide could not be read, and reads it again from there', async () => {
+    const g = h.liveGame('1');
+    setDay([g]);
+    setStreams(g, [h.match(ESPN)]);
+    data.guideError = Object.assign(new Error('database is locked'), { code: 'db' });
+    await openReady();
+    const note = screen.getByTestId('sports-guide-failed');
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.textContent).toBe("Couldn't read the TV guide for these games, so streams are matched by channel names only. Try again");
+    // Not an alert box, and the cards still offer what was found by name.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(within(card(g)).getByTestId('sports-watch')).toBeTruthy();
+    fireEvent.click(within(note).getByRole('button', { name: 'Try again' }));
+    expect(data.streamRetries).toBeGreaterThan(0);
+    cleanup();
+
+    // The channel index failing as well says that, the louder message, alone.
+    data.streamsError = Object.assign(new Error('database is locked'), { code: 'db' });
+    await openReady();
+    expect(screen.queryByTestId('sports-guide-failed')).toBeNull();
   });
 
   it('says streams are being looked for while matching runs', async () => {

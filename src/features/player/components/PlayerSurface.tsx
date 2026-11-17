@@ -303,7 +303,14 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
   const upNext = useMediaStore((s) => s.upNext);
   const fullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const action = useStageEndedAction();
-  if (!ended || upNext) return null;
+  // The way on takes focus when the player had it (or the page did): it stayed on the page's
+  // body, so Enter did nothing, as UpNextCard's Play now already does.
+  const primary = useRef<HTMLButtonElement>(null);
+  const shown = ended && !upNext;
+  useEffect(() => {
+    if (shown) focusIfPlayerOwnsFocus(primary.current);
+  }, [shown]);
+  if (!shown) return null;
   const small = compact || short;
   if (action && !compact) {
     return (
@@ -323,7 +330,7 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
             <RotateCcw aria-hidden />
             {t('replay')}
           </button>
-          <button type="button" onClick={action.onClick} className={glassButton('primary', short ? 'sm' : 'md')}>
+          <button ref={primary} type="button" onClick={action.onClick} className={glassButton('primary', short ? 'sm' : 'md')}>
             {action.label}
           </button>
         </div>
@@ -341,6 +348,7 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <button
+        ref={primary}
         type="button"
         onClick={replay}
         aria-label={t('replay')}

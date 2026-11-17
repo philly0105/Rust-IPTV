@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { sameRef, type Channel, type EpgProgram, type ItemRef, type SourceKind } from '@/api/types';
+import { downloadToastId } from '@/features/library/lib/queue';
 import { PlayerStage, usePlayerStore } from '@/features/player';
 import { plainChannelName } from '@/lib/channelName';
 import { useShell } from '@/shell';
@@ -273,9 +274,11 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes, back }: BrowserPro
     catchupDownloadArgs(channel, kind, p, { now, displayName: name, subtitle, notFileMessage: t('downloadNotFile', { ns: 'vod' }) })
       .then(async (args) => {
         if (!args) return;
-        await rpc('downloads.start', args);
+        const queued = await rpc('downloads.start', args);
         void invalidate('downloads.');
         toast({
+          // The download's own id: its Downloaded (or failed) toast replaces this one in place.
+          id: downloadToastId(queued.id),
           title: t('downloadQueued', { ns: 'vod' }),
           description: `${name}  ${p.title}`,
           variant: 'success',

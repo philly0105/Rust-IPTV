@@ -160,6 +160,18 @@ function card(game: Game): HTMLElement {
   return el;
 }
 
+/**
+ * A stream's name as drawn. ChannelName may draw a feed's quality words apart from the station
+ * ("ESPN" + " HD") in a part screen readers skip, beside one copy of the name they read instead;
+ * that copy has to say the same, once.
+ */
+function streamName(n: HTMLElement): string | null {
+  const drawn = n.querySelector('[aria-hidden]');
+  if (!drawn) return n.textContent;
+  expect(n.querySelector('.sr-only')?.textContent).toBe(drawn.textContent);
+  return drawn.textContent;
+}
+
 const ESPN = h.channel('1', 'US| ESPN HD');
 const EVENT = h.channel('2', 'NBA 05: Celtics vs Knicks', { categoryId: 'nba-events' });
 const MSG = h.channel('3', 'MSG');
@@ -743,7 +755,7 @@ describe('sports page', () => {
       const list = within(card(g)).getByTestId('sports-streams');
       const toggle = within(list).queryByTestId('sports-show-all');
       if (toggle?.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
-      return within(list).getAllByTestId('sports-stream-name').map((n) => n.textContent);
+      return within(list).getAllByTestId('sports-stream-name').map(streamName);
     };
     expect(names()).toEqual(['ESPN HD', 'ESPN ᵁᴴᴰ', 'NBA 05: Celtics vs Knicks', 'BOSTON CELTICS SD']);
     fireEvent.click(chip);
@@ -808,7 +820,7 @@ describe('sports page', () => {
     const list = within(card(g)).getByTestId('sports-streams');
     fireEvent.click(within(list).getByRole('button', { name: 'Show all 4 streams' }));
     const rows = within(list).getAllByTestId('sports-stream');
-    expect(rows.map((r) => within(r).getByTestId('sports-stream-name').textContent)).toEqual(['ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ', 'ESPN HD', 'TSN 1 ⁽ᴮᴷ⁾ ᴿᴬᵂ', 'BOSTON CELTICS SD']);
+    expect(rows.map((r) => streamName(within(r).getByTestId('sports-stream-name')))).toEqual(['ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ', 'ESPN HD', 'TSN 1 ⁽ᴮᴷ⁾ ᴿᴬᵂ', 'BOSTON CELTICS SD']);
     expect(rows.map((r) => within(r).queryByTestId('sports-stream-quality')?.textContent ?? null)).toEqual(['4K', '720p', null, 'SD']);
     // The first of several says it is the best, in words after its quality.
     expect(rows.map((r) => within(r).queryByTestId('sports-best')?.textContent ?? null)).toEqual(['Best', null, null, null]);

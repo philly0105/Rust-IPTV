@@ -119,12 +119,10 @@ export const TabBar = memo(function TabBar() {
     { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') || fromGuide },
     { id: 'search', to: '/search', label: t('navSearch'), icon: Search, active: pathname === '/search', tour: 'search' },
   ];
-  // The page on show lives in the sheet: More takes its icon and name, so a movie's page says
-  // Movies at the foot of the screen, not just More. A page in no tab and no tile (a 404, a
-  // source's search) marks no tab.
-  const sheetPage = tabs.some((tab) => tab.active) || sourceGone(sources.data, pathname) ? undefined : sheetCurrent(sources.data, pathname, forSearch, t);
-  const moreActive = sheetPage !== undefined;
-  const MoreIcon = sheetPage?.icon ?? MenuIcon;
+  // The page on show lives in the sheet: More is the current tab. It keeps its own icon and name
+  // ("More" fits every locale; a page's name was cut to "Recently wat…" and hid the way into the
+  // sheet). A page in no tab and no tile (a 404, a source's search) marks no tab.
+  const moreActive = !tabs.some((tab) => tab.active) && !sourceGone(sources.data, pathname) && inSheet(sources.data, pathname, forSearch);
 
   return (
     <nav
@@ -152,13 +150,11 @@ export const TabBar = memo(function TabBar() {
             className={tabClass(moreActive)}
           >
             <span className="relative shrink-0">
-              <MoreIcon aria-hidden size={22} className={cn(moreActive && 'text-accent')} />
+              <MenuIcon aria-hidden size={22} className={cn(moreActive && 'text-accent')} />
               {/* Downloads and Scheduled live in the sheet: a running download or recording shows here. */}
               <ActivityMark kind="any" placement="corner" />
             </span>
-            <span className="max-w-full truncate">{sheetPage?.label ?? t('tabMore')}</span>
-            {/* Still the sheet's opener while it names the page: "Movies, More". */}
-            {sheetPage && <span className="sr-only">{`, ${t('tabMore')}`}</span>}
+            <span className="max-w-full truncate">{t('tabMore')}</span>
             <ActivityText kind="any" />
           </button>
         </li>
@@ -208,23 +204,13 @@ function sheetWatchLinks(sources: readonly Source[] | undefined, pathname: strin
 }
 
 /**
- * The sheet's entry for the page on show, if it has one: a Watch tile, a Library tile, the
- * Sources page or Settings, by the rules that mark them current in the sheet.
+ * The page on show has an entry in the sheet: a Watch tile, a Library tile, the Sources page or
+ * Settings, by the rules that mark them current in the sheet.
  */
-function sheetCurrent(
-  sources: readonly Source[] | undefined,
-  pathname: string,
-  search: string,
-  t: (key: string) => string,
-): { label: string; icon: LucideIcon } | undefined {
-  const watch = sheetWatchLinks(sources, pathname, search).find((l) => l.active)?.link;
-  if (watch) return { label: t(watch.labelKey), icon: watch.icon };
+function inSheet(sources: readonly Source[] | undefined, pathname: string, search: string): boolean {
+  if (sheetWatchLinks(sources, pathname, search).some((l) => l.active)) return true;
   const under = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
-  const library = LIBRARY_LINKS.find((l) => under(l.to));
-  if (library) return { label: t(library.labelKey), icon: library.icon };
-  if (pathname === '/sources') return { label: t('sources'), icon: Server };
-  if (under('/settings')) return { label: t('navSettings'), icon: SettingsIcon };
-  return undefined;
+  return LIBRARY_LINKS.some((l) => under(l.to)) || pathname === '/sources' || under('/settings');
 }
 
 /** One square tile of the sheet's Watch and Library grids. */

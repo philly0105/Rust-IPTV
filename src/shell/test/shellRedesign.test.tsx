@@ -340,10 +340,10 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     const { router } = renderRoutes(routes(), '/s/s2/movies');
     const bar = await screen.findByTestId('tab-bar');
     await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s2/live'));
-    // Movies of a source is under More, which names it: the tick in the mark tone, the page's own icon and name.
-    const more = within(bar).getByRole('button', { name: 'Movies, More' });
+    // Movies of a source is under More: the tick in the mark tone, and the tab keeps its own name.
+    const more = within(bar).getByRole('button', { name: 'More' });
     expect(more.className).toContain('before:bg-accent-mark');
-    expect(more.querySelector('.truncate')?.textContent).toBe('Movies');
+    expect(more.querySelector('.truncate')?.textContent).toBe('More');
     expect(more.getAttribute('aria-current')).toBe('true');
     fireEvent.click(more);
     const sheet = await screen.findByRole('dialog', { name: 'More' });
@@ -419,11 +419,11 @@ describe('phone tab bar on a page in no tab and no tile', () => {
     expect(within(bar).queryAllByRole('link').filter((l) => l.getAttribute('aria-current'))).toEqual([]);
   });
 
-  it('names Settings on the settings pages', async () => {
+  it('marks More on the settings pages, under its own name', async () => {
     media(...PHONE);
     renderRoutes([{ ...routes()[0]!, children: [...routes()[0]!.children, { path: 'settings/*', element: <Page>settings page</Page> }] }], '/settings/playback');
     const bar = await screen.findByTestId('tab-bar');
-    const more = await within(bar).findByRole('button', { name: 'Settings, More' });
+    const more = await within(bar).findByRole('button', { name: 'More' });
     expect(more.getAttribute('aria-current')).toBe('true');
   });
 });

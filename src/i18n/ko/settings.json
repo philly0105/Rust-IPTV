@@ -373,7 +373,7 @@
   "resetAction": "초기화…",
   "resetConfirmTitle": "모든 설정을 초기화할까요?",
   "resetConfirmBody": "언어, 테마, 플레이어 경로를 포함한 모든 설정이 기본값으로 돌아갑니다. 소스, 즐겨찾기, 기록, 다운로드는 유지됩니다. 가이드 주소와 TMDB 키도 유지됩니다.",
-  "resetConfirm": "초기화",
+  "resetConfirm": "설정 초기화",
   "resetDone": "설정을 기본값으로 되돌렸습니다",
   "resetFailed": "설정을 초기화할 수 없습니다",
   "streamReconnect": "끊긴 스트림 다시 연결",

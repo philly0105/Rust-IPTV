@@ -138,6 +138,50 @@ describe('rpc (web)', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))));
     await expect(rpc('app.info')).rejects.toMatchObject({ code: 'network', retryable: true });
   });
+
+  /** A server that accepts the request and never answers, until the request is aborted. */
+  const hangingFetch = () =>
+    vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+
+  it('gives up on a read after timeoutMs with a timeout error that is not retried (states-feedback-07)', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', hangingFetch());
+      const call = rpcRaw('favorites.list', {}, { timeoutMs: 30_000 }).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await call).toMatchObject({ code: 'timeout', retryable: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still rejects with the abort reason when the caller cancels a timed read', async () => {
+    vi.stubGlobal('fetch', hangingFetch());
+    const ctrl = new AbortController();
+    const call = rpcRaw('favorites.list', {}, { signal: ctrl.signal, timeoutMs: 30_000 }).catch((e: unknown) => e);
+    ctrl.abort();
+    const err = await call;
+    expect(err).not.toBeInstanceOf(RpcError);
+    expect((err as Error).name).toBe('AbortError');
+  });
+
+  it('has no timeout unless the caller asks for one (imports, refreshes)', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', hangingFetch());
+      let settled = false;
+      void rpc('app.info').finally(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(settled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('proxiedUrl (web)', () => {

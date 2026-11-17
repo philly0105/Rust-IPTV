@@ -400,7 +400,6 @@
   "removedUndoHint": "ستُحذف معه قنواته ومفضلاته وسجل المشاهدة وعناوينه في قائمتي.",
   "undo": "تراجع",
   "removeFailedKept": "عاد المصدر إلى قائمتك.",
-  "removedAnnouncement": "تمت إزالة {{name}}. اضغط F8 للوصول إلى «تراجع».",
   "restoredAnnouncement": "تمت استعادة {{name}}",
   "errorFileTooLarge": "حجم هذا الملف {{size}}، وهو أكبر من أن يُفتح هنا. ضعه على عنوان ويب وأضفه كرابط URL.",
   "progressBytes": "تم تنزيل {{size}}",

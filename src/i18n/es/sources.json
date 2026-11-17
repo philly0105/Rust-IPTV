@@ -346,7 +346,6 @@
   "removedUndoHint": "Sus canales, favoritos, historial de reproducción y títulos de Mi lista se eliminan con ella.",
   "undo": "Deshacer",
   "removeFailedKept": "La fuente vuelve a estar en tu lista.",
-  "removedAnnouncement": "{{name}} eliminada. Pulsa F8 para llegar a Deshacer.",
   "restoredAnnouncement": "{{name}} restaurada",
   "errorFileTooLarge": "Este archivo ocupa {{size}}, demasiado para abrirlo aquí. Súbelo a una dirección web y añádelo como URL.",
   "progressBytes": "{{size}} descargados",

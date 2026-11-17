@@ -215,6 +215,8 @@
   "playTitle": "Oynat: {{title}}",
   "openFailed": "{{title}} açılamadı",
   "removeFailed": "Öğe kaldırılamadı",
+  "favoritesLoadFailed": "Favoriler yüklenemedi",
+  "recentLoadFailed": "Geçmiş yüklenemedi",
   "sourceRemoved": "Kaynak kaldırıldı",
   "sourceRemovedHint": "Bu öğenin kaynağı kaldırıldı. Öğeyi açmak için kaynağı yeniden ekleyin.",
   "tryAgain": "Yeniden dene",

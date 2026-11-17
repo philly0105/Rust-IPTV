@@ -77,7 +77,7 @@ describe('takeScreenshot in the desktop app', () => {
     opts.action.onClick();
     await vi.waitFor(() =>
       expect(toastMock).toHaveBeenLastCalledWith({
-        title: 'Could not open the screenshot',
+        title: 'Couldn\'t open the screenshot',
         description: 'No app is set to open PNG files.',
         variant: 'error',
       }),

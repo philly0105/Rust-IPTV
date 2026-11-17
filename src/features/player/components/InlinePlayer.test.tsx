@@ -47,7 +47,7 @@ describe('stream error overlay', () => {
     expect(alert.getAttribute('data-error-class')).toBe('auth');
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('The provider refused this stream');
     expect(alert.textContent).toContain('HTTP 403');
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 
   it('leaves room for the title bar and scrolls from the top in a short player (390 px)', () => {
@@ -81,7 +81,7 @@ describe('stream error overlay', () => {
     expect(heading.getAttribute('title')).toContain('HTTP 403');
     expect(alert.querySelector('details')).toBeNull();
     expect(alert.querySelector('p.line-clamp-2')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     // With the title bar hidden, the panel names what failed.
     expect(screen.getByTestId('error-item').textContent).toBe('Movie');
   });
@@ -153,7 +153,7 @@ describe('stream error overlay', () => {
     expect(usePlayerStore.getState().status).toBe('error');
     const { rpc } = await import('@/api/transport');
     const before = vi.mocked(rpc).mock.calls.filter((c) => c[0] === 'xtream.streamUrl').length;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
     });

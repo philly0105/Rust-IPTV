@@ -378,7 +378,7 @@
   "resetAction": "Réinitialiser…",
   "resetConfirmTitle": "Réinitialiser tous les réglages ?",
   "resetConfirmBody": "Chaque réglage revient à sa valeur par défaut, y compris la langue, le thème et les chemins des lecteurs. Sources, favoris, historique et téléchargements restent. Les adresses du guide et la clé TMDB sont aussi conservées.",
-  "resetConfirm": "Réinitialiser",
+  "resetConfirm": "Réinitialiser les paramètres",
   "resetDone": "Réglages réinitialisés",
   "resetFailed": "Impossible de réinitialiser les réglages",
   "streamReconnect": "Reconnecter les flux interrompus",

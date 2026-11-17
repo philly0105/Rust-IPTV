@@ -231,6 +231,8 @@
   "playTitle": "Riproduci {{title}}",
   "openFailed": "Impossibile aprire {{title}}",
   "removeFailed": "Impossibile rimuovere l'elemento",
+  "favoritesLoadFailed": "Impossibile caricare i preferiti",
+  "recentLoadFailed": "Impossibile caricare la cronologia",
   "sourceRemoved": "Sorgente rimossa",
   "sourceRemovedHint": "La sorgente di questo elemento è stata rimossa. Aggiungila di nuovo per aprire l'elemento.",
   "tryAgain": "Riprova",

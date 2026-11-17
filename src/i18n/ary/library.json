@@ -279,6 +279,8 @@
   "playTitle": "شغّل {{title}}",
   "openFailed": "ما قدرناش نحلو {{title}}",
   "removeFailed": "ما قدرناش نحيدو العنصر",
+  "favoritesLoadFailed": "ما قدرناش نحمّلو المفضلة",
+  "recentLoadFailed": "ما قدرناش نحمّلو السجل",
   "sourceRemoved": "المصدر تحيّد",
   "sourceRemovedHint": "المصدر ديال هاد العنصر تحيّد. زيدو مرة أخرى باش تحل العنصر.",
   "tryAgain": "عاود جرّب",

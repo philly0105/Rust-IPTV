@@ -328,7 +328,6 @@
   "removedUndoHint": "チャンネル、お気に入り、視聴履歴、マイリストの作品も一緒に削除されます。",
   "undo": "元に戻す",
   "removeFailedKept": "ソースがリストに戻りました。",
-  "removedAnnouncement": "{{name}} を削除しました。F8 キーで「元に戻す」に移動できます。",
   "restoredAnnouncement": "{{name}} を元に戻しました",
   "errorFileTooLarge": "このファイルは {{size}} あり、ここで開くには大きすぎます。Web アドレスに置いて URL として追加してください。",
   "progressBytes": "{{size}} ダウンロード済み",

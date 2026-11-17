@@ -247,6 +247,8 @@
   "playTitle": "Прайграць {{title}}",
   "openFailed": "Не ўдалося адкрыць {{title}}",
   "removeFailed": "Не ўдалося выдаліць элемент",
+  "favoritesLoadFailed": "Не ўдалося загрузіць выбранае",
+  "recentLoadFailed": "Не ўдалося загрузіць гісторыю",
   "sourceRemoved": "Крыніца выдалена",
   "sourceRemovedHint": "Крыніцу гэтага элемента выдалілі. Дадайце яе зноў, каб адкрыць элемент.",
   "tryAgain": "Паўтарыць",

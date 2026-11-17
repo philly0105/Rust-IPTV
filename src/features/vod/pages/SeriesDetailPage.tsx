@@ -316,6 +316,7 @@ export function SeriesDetailPage() {
         <h1 className="sr-only">{pageTitle}</h1>
         <ErrorState
           error={source.error ?? detail.error}
+          title={t('titleLoadFailed')}
           onRetry={() => {
             void source.refetch();
             void detail.refetch();

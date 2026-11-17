@@ -378,7 +378,7 @@
   "resetAction": "Restablecer…",
   "resetConfirmTitle": "¿Restablecer todos los ajustes?",
   "resetConfirmBody": "Cada ajuste vuelve a su valor predeterminado, incluidos idioma, tema y rutas de reproductores. Fuentes, favoritos, historial y descargas se mantienen. También se conservan las direcciones de la guía y la clave de TMDB.",
-  "resetConfirm": "Restablecer",
+  "resetConfirm": "Restablecer ajustes",
   "resetDone": "Ajustes restablecidos",
   "resetFailed": "No se pudieron restablecer los ajustes",
   "streamReconnect": "Reconectar transmisiones caídas",

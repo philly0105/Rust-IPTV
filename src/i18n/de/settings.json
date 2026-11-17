@@ -373,7 +373,7 @@
   "resetAction": "Zurücksetzen…",
   "resetConfirmTitle": "Alle Einstellungen zurücksetzen?",
   "resetConfirmBody": "Jede Einstellung kehrt zum Standard zurück, auch Sprache, Design und Player-Pfade. Quellen, Favoriten, Verlauf und Downloads bleiben. Auch die Programmführer-Adressen und der TMDB-Schlüssel bleiben.",
-  "resetConfirm": "Zurücksetzen",
+  "resetConfirm": "Einstellungen zurücksetzen",
   "resetDone": "Einstellungen auf Standard zurückgesetzt",
   "resetFailed": "Einstellungen konnten nicht zurückgesetzt werden",
   "streamReconnect": "Abgebrochene Streams neu verbinden",

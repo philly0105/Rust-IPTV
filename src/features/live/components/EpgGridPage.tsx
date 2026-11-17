@@ -41,7 +41,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router';
 
 import { guideCategoriesArgs, setGuideGridPrefetch } from '@/api/bootPrefetch';
-import { invalidate, queryClient as appQueryClient, rpcKey, useRpcQuery } from '@/api/query';
+import { queryClient as appQueryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Settings, type Source, type SourceKind } from '@/api/types';
 
@@ -53,6 +53,7 @@ import { dateTimeFormat, intlLocale, listSeparator, relativeTimeFormat } from '@
 import { joinList } from '@/shell/dashboard/cards';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
+import { toggleFavoriteWithUndo } from '@/features/library/lib/favoriteToggle';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { useProgrammeActions } from '../hooks/useProgrammeActions';
@@ -1578,16 +1579,12 @@ export function EpgGridPage() {
   const closeMapping = useCallback(() => setMapping(null), []);
   const toggleFavorite = useStable(async (channel: Channel, wasFavorite: boolean) => {
     const name = plainChannelName(channel.name, prefs.stripCountryPrefix);
-    try {
-      const res = await rpc('favorites.toggle', {
-        ref: channel.ref,
-        snapshot: { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
-      });
-      await invalidate('favorites.');
-      toast({ title: res.isFavorite ? t('favoriteAdded', { name }) : t('favoriteRemoved', { name }), variant: 'success' });
-    } catch (err) {
-      toast({ title: wasFavorite ? t('favoriteRemoveFailed') : t('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
-    }
+    await toggleFavoriteWithUndo(
+      channel.ref,
+      { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
+      name,
+      wasFavorite,
+    );
   });
   /** The keyboard's way in: the menu of the cursor row's channel, anchored at its channel cell. */
   const openRowMenuAt = (row: number) => {
@@ -2094,7 +2091,7 @@ export function EpgGridPage() {
     return (
       <>
         {heading}
-        <ErrorState error={sources.error} onRetry={() => void sources.refetch()} />
+        <ErrorState error={sources.error} title={t('guideGridLoadFailed')} onRetry={() => void sources.refetch()} />
       </>
     );
   }
@@ -2179,7 +2176,7 @@ export function EpgGridPage() {
       ) : null}
 
       {paged.error ? (
-        <ErrorState error={paged.error} onRetry={paged.retry} />
+        <ErrorState error={paged.error} title={t('guideGridLoadFailed')} onRetry={paged.retry} />
       ) : paged.isLoading || !sourceId ? (
         <div className="flex flex-col gap-2 p-3" aria-busy="true" aria-label={t('loadingGuide')}>
           {Array.from({ length: 10 }, (_, i) => (

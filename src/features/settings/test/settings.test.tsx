@@ -200,7 +200,7 @@ describe('Downloads folder (web build)', () => {
     renderAt(settingsRoutes, '/settings/general');
     const err = await screen.findByTestId('downloads-dir-error');
     fail = false;
-    fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(err).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.getByTestId('downloads-dir-path').textContent).toBe('E:/dl'));
   });
 });
@@ -252,7 +252,7 @@ describe('Section-level error states', () => {
     renderAt(settingsRoutes, '/settings/playback');
     const err = await screen.findByTestId('player-caps-error');
     fail = false;
-    fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(err).getByRole('button', { name: 'Try again' }));
     expect((await screen.findByTestId('select-livePlayer') as HTMLSelectElement).querySelector('option[value="embedded-mpv"]')).toBeTruthy();
   });
 
@@ -265,7 +265,7 @@ describe('Section-level error states', () => {
     renderAt(settingsRoutes, '/settings/remote');
     const err = await screen.findByTestId('remote-status-error');
     fail = false;
-    fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(err).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.queryByTestId('remote-status-error')).toBeNull());
   });
 });

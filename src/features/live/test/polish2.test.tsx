@@ -185,7 +185,7 @@ describe('favorites from the list', () => {
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
     fireEvent.click(rowStar(1));
-    await waitFor(() => expect(toasts()).toContain('Could not add the favorite'));
+    await waitFor(() => expect(toasts()).toContain('Couldn\'t add the favorite'));
     await waitFor(() => expect(rowStar(1).getAttribute('aria-pressed')).toBe('false'));
   });
 
@@ -212,7 +212,7 @@ describe('context menu', () => {
     const menu = await screen.findByRole('menu');
     expect(within(menu).queryByRole('menuitem', { name: 'Add or remove favorite' })).toBeNull();
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Remove from favorites' }));
-    await waitFor(() => expect(toasts()).toContain('Could not remove the favorite'));
+    await waitFor(() => expect(toasts()).toContain('Couldn\'t remove the favorite'));
 
     fireEvent.contextMenu(rowButton(3)!.parentElement!, { clientX: 40, clientY: 40 });
     expect(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Add to favorites' })).toBeTruthy();

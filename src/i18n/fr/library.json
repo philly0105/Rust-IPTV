@@ -231,6 +231,8 @@
   "playTitle": "Lire {{title}}",
   "openFailed": "Impossible d'ouvrir {{title}}",
   "removeFailed": "Impossible de supprimer l'élément",
+  "favoritesLoadFailed": "Impossible de charger les favoris",
+  "recentLoadFailed": "Impossible de charger l'historique",
   "sourceRemoved": "Source supprimée",
   "sourceRemovedHint": "La source de cet élément a été supprimée. Ajoutez-la de nouveau pour ouvrir l'élément.",
   "tryAgain": "Réessayer",

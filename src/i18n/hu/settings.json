@@ -373,7 +373,7 @@
   "resetAction": "Visszaállítás…",
   "resetConfirmTitle": "Visszaállítod az összes beállítást?",
   "resetConfirmBody": "Minden beállítás alapértékre áll, a nyelv, a téma és a lejátszók útvonala is. A források, kedvencek, előzmények és letöltések maradnak. A műsorújság-címek és a TMDB-kulcs is megmaradnak.",
-  "resetConfirm": "Visszaállítás",
+  "resetConfirm": "Beállítások visszaállítása",
   "resetDone": "Beállítások alapértékre állítva",
   "resetFailed": "Nem sikerült visszaállítani a beállításokat",
   "streamReconnect": "Megszakadt adások újracsatlakoztatása",

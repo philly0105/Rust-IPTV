@@ -364,7 +364,6 @@
   "removedUndoHint": "Jego kanały, ulubione, historia oglądania i tytuły z Mojej listy zostaną usunięte.",
   "undo": "Cofnij",
   "removeFailedKept": "Źródło wróciło na listę.",
-  "removedAnnouncement": "Usunięto {{name}}. Naciśnij F8, aby przejść do Cofnij.",
   "restoredAnnouncement": "Przywrócono {{name}}",
   "errorFileTooLarge": "Ten plik ma {{size}} i jest za duży, by go tu otworzyć. Umieść go pod adresem internetowym i dodaj jako URL.",
   "progressBytes": "Pobrano {{size}}",

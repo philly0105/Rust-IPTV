@@ -65,7 +65,7 @@
   "errorUnsupported": "Bu tarayıcı bu yayın türünü oynatamıyor. Harici bir oynatıcıda açın.",
   "errorGeneric": "Oynatma bir hatayla durdu. Tekrar deneyin veya yayını harici bir oynatıcıda açın.",
   "errorTsLive": "Ham MPEG-TS yayınları uygulama içinde oynatılamaz. Ayarlar'da Yayın biçimini HLS yapın veya harici bir oynatıcıda açın.",
-  "retry": "Tekrar dene",
+  "retry": "Yeniden dene",
   "openExternal": "Harici oynatıcıda aç",
   "openInMpv": "MPV'de aç",
   "openInVlc": "VLC'de aç",

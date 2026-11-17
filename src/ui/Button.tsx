@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react';
-import type { ComponentPropsWithRef, ReactNode, Ref } from 'react';
+import { useState, type ComponentPropsWithRef, type MouseEvent, type ReactNode, type Ref } from 'react';
 
 import { cn } from './cn';
 import { useMergedRef, useTooltip, withTooltipProps, type TooltipPlacement, type TooltipTone } from './Tooltip';
@@ -125,6 +125,12 @@ export interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, '
   tooltipSide?: TooltipPlacement;
   /** `glass` over video and artwork (the player, multi-view, the hero). */
   tooltipTone?: TooltipTone;
+  /**
+   * As Button's: a spinner in place of the icon, aria-busy, and activation ignored. Uses
+   * aria-disabled rather than native `disabled`, which would blur the focused button and drop a
+   * keyboard or remote user's focus to the page while the call runs.
+   */
+  loading?: boolean;
 }
 
 /**
@@ -155,8 +161,10 @@ export function IconButton({
   shortcut,
   tooltipSide,
   tooltipTone,
+  loading = false,
   type = 'button',
   ref,
+  onClick,
   ...rest
 }: IconButtonProps) {
   const content = tooltip === undefined ? label : tooltip;
@@ -184,12 +192,40 @@ export function IconButton({
           pressed && 'bg-selected text-fg',
           className,
         )}
+        aria-disabled={loading || undefined}
+        aria-busy={loading || undefined}
         {...rest}
         {...withTooltipProps(rest, triggerProps, mergedRef)}
+        onClick={(e) => {
+          if (loading) {
+            e.preventDefault();
+            return;
+          }
+          onClick?.(e);
+        }}
       >
-        {icon}
+        {loading ? <LoaderCircle aria-hidden size={size === 'lg' ? 18 : 16} className="motion-safe:animate-spin" /> : icon}
       </button>
       {tip}
     </>
   );
+}
+
+/**
+ * Props for a row of icon buttons that share one busy flag (the row's call is running): the
+ * button whose press started it shows the spinner, the others ignore presses, and none takes
+ * native `disabled`, which would blur the pressed button and drop a keyboard or remote user's
+ * focus to the page. Spread `busyButton('remove', onRemove)` on each IconButton.
+ */
+export function useBusyButtons(busy: boolean) {
+  const [started, setStarted] = useState<string | null>(null);
+  return (name: string, onClick: (e: MouseEvent<HTMLButtonElement>) => void) => ({
+    loading: busy && started === name,
+    'aria-disabled': busy || undefined,
+    onClick: (e: MouseEvent<HTMLButtonElement>) => {
+      if (busy) return;
+      setStarted(name);
+      onClick(e);
+    },
+  });
 }

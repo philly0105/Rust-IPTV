@@ -178,6 +178,13 @@ export function TransitionReads({ children }: { children?: ReactNode }) {
   return createElement(TransitionReadsContext.Provider, { value: true }, children);
 }
 
+/**
+ * How long a page's read may go unanswered (web) before it shows "The request took too long" with
+ * Try again, instead of a skeleton for as long as the core is stuck (a refresh holding the
+ * library, a hung provider). Generous: a slow provider page or a big search answers well inside it.
+ */
+export const READ_TIMEOUT_MS = 30_000;
+
 export function useRpcQuery<K extends RpcName>(
   cmd: K,
   args: RpcArgs<K>,
@@ -185,8 +192,9 @@ export function useRpcQuery<K extends RpcName>(
 ): UseQueryResult<RpcResult<K>, RpcError> {
   const options: UseQueryOptions<RpcResult<K>, RpcError> = {
     queryKey: rpcKey(cmd, args),
-    // The signal aborts a refetch that a newer invalidation or an unmount replaced.
-    queryFn: async ({ signal }) => (await rpcRaw(cmd, args, { signal })) as RpcResult<K>,
+    // The signal aborts a refetch that a newer invalidation or an unmount replaced. A read that
+    // has not answered in READ_TIMEOUT_MS becomes a timeout error with Try again.
+    queryFn: async ({ signal }) => (await rpcRaw(cmd, args, { signal, timeoutMs: READ_TIMEOUT_MS })) as RpcResult<K>,
   };
   // Only set what the caller gave: an explicit `undefined` would hide the per-command defaults.
   if (opts?.enabled !== undefined) options.enabled = opts.enabled;

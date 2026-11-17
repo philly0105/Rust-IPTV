@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Minus, Search, X } from 'lucide-react';
-import { useId, useLayoutEffect, useRef, type ComponentPropsWithRef, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, type ComponentPropsWithRef, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { TOUCH_TARGET } from './Button';
@@ -310,12 +310,22 @@ export interface ToggleProps {
   hideLabel?: boolean;
 }
 
-/** A labelled Switch: label and description on the start side, the switch on the end. */
+/**
+ * A labelled Switch: label and description on the start side, the switch on the end. On touch
+ * the whole row is the target (at least 44 px tall), as a Settings switch row is: a tap on the
+ * description or the gap toggles too. The switch stays the one control for the keyboard and
+ * screen readers; taps on the label, a link or a button are left to the browser.
+ */
 export function Toggle({ checked, onChange, label, description, disabled, id: idProp, className, hideLabel }: ToggleProps) {
   const autoId = useId();
   const id = idProp ?? autoId;
+  const onRowClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (disabled || !window.matchMedia?.('(pointer: coarse)').matches) return;
+    if ((e.target as Element).closest('label, a, button, input, select, textarea')) return;
+    onChange(!checked);
+  };
   return (
-    <div className={cn('flex items-start justify-between gap-4', className)}>
+    <div className={cn('flex items-start justify-between gap-4', TOUCH_TARGET, !disabled && 'pointer-coarse:cursor-pointer', className)} onClick={onRowClick}>
       <div className={cn('min-w-0', hideLabel && 'sr-only')}>
         <label htmlFor={id} className="text-sm font-medium text-fg">
           {label}

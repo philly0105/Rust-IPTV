@@ -309,7 +309,7 @@ export function RecentPage() {
 
   let body;
   if (query.isLoading) body = <EntryRowsSkeleton />;
-  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  else if (query.isError) body = <ErrorState error={query.error} title={t('recentLoadFailed')} onRetry={() => void query.refetch()} />;
   else if (count === 0)
     body = (
       <EmptyState

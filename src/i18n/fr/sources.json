@@ -346,7 +346,6 @@
   "removedUndoHint": "Ses chaînes, favoris, historique de lecture et titres de Ma liste sont supprimés avec elle.",
   "undo": "Annuler",
   "removeFailedKept": "La source est de retour dans votre liste.",
-  "removedAnnouncement": "{{name}} supprimée. Appuyez sur F8 pour atteindre Annuler.",
   "restoredAnnouncement": "{{name}} restaurée",
   "errorFileTooLarge": "Ce fichier fait {{size}}, trop volumineux pour l'ouvrir ici. Placez-le à une adresse web et ajoutez-le comme URL.",
   "progressBytes": "{{size}} téléchargés",

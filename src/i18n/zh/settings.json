@@ -373,7 +373,7 @@
   "resetAction": "重置…",
   "resetConfirmTitle": "要重置所有设置吗？",
   "resetConfirmBody": "所有设置都会恢复为默认值，包括语言、主题和播放器路径。来源、收藏、历史记录和下载会保留。节目指南地址和 TMDB 密钥也会保留。",
-  "resetConfirm": "重置",
+  "resetConfirm": "重置设置",
   "resetDone": "设置已恢复为默认值",
   "resetFailed": "无法重置设置",
   "streamReconnect": "自动重连中断的流",

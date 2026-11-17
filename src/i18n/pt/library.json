@@ -231,6 +231,8 @@
   "playTitle": "Reproduzir {{title}}",
   "openFailed": "Não foi possível abrir {{title}}",
   "removeFailed": "Não foi possível remover o item",
+  "favoritesLoadFailed": "Não foi possível carregar os favoritos",
+  "recentLoadFailed": "Não foi possível carregar o histórico",
   "sourceRemoved": "Fonte removida",
   "sourceRemovedHint": "A fonte deste item foi removida. Adicione-a novamente para abrir o item.",
   "tryAgain": "Tentar novamente",

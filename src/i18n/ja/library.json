@@ -215,6 +215,8 @@
   "playTitle": "{{title}}を再生",
   "openFailed": "{{title}}を開けませんでした",
   "removeFailed": "項目を削除できませんでした",
+  "favoritesLoadFailed": "お気に入りを読み込めませんでした",
+  "recentLoadFailed": "履歴を読み込めませんでした",
   "sourceRemoved": "ソースが削除されました",
   "sourceRemovedHint": "この項目のソースは削除されています。開くには、ソースを再度追加してください。",
   "tryAgain": "再試行",

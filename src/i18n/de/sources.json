@@ -328,7 +328,6 @@
   "removedUndoHint": "Ihre Sender, Favoriten, der Wiedergabeverlauf und ihre Titel in meiner Liste werden mit entfernt.",
   "undo": "Rückgängig",
   "removeFailedKept": "Die Quelle ist wieder in Ihrer Liste.",
-  "removedAnnouncement": "{{name}} entfernt. Mit F8 erreichen Sie „Rückgängig“.",
   "restoredAnnouncement": "{{name}} wiederhergestellt",
   "errorFileTooLarge": "Diese Datei ist {{size}} groß und zu groß, um sie hier zu öffnen. Legen Sie sie unter einer Webadresse ab und fügen Sie sie als URL hinzu.",
   "progressBytes": "{{size}} heruntergeladen",

@@ -1,11 +1,11 @@
 import { Check, CircleAlert, CircleCheck, CirclePause, Clock, Download as DownloadIcon, HardDriveDownload, Heart, LoaderCircle, Pause } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { invalidate, useRpcMutation } from '@/api/query';
 import type { Download, ItemRef, ItemSnapshot } from '@/api/types';
 
+import { toggleFavoriteWithUndo } from '@/features/library/lib/favoriteToggle';
 import { useLiveProgress, type EffectiveProgress } from '@/features/library/lib/progress';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
 import { intlLocale } from '@/lib/intl';
@@ -16,23 +16,19 @@ import { Button, IconButton, Tooltip, buttonClass, cn, useToast, errorDescriptio
 import { GHOST_ICON } from '@/ui/Button';
 import { HeroIcon } from './DetailHero';
 
-/** Adds the title to favorites or takes it off, with the toast. */
-function useFavoriteToggle(itemRef: ItemRef, snapshot: ItemSnapshot) {
-  const { t } = useTranslation('vod');
-  const { toast } = useToast();
-  const toggle = useRpcMutation('favorites.toggle');
-  const onClick = () =>
-    toggle.mutate(
-      { ref: itemRef, snapshot },
-      {
-        onSuccess: (res) => {
-          void invalidate('favorites.');
-          toast({ title: res.isFavorite ? t('addedToFavorites') : t('removedFromFavorites'), variant: 'success' });
-        },
-        onError: (err) => toast({ title: t('favoriteFailed'), description: errorDescription(err), variant: 'error' }),
-      },
-    );
-  return { onClick, pending: toggle.isPending };
+/**
+ * Adds the title to favorites or takes it off: the shared toggle's toast names the title, and a
+ * removal carries Undo. The state flips at once and the answer settles it, so the heart does not
+ * look dead while the call and the refetch run.
+ */
+function useFavoriteToggle(itemRef: ItemRef, snapshot: ItemSnapshot, isFavorite: boolean) {
+  const [optimistic, setOptimistic] = useState<boolean | undefined>(undefined);
+  const onClick = () => {
+    if (optimistic !== undefined) return;
+    setOptimistic(!isFavorite);
+    void toggleFavoriteWithUndo(itemRef, snapshot, snapshot.title, isFavorite).finally(() => setOptimistic(undefined));
+  };
+  return { onClick, pending: optimistic !== undefined, favorite: optimistic ?? isFavorite };
 }
 
 /**
@@ -41,9 +37,9 @@ function useFavoriteToggle(itemRef: ItemRef, snapshot: ItemSnapshot) {
  * pressed state is the neutral selected fill with the heart filled in (a state, never amber), and
  * whose tooltip says what a press does.
  */
-export function FavoriteButton({ itemRef, snapshot, isFavorite, round }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; round?: boolean }) {
+export function FavoriteButton({ itemRef, snapshot, isFavorite: shown, round }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; round?: boolean }) {
   const { t } = useTranslation('vod');
-  const { onClick, pending } = useFavoriteToggle(itemRef, snapshot);
+  const { onClick, pending, favorite: isFavorite } = useFavoriteToggle(itemRef, snapshot, shown);
   if (round) {
     return (
       <IconButton
@@ -52,9 +48,11 @@ export function FavoriteButton({ itemRef, snapshot, isFavorite, round }: { itemR
         label={t('captionFavorite')}
         tooltip={isFavorite ? t('removeFromFavorites') : t('addToFavorites')}
         pressed={isFavorite}
+        // The heart shows the new state at once, so no spinner; a press during the call is ignored,
+        // and focus stays on the button (native disabled would drop it to the page).
         icon={<Heart aria-hidden size={18} className={cn(isFavorite && 'fill-current')} />}
+        aria-busy={pending || undefined}
         onClick={onClick}
-        disabled={pending}
         data-testid="vod-favorite-button"
       />
     );
@@ -150,13 +148,14 @@ export function WatchedButton({
         // Watched is a state, so it reads as pressed (neutral), with the green tick; the label says what a press does.
         className={cn(watched && 'bg-selected text-fg')}
         onClick={toggle}
-        disabled={disabled || pending}
+        disabled={disabled}
+        loading={pending}
         data-testid="vod-watched-button"
       />
     );
   }
   if (compact) {
-    return <IconButton label={label} icon={icon} onClick={toggle} disabled={disabled || pending} />;
+    return <IconButton label={label} icon={icon} onClick={toggle} disabled={disabled} loading={pending} />;
   }
   return (
     <Button size={size} variant="ghost" icon={icon} loading={pending} disabled={disabled} onClick={toggle}>
@@ -243,7 +242,7 @@ export function DownloadButton({
         className={COMPACT_SLOT}
         label={`${text}${ctx}`}
         icon={failed ? <CircleAlert aria-hidden size={16} className="text-danger" /> : <DownloadIcon aria-hidden size={16} />}
-        disabled={pending}
+        loading={pending}
         onClick={onStart}
       />
     );
@@ -340,12 +339,9 @@ function RoundDownloadButton({
         size="lg"
         variant="secondary"
         label={failed ? t('downloadRetry') : t('download')}
-        icon={pending ? <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" /> : failed ? <CircleAlert aria-hidden size={18} className="text-danger" /> : <DownloadIcon aria-hidden size={18} />}
-        aria-busy={pending || undefined}
-        aria-disabled={pending || undefined}
-        onClick={() => {
-          if (!pending) onStart();
-        }}
+        icon={failed ? <CircleAlert aria-hidden size={18} className="text-danger" /> : <DownloadIcon aria-hidden size={18} />}
+        loading={pending}
+        onClick={onStart}
         data-testid="vod-download-button"
       />
     </HeroIcon>

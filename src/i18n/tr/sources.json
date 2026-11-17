@@ -328,7 +328,6 @@
   "removedUndoHint": "Kanalları, favorileri, izleme geçmişi ve Listemdeki başlıkları da onunla birlikte silinir.",
   "undo": "Geri al",
   "removeFailedKept": "Kaynak listene geri döndü.",
-  "removedAnnouncement": "{{name}} kaldırıldı. Geri al düğmesine ulaşmak için F8 tuşuna bas.",
   "restoredAnnouncement": "{{name}} geri yüklendi",
   "errorFileTooLarge": "Bu dosya {{size}}, burada açmak için fazla büyük. Bir web adresine koyup URL olarak ekle.",
   "progressBytes": "{{size}} indirildi",

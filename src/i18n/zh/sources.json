@@ -328,7 +328,6 @@
   "removedUndoHint": "其频道、收藏、观看记录和我的片单中的影片会一并删除。",
   "undo": "撤销",
   "removeFailedKept": "该源已回到列表中。",
-  "removedAnnouncement": "已移除 {{name}}。按 F8 可转到“撤销”。",
   "restoredAnnouncement": "已恢复 {{name}}",
   "errorFileTooLarge": "此文件大小为 {{size}}，太大，无法在这里打开。请将其放到网址上，再以 URL 方式添加。",
   "progressBytes": "已下载 {{size}}",

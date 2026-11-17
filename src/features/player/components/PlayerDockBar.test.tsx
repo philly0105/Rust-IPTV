@@ -257,7 +257,7 @@ describe('the mini player on a phone', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
     expect(toggle).toHaveBeenCalledTimes(1);
     act(() => usePlayerStore.setState({ status: 'error', error: 'boom' }));
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(screen.getByTestId('mini-bar-status').textContent).toBe('This stream did not play');
   });
 

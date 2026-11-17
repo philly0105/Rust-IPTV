@@ -39,7 +39,7 @@ export async function addFromMenu(
       const over = await wallOverLimit(ch.ref.sourceId);
       toast({
         id: 'multiview-add',
-        variant: over ? 'info' : 'success',
+        variant: over ? 'warning' : 'success',
         title: t('toastAdded', { name: ch.title }),
         description: over
           ? t('limitBody', { count: over.max, tiles: over.tiles, source: over.name })

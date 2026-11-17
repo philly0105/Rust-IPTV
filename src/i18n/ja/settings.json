@@ -373,7 +373,7 @@
   "resetAction": "リセット…",
   "resetConfirmTitle": "すべての設定をリセットしますか？",
   "resetConfirmBody": "言語、テーマ、プレーヤーのパスを含むすべての設定が既定値に戻ります。ソース、お気に入り、履歴、ダウンロードは残ります。番組表のアドレスと TMDB キーも残ります。",
-  "resetConfirm": "リセット",
+  "resetConfirm": "設定をリセット",
   "resetDone": "設定を既定値に戻しました",
   "resetFailed": "設定をリセットできませんでした",
   "streamReconnect": "途切れたストリームに再接続",

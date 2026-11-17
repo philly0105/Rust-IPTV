@@ -231,6 +231,8 @@
   "playTitle": "Reproducir {{title}}",
   "openFailed": "No se pudo abrir {{title}}",
   "removeFailed": "No se pudo quitar el elemento",
+  "favoritesLoadFailed": "No se pudieron cargar los favoritos",
+  "recentLoadFailed": "No se pudo cargar el historial",
   "sourceRemoved": "Fuente quitada",
   "sourceRemovedHint": "Se quitó la fuente de este elemento. Vuelve a añadirla para abrirlo.",
   "tryAgain": "Reintentar",

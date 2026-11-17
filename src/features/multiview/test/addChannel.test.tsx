@@ -196,7 +196,7 @@ describe('useMultiviewMenuItem', () => {
     const { result } = renderHook(() => useMultiviewMenuItem(input(3)), { wrapper });
     act(() => result.current.onSelect());
     await waitFor(() => expect(toasts).toHaveLength(1));
-    expect(toasts[0]).toMatchObject({ variant: 'info', title: 'Added Channel 3 to multi-view' });
+    expect(toasts[0]).toMatchObject({ variant: 'warning', title: 'Added Channel 3 to multi-view' });
     expect(toasts[0]!.description).toBe('Demo TV allows 2 streams at a time and the wall uses 3. Tiles past the limit may not play.');
   });
 

@@ -914,7 +914,7 @@ describe('embedded mpv readouts and errors', () => {
     render(surfaceTree);
     await tick();
     act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 404' }));
-    const retry = within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' });
+    const retry = within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' });
     expect(document.activeElement).toBe(retry);
     // A headline says what happened (classified: a 404 is a removed stream); mpv's terse reason follows.
     expect(screen.getByRole('alert').textContent).toContain('This stream no longer exists');
@@ -965,7 +965,7 @@ describe('embedded mpv recovery', () => {
     expect(alert.getAttribute('data-error-class')).toBe('crashed');
     expect(alert.textContent).toContain('MPV stopped unexpectedly');
 
-    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
     await tick();
     expect(calls('mpv.attach')).toHaveLength(2);
     expect(calls('mpv.load').length).toBe(loadsBefore + 1);
@@ -977,12 +977,12 @@ describe('embedded mpv recovery', () => {
     await tick();
     act(() => emitState({ ...mpvState, attached: false, error: 'Lost the connection to mpv.' }));
     attachError = Object.assign(new Error('mpv exited during startup'), { code: 'internal' });
-    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
     await tick();
     // Retry really started a second session; it failed, so the error stays.
     expect(calls('mpv.attach')).toHaveLength(2);
     expect(usePlayerStore.getState()).toMatchObject({ status: 'error', mode: 'embedded-mpv' });
-    expect(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 
   it.each([
@@ -1001,7 +1001,7 @@ describe('embedded mpv recovery', () => {
     await tick();
     act(() => emitState({ ...mpvState, attached: false, error: 'Lost the connection to mpv.' }));
     attachError = err;
-    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
     await tick();
     expect(usePlayerStore.getState()).toMatchObject({ mode: 'inline', error: undefined });
     expect(screen.queryByText(/no longer exists/i)).toBeNull();

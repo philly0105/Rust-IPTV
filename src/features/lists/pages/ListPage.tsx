@@ -10,11 +10,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 
-import { invalidate, useRpcQuery } from '@/api/query';
-import { rpc } from '@/api/transport';
+import { useRpcQuery } from '@/api/query';
 import { itemKey, sameRef, type Channel, type CustomListEntry, type EpgNowNext, type ItemKey, type SourceKind } from '@/api/types';
 import { registerCommands } from '@/shell/commands';
 import { useChannelEditShortcuts } from '@/features/channeledit';
+import { toggleFavoriteWithUndo } from '@/features/library/lib/favoriteToggle';
 import { EpgMappingDialog } from '@/features/live/components/EpgMappingDialog';
 import { EpgRibbon } from '@/features/live/components/EpgRibbon';
 import { LiveStageColumn } from '@/features/live/components/LiveStageColumn';
@@ -217,21 +217,18 @@ export function ListPage() {
       setOverride(key, !wasFavorite);
       const name = plainChannelName(channel.name, prefs.stripCountryPrefix);
       try {
-        const res = await rpc('favorites.toggle', {
-          ref: channel.ref,
-          snapshot: { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
-        });
-        setOverride(key, res.isFavorite);
-        await invalidate('favorites.');
-        toast({ title: res.isFavorite ? tl('favoriteAdded', { name }) : tl('favoriteRemoved', { name }), variant: 'success' });
-      } catch (err) {
-        toast({ title: wasFavorite ? tl('favoriteRemoveFailed') : tl('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
+        await toggleFavoriteWithUndo(
+          channel.ref,
+          { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
+          name,
+          wasFavorite,
+        );
       } finally {
         favInFlight.current.delete(key);
         setOverride(key, undefined);
       }
     },
-    [prefs.stripCountryPrefix, setOverride, tl, toast],
+    [prefs.stripCountryPrefix, setOverride],
   );
   const onToggleFavorite = useCallback((c: Channel, fav: boolean) => void toggleFavorite(c, fav), [toggleFavorite]);
 

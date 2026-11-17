@@ -96,7 +96,7 @@ describe('RecordingRulesPanel', () => {
     render();
     await screen.findAllByTestId('rule-row');
     fireEvent.click(within(row('paused')).getByRole('switch'));
-    await waitFor(() => expect(toastTitles()).toContain('Could not update the series'));
+    await waitFor(() => expect(toastTitles()).toContain('Couldn\'t update the series'));
     expect(rpc.of('recordings.setRuleEnabled')).toEqual([{ id: 'paused', enabled: true }]);
     await waitFor(() => expect(within(row('paused')).getByRole('switch').getAttribute('aria-checked')).toBe('false'));
   });

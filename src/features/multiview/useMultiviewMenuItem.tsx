@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, type NavigateFunction } from 'react-router';
 
 import { sameRef } from '@/api/types';
+import { plainChannelName } from '@/features/live/lib/channelName';
 import { toast, type MenuAction } from '@/ui';
 
 import { wallOverLimit } from './accountStatus';
@@ -40,7 +41,7 @@ export async function addFromMenu(
       toast({
         id: 'multiview-add',
         variant: over ? 'warning' : 'success',
-        title: t('toastAdded', { name: ch.title }),
+        title: t('toastAdded', { name: plainChannelName(ch.title, false) }),
         description: over
           ? t('limitBody', { count: over.max, tiles: over.tiles, source: over.name })
           : t('subtitle', { n: useMultiviewStore.getState().tiles.length, max: MAX_TILES }),
@@ -49,7 +50,7 @@ export async function addFromMenu(
       return;
     }
     case 'duplicate':
-      toast({ id: 'multiview-add', title: t('toastDuplicate', { name: ch.title }), action: open });
+      toast({ id: 'multiview-add', title: t('toastDuplicate', { name: plainChannelName(ch.title, false) }), action: open });
       return;
     case 'full':
       toast({ id: 'multiview-add', title: t('toastFull'), description: t('toastFullHint'), action: open });

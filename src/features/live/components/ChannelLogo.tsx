@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useState, type ReactNode, type SyntheticE
 
 import { TINT_THEME, cn, gateImage, tintVars, useImageChain } from '@/ui';
 
-import { channelNameParts } from '../lib/channelName';
+import { channelNameParts, plainChannelName } from '../lib/channelName';
 import { monogramHue, monogramText, slotNumber } from '../lib/monogram';
 
 export type LogoPlate = 'light' | 'dark';
@@ -329,7 +329,8 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
           </span>
         ) : null}
       </span>
-      <span className="sr-only">{parts.full}</span>
+      {/* Heard as toasts word it, "ESPN HD (US)": a reader spelled out the provider's "US| ESPN HD". */}
+      <span className="sr-only">{plainChannelName(name, strip)}</span>
     </span>
   );
 }

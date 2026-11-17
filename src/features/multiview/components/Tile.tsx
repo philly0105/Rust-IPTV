@@ -18,6 +18,7 @@ import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 
 import { useTranslation } from 'react-i18next';
 
 import type { ParentalMode } from '@/api/types';
+import { plainChannelName } from '@/features/live/lib/channelName';
 import { glassButton } from '@/features/player/components/glassButton';
 import { GLASS_FOCUS } from '@/ui/focus';
 
@@ -202,6 +203,8 @@ export const Tile = memo(function Tile({
   const [dropTarget, setDropTarget] = useState(false);
   const number = slot + 1;
   const name = tile.title;
+  // Heard as toasts word it: "ESPN HD (US)", not the provider's "US| ESPN HD" (w-a11y-03).
+  const spoken = plainChannelName(name, false);
   const errorClass = !blocked && phase === 'error' && fault ? classifyTileFault(fault, overLimit) : null;
   useRetryWhenOnline(errorClass !== null && retriesWhenOnline(errorClass), retry);
 
@@ -247,15 +250,15 @@ export const Tile = memo(function Tile({
     if (from && from !== tile.key) onDropTile(from, tile.key);
   };
 
-  const enlargeLabel = enlarged ? t('restoreLabel', { name }) : t('enlargeLabel', { name });
+  const enlargeLabel = enlarged ? t('restoreLabel', { name: spoken }) : t('enlargeLabel', { name: spoken });
 
   const mainLabel = isSwapTarget
-    ? t('swapHereLabel', { name, slot: number })
+    ? t('swapHereLabel', { name: spoken, slot: number })
     : isSwapSource
       ? t('swapCancel')
       : hasSound
-        ? t('hasSound', { name })
-        : t('listen', { name });
+        ? t('hasSound', { name: spoken })
+        : t('listen', { name: spoken });
 
   // Centre: what the tile is doing when it is not simply playing.
   let centre: ReactNode = null;
@@ -358,7 +361,7 @@ export const Tile = memo(function Tile({
   return (
     <div
       role="group"
-      aria-label={t('tileLabel', { slot: number, name })}
+      aria-label={t('tileLabel', { slot: number, name: spoken })}
       data-testid="multiview-tile"
       data-tile-key={tile.key}
       data-slot={number}
@@ -524,11 +527,11 @@ export const Tile = memo(function Tile({
             swapping && 'hidden',
           )}
         >
-          <Tooltip content={hasSound ? t('hasSound', { name }) : t('listen', { name })} tone="glass" describe={false}>
+          <Tooltip content={hasSound ? t('hasSound', { name: spoken }) : t('listen', { name: spoken })} tone="glass" describe={false}>
             <button
               type="button"
               className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE, hasSound && GLASS_ACCENT_TEXT)}
-              aria-label={hasSound ? t('hasSound', { name }) : t('listen', { name })}
+              aria-label={hasSound ? t('hasSound', { name: spoken }) : t('listen', { name: spoken })}
               aria-pressed={hasSound}
               data-testid="multiview-tile-listen"
               onClick={listen}
@@ -549,11 +552,11 @@ export const Tile = memo(function Tile({
               <LayoutPanelLeft aria-hidden className="size-4" />
             </button>
           </Tooltip>
-          <Tooltip content={t('swapLabel', { name })} shortcut="s" tone="glass" describe={false}>
+          <Tooltip content={t('swapLabel', { name: spoken })} shortcut="s" tone="glass" describe={false}>
             <button
               type="button"
               className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
-              aria-label={t('swapLabel', { name })}
+              aria-label={t('swapLabel', { name: spoken })}
               aria-keyshortcuts="S"
               data-testid="multiview-tile-swap"
               onClick={() => onSwapStart(tile.key)}
@@ -561,11 +564,11 @@ export const Tile = memo(function Tile({
               <ArrowLeftRight aria-hidden className="size-4" />
             </button>
           </Tooltip>
-          <Tooltip content={t('replaceLabel', { slot: number, name })} shortcut="r" tone="glass" describe={false}>
+          <Tooltip content={t('replaceLabel', { slot: number, name: spoken })} shortcut="r" tone="glass" describe={false}>
             <button
               type="button"
               className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
-              aria-label={t('replaceLabel', { slot: number, name })}
+              aria-label={t('replaceLabel', { slot: number, name: spoken })}
               aria-keyshortcuts="R"
               data-testid="multiview-tile-replace"
               onClick={() => onReplace(tile.key)}
@@ -573,22 +576,22 @@ export const Tile = memo(function Tile({
               <Replace aria-hidden className="size-4" />
             </button>
           </Tooltip>
-          <Tooltip content={t('watchLabel', { name })} tone="glass" describe={false}>
+          <Tooltip content={t('watchLabel', { name: spoken })} tone="glass" describe={false}>
             <button
               type="button"
               className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
-              aria-label={t('watchLabel', { name })}
+              aria-label={t('watchLabel', { name: spoken })}
               data-testid="multiview-tile-watch"
               onClick={() => onWatch(tile.key)}
             >
               <MonitorPlay aria-hidden className="size-4" />
             </button>
           </Tooltip>
-          <Tooltip content={t('closeLabel', { name })} shortcut="delete" tone="glass" describe={false}>
+          <Tooltip content={t('closeLabel', { name: spoken })} shortcut="delete" tone="glass" describe={false}>
             <button
               type="button"
               className={cn(TOOL_BUTTON, 'hidden', TOOL_WIDE)}
-              aria-label={t('closeLabel', { name })}
+              aria-label={t('closeLabel', { name: spoken })}
               aria-keyshortcuts="Delete"
               data-testid="multiview-tile-close"
               onClick={() => onClose(tile.key)}
@@ -598,8 +601,8 @@ export const Tile = memo(function Tile({
           </Tooltip>
           <span data-testid="multiview-tile-more" className={cn('flex', TOOL_NARROW)}>
             <Menu
-              label={t('tileMenuLabel', { name })}
-              tooltip={t('tileMenuLabel', { name })}
+              label={t('tileMenuLabel', { name: spoken })}
+              tooltip={t('tileMenuLabel', { name: spoken })}
               trigger={<EllipsisVertical aria-hidden className="size-4" />}
               triggerClassName={TOOL_BUTTON}
               align="end"

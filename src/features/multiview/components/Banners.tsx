@@ -1,6 +1,8 @@
 import { MonitorPlay, TriangleAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { plainChannelName } from '@/features/live/lib/channelName';
+
 import { Button, cn, IconButton } from '../deps';
 import type { MultiviewTile } from '../types';
 import type { SourceLoad } from '../useWallData';
@@ -57,7 +59,7 @@ export function LimitBanners({
             <div className="-me-1 flex shrink-0 items-center gap-1">
               {last && onCloseTile ? (
                 <Button size="sm" className="max-w-56 min-w-0" onClick={() => onCloseTile(last.key)} data-testid="multiview-limit-close">
-                  <span className="min-w-0 truncate">{t('closeLabel', { name: last.title })}</span>
+                  <span className="min-w-0 truncate">{t('closeLabel', { name: plainChannelName(last.title, false) })}</span>
                 </Button>
               ) : null}
               <IconButton size="sm" label={t('limitDismiss')} icon={<X aria-hidden className="size-4" />} onClick={() => onDismiss(l)} />

@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey } from '@/api/types';
+import { plainChannelName } from '@/features/live/lib/channelName';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
@@ -186,7 +187,8 @@ export function MultiviewPage() {
     if (index >= 0) focusSlot(wallRef.current, index);
   }, [location.key, location.state]);
 
-  const nameOf = useCallback((key: string) => useMultiviewStore.getState().tiles.find((x) => x.key === key)?.title ?? '', []);
+  // A tile's name as announcements and toasts say it: "ESPN HD (US)", not "US| ESPN HD".
+  const nameOf = useCallback((key: string) => plainChannelName(useMultiviewStore.getState().tiles.find((x) => x.key === key)?.title, false), []);
 
   const openPicker = useCallback(
     (mode: PickerMode) => {
@@ -219,12 +221,12 @@ export function MultiviewPage() {
       if (!tile) return;
       const hadSound = s.audioKey === key;
       s.remove(key);
-      setAnnouncement(t('announceClosed', { name: tile.title }));
+      setAnnouncement(t('announceClosed', { name: plainChannelName(tile.title, false) }));
       // Focus stays where the tile was: the next tile, or the free frame now there.
       if (useMultiviewStore.getState().tiles.length > 0) focusSlot(wallRef.current, index);
       toast({
         id: `multiview-closed-${key}`,
-        title: t('toastClosed', { name: tile.title }),
+        title: t('toastClosed', { name: plainChannelName(tile.title, false) }),
         action: {
           label: t('undo'),
           onClick: () => {
@@ -332,7 +334,7 @@ export function MultiviewPage() {
         // Hide mode has no gate (the core hides locked channels): unlocking is the session's PIN.
         void requestPin({
           title: t('unlockTitle'),
-          description: t('unlockBody', { name: tile.title }),
+          description: t('unlockBody', { name: plainChannelName(tile.title, false) }),
           confirmLabel: t('unlock'),
           submit: async (pin) => {
             await rpc('parental.unlock', { pin });

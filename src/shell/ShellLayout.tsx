@@ -405,7 +405,23 @@ const selectLanguage = (s: Settings) => s.language;
  * the real rail and header (the brand row, the Watch and Library groups at --rail-item-height,
  * the footer row, the search slot, the phone tab bar), so nothing jumps as the shell replaces it.
  */
-export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = 'shell-skeleton' }: { collapsed: boolean; railHidden: boolean; phone?: boolean; testId?: string }) {
+export function ShellSkeleton({
+  collapsed,
+  railHidden,
+  phone = false,
+  homeBody = true,
+  testId = 'shell-skeleton',
+}: {
+  collapsed: boolean;
+  railHidden: boolean;
+  phone?: boolean;
+  /**
+   * Home's shape under the header (a title, a wide block, a rail). Off, one faint line where every
+   * page starts: a cold link to Live TV or the guide drew Home's blocks and then jumped to columns.
+   */
+  homeBody?: boolean;
+  testId?: string;
+}) {
   const rows = (n: number) =>
     Array.from({ length: n }, (_, i) => (
       <div key={i} className={cn('flex h-(--rail-item-height) items-center gap-3', collapsed ? 'justify-center' : 'px-3')}>
@@ -461,10 +477,16 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
           )}
         </div>
         <div aria-hidden className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden px-(--page-gutter) py-6">
-          <Skeleton className="h-5 w-48" />
-          <Skeleton className="h-40 w-full max-w-[80rem] rounded-lg" />
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
+          {homeBody ? (
+            <>
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-40 w-full max-w-[80rem] rounded-lg" />
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
+            </>
+          ) : (
+            <Skeleton className="h-5 w-48 opacity-60" />
+          )}
         </div>
         {phone && (
           <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>

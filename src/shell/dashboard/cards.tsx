@@ -7,7 +7,7 @@ import { Link } from 'react-router';
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/lib/channelName';
+import { displayChannelName, splitPlaceTag, stripCountryPrefix } from '@/lib/channelName';
 import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
 import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from '@/features/mylist/components/MyListButton';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
@@ -851,14 +851,9 @@ export interface OnNowCardProps {
  * programme's own picture through the image cache, or the channel logo on its tint, the
  * programme title and the channel under it, and how far it has run along the bottom edge.
  */
-export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
-  const { t } = useTranslation('shell');
+export function OnNowCard({ rail, programme, programmeArt, channelName, sourceName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
+  const { t, i18n } = useTranslation('shell');
   const { stripCountryPrefix: strip } = useDisplayPrefs();
-  // With several sources Home names the source after the channel ("US| CBS HD, Northwind"): the
-  // channel's own name is drawn as every list draws it, the source follows as written.
-  const lead = channel && [channel.name, isolate(channel.name)].find((part) => channelName.startsWith(part));
-  const shownName = lead ? channel.name : channelName;
-  const afterName = lead ? channelName.slice(lead.length) : '';
   const openMenu = useContext(ChannelMenuContext);
   // On now is only ever Home's own rail, so its cards open the channel's Live TV. Played in the mini
   // player over Home, the pressed card left On now (its channel joins Recently watched) and the
@@ -878,10 +873,12 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
                 <span aria-hidden className="absolute top-2 start-2 flex h-7 w-11 items-center justify-center rounded-sm border border-glass-border bg-glass-strong p-1">
                   <Poster src={logoUrl} sourceId={sourceId} width={44} alt="" label={channelName} aspect="wide" fit="contain" kind="live" className="h-full bg-transparent after:hidden [&_img]:p-0" rounded="sm" />
                 </span>
+  /** The channel's source, named after the channel when Home shows more than one source. */
+  sourceName?: string | undefined;
               )}
             </>
           ) : (
-            <LogoArt name={displayChannelName(shownName, strip)} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
+            <LogoArt name={displayChannelName(channelName, strip)} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
           )}
           <PlayGlyph corner={!programmeArt} />
           {progress !== undefined && <EdgeProgress value={progress} tone={programmeArt ? 'glass-quiet' : 'quiet'} />}
@@ -890,14 +887,22 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
           {programme}
         </span>
         <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
-          <span title={channelName} className="flex min-w-0 items-baseline">
-            <ChannelName name={shownName} strip={strip} className="min-w-0 truncate text-match-parent" />
-            {afterName ? (
-              <span dir="auto" className="min-w-0 shrink-[2] truncate text-match-parent">
-                {afterName}
+          {sourceName ? (
+            // With the source after it the line has no room to spare, and a place tag that did not
+            // fit still widened the name's box, leaving a gap before the source: the name goes bare.
+            <span title={joinList([channelName, sourceName], i18n.language)} className="flex min-w-0 items-baseline gap-1.5">
+              {/* The channel comes first: whole while the source can still show a few letters. */}
+              <span dir="auto" className="max-w-[calc(100%-3rem)] shrink-0 truncate text-match-parent">
+                {strip ? stripCountryPrefix(channelName) : splitPlaceTag(channelName).name}
               </span>
-            ) : null}
-          </span>
+              <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+              <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="on-now-source">
+                {sourceName}
+              </span>
+            </span>
+          ) : (
+            <ChannelName name={channelName} strip={strip} title={channelName} className="min-w-0 truncate text-match-parent" />
+          )}
           {left && (
             <>
               <span aria-hidden className="shrink-0 text-fg-subtle">·</span>

@@ -1044,13 +1044,13 @@ const OnNowRail = memo(function OnNowRail({
       skeletonAspect={16 / 9}
       renderCard={(c, rail) => {
         const left = c.left !== undefined ? t('minutesLeft', { count: c.left }) : undefined;
-        const channelName = manySources ? joinList([c.name, sourceById.get(c.ref.sourceId)?.name], i18n.language) : c.name;
         return (
           <OnNowCard
             rail={rail}
             programme={c.programme.title}
             programmeArt={c.programme.icon}
-            channelName={channelName}
+            channelName={c.name}
+            sourceName={manySources ? sourceById.get(c.ref.sourceId)?.name : undefined}
             logoUrl={c.logoUrl}
             left={left}
             progress={c.progress}

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Recording } from '@/api/types';
+import { DEFAULT_SETTINGS, type Recording } from '@/api/types';
 
 import { DownloadsPage } from '../pages/DownloadsPage';
 import { MyVideosPage } from '../pages/MyVideosPage';
@@ -142,13 +142,21 @@ describe('My Videos header subtitle (L3-visual-11)', () => {
 });
 
 describe('phone headers (L3-visual-6)', () => {
-  it('Downloads: the My Videos link is an icon on a phone, with its label for screen readers and as a tooltip', async () => {
+  it('Downloads: on a phone the My videos link and the speed button keep short visible labels, the full ones named (v-phone-02)', async () => {
     rpc.handlers['downloads.list'] = () => [];
     rpc.handlers['myvideos.list'] = () => [];
+    rpc.handlers['settings.get'] = () => ({ ...DEFAULT_SETTINGS, downloadRateLimitBps: 0 });
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
     const link = await screen.findByRole('link', { name: 'Open My videos' });
     expect(link.getAttribute('title')).toBe('Open My videos');
-    expect(within(link).getByText('Open My videos').className).toContain('max-sm:sr-only');
+    expect(within(link).getByText('Open My videos').className).toContain('max-sm:hidden');
+    expect(within(link).getByText('My videos').className).toContain('sm:hidden');
+    const speed = await screen.findByTestId('downloads-speed');
+    await waitFor(() => expect(speed.getAttribute('aria-label')).toBe('Default speed: Unlimited'));
+    expect(within(speed).getByText('Default: Unlimited').className).toContain('sm:hidden');
+    // The path gets its own line under its label on a phone.
+    expect(screen.getByTestId('downloads-folder').className).toContain('max-sm:basis-full');
+    expect((await screen.findByTestId('downloads-dir')).className).toContain('max-sm:basis-full');
   });
 
   it('Recent: on a phone Clear history moves out of the header into a bar above the list', async () => {

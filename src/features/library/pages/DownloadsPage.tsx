@@ -127,17 +127,25 @@ export function DownloadsPage() {
   // tabs), so the header search keeps its place from page to page.
   const myVideosLabel = completedCount > 0 ? t('openMyVideosCount', { count: completedCount }) : t('openMyVideos');
   const myVideosLink = (
-    // Icon only on a phone, so the folder line keeps its room (L3-visual-6).
-    <Link to="/my-videos" className={buttonClass('ghost', 'sm', 'ms-auto shrink-0')} title={myVideosLabel} data-testid="downloads-my-videos">
+    // On a phone the folder takes its own line and the two actions the next, with short labels so
+    // they share it, their icons under the folder's: as bare glyphs they squeezed the path to
+    // "/ho… downloads" and said nothing on touch.
+    <Link
+      to="/my-videos"
+      className={buttonClass('ghost', 'sm', 'shrink-0 max-sm:-ms-3 sm:ms-auto')}
+      title={myVideosLabel}
+      aria-label={myVideosLabel}
+      data-testid="downloads-my-videos"
+    >
       <Library size={16} aria-hidden />
-      <span className="max-sm:sr-only">{myVideosLabel}</span>
+      <span className="sm:hidden">{completedCount > 0 ? myVideosLabel : t('myVideosTitle')}</span>
+      <span className="max-sm:hidden">{myVideosLabel}</span>
     </Link>
   );
   const title = t('title');
   usePageHeader(title, summary || undefined);
-  const speedButtonLabel = t('speedGlobalButton', {
-    speed: settings.data ? (globalLimit === 0 ? t('speedUnlimited') : formatSpeedLimit(globalLimit, i18n.language)) : '…',
-  });
+  const speedText = settings.data ? (globalLimit === 0 ? t('speedUnlimited') : formatSpeedLimit(globalLimit, i18n.language)) : '…';
+  const speedButtonLabel = t('speedGlobalButton', { speed: speedText });
 
   // The download the dialog is about as the list shows it now: it may have
   // finished since the dialog opened.
@@ -286,7 +294,7 @@ export function DownloadsPage() {
       <PageTitle>{title}</PageTitle>
       {/* The list's own box (-mx-2, max-w-5xl, rows padded px-2), so the folder line, the section
           headings and the rows end on one line. */}
-      <div className="-mx-2 flex min-w-0 max-w-5xl items-center gap-3 px-2">
+      <div className="-mx-2 flex min-w-0 max-w-5xl items-center gap-3 px-2 max-sm:flex-wrap max-sm:gap-y-1">
         <FolderBar pageError={query.isError} />
         {myVideosLink}
         {/* The default speed, a rarely changed setting (also in Settings > General), as one quiet
@@ -305,11 +313,12 @@ export function DownloadsPage() {
               icon={<Gauge size={16} aria-hidden />}
               disabled={!settings.data}
               title={speedButtonLabel}
+              aria-label={speedButtonLabel}
               onClick={() => setSpeedTarget('global')}
               data-testid="downloads-speed"
             >
-              {/* Icon only on a phone, as the My videos link beside it. */}
-              <span className="max-sm:sr-only">{speedButtonLabel}</span>
+              <span className="sm:hidden">{t('speedInherited', { speed: speedText })}</span>
+              <span className="max-sm:hidden">{speedButtonLabel}</span>
             </Button>
           ))}
       </div>

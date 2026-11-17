@@ -469,9 +469,11 @@ function DashboardBody() {
   // under it, so the same two or three titles showed twice before anything else; with no more in
   // progress than the hero holds, the rail goes and On now moves up into the first screen. The
   // whole list, with remove and clear, stays on Recently watched (the More tab). On a wider
-  // window the rail stays whole: it shows every title at once beside the rotating hero. Only
-  // while the hero is drawn: the shared error takes its place, and the rail still shows the
-  // titles it has kept from before (a refetch that failed), so they must not go with the hero.
+  // window the rail stays whole while it holds a title the hero lacks: it shows every title at
+  // once beside the rotating hero. With every title in progress already a hero slide it would only
+  // repeat them under it, so it goes there too (home-08). Only while the hero is drawn: the shared
+  // error takes its place, and the rail still shows the titles it has kept from before (a refetch
+  // that failed), so they must not go with the hero.
   const phone = useMediaQuery(PHONE_QUERY);
   const uiScale = useUiScale();
   const density = useDensity();
@@ -479,9 +481,11 @@ function DashboardBody() {
   const drawnSections = useRef(new Set<string>());
   const heroOn = show('hero');
   const railContinueRows = useMemo(() => {
-    if (!heroOn || showSharedError || !phone) return continueRows;
+    if (!heroOn || showSharedError) return continueRows;
     const inHero = new Set(heroSlides.filter((s) => s.kind === 'continue').map((s) => s.key));
-    return inHero.size === 0 ? continueRows : continueRows.filter((p) => !inHero.has(continueKey(p)));
+    if (inHero.size === 0) return continueRows;
+    if (phone) return continueRows.filter((p) => !inHero.has(continueKey(p)));
+    return continueRows.every((p) => inHero.has(continueKey(p))) ? [] : continueRows;
   }, [heroOn, showSharedError, phone, heroSlides, continueRows]);
   const retryAllRails = () => {
     for (const q of railQueries) if (q.isError) void q.refetch();
@@ -1044,13 +1048,13 @@ const OnNowRail = memo(function OnNowRail({
       skeletonAspect={16 / 9}
       renderCard={(c, rail) => {
         const left = c.left !== undefined ? t('minutesLeft', { count: c.left }) : undefined;
-        const channelName = manySources ? joinList([c.name, sourceById.get(c.ref.sourceId)?.name], i18n.language) : c.name;
         return (
           <OnNowCard
             rail={rail}
             programme={c.programme.title}
             programmeArt={c.programme.icon}
-            channelName={channelName}
+            channelName={c.name}
+            sourceName={manySources ? sourceById.get(c.ref.sourceId)?.name : undefined}
             logoUrl={c.logoUrl}
             left={left}
             progress={c.progress}

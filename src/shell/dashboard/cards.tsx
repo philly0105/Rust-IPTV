@@ -7,11 +7,13 @@ import { Link } from 'react-router';
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/lib/channelName';
+import { displayChannelName, splitPlaceTag, stripCountryPrefix } from '@/lib/channelName';
 import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
 import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from '@/features/mylist/components/MyListButton';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
+import { useLongPress, type LongPressHandlers } from '@/features/live/hooks/useLongPress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
+import type { PosterMenuItem } from '@/features/vod/hooks/usePosterMenu';
 import { intlLocale, listSeparator } from '@/lib/intl';
 import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, WatchedChip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
 
@@ -219,6 +221,9 @@ interface PosterCardViewProps extends PosterCardProps {
   artCorner?: ReactNode;
   /** Extra classes for the artwork frame. */
   artClassName?: string;
+  /** The poster's menu: right click, the context-menu key, Shift+F10 and a long press (`longPress`) open it. */
+  openMenu?: ((pos: { x: number; y: number }) => void) | undefined;
+  longPress?: LongPressHandlers | undefined;
 }
 
 function PosterCardView({
@@ -237,6 +242,8 @@ function PosterCardView({
   artCorner,
   artClassName,
   search,
+  openMenu,
+  longPress,
 }: PosterCardViewProps) {
   // Only a link to a movie or series page prefetches; play cards and search links do not.
   const opens = onPlay ? undefined : linkTarget(to, title, posterUrl)?.itemRef;
@@ -281,7 +288,10 @@ function PosterCardView({
       to={to ?? '#'}
       {...rail}
       aria-label={ariaLabel}
-      className={cardRoot}
+      // A long press opens the menu: no link preview or text selection on touch.
+      className={cn(cardRoot, longPress && 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]')}
+      {...menuHandlers<HTMLAnchorElement>(openMenu)}
+      {...longPress}
       onPointerEnter={opens ? intent.onPointerEnter : undefined}
       onPointerLeave={opens ? intent.onPointerLeave : undefined}
       onFocus={opens ? intent.onFocus : undefined}
@@ -358,9 +368,16 @@ function CornerMyListButton(props: MyListButtonProps) {
  */
 function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
   const { rail, myList, progress, myListMark = 'saved' } = props;
+  const openPosterMenu = useContext(PosterMenuContext);
+  const kinds = useContext(SourceKindContext);
+  const openMenu = openPosterMenu
+    ? (pos: { x: number; y: number }) => openPosterMenu({ pos, item: posterMenuItem(props), sourceKind: kinds?.get(myList.itemRef.sourceId) })
+    : undefined;
+  // iOS fires no contextmenu on a long press of a link (it shows its own preview): a timer does.
+  const longPress = useLongPress((x, y) => openMenu?.({ x, y }));
   return (
     <div className="group/poster relative min-w-0">
-      <PosterCardView {...props} artClassName={WRAPPER_HOVER_ART} />
+      <PosterCardView {...props} artClassName={WRAPPER_HOVER_ART} openMenu={openMenu} longPress={openMenu ? longPress : undefined} />
       {/* The artwork's box (2:3 at the card's width), so the toggle sits on the poster's corner. */}
       <div className={cn('pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]', WRAPPER_HOVER_LAYER)}>
         {/* The rail is one Tab stop (roving tabindex): only the card holding it also offers its toggle. */}
@@ -371,8 +388,14 @@ function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef;
           snapshot={myList.snapshot}
           className={cn(
             'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 group-has-[a:focus-visible]/poster:opacity-100 focus-visible:opacity-100',
-            // No hover on a touch screen: there an invisible toggle would only take stray taps.
-            myListMark === 'saved' ? 'data-in-list:opacity-100 [@media(hover:none)]:opacity-100' : '[@media(hover:none)]:hidden',
+            // No hover on a touch screen: there an invisible toggle would only take stray taps. With
+            // the poster's menu (a long press) holding Add to My List, a touch screen shows the
+            // toggle only as the saved marker, not as an add disc on every poster (home-07).
+            myListMark === 'hover'
+              ? '[@media(hover:none)]:hidden'
+              : openMenu
+                ? 'data-in-list:opacity-100 [@media(hover:none)]:not-data-in-list:hidden'
+                : 'data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
             'motion-safe:transition-[opacity,background-color,color,transform]',
             cornerOffset(progress),
           )}
@@ -380,6 +403,15 @@ function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef;
       </div>
     </div>
   );
+}
+
+/** What a poster's menu acts on: its title, with a caption that is only a year as the menu's subtitle. */
+function posterMenuItem({ title, posterUrl, myList }: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }): PosterMenuItem {
+  const item: PosterMenuItem = { ref: myList.itemRef, name: title };
+  const year = myList.snapshot.subtitle;
+  if (year && /^\d{4}$/.test(year)) item.year = Number(year);
+  if (posterUrl) item.posterUrl = posterUrl;
+  return item;
 }
 
 /** A channel card asking for its menu (Run 2 C2): where to draw it, the channel, and the card's Play. */
@@ -673,6 +705,17 @@ export interface CardMenuItem {
 /** Opens a card's action menu. `ChannelMenuHost` provides it; without it a card has no menu. */
 export const CardMenuContext = createContext<((request: CardMenuRequest) => void) | null>(null);
 
+/** A movie or series poster asking for the Movies grids' poster menu (usePosterMenu): where to draw it, and the title. */
+export interface PosterMenuRequest {
+  pos: { x: number; y: number };
+  item: PosterMenuItem;
+  /** The title's source kind, for Play; unknown, Play opens the details instead. */
+  sourceKind: SourceKind | undefined;
+}
+
+/** Opens a poster's menu. `ChannelMenuHost` provides it; without it a poster has no menu. */
+export const PosterMenuContext = createContext<((request: PosterMenuRequest) => void) | null>(null);
+
 /**
  * 16:9 artwork for a title that may only have a poster: the backdrop when there is one; else
  * the poster stands upright at the inline start over a soft field made from its own colours,
@@ -729,6 +772,9 @@ function CardMenuButton({ label, tabIndex, onOpen }: { label: string; tabIndex: 
         className={cn(
           'absolute top-1.5 end-1.5 z-[1] inline-flex size-8 items-center justify-center rounded-full border border-glass-border bg-glass-strong text-on-glass shadow-1',
           'opacity-0 group-hover/wide:opacity-100 group-focus-within/wide:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100',
+          // On touch it is on every card at once: a lighter disc with no rim or shadow, so a rail of
+          // them does not read as a row of dark dots (the strongest on the light theme's pale tiles).
+          '[@media(hover:none)]:border-transparent [@media(hover:none)]:bg-glass/50 [@media(hover:none)]:shadow-none',
           'hover:bg-glass active:scale-95 motion-safe:transition-[opacity,transform] motion-safe:duration-(--duration-fast)',
         )}
       >
@@ -835,6 +881,8 @@ export interface OnNowCardProps {
   /** The programme's own picture (XMLTV icon), when the guide has one. */
   programmeArt?: string;
   channelName: string;
+  /** The channel's source, named after the channel when Home shows more than one source. */
+  sourceName?: string | undefined;
   logoUrl?: string;
   /** "12 minutes left". */
   left?: string;
@@ -851,14 +899,9 @@ export interface OnNowCardProps {
  * programme's own picture through the image cache, or the channel logo on its tint, the
  * programme title and the channel under it, and how far it has run along the bottom edge.
  */
-export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
-  const { t } = useTranslation('shell');
+export function OnNowCard({ rail, programme, programmeArt, channelName, sourceName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
+  const { t, i18n } = useTranslation('shell');
   const { stripCountryPrefix: strip } = useDisplayPrefs();
-  // With several sources Home names the source after the channel ("US| CBS HD, Northwind"): the
-  // channel's own name is drawn as every list draws it, the source follows as written.
-  const lead = channel && [channel.name, isolate(channel.name)].find((part) => channelName.startsWith(part));
-  const shownName = lead ? channel.name : channelName;
-  const afterName = lead ? channelName.slice(lead.length) : '';
   const openMenu = useContext(ChannelMenuContext);
   // On now is only ever Home's own rail, so its cards open the channel's Live TV. Played in the mini
   // player over Home, the pressed card left On now (its channel joins Recently watched) and the
@@ -881,7 +924,7 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
               )}
             </>
           ) : (
-            <LogoArt name={displayChannelName(shownName, strip)} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
+            <LogoArt name={displayChannelName(channelName, strip)} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
           )}
           <PlayGlyph corner={!programmeArt} />
           {progress !== undefined && <EdgeProgress value={progress} tone={programmeArt ? 'glass-quiet' : 'quiet'} />}
@@ -890,14 +933,22 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
           {programme}
         </span>
         <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
-          <span title={channelName} className="flex min-w-0 items-baseline">
-            <ChannelName name={shownName} strip={strip} className="min-w-0 truncate text-match-parent" />
-            {afterName ? (
-              <span dir="auto" className="min-w-0 shrink-[2] truncate text-match-parent">
-                {afterName}
+          {sourceName ? (
+            // With the source after it the line has no room to spare, and a place tag that did not
+            // fit still widened the name's box, leaving a gap before the source: the name goes bare.
+            <span title={joinList([channelName, sourceName], i18n.language)} className="flex min-w-0 items-baseline gap-1.5">
+              {/* The channel comes first: whole while the source can still show a few letters. */}
+              <span dir="auto" className="max-w-[calc(100%-3rem)] shrink-0 truncate text-match-parent">
+                {strip ? stripCountryPrefix(channelName) : splitPlaceTag(channelName).name}
               </span>
-            ) : null}
-          </span>
+              <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+              <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="on-now-source">
+                {sourceName}
+              </span>
+            </span>
+          ) : (
+            <ChannelName name={channelName} strip={strip} title={channelName} className="min-w-0 truncate text-match-parent" />
+          )}
           {left && (
             <>
               <span aria-hidden className="shrink-0 text-fg-subtle">·</span>

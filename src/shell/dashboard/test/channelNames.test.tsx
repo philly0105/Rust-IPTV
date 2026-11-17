@@ -65,22 +65,22 @@ describe("Home's channel cards name a channel as Live TV does", () => {
     expect(card.querySelector('[title="US| ESPN HD"]')!.querySelector('.sr-only')!.textContent).toBe('US| ESPN HD');
   });
 
-  it('an On now card draws the channel line the same way, the source after it as written', async () => {
+  it('an On now card draws the channel line the same way; with its source after it the name goes bare, then a dot', async () => {
     const joined = joinList([cbs.name, 'Northwind Premium'], 'en');
     wrap(
       <>
         <OnNowCard rail={rail} programme="NFL Live" channelName={cbs.name} left="41 minutes left" sourceId="s1" ariaLabel="Play one" onPlay={vi.fn()} channel={cbs} />
-        <OnNowCard rail={rail} programme="NFL Live" channelName={joined} sourceId="s1" ariaLabel="Play two" onPlay={vi.fn()} channel={cbs} />
+        <OnNowCard rail={rail} programme="NFL Live" channelName={cbs.name} sourceName="Northwind Premium" sourceId="s1" ariaLabel="Play two" onPlay={vi.fn()} channel={cbs} />
       </>,
     );
     const one = screen.getByRole('button', { name: 'Play one' });
     await waitFor(() => expect(drawn(one)).toEqual(['CBS HD', 'US']));
     expect(one.textContent).toContain('41 minutes left');
     const two = screen.getByRole('button', { name: 'Play two' });
-    expect(drawn(two)).toEqual(['CBS HD', 'US']);
+    // realdata-12: a tag that did not fit still widened the name's box, so a gap came before ", Northwind".
+    expect(two.querySelector('[data-testid=channel-name-tag]')).toBeNull();
     const line = two.querySelector<HTMLElement>(`[title="${joined}"]`)!;
-    expect(line.lastElementChild!.textContent).toContain('Northwind Premium');
-    expect(line.lastElementChild!.textContent).not.toContain('CBS');
+    expect([...line.children].map((c) => c.textContent)).toEqual(['CBS HD', '·', 'Northwind Premium']);
   });
 
   it('with "Hide country tags" on, the cards leave the tag out', async () => {

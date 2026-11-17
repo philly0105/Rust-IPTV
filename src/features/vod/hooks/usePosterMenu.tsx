@@ -44,7 +44,8 @@ export function menuPosition(e: MouseEvent<HTMLElement>, card: Element): { x: nu
 /**
  * A poster's menu (right click, Shift+F10, the context-menu key, a long press): Play (or Resume),
  * Open details, My List and Mark as watched, under a header naming the title. Category grids and
- * the landing's rails open the same menu. `open` keeps its identity, so memoised rails keep theirs.
+ * the landing's rails open the same menu, and Home's poster cards (through `ChannelMenuHost`). `open`
+ * and `close` keep their identity, so memoised rails keep theirs.
  */
 export function usePosterMenu({ sourceKind, resume, openDetails }: PosterMenuOptions) {
   const { t } = useTranslation('vod');
@@ -106,5 +107,5 @@ export function usePosterMenu({ sourceKind, resume, openDetails }: PosterMenuOpt
       onClose={close}
     />
   );
-  return { open, element, isOpen: menu !== null };
+  return { open, close, element, isOpen: menu !== null };
 }

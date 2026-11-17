@@ -72,7 +72,8 @@ function home() {
   };
   rpcMock.reset();
   const h = rpcMock.handlers;
-  h['settings.get'] = () => settings();
+  // No hero: it would hold all three titles, and Continue watching would go (home-08).
+  h['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false } });
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   h['sources.list'] = () => [makeSource('s1', { name: 'Night Portal' })];
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });

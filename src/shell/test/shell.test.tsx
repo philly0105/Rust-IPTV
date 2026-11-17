@@ -627,8 +627,9 @@ describe('DashboardPage', () => {
     const hero = await screen.findByTestId('dashboard-hero');
     expect(within(hero).getByText('The Long Signal')).toBeTruthy();
     expect(within(hero).getByText('60 minutes left')).toBeTruthy();
-    expect(await screen.findByTestId('dashboard-rail-continue-watching')).toBeTruthy();
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    // The one title in progress is the hero's slide, so Continue watching does not repeat it (home-08).
+    expect(screen.queryByTestId('dashboard-rail-continue-watching')).toBeNull();
     expect(within(live).getByText('Harbor News')).toBeTruthy();
     expect(await within(live).findByText('Morning Bulletin')).toBeTruthy();
     // The cards show titles and times only, so the programme descriptions stay off the wire (L3-serve-ui-8).
@@ -1356,7 +1357,7 @@ describe('B7 review round 2', () => {
     queryClient.clear();
     rpcMock.handlers['favorites.list'] = () => new Promise((r) => (resolve = r));
     renderRoutes(routes(), '/dashboard');
-    await screen.findByTestId('dashboard-rail-continue-watching');
+    await screen.findByTestId('dashboard-hero');
     expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull();
     expect(screen.queryByTestId('dashboard-rail-favorite-vod')).toBeNull();
     // Rails below the still-loading favorites wait for it (round 3 hold rule), then appear.
@@ -1852,6 +1853,8 @@ describe('F11 (L2-desktop-8)', () => {
 
 describe('dashboard base titles (L2-visual-3)', () => {
   it('Continue watching and favourite VOD cards drop the provider tags an old snapshot still carries', async () => {
+    // No hero: the one title in progress would be its slide, and Continue watching would go (home-08).
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false } });
     rpcMock.handlers['positions.continueWatching'] = (): PlaybackPosition[] => [
       { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('|EN| 4K - Night Train [MULTI-SUB] (2019)') },
     ];

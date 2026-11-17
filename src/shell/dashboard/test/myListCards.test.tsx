@@ -1,6 +1,6 @@
 /** V1-9: dashboard rail posters carry My List (C3): the toggle beside a linked card, the saved marker on a play card, nothing on live. */
 
-import { configure, cleanup, screen, waitFor, within } from '@testing-library/react';
+import { configure, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FavoriteEntry, PlaybackPosition, WatchlistEntry } from '@/api/types';
@@ -55,7 +55,8 @@ function favorite(ref: FavoriteEntry['ref'], title: string): FavoriteEntry {
 function dashboard(list: () => unknown) {
   rpcMock.reset();
   const h = rpcMock.handlers;
-  h['settings.get'] = () => settings();
+  // No hero: the one title in progress would be its slide, and Continue watching would go (home-08).
+  h['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false } });
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   h['sources.list'] = () => [makeSource('s1', { name: 'Night Portal' })];
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
@@ -114,6 +115,40 @@ describe('dashboard rail posters and My List', () => {
     expect(savedLink.getAttribute('tabindex')).toBe('0');
     expect(savedToggle.getAttribute('tabindex')).toBe('0');
     expect(otherToggle.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it("a poster's right click, Shift+F10 and long press open the Movies grids' menu, which also adds to My List (home-05)", async () => {
+    dashboard(() => [savedEntry]);
+    rpcMock.handlers['watchlist.toggle'] = () => ({ inList: true });
+    const { router } = renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-favorite-vod');
+    const other = await within(rail).findByRole('link', { name: /Other Film/ });
+    fireEvent.contextMenu(other, { clientX: 30, clientY: 40 });
+    let menu = await screen.findByRole('menu', { name: 'Other Film' });
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Play', 'Open details', 'Add to My List', 'Mark as watched']);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+    // The keyboard, then the menu's Add to My List.
+    fireEvent.keyDown(other, { key: 'F10', shiftKey: true });
+    menu = await screen.findByRole('menu', { name: 'Other Film' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Add to My List' }));
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'watchlist.toggle' && JSON.stringify(c.args).includes('"m2"'))).toBe(true));
+
+    // Open details from the menu.
+    fireEvent.contextMenu(other, { clientX: 30, clientY: 40 });
+    fireEvent.click(within(await screen.findByRole('menu', { name: 'Other Film' })).getByRole('menuitem', { name: 'Open details' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/s/s1/movie/m2'));
+  });
+
+  it('on a touch screen a poster with a menu shows its My List toggle only as the saved marker (home-07)', async () => {
+    dashboard(() => [savedEntry]);
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-favorite-vod');
+    const other = await within(rail).findByRole('link', { name: /Other Film/ });
+    const toggle = within(other.parentElement!).getByRole('button', { name: 'Save Other Film to My List' });
+    expect(toggle.className).toContain('[@media(hover:none)]:not-data-in-list:hidden');
+    expect(toggle.className).not.toContain('[@media(hover:none)]:opacity-100');
   });
 
   it('the My List rail cards get the toggle too, from their detail links', async () => {

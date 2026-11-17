@@ -155,6 +155,18 @@ describe('route error page', () => {
     render(<AppLoading />);
     expect(screen.getByTestId('app-loading').textContent).toBe('');
   });
+
+  it("draws Home's blocks only on the way to Home: a cold link elsewhere gets one neutral line", () => {
+    const blocks = () => screen.getByTestId('app-loading').querySelectorAll('.h-40').length;
+    window.history.replaceState(null, '', '/dashboard');
+    render(<AppLoading />);
+    expect(blocks()).toBe(1);
+    cleanup();
+    window.history.replaceState(null, '', '/s/a/live');
+    render(<AppLoading />);
+    expect(blocks()).toBe(0);
+    window.history.replaceState(null, '', '/');
+  });
 });
 
 describe('not-found page', () => {

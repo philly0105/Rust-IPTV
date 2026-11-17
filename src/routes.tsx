@@ -70,7 +70,11 @@ export function AppLoading() {
   const railHiddenPref = useShellStore((s) => s.railHidden);
   const narrow = useMediaQuery('(max-width: 1023px)');
   const phone = useMediaQuery(PHONE_QUERY);
-  return <ShellSkeleton collapsed={railPref || narrow} railHidden={railHiddenPref && narrow && !phone} phone={phone} testId="app-loading" />;
+  // Home's blocks only where Home is coming; any other page gets the neutral line, so its own
+  // layout (Live's columns, a grid) does not replace a Home-shaped placeholder.
+  const { pathname } = window.location;
+  const home = pathname === '/' || pathname === '/dashboard';
+  return <ShellSkeleton collapsed={railPref || narrow} railHidden={railHiddenPref && narrow && !phone} phone={phone} homeBody={home} testId="app-loading" />;
 }
 
 /** A lazy page chunk that failed to download (offline, or a stale build after an update). */

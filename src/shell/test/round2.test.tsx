@@ -125,6 +125,23 @@ function GuideLikePage() {
   return <Page>guide page</Page>;
 }
 
+/** A page that asks the header to step aside while `aside` is set (Multi-view on a short window). */
+function AsidePage() {
+  const [aside, setAside] = useState(true);
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Multi-view', stepAside: aside });
+  }, [shell, aside]);
+  return (
+    <Page>
+      aside page
+      <button type="button" onClick={() => setAside(false)}>
+        back in
+      </button>
+    </Page>
+  );
+}
+
 const onBack = vi.fn();
 
 function routes() {
@@ -142,6 +159,7 @@ function routes() {
         { path: 'page-search', element: <PageSearchPage /> },
         { path: 'search', element: <Page>search page</Page> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
+        { path: 'aside', element: <AsidePage /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
       ],
@@ -266,6 +284,25 @@ describe('detail pages: Back in the header, the title once its h1 scrolls away',
   });
 });
 
+describe('a page can ask the header to step aside', () => {
+  it('draws no header bar while the page asks, keeps the window title, and comes back after', async () => {
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(screen.queryByTestId('shell-header')).toBeNull();
+    expect(document.title).toBe('Multi-view · Tsrust IPTV');
+    fireEvent.click(screen.getByRole('button', { name: 'back in' }));
+    expect(await screen.findByTestId('shell-header')).toBeTruthy();
+  });
+
+  it('stays while the rail is hidden, whose Show button is in the header', async () => {
+    media('(max-width: 1023px)');
+    useShellStore.setState({ railHidden: true });
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(within(screen.getByTestId('shell-header')).getByTestId('rail-show')).toBeTruthy();
+  });
+});
+
 describe('the header search slot', () => {
   it("a page's own field wears the trigger's fill and a Ctrl F hint, and the palette keeps a button", async () => {
     renderRoutes(routes(), '/searching');
@@ -362,6 +399,28 @@ describe('the rail', () => {
     await act(() => router.navigate('/live/archive/s1/ch1'));
     await waitFor(() => expect(links('Live TV').map((l) => l.getAttribute('aria-current'))).toEqual(['page', 'page']));
     for (const link of links('Movies')) expect(link.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('marks the TV guide, not Live TV, on the catch-up archive the guide opened', async () => {
+    const { router } = renderRoutes(routes(), '/dashboard');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await act(() => router.navigate('/live/archive/s1/ch1', { state: { from: '/epg?at=2026-11-16T20:00' } }));
+    const links = (name: string) => within(nav).getAllByRole('link', { name });
+    await waitFor(() => expect(links('Live TV')).toHaveLength(2));
+    for (const link of links('Live TV')) expect(link.getAttribute('aria-current')).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBe('page');
+    // The phone's tab bar says the same.
+    cleanup();
+    media(...PHONE);
+    const phone = renderRoutes(routes(), '/dashboard');
+    await act(() => phone.router.navigate('/live/archive/s1/ch1', { state: { from: '/epg' } }));
+    const bar = await screen.findByTestId('tab-bar');
+    expect(within(bar).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBe('page');
+    expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBeNull();
+    // Opened from Live TV (or a link), the archive is Live TV's.
+    await act(() => phone.router.navigate('/live/archive/s1/ch1', { state: { from: '/s/s1/live' } }));
+    await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page'));
+    expect(within(bar).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBeNull();
   });
 
   it('railLinkCurrent counts the paths beside a link, never another source or section', () => {

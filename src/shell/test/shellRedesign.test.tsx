@@ -146,7 +146,9 @@ describe('rail (SH-rail-ia)', () => {
     expect(screen.queryByRole('button', { name: /Only One/ })).toBeNull();
     // It stands for Manage sources, which no longer has a row of its own.
     const sources = screen.getByRole('group', { name: 'Sources' });
-    expect(within(sources).getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/sources?add=1', '/sources']);
+    // Then Add source, a labelled row at the end of the group (walkthrough-18).
+    expect(within(sources).getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/sources', '/sources?add=1']);
+    expect(within(sources).getByRole('link', { name: 'Add source' }).textContent).toBe('Add source');
     const watch = screen.getByRole('group', { name: 'Watch' });
     expect(within(watch).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live');
     // Radio was the one link of the source's own that no Watch or Library row had: it follows Live TV.

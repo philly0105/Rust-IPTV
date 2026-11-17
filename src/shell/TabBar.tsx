@@ -25,6 +25,7 @@ import { cn, Dialog, SourceMonogram } from '@/ui';
 
 import { ActivityMark, ActivityText } from './activityMarks';
 import {
+  archiveFromGuide,
   isLiveRoute,
   LIBRARY_LINKS,
   liveTabTarget,
@@ -76,7 +77,9 @@ function sourceGone(sources: readonly Source[] | undefined, pathname: string): b
 export const TabBar = memo(function TabBar() {
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();
-  const { pathname, search, key } = useLocation();
+  const { pathname, search, key, state } = useLocation();
+  // The archive the guide opened is the guide's page here, not Live TV's.
+  const fromGuide = archiveFromGuide(pathname, state);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreOpenRef = useRef(moreOpen);
   moreOpenRef.current = moreOpen;
@@ -110,10 +113,10 @@ export const TabBar = memo(function TabBar() {
       label: t('tabLive'),
       icon: Tv,
       // Not on the page of a source that is not there (SourceGuard's page), which no tab stands for.
-      active: (isLiveRoute(pathname) && !sourceGone(sources.data, pathname)) || sourcesFor(pathname, forSearch) === 'live',
+      active: (isLiveRoute(pathname) && !fromGuide && !sourceGone(sources.data, pathname)) || sourcesFor(pathname, forSearch) === 'live',
       tour: 'live',
     },
-    { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
+    { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') || fromGuide },
     { id: 'search', to: '/search', label: t('navSearch'), icon: Search, active: pathname === '/search', tour: 'search' },
   ];
   // The page on show lives in the sheet: More takes its icon and name, so a movie's page says
@@ -160,7 +163,7 @@ export const TabBar = memo(function TabBar() {
           </button>
         </li>
       </ul>
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} search={forSearch} />
+      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} search={forSearch} fromGuide={fromGuide} />
     </nav>
   );
 });
@@ -260,6 +263,7 @@ function MoreSheet({
   sources,
   pathname,
   search,
+  fromGuide,
 }: {
   open: boolean;
   onClose: () => void;
@@ -267,6 +271,8 @@ function MoreSheet({
   pathname: string;
   /** The query only while there are no sources (TabBar's forSearch), else empty. */
   search: string;
+  /** The page is the archive the guide opened: a source's Live TV does not claim it. */
+  fromGuide: boolean;
 }) {
   const { t } = useTranslation('shell');
   // On the Sources page a Movies or Series tile led to, that tile is current, not Manage sources.
@@ -351,7 +357,7 @@ function MoreSheet({
                   {railLinks(s, { hasRadio: (s.radioCount ?? 0) > 0 })
                     .filter((l) => l.id !== 'favorites' && l.id !== 'recent')
                     .map((l) => {
-                    const active = railLinkCurrent(l, pathname);
+                    const active = railLinkCurrent(l, pathname) && !(fromGuide && l.id === 'live');
                     return (
                       <li key={l.id}>
                         <NavLink

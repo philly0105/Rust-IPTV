@@ -64,6 +64,7 @@ function mountEvents(): void {
 beforeEach(() => {
   rpcMock.reset();
   useToastStore.getState().clear();
+  localStorage.removeItem('tsrust.lastRoute');
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 });
 afterEach(() => {
@@ -180,6 +181,8 @@ describe('lastRoute persistence', () => {
     await act(() => router.navigate('/live?group=news'));
     act(() => vi.advanceTimersByTime(1200));
     expect(routeWrites()).toEqual(['/search', '/search?q=dune', '/live?group=news']);
+    // This browser keeps its own copy, which startup reads before the server's (one per server).
+    expect(localStorage.getItem('tsrust.lastRoute')).toBe('/live?group=news');
   });
 
   it('a screen change within the debounce saves only the newest path, query included', async () => {

@@ -62,6 +62,10 @@ export const Header = memo(function Header({
     document.title = windowTitle ? `${windowTitle} · ${appName}` : appName;
   }, [windowTitle, appName]);
 
+  // The page asked for the room (header.stepAside); the window title above still follows it. A
+  // phone app installed to the home screen still keeps the page off the status bar.
+  if (header?.stepAside && !railHidden) return <div aria-hidden className="h-[env(safe-area-inset-top,0px)] shrink-0" data-testid="shell-header-aside" />;
+
   return (
     <header
       data-testid="shell-header"

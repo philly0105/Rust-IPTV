@@ -369,6 +369,8 @@ export function DashboardRail<T>({
       ref={sectionRef}
       aria-labelledby={headingId}
       data-dash-rail={id}
+      // The shell's skip link lands on the first rail's card in focus, past the hero (the first rail wins).
+      data-skip-target=""
       data-testid={`dashboard-rail-${id}`}
       className="group/rail relative flex flex-col gap-3"
     >

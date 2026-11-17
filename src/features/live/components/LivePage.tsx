@@ -847,6 +847,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       resumeProgram={resumeCatchup?.program && { title: resumeCatchup.program.title, positionSeconds: resumeCatchup.positionSeconds }}
       highlighted={!isRadio && !!cursorChannel}
       locked={locks.channelLocked(idleCard?.channel)}
+      pending={!!last?.pending}
       now={now}
       stripPrefix={prefs.stripCountryPrefix}
       epgOffsetMinutes={prefs.epgOffsetMinutes}

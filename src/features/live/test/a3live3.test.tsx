@@ -192,3 +192,14 @@ describe('channel names for screen readers (w-a11y-03)', () => {
     expect(live.getAttribute('aria-label')).not.toContain('US|');
   });
 });
+
+describe('the idle stage while the channel last watched is looked up (w-realdata-09)', () => {
+  it('shows the backdrop only, no prompt for a Resume to replace', () => {
+    renderAt('/', [{ path: '/', element: <StageIdle kind="live" pending now={now} /> }]);
+    expect(screen.getByTestId('stage-idle')).toBeTruthy();
+    expect(screen.queryByText(/Nothing playing|Pick a channel/)).toBeNull();
+    cleanup();
+    renderAt('/', [{ path: '/', element: <StageIdle kind="live" now={now} /> }]);
+    expect(screen.getAllByText(/Nothing playing|Pick a channel/).length).toBeGreaterThan(0);
+  });
+});

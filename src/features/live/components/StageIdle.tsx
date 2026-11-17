@@ -27,6 +27,11 @@ export interface StageIdleProps {
    * the programme again when an unlock runs out.
    */
   locked?: boolean;
+  /**
+   * The channel last watched is still being looked up (w-realdata-09): only the backdrop, no
+   * "Nothing playing" prompt that a Resume replaces a moment later.
+   */
+  pending?: boolean;
   now: number;
   stripPrefix?: boolean;
   epgOffsetMinutes?: number;
@@ -62,7 +67,7 @@ const TINY_STAGE = 'md:[@container_(max-height:8rem)]:hidden';
  * stage gets shorter (a laptop's or tablet's stage column is 170 to 230 px tall): the hint first,
  * then the logo, so the name and Resume are never cut off.
  */
-export function StageIdle({ kind, last, resumeProgram, highlighted = false, locked = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
+export function StageIdle({ kind, last, resumeProgram, highlighted = false, locked = false, pending = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
   const channel = last?.channel;
   const name = channel ? displayChannelName(channel.name, stripPrefix) : '';
@@ -88,7 +93,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
         data-hue={hue ?? undefined}
         style={{ backgroundImage: `radial-gradient(120% 90% at 50% 18%, ${glow}, transparent 68%)` }}
       />
-      {channel ? (
+      {pending && !channel ? null : channel ? (
         <div className="relative flex max-w-md min-w-0 flex-col items-center gap-3 px-6 text-center max-md:w-full max-md:max-w-none max-md:flex-row max-md:gap-3 max-md:px-0 max-md:text-start">
           <ChannelLogo src={channel.logoUrl} name={name} size={64} sourceId={channel.ref.sourceId} className={cn('shadow-2 max-md:hidden', SHORT_STAGE)} onHue={onHue} />
           <ChannelLogo src={channel.logoUrl} name={name} size={32} sourceId={channel.ref.sourceId} className="md:hidden" />

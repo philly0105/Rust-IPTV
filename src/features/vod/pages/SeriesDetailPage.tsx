@@ -391,7 +391,7 @@ export function SeriesDetailPage() {
           />
         </HeroIcon>
       )}
-      <HeroIcon caption={t('captionMyList')}>
+      <HeroIcon caption={t('captionMyList')} labelled={!watch.active}>
         <MyListButton itemRef={ref} snapshot={listSnapshot} variant={watch.active ? 'round' : 'hero'} size="lg" />
       </HeroIcon>
       <HeroIcon caption={t('captionFavorite')}>

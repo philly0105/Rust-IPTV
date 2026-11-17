@@ -309,7 +309,7 @@ export function MovieDetailPage() {
           />
         </HeroIcon>
       )}
-      <HeroIcon caption={t('captionMyList')}>
+      <HeroIcon caption={t('captionMyList')} labelled={!watching}>
         <MyListButton itemRef={ref} snapshot={listSnapshot} variant={watching ? 'round' : 'hero'} size="lg" />
       </HeroIcon>
       <HeroIcon caption={t('captionFavorite')}>

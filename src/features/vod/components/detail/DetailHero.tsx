@@ -164,7 +164,7 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
           {/* Two groups (the text buttons, the icon buttons): a narrow column breaks between them, never
               inside one. The progress line follows the buttons in the DOM, Resume first; from sm it is
               drawn under the whole row, on a phone between Resume and the icon tiles. */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="vod-hero-actions">
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-2" data-testid="vod-hero-actions">
             {actions}
             {progress && (
               <div className="flex basis-full items-center gap-2 text-caption text-fg-muted sm:order-last" data-testid="vod-hero-progress">
@@ -220,15 +220,23 @@ export function HeroIconGroup({ children, className }: { children: ReactNode; cl
 }
 
 /**
- * One round icon button of a `HeroIconGroup` with its caption, which shows on a phone only. The
- * button keeps its accessible name; the caption is a shorter form of it ("Watched" for "Mark as
- * watched"), hidden from assistive tech so the name is not read twice.
+ * One round icon button of a `HeroIconGroup` with its caption under it, on every width: the
+ * hero's actions are all named in words, as Play and My List are (w-walkthrough-05). The button
+ * keeps its accessible name and tooltip; the caption is a shorter form of it ("Watched" for "Mark
+ * as watched"), hidden from assistive tech so the name is not read twice. `labelled`: the button
+ * draws its own label from sm (the hero's My List), so the caption is the phone's only.
  */
-export function HeroIcon({ caption, children }: { caption: string; children: ReactNode }) {
+export function HeroIcon({ caption, labelled, children }: { caption: string; labelled?: boolean; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col items-center gap-1">
+    <div className="flex min-w-0 flex-col items-center gap-1 sm:min-w-14">
       {children}
-      <span aria-hidden className="line-clamp-2 max-w-full text-center text-caption leading-tight break-words text-fg-muted hyphens-auto sm:hidden">
+      <span
+        aria-hidden
+        className={cn(
+          'line-clamp-2 max-w-full text-center text-caption leading-tight break-words text-fg-muted hyphens-auto sm:max-w-20',
+          labelled && 'sm:hidden',
+        )}
+      >
         {caption}
       </span>
     </div>

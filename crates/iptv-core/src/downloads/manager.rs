@@ -85,6 +85,9 @@ pub const MIRROR_COOLDOWN: Duration = Duration::from_secs(120);
 /// How long an endpoint resolved ahead for the next row stays usable
 /// ([`DownloadManager::take_preresolved`]).
 pub const PRERESOLVE_TTL: Duration = Duration::from_secs(60);
+/// How long a source is not probed after a round there was aborted
+/// (playback, a recording or a stop), so an abort cannot repeat every tick.
+pub const PROBE_ABORT_BACKOFF: Duration = Duration::from_secs(600);
 
 /// Why a running transfer was asked to stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +112,9 @@ pub struct TaskCtl {
     pub bytes: AtomicI64,
     /// u64::MAX inherits; zero is explicitly unlimited.
     rate_limit: AtomicU64,
+    /// Something in this run asked for one connection
+    /// ([`TaskCtl::set_one_connection`]): no probe runs for it.
+    one_connection: AtomicBool,
     done: tokio::sync::watch::Sender<bool>,
     /// Start order among running transfers.
     seq: u64,
@@ -151,6 +157,7 @@ impl TaskCtl {
             reason: Mutex::new(None),
             bytes: AtomicI64::new(0),
             rate_limit: AtomicU64::new(u64::MAX),
+            one_connection: AtomicBool::new(false),
             done: tokio::sync::watch::channel(false).0,
             seq,
             row_source,
@@ -269,6 +276,13 @@ impl TaskCtl {
         }
     }
 
+    /// Records that this run keeps to one connection (a segment answer that
+    /// did not match, a refused extra connection, a file system without
+    /// holes), so it never probes.
+    pub fn set_one_connection(&self, on: bool) {
+        self.one_connection.store(on, Ordering::Relaxed);
+    }
+
     pub fn set_rate_limit(&self, bps: Option<u64>) {
         self.rate_limit
             .store(bps.unwrap_or(u64::MAX), Ordering::Relaxed);
@@ -320,6 +334,8 @@ pub(super) struct Policy {
     allow_equivalent: bool,
     /// `download_single_connection`.
     single: Vec<String>,
+    /// `download_rate_limit_bps`.
+    rate_limit: u64,
 }
 
 impl Policy {
@@ -329,6 +345,7 @@ impl Policy {
             use_mirrors: s.download_use_mirrors,
             allow_equivalent: s.download_allow_equivalent,
             single: s.download_single_connection.clone(),
+            rate_limit: s.download_rate_limit_bps,
         }
     }
 
@@ -404,6 +421,9 @@ struct Inner {
     /// Probe rounds running, per source: the count of their open
     /// connections, alive as long as the round.
     probes: HashMap<String, Weak<AtomicUsize>>,
+    /// Sources whose last probe round was aborted, until they may be
+    /// probed again ([`PROBE_ABORT_BACKOFF`]).
+    probe_backoff: HashMap<String, Instant>,
     /// Rows known to hold an equivalent copy's bytes (`origin_json`): they
     /// run on that copy or on copies identical to it, never their own.
     origins: HashMap<i64, CopyRef>,
@@ -664,10 +684,10 @@ impl Inner {
     }
 
     /// Connections `ctl` may hold on `source`, a source other than its
-    /// authority: none while the limit loads, anything plays or records
-    /// there, the source is blocked or cooling down after a refused mirror
-    /// connection, or a queued row could start there.
-    /// `ctl` is `None` for a holder that holds nothing there yet.
+    /// authority: none while `download_use_mirrors` is off, the limit loads,
+    /// anything plays or records there, the source is blocked or cooling
+    /// down after a refused mirror connection, or a queued row could start
+    /// there. `ctl` is `None` for a holder that holds nothing there yet.
     fn mirror_allowance(
         &self,
         ctl: Option<&TaskCtl>,
@@ -675,6 +695,9 @@ impl Inner {
         now: Instant,
         policy: &Policy,
     ) -> usize {
+        if !policy.use_mirrors {
+            return 0;
+        }
         let Some((limit, _)) = self.effective(source, policy) else {
             return 0;
         };
@@ -705,11 +728,11 @@ impl Inner {
     }
 
     /// Where queued row `id` could start besides its home, when its home
-    /// has no room: a source with room and an identical copy (of its origin,
-    /// when it has one), else, for a fresh row with equivalent copies
-    /// allowed, a source with room and an equivalent copy (`adopt`: the copy
-    /// becomes the row's origin). A missing or stale plan is listed for a
-    /// read.
+    /// has no room and the row may move ([`spread::may_move`]): a source
+    /// with room and an identical copy (of its origin, when it has one),
+    /// else, for a fresh row with equivalent copies allowed, a source with
+    /// room and an equivalent copy (`adopt`: the copy becomes the row's
+    /// origin). A missing or stale plan is listed for a read.
     fn spread_pick(
         &mut self,
         id: i64,
@@ -728,6 +751,9 @@ impl Inner {
                 return None;
             }
         };
+        if !plan.movable {
+            return None;
+        }
         let has_origin = self.origins.contains_key(&id);
         let equivalent: &[CopyRef] = if policy.allow_equivalent && plan.fresh && !has_origin {
             &plan.equivalent
@@ -824,6 +850,7 @@ impl Inner {
         self.ended.expire(now);
         self.blocked.retain(|_, b| b.until > now);
         self.cooldown.retain(|_, t| *t > now);
+        self.probe_backoff.retain(|_, t| *t > now);
         self.holds.retain(|(_, t)| t.strong_count() > 0);
         self.probes.retain(|_, n| n.strong_count() > 0);
     }
@@ -1141,9 +1168,10 @@ impl DownloadManager {
     /// already holds there, never more than [`MAX_CONNECTIONS`]. On its own
     /// source this is [`connection_allowance`](Self::connection_allowance).
     /// On a mirror it is what the budget leaves after every other holder
-    /// there, and 0 while the limit loads (the read starts), anything plays
-    /// or records there, a queued row could start there, or the source
-    /// refused a mirror connection less than [`MIRROR_COOLDOWN`] ago. An
+    /// there, and 0 while `download_use_mirrors` is off (read live), the
+    /// limit loads (the read starts), anything plays or records there, a
+    /// queued row could start there, or the source refused a mirror
+    /// connection less than [`MIRROR_COOLDOWN`] ago. An
     /// unknown limit gives 1 while no one else uses the source.
     pub fn allowance_on(&self, ctl: &TaskCtl, source: &str) -> usize {
         if source == ctl.source {
@@ -1343,7 +1371,13 @@ impl DownloadManager {
 
     /// [`super::probe::probe_due`] with the settings read.
     pub(super) fn probe_due_with(&self, ctl: &TaskCtl, source: &str, policy: &Policy) -> bool {
-        if !policy.learns(source) || ctl.token.is_cancelled() {
+        // A transfer that may not split never uses what a probe learns.
+        if !policy.learns(source)
+            || ctl.token.is_cancelled()
+            || policy.single(source)
+            || ctl.rate_limit(policy.rate_limit).is_some()
+            || ctl.one_connection.load(Ordering::Relaxed)
+        {
             return false;
         }
         self.ensure_loaded(source);
@@ -1364,6 +1398,7 @@ impl DownloadManager {
             if !due
                 || inner.playing(source, now) + inner.recording(source, now) > 0
                 || inner.probing(source)
+                || inner.probe_backoff.get(source).is_some_and(|t| *t > now)
                 || inner.blocked_now(source, now)
             {
                 return false;
@@ -1405,6 +1440,15 @@ impl DownloadManager {
         let now = Instant::now();
         let inner = self.inner.lock();
         inner.playing(source, now) + inner.recording(source, now) > 0
+    }
+
+    /// Records that a probe round on `source` was aborted: none runs there
+    /// for [`PROBE_ABORT_BACKOFF`].
+    pub(super) fn probe_aborted(&self, source: &str) {
+        self.inner
+            .lock()
+            .probe_backoff
+            .insert(source.to_string(), Instant::now() + PROBE_ABORT_BACKOFF);
     }
 
     /// The account's reported limit of `source`, once read.
@@ -2262,7 +2306,10 @@ async fn claim(
                     if d.origin != origin {
                         return Ok(Claim::Misplaced(d.origin));
                     }
-                    if adopt && !spread::is_fresh(&d) {
+                    // A run on another copy needs a row that may move; one
+                    // adopting an equivalent copy, a fresh row.
+                    let elsewhere = claim_ctl.copy.is_some() && claim_ctl.copy != origin;
+                    if elsewhere && !spread::may_move(&d) || adopt && !spread::is_fresh(&d) {
                         return Ok(Claim::Stale);
                     }
                     let tx = c.transaction()?;
@@ -2934,6 +2981,40 @@ mod tests {
         assert_eq!(inner.preempt(now, &policy).len(), 1);
         assert_eq!(next.reason(), StopReason::Yield);
         assert!(!mirrored.token.is_cancelled());
+    }
+
+    #[test]
+    fn probes_need_a_transfer_that_may_split_and_back_off_after_an_abort() {
+        let mgr = DownloadManager::default();
+        known(&mgr, "a", Some(1), None);
+        let ctl = TaskCtl::detached("a");
+        mgr.inner.lock().active.insert(1, ctl.clone());
+        let with = |f: fn(&mut Settings)| {
+            let mut s = Settings::default();
+            f(&mut s);
+            Policy::of(&s)
+        };
+        let policy = with(|_| {});
+        assert!(mgr.probe_due_with(&ctl, "a", &policy));
+        // A speed cap (global or the row's), the source set to one
+        // connection, or a run kept to one: no probe.
+        assert!(!mgr.probe_due_with(&ctl, "a", &with(|s| s.download_rate_limit_bps = 1024)));
+        ctl.set_rate_limit(Some(2048));
+        assert!(!mgr.probe_due_with(&ctl, "a", &policy));
+        ctl.set_rate_limit(None);
+        let single = with(|s| s.download_single_connection = vec!["a".into()]);
+        assert!(!mgr.probe_due_with(&ctl, "a", &single));
+        ctl.set_one_connection(true);
+        assert!(!mgr.probe_due_with(&ctl, "a", &policy));
+        ctl.set_one_connection(false);
+        assert!(mgr.probe_due_with(&ctl, "a", &policy));
+        // An aborted round: none for ten minutes.
+        mgr.probe_aborted("a");
+        assert!(!mgr.probe_due_with(&ctl, "a", &policy));
+        mgr.inner
+            .lock()
+            .expire(Instant::now() + PROBE_ABORT_BACKOFF);
+        assert!(mgr.probe_due_with(&ctl, "a", &policy));
     }
 
     #[test]

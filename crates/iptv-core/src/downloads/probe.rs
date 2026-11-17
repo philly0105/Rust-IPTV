@@ -3,9 +3,10 @@
 //!
 //! A round runs beside a transfer that holds everything its source gives
 //! it. It opens extra Range requests near the file's end one at a time,
-//! holds each for [`ProbeTiming::step`](super::manager::ProbeTiming), and
-//! stops at the first refusal, at a kick (the panel ended the oldest
-//! connection to take the new one) or at the engine's cap plus one. The most
+//! holds each for [`ProbeTiming::step`](super::manager::ProbeTiming) with
+//! its body unread, and stops at the first refusal (any answer but a 2xx),
+//! at a kick (the panel ended the oldest connection, the transfer's own, to
+//! take the new one) or at the engine's cap plus one. The most
 //! connections the panel kept open becomes the source's learned limit
 //! ([`LimitRecord`] under [`limit_key`]), retested after a week. A learned
 //! limit above the reported one raises the source's download budget
@@ -14,7 +15,8 @@
 //! A round never touches the row: no settle, no account check, no wait. It
 //! aborts, recording nothing, as soon as playback or a recording starts on
 //! the source or the transfer stops, and it closes every connection it
-//! opened before it returns.
+//! opened before it returns. After an aborted round the source is not
+//! probed for [`super::manager::PROBE_ABORT_BACKOFF`].
 
 use super::manager::{self, Policy, TaskCtl};
 use super::segments::MAX_CONNECTIONS;
@@ -26,15 +28,13 @@ use super::DownloadManager;
 use crate::error::CoreResult;
 use crate::model::{ConnectionLimitMode, SourceConnectionLimit, SourceKind, TransferNote};
 use crate::state::AppState;
-use futures::FutureExt;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Answers that mean the panel refused one connection too many.
-const REFUSALS: [u16; 6] = [401, 403, 429, 458, 503, 509];
-/// How far before the file's end probe requests start.
+/// How far before the file's end probe requests start. Their bodies are
+/// never read.
 const PROBE_SPAN: i64 = 32 * 1024 * 1024;
 /// How often a round checks for a stop, playback or a kick.
 const POLL: Duration = Duration::from_millis(25);
@@ -43,7 +43,9 @@ const HISTORY: usize = 20;
 
 /// Sync. True when `ctl` should probe `source` now: settings allow it, the
 /// source is Xtream or Stalker, its record is missing or due, nothing plays
-/// or records from it, no probe runs on it, it is not blocked, `ctl` holds
+/// or records from it, no probe runs on it or was aborted there lately, it
+/// is not blocked, `ctl` may split (no rate limit, the source not set to one
+/// connection, no one-connection fallback in this run), `ctl` holds
 /// everything it may there, and the effective limit is below the engine's
 /// cap plus one. A source whose record is not read yet is not due (the read
 /// starts).
@@ -54,14 +56,14 @@ pub fn probe_due(state: &AppState, mgr: &DownloadManager, ctl: &TaskCtl, source:
 
 /// How a round's climb ended.
 enum End {
-    /// The panel refused the next connection.
+    /// The panel refused the next connection: any answer but a 2xx, a
+    /// reset, or no answer in time.
     Refused,
     /// The panel took the next connection and ended the oldest.
     Kicked,
     /// The round reached [`MAX_CONNECTIONS`] + 1 connections.
     Cap,
-    /// The transfer stopped, playback or a recording started, or the panel
-    /// answered something a probe cannot read.
+    /// The transfer stopped, or playback or a recording started.
     Abort,
 }
 
@@ -123,31 +125,27 @@ pub async fn probe(
                 open.push(resp);
                 round.open.store(open.len(), Ordering::Relaxed);
             }
-            Ok(Ok(resp)) if REFUSALS.contains(&resp.status().as_u16()) => {
+            // Any other answer, a reset or no answer in time: the panel
+            // would not take it.
+            Ok(Ok(resp)) => {
+                tracing::debug!(source, status = %resp.status(), "probe connection refused");
                 steps.push(step(trying, ProbeOutcome::Refused));
                 break End::Refused;
             }
-            Ok(Ok(resp)) => {
-                tracing::debug!(source, status = %resp.status(), "probe got an unexpected answer");
-                break End::Abort;
-            }
-            // A reset or no answer in time: the panel would not take it.
             Ok(Err(_)) | Err(_) => {
                 steps.push(step(trying, ProbeOutcome::Refused));
                 break End::Refused;
             }
         }
         // Hold every connection for a step, watching for a kick: the
-        // transfer's stream (the oldest) or an earlier probe ending.
+        // transfer's stream (the oldest connection) dropping. Probe bodies
+        // stay unread, so the end of a probe's range never looks like one.
         let until = tokio::time::Instant::now() + timing.step;
         loop {
             if mgr.probe_interrupted(ctl, &source) {
                 break 'climb End::Abort;
             }
-            let ended = open
-                .iter_mut()
-                .any(|r| matches!(r.chunk().now_or_never(), Some(Err(_)) | Some(Ok(None))));
-            if ended || ctl.drops(&source) > drops_before {
+            if ctl.drops(&source) > drops_before {
                 steps.push(step(trying, ProbeOutcome::KickedOldest));
                 break 'climb End::Kicked;
             }
@@ -166,6 +164,7 @@ pub async fn probe(
     drop(round);
     let (limit, mode, outcome) = match end {
         End::Abort => {
+            mgr.probe_aborted(&source);
             mgr.repump();
             return Some(ProbeOutcome::Aborted);
         }

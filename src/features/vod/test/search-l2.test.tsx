@@ -66,6 +66,8 @@ beforeEach(() => {
   h['settings.get'] = () => settings();
   h['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
   h['catalog.search'] = () => ({ live: [], movies: [movie(0), movie(1), movie(2)], series: [] });
+  // The guide finds nothing (a failed guide search now shows its own error on the page).
+  h['epg.search'] = () => [];
 });
 afterEach(() => cleanup());
 

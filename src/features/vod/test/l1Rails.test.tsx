@@ -85,6 +85,8 @@ beforeEach(async () => {
   h['sources.list'] = () => [src];
   h['settings.get'] = () => settings();
   h['watchlist.list'] = () => [];
+  // The guide finds nothing (a failed guide search now shows its own error on the page).
+  h['epg.search'] = () => [];
   // The My List toggle reads the app-wide list cache (the harness renders with its own client).
   const { queryClient } = await import('@/api/query');
   queryClient.setQueryData(['watchlist.list', {}], []);

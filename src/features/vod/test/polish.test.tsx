@@ -71,6 +71,8 @@ function baseHandlers() {
   const src = makeSource('src1', 'xtream', 'Alpha IPTV');
   h['sources.get'] = () => src;
   h['settings.get'] = () => settings();
+  // The guide finds nothing (a failed guide search now shows its own error on the page).
+  h['epg.search'] = () => [];
   // Parental controls off: detail pages open without a lock check (C2).
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['catalog.categories'] = () => cats;

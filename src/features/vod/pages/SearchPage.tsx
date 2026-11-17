@@ -33,6 +33,7 @@ import { PosterRail } from '../components/PosterRail';
 import { isSourceMissing, SourceMissing } from '../components/SourceMissing';
 import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } from '../hooks/queries';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
+import { usePosterMenu } from '../hooks/usePosterMenu';
 import { useSearchLocks } from '../hooks/useSearchLocks';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { usePageHeader } from '../hooks/usePageHeader';
@@ -1553,7 +1554,22 @@ const TopResults = memo(function TopResults({
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
   const { t } = useTranslation('vod');
+  const navigate = useNavigate();
   const count = (n: number, capped: boolean | undefined) => (capped ? t('searchCountMore', { count: n }) : n);
+  // The posters' menu (right click, the menu key, a long press), as the Movies rails and grids have it.
+  const posterMenu = usePosterMenu({ sourceKind: undefined, resume, openDetails: (ref) => void navigate(detailHref(ref) ?? '#') });
+  const openPosterMenu = posterMenu.open;
+  const railMenu = useCallback(
+    (g: GroupedHit, i: number, pos: { x: number; y: number }) => {
+      const item = g.hit.item as VodItem | SeriesItem;
+      openPosterMenu(
+        { ref: item.ref, name: item.titleBase || item.title, title: item.title, year: item.year, posterUrl: item.posterUrl, categoryId: item.categoryId, sourceKind: g.hit.sourceKind },
+        i,
+        pos,
+      );
+    },
+    [openPosterMenu],
+  );
   const posterGroups = useMemo(
     () =>
       groups
@@ -1580,6 +1596,7 @@ const TopResults = memo(function TopResults({
           showBadges={showBadges}
           resume={resume}
           locked={locked}
+          menu={railMenu}
         />
       ),
     });
@@ -1599,6 +1616,7 @@ const TopResults = memo(function TopResults({
             resume={resume}
             locked={locked}
             seeAll={typeHref(group.kind)}
+            menu={railMenu}
           />
         ),
       });
@@ -1648,6 +1666,7 @@ const TopResults = memo(function TopResults({
           {programmeError}
         </section>
       )}
+      {posterMenu.element}
     </div>
   );
 });
@@ -1666,6 +1685,7 @@ function TopPosterRail({
   resume,
   locked,
   seeAll,
+  menu,
 }: {
   section: string;
   title: string;
@@ -1675,6 +1695,7 @@ function TopPosterRail({
   resume: Map<string, number>;
   locked: (item: VodItem | SeriesItem) => boolean;
   seeAll?: string;
+  menu: (g: GroupedHit, index: number, pos: { x: number; y: number }) => void;
 }) {
   const cardWidth = useRailCardWidth();
   const items = useMemo(() => folded.slice(0, TOP_POSTERS), [folded]);
@@ -1689,6 +1710,7 @@ function TopPosterRail({
         cardWidth={cardWidth}
         bleed
         myList={(g) => myListTarget(g.hit.item as VodItem | SeriesItem)}
+        menu={menu}
         render={(g, i, rail) => {
           const item = g.hit.item as VodItem | SeriesItem;
           return (
@@ -1868,6 +1890,9 @@ function SearchStart({
     [sourceId, movieCats.data, seriesCats.data],
   );
   const sourceKind = (id: string) => sources.find((s) => s.id === id)?.kind;
+  const navigate = useNavigate();
+  // Jump back in's menu, as the landings' Continue watching has it.
+  const posterMenu = usePosterMenu({ sourceKind: undefined, resume, openDetails: (ref) => void navigate(detailHref(ref) ?? '#') });
 
   if (queries.length === 0 && jump.length === 0 && browse.length === 0) return <>{empty}</>;
   return (
@@ -1922,6 +1947,13 @@ function SearchStart({
           title={t('jumpBackIn')}
           items={jump}
           bleed
+          menu={(e, i, pos) =>
+            posterMenu.open(
+              { ref: e.ref, name: snapshotTitle(e.ref, e.snapshot.title).title, title: e.snapshot.title, posterUrl: e.snapshot.posterUrl, sourceKind: sourceKind(e.ref.sourceId) },
+              i,
+              pos,
+            )
+          }
           render={(e, i, rail) => {
             const kind = sourceKind(e.ref.sourceId);
             return (
@@ -1965,6 +1997,7 @@ function SearchStart({
           ))}
         </section>
       )}
+      {posterMenu.element}
     </div>
   );
 }

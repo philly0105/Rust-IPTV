@@ -267,6 +267,28 @@ describe('search programmes', () => {
   });
 });
 
+describe('Top results poster menu', () => {
+  it('opens the Movies rails’ menu on a right click, and Open details opens the title', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 7, 'Dune TV')], movies: [vod('src2', 1, 'Dune')], series: [] });
+    renderAt('/search?q=dune', [
+      { path: '/search', element: <SearchPage /> },
+      { path: '/s/:sourceId/movie/:itemId', element: <p>movie page</p> },
+    ]);
+    const top = await screen.findByTestId('search-top');
+    const card = await waitFor(() => {
+      const c = top.querySelector<HTMLElement>('[data-search-section="movies"] [data-grid-index="0"]');
+      expect(c).toBeTruthy();
+      return c!;
+    });
+    fireEvent.contextMenu(card, { clientX: 30, clientY: 30 });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Open details' }));
+    await screen.findByText('movie page');
+    expect(currentLocation).toBe('/s/src2/movie/m1');
+  });
+});
+
 describe('a failed guide search (states-feedback-06)', () => {
   const fail = () => {
     throw new Error('simulated failure');

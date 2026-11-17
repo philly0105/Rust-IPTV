@@ -26,9 +26,6 @@ const HERO_GRID =
  */
 const HERO_TOP_WITH_ART = 'pt-[clamp(88px,20vh,240px)] max-sm:pt-10';
 const HERO_TOP_PLAIN = 'pt-10 max-sm:pt-6';
-/** The same with a Back pill of the page's own in the hero's top corner (`back`). */
-const HERO_TOP_WITH_ART_BACK = 'pt-[clamp(88px,20vh,240px)] max-sm:pt-20';
-const HERO_TOP_PLAIN_BACK = 'pt-[clamp(56px,9vh,112px)] max-sm:pt-20';
 
 /** Past this many characters a title takes the headline size instead of the display size. */
 const LONG_TITLE = 40;
@@ -67,11 +64,6 @@ export interface DetailHeroProps {
   pending?: boolean;
   /** Cast names link to their actor pages only when TMDB can show them (VL-tmdb-deadend). */
   castLinks?: boolean;
-  /**
-   * A Back control of the page's own in the hero's top corner. The catalogue pages put Back in the
-   * shell header instead (usePageHeader `back`), so by default the hero has none.
-   */
-  back?: ReactNode;
 }
 
 /**
@@ -80,7 +72,7 @@ export interface DetailHeroProps {
  * artwork reads and the title and buttons stay legible on any image. Poster and title sit on its
  * lower edge; the title is the one large type moment on the page.
  */
-export function DetailHero({ model, sourceId, actions, icons, progress, chips, note, notice, pending, castLinks = true, back }: DetailHeroProps) {
+export function DetailHero({ model, sourceId, actions, icons, progress, chips, note, notice, pending, castLinks = true }: DetailHeroProps) {
   const { t, i18n } = useTranslation('vod');
   const [expanded, setExpanded] = useState(false);
   const formatRuntime = useFormatRuntime();
@@ -92,7 +84,7 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
   const titleRef = useHeaderTitleAnchor();
   const heading = model.titleBase ?? model.title;
   const longTitle = heading.length > LONG_TITLE;
-  const top = model.backdropUrl || pending ? (back ? HERO_TOP_WITH_ART_BACK : HERO_TOP_WITH_ART) : back ? HERO_TOP_PLAIN_BACK : HERO_TOP_PLAIN;
+  const top = model.backdropUrl || pending ? HERO_TOP_WITH_ART : HERO_TOP_PLAIN;
 
   return (
     // Not `isolate`: the backdrop's -z-10 must resolve against the page's
@@ -103,7 +95,6 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
       {/* The tint comes from the title as the page shows it, as every rail's card takes it: the
           provider's own name ("Harbor Lights (2021)") would put the page on another colour. */}
       <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} title={model.titleBase ?? model.title} />
-      {back && <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">{back}</div>}
       <div className={cn(HERO_GRID, top)}>
         <div
           className="self-end overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:row-span-2 sm:self-start"
@@ -261,13 +252,6 @@ export function WatchedFact() {
 /** The hero's More menu trigger: the Menu's own icon button, drawn as the other icon secondaries. */
 export const HERO_MENU_TRIGGER =
   'h-12 w-12 rounded-md border border-edge bg-surface-2 text-fg hover:bg-surface-3 hover:text-fg active:bg-pressed active:text-fg';
-
-/**
- * The hero's Back pill, for a page that passes its own `back`: the kit back button on a frosted
- * page surface, so it reads on any backdrop, and in the light theme it is a light pill instead of
- * a dark glass capsule over pale artwork (critique: light detail).
- */
-export const HERO_BACK = 'border border-edge bg-surface/80 text-fg shadow-1 glass-blur hover:bg-surface hover:text-fg active:bg-surface-2';
 
 /**
  * The title's tint as two soft washes from the top edge, for a hero with no artwork at all: one

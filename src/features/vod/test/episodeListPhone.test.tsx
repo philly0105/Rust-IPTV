@@ -245,3 +245,15 @@ describe('episode rows on a phone (L3-visual-7)', () => {
     expect(onChange).toHaveBeenCalledWith(11);
   });
 });
+
+describe('realdata-16: an episode without a still', () => {
+  beforeAll(installDomStubs);
+  afterEach(cleanup);
+
+  it('shows its number on a neutral tile instead of initials tinted from its title', async () => {
+    renderList();
+    const tiles = await screen.findAllByTestId('episode-number-tile');
+    expect(tiles.map((t) => t.textContent)).toEqual(['E1', 'E2']);
+    expect(document.querySelector('[data-testid="episode-thumb"] [data-poster-fallback]')).toBeNull();
+  });
+});

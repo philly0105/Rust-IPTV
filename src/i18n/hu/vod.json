@@ -21,6 +21,7 @@
   "categoryCount_one": "{{count, number}} kategória",
   "categoryCount_other": "{{count, number}} kategória",
   "filterCategories": "Kategóriák szűrése",
+  "allLanguages": "Minden nyelv",
   "manageCategories": "Kategóriák kezelése",
   "manageCategoriesHidden_one": "Kategóriák kezelése ({{count, number}} rejtett)",
   "manageCategoriesHidden_other": "Kategóriák kezelése ({{count, number}} rejtett)",

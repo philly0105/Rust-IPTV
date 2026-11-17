@@ -25,6 +25,7 @@
   "categoryCount_many": "{{count, number}} فئة",
   "categoryCount_other": "الفئات: {{count, number}}",
   "filterCategories": "فلتر الفئات",
+  "allLanguages": "كاع اللغات",
   "manageCategories": "تدبير الفئات",
   "manageCategoriesHidden_zero": "تدبير الفئات (حتى وحدة ما مخبية)",
   "manageCategoriesHidden_one": "تدبير الفئات ({{count, number}} مخبية)",

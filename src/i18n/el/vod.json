@@ -21,6 +21,7 @@
   "categoryCount_one": "{{count, number}} κατηγορία",
   "categoryCount_other": "{{count, number}} κατηγορίες",
   "filterCategories": "Φιλτράρισμα κατηγοριών",
+  "allLanguages": "Όλες οι γλώσσες",
   "manageCategories": "Διαχείριση κατηγοριών",
   "manageCategoriesHidden_one": "Διαχείριση κατηγοριών ({{count, number}} κρυφή)",
   "manageCategoriesHidden_other": "Διαχείριση κατηγοριών ({{count, number}} κρυφές)",

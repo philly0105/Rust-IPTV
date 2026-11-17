@@ -21,6 +21,7 @@
   "categoryCount_one": "{{count, number}}カテゴリー",
   "categoryCount_other": "{{count, number}}カテゴリー",
   "filterCategories": "カテゴリーを絞り込む",
+  "allLanguages": "すべての言語",
   "manageCategories": "カテゴリーを管理",
   "manageCategoriesHidden_one": "カテゴリーを管理（{{count, number}}件非表示）",
   "manageCategoriesHidden_other": "カテゴリーを管理（{{count, number}}件非表示）",

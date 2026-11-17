@@ -1,4 +1,4 @@
-import { Check, CircleAlert, CircleCheck, CirclePause, Clock, Download as DownloadIcon, HardDriveDownload, Heart, LoaderCircle, Pause } from 'lucide-react';
+import { CircleAlert, CircleCheck, CirclePause, Clock, Download as DownloadIcon, HardDriveDownload, Heart, LoaderCircle, Pause } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -178,12 +178,14 @@ function useDownloadPercent(d: Download): number | undefined {
   return downloadPercent(useLiveProgress(d));
 }
 
-/** Download control reflecting the queue row for this item or episode. */
+/**
+ * Download control reflecting the queue row for this item or episode: an episode row's compact
+ * icon control, or with `round` the detail hero's icon button.
+ */
 export function DownloadButton({
   download,
   pending,
   onStart,
-  compact,
   round,
   label,
   downloadedHref = '/my-videos',
@@ -191,7 +193,6 @@ export function DownloadButton({
   download: Download | undefined;
   pending: boolean;
   onStart: () => void;
-  compact?: boolean;
   /** The detail hero's icon button: the state in the icon and the tooltip (VL-hero-actions). */
   round?: boolean;
   /** Accessible context, e.g. the episode title. */
@@ -200,7 +201,6 @@ export function DownloadButton({
   downloadedHref?: string;
 }) {
   const { t } = useTranslation('vod');
-  const size = compact ? 'sm' : 'lg';
   const status = download?.status;
   const ctx = label ? ` ${label}` : '';
   if (round) return <RoundDownloadButton download={download} pending={pending} onStart={onStart} downloadedHref={downloadedHref} />;
@@ -208,49 +208,36 @@ export function DownloadButton({
   if (status === 'completed') {
     // The file-on-disk glyph the row's facts use, in the quiet icon tone: a green tick here sat
     // beside the green watched tick and read as a second one (vod-detail-02).
-    return compact ? (
+    return (
       <Tooltip content={t('downloaded')} describe={false}>
         <Link to={downloadedHref} aria-label={`${t('downloaded')}${ctx}`} className={buttonClass('ghost', 'sm', cn(COMPACT_SLOT, GHOST_ICON))}>
           <HardDriveDownload aria-hidden size={16} />
         </Link>
       </Tooltip>
-    ) : (
-      <Link to={downloadedHref} className={buttonClass('secondary', size)}>
-        <Check aria-hidden size={18} className="text-success" />
-        {t('downloaded')}
-      </Link>
     );
   }
-  if (download && (download.status === 'downloading' || download.status === 'queued')) return <DownloadingLink download={download} compact={compact} ctx={ctx} />;
+  if (download && (download.status === 'downloading' || download.status === 'queued')) return <DownloadingLink download={download} ctx={ctx} />;
   if (status === 'paused') {
     return (
-      <Tooltip content={compact ? t('downloadPaused') : null} describe={false}>
-        <Link to="/downloads" aria-label={`${t('downloadPaused')}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? cn(COMPACT_SLOT, GHOST_ICON) : undefined)}>
+      <Tooltip content={t('downloadPaused')} describe={false}>
+        <Link to="/downloads" aria-label={`${t('downloadPaused')}${ctx}`} className={buttonClass('ghost', 'sm', cn(COMPACT_SLOT, GHOST_ICON))}>
           {/* A paused state, not a Pause button: the glyph in a circle, in the quiet tone. */}
-          {compact ? <CirclePause aria-hidden size={16} /> : <Pause aria-hidden size={18} />}
-          {!compact && t('downloadPaused')}
+          <CirclePause aria-hidden size={16} />
         </Link>
       </Tooltip>
     );
   }
   const failed = status === 'failed';
   const text = failed ? t('downloadRetry') : t('download');
-  if (compact) {
-    return (
-      <IconButton
-        size="sm"
-        className={COMPACT_SLOT}
-        label={`${text}${ctx}`}
-        icon={failed ? <CircleAlert aria-hidden size={16} className="text-danger" /> : <DownloadIcon aria-hidden size={16} />}
-        loading={pending}
-        onClick={onStart}
-      />
-    );
-  }
   return (
-    <Button size={size} variant="secondary" icon={<DownloadIcon aria-hidden size={18} />} loading={pending} onClick={onStart}>
-      {text}
-    </Button>
+    <IconButton
+      size="sm"
+      className={COMPACT_SLOT}
+      label={`${text}${ctx}`}
+      icon={failed ? <CircleAlert aria-hidden size={16} className="text-danger" /> : <DownloadIcon aria-hidden size={16} />}
+      loading={pending}
+      onClick={onStart}
+    />
   );
 }
 
@@ -265,20 +252,16 @@ const COMPACT_SLOT = 'w-14 px-0 justify-center';
  * Only a download under way spins and shows the percent; a queued one waits under a clock, so it
  * does not look like a transfer stuck at 0 %.
  */
-function DownloadingLink({ download, compact, ctx }: { download: Download; compact: boolean | undefined; ctx: string }) {
+function DownloadingLink({ download, ctx }: { download: Download; ctx: string }) {
   const { t } = useTranslation('vod');
   const pct = useDownloadPercent(download);
   const queued = download.status === 'queued';
   const text = queued ? t('downloadQueuedShort') : pct !== undefined ? t('downloadingPercent', { percent: pct }) : t('downloading');
   return (
-    <Tooltip content={compact ? text : null} describe={false}>
-      <Link to="/downloads" aria-label={`${text}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', compact ? 'sm' : 'lg', compact ? cn(COMPACT_SLOT, 'gap-1 text-xs', queued && GHOST_ICON) : undefined)}>
-        {queued ? (
-          <Clock aria-hidden size={compact ? 14 : 18} />
-        ) : (
-          <LoaderCircle aria-hidden size={compact ? 14 : 18} className="motion-safe:animate-spin" />
-        )}
-        {compact ? (!queued && pct !== undefined ? `${pct}%` : null) : text}
+    <Tooltip content={text} describe={false}>
+      <Link to="/downloads" aria-label={`${text}${ctx}`} className={buttonClass('ghost', 'sm', cn(COMPACT_SLOT, 'gap-1 text-xs', queued && GHOST_ICON))}>
+        {queued ? <Clock aria-hidden size={14} /> : <LoaderCircle aria-hidden size={14} className="motion-safe:animate-spin" />}
+        {!queued && pct !== undefined ? `${pct}%` : null}
       </Link>
     </Tooltip>
   );

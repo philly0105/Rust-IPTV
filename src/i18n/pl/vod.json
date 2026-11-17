@@ -23,6 +23,7 @@
   "categoryCount_many": "{{count, number}} kategorii",
   "categoryCount_other": "{{count, number}} kategorii",
   "filterCategories": "Filtruj kategorie",
+  "allLanguages": "Wszystkie języki",
   "manageCategories": "Zarządzaj kategoriami",
   "manageCategoriesHidden_one": "Zarządzaj kategoriami (ukryte: {{count, number}})",
   "manageCategoriesHidden_few": "Zarządzaj kategoriami (ukryte: {{count, number}})",

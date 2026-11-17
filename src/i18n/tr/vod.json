@@ -21,6 +21,7 @@
   "categoryCount_one": "{{count, number}} kategori",
   "categoryCount_other": "{{count, number}} kategori",
   "filterCategories": "Kategorileri filtrele",
+  "allLanguages": "Tüm diller",
   "manageCategories": "Kategorileri yönet",
   "manageCategoriesHidden_one": "Kategorileri yönet ({{count, number}} gizli)",
   "manageCategoriesHidden_other": "Kategorileri yönet ({{count, number}} gizli)",

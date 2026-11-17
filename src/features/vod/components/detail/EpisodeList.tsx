@@ -194,20 +194,26 @@ export function EpisodeList({
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus sm:gap-4"
               >
                 <div className="relative w-28 shrink-0 sm:w-40" data-testid="episode-thumb">
-                  <PosterCellWidthContext.Provider value={thumbWidth}>
-                    <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 opacity-0 group-hover:bg-scrim/70 group-hover:opacity-100 motion-safe:transition-opacity"
-                      >
-                        {/* On a disc, as poster cards draw it: over a tile without artwork the bare
-                            glyph landed between the initials and read "S▶H" (vod-detail-05). */}
-                        <span className="rounded-full bg-glass-strong p-2 text-on-glass">
-                          <Play size={18} className="fill-current" />
-                        </span>
+                  {ep.posterUrl?.trim() ? (
+                    <PosterCellWidthContext.Provider value={thumbWidth}>
+                      <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
+                        <PlayHover />
+                      </Poster>
+                    </PosterCellWidthContext.Provider>
+                  ) : (
+                    // No still (normal for M3U and many Xtream providers): a quiet tile with the
+                    // episode's number. Initials tinted from each title made a season a column of
+                    // colours ("PI", "E2", "P2") that told the episodes apart no better than the code.
+                    <div
+                      className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-sm bg-surface-2 ring-1 ring-edge ring-inset"
+                      data-testid="episode-number-tile"
+                    >
+                      <span aria-hidden className="font-display text-title-sm tabular text-fg-muted sm:text-title">
+                        {ep.episode > 0 ? `E${ep.episode}` : code}
                       </span>
-                    </Poster>
-                  </PosterCellWidthContext.Provider>
+                      <PlayHover />
+                    </div>
+                  )}
                   {/* On the thumbnail the bar is glass, and drawn only (the row says how far). A watched
                       episode shows the watched tick instead, as a poster does. */}
                   {watched ? (
@@ -299,7 +305,6 @@ export function EpisodeList({
                   )}
                   {canDownload && (
                     <DownloadButton
-                      compact
                       label={`${code} ${ep.title}`}
                       download={downloads.get(ep.id)}
                       pending={pendingDownload === ep.id}
@@ -313,5 +318,21 @@ export function EpisodeList({
         );
       })}
     </div>
+  );
+}
+
+/** The play glyph a row's thumbnail shows under the pointer. */
+function PlayHover() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 opacity-0 group-hover:bg-scrim/70 group-hover:opacity-100 motion-safe:transition-opacity"
+    >
+      {/* On a disc, as poster cards draw it: over a tile without artwork the bare glyph landed
+          between the initials and read "S▶H" (vod-detail-05). */}
+      <span className="rounded-full bg-glass-strong p-2 text-on-glass">
+        <Play size={18} className="fill-current" />
+      </span>
+    </span>
   );
 }

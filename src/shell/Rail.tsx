@@ -802,8 +802,10 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
     if (collapsed) void loadRailMenu().catch(() => {});
   }, [collapsed]);
 
+  // With no sources the list itself is the add row (or the page's own onboarding).
+  const canAdd = !noSources && !(sources.isError && !offline);
   const addSource = (
-    <Tooltip content={t('addSource')} describe={false}>
+    <Tooltip content={t('addSource')} side="inline-end" describe={false}>
       <Link
         to="/sources?add=1"
         aria-label={t('addSource')}
@@ -962,7 +964,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
                 id="rail-sources-heading"
                 label={t('sources')}
                 collapsed={collapsed}
-                action={noSources || (sources.isError && !offline) ? undefined : addSource}
+                // The icon rail has no room for a row: there the + stays beside the group's rule.
+                action={collapsed && canAdd ? addSource : undefined}
               />
               {sourceList}
               {/* One source: its own row leads to the Sources page. */}
@@ -978,6 +981,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
                   current={noSources && sourcesFor(location.pathname, location.search) ? false : undefined}
                 />
               )}
+              {/* A labelled row, so adding a source reads as a control (a bare + in the label read as decoration). */}
+              {!collapsed && canAdd && <RailNavLink to="/sources?add=1" labelKey="addSource" icon={Plus} collapsed={false} current={false} />}
             </div>
           </div>
         </div>

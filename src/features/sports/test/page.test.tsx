@@ -1037,11 +1037,11 @@ describe('sports page', () => {
     };
     await openReady();
     const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
-    // Not a row that looks pressable and does nothing: the row's one action is a reminder.
+    // Not a row that looks pressable and does nothing: the row's one action is a reminder, beside when Watch comes.
     const remind = await within(card(later)).findByRole('button', { name: 'Remind me about Boston Celtics at New York Knicks on ESPN HD' });
     expect(remind.textContent).toBe('Remind me');
     expect(remind.getAttribute('aria-pressed')).toBe('false');
-    expect(within(card(later)).queryByTestId('sports-watch-from')).toBeNull();
+    expect(within(card(later)).getByTestId('sports-watch-from').textContent).toBe(`Watch from ${at}`);
     fireEvent.click(remind);
     await waitFor(() => expect(rpc.callsOf('reminders.add')).toHaveLength(1));
     // The game's programme, as Record would take it: ten minutes before the start.
@@ -1190,6 +1190,45 @@ describe('sports page', () => {
       end: new Date(g.startMs + TYPICAL_LENGTH_MS.nba + h.HOUR).toISOString(),
     });
     await waitFor(() => expect(h.lastToast()?.variant).toBe('success'));
+  });
+
+  it('offers Remind me beside Record before Watch comes, and a press on the row does what its main action does (w-walkthrough-02)', async () => {
+    const later = h.game('2', { startMs: Date.now() + 40 * h.MINUTE });
+    const live = h.liveGame('1');
+    setDay([live, later]);
+    setStreams(live, [h.match(EVENT, { reason: 'event' })]);
+    setStreams(later, [h.match(ESPN)]);
+    const reminders: object[] = [];
+    rpc.handlers['reminders.list'] = () => [...reminders];
+    rpc.handlers['reminders.add'] = (args) => {
+      reminders.push({ id: 'r1', status: 'pending', ...(args as object) });
+      return reminders[0];
+    };
+    await openReady();
+    const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
+    // Recording works here, and the game still offers Remind me and says when Watch comes.
+    await within(card(later)).findByRole('button', { name: 'Record Boston Celtics at New York Knicks on ESPN HD' });
+    expect(within(card(later)).getByRole('button', { name: 'Remind me about Boston Celtics at New York Knicks on ESPN HD' })).toBeTruthy();
+    expect(within(card(later)).getByTestId('sports-watch-from').textContent).toBe(`Watch from ${at}`);
+    // A press on the row sets the reminder, never a recording.
+    fireEvent.click(within(card(later)).getByTestId('sports-stream-name'));
+    await waitFor(() => expect(rpc.callsOf('reminders.add')).toHaveLength(1));
+    expect(rpc.callsOf('recordings.schedule')).toHaveLength(0);
+    // A live game's row watches.
+    fireEvent.click(within(card(live)).getByTestId('sports-stream-name'));
+    await waitFor(() => expect(player.played).toHaveLength(1));
+    expect(player.played[0]!.channel).toEqual(EVENT);
+    cleanup();
+
+    // Reminders off: the row says when Watch comes.
+    h.resetShared();
+    rpc.handlers['settings.get'] = () => ({ stripCountryPrefix: true, remindersEnabled: false });
+    await openReady();
+    await within(card(later)).findByTestId('sports-record');
+    expect(within(card(later)).queryByTestId('sports-remind')).toBeNull();
+    fireEvent.click(within(card(later)).getByTestId('sports-stream-name'));
+    await waitFor(() => expect(h.lastToast()?.title).toBe(`Watch from ${at}`));
+    expect(rpc.callsOf('recordings.schedule')).toHaveLength(0);
   });
 
   it('marks a game already set to record, and hides Record where recording is unsupported', async () => {

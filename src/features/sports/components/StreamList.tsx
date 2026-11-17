@@ -4,13 +4,15 @@
  * stream tall. Each row names the channel, the picture quality its name gives, why it matched (the
  * guide, an event channel's name, a team's own channel, or a network carrying the game) and offers
  * what fits the game's phase: Watch from 15 minutes before the start, Replay from the channel's
- * archive once it is over, Record before it starts. Before Watch comes, where nothing can be recorded, a
- * row offers Remind me (a guide reminder, as the guide's own) or, with reminders off, says when Watch
- * comes. The player loads on the press.
+ * archive once it is over, Record before it starts. Before Watch comes, a row puts its actions on a
+ * line of their own: Remind me (a guide reminder, as the guide's own; not with reminders off) and
+ * Record where recording is supported, after "Watch from 4:45 PM" on the best row. A press on the row
+ * itself does what its main action does (Watch, Replay, Remind me), or says when Watch comes. The
+ * player loads on the press.
  */
 
 import { Bell, BellOff, ChevronDown, ChevronUp, Circle, Clock, History, Play, TriangleAlert, Volume2 } from 'lucide-react';
-import { Fragment, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useCallback, useMemo, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -281,6 +283,7 @@ function StreamRow({
   toggle?: ReactNode;
 }) {
   const { t, i18n } = useTranslation('sports');
+  const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const name = displayChannelName(match.channel.name, ctx.strip) || match.channel.name;
   // What a screen reader hears: the cleaned name toasts use ("ESPN HD (US)"), not the provider's "US| ESPN HD".
@@ -356,30 +359,45 @@ function StreamRow({
     );
   }
 
-  // Before Watch comes, with nothing to record: a guide reminder for the game's programme, which fires
-  // with "Watch now" as the guide's own do. A press again takes it away.
-  const later = action === null && watchesLater(game, ctx.now);
+  // Before Watch comes: a guide reminder for the game's programme, which fires with "Watch now" as the
+  // guide's own do, whether or not Record is offered too. A press again takes it away.
+  const later = watchesLater(game, ctx.now);
   const watchTime = later ? formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language) : '';
   const remindProgram = later && ctx.remindersOn ? gameProgram(game, match, title) : null;
   const reminder = remindProgram ? ctx.reminderFor(match.channel.ref, remindProgram) : undefined;
-  if (!button && remindProgram && (reminder || ms(remindProgram.start) > ctx.now)) {
-    button = (
-      <Tooltip content={t('watchFrom', { time: watchTime })}>
-        <Button
-          size="sm"
-          variant="secondary"
-          icon={reminder ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
-          aria-pressed={!!reminder}
-          loading={busy}
-          aria-label={reminder ? undefined : t('remindLabel', { title, name: spoken })}
-          onClick={() => run(() => ctx.remind(match, remindProgram, name, reminder))}
-          data-testid="sports-remind"
-        >
-          {reminder ? t('reminderOn') : t('remindMe')}
-        </Button>
-      </Tooltip>
-    );
-  }
+  const remind = remindProgram && (reminder || ms(remindProgram.start) > ctx.now) ? () => run(() => ctx.remind(match, remindProgram, name, reminder)) : null;
+  const remindButton = remind ? (
+    <Tooltip content={t('watchFrom', { time: watchTime })}>
+      <Button
+        size="sm"
+        variant="secondary"
+        icon={reminder ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
+        aria-pressed={!!reminder}
+        loading={busy}
+        aria-label={reminder ? undefined : t('remindLabel', { title, name: spoken })}
+        onClick={remind}
+        data-testid="sports-remind"
+      >
+        {reminder ? t('reminderOn') : t('remindMe')}
+      </Button>
+    </Tooltip>
+  ) : null;
+
+  // A press on the row does what its main action does: Watch, Replay or Remind me. Record never runs
+  // from a stray press; before Watch comes, with no reminder to set, the row says when Watch comes.
+  let primary: (() => void) | null = null;
+  if (playing) primary = null;
+  else if (action?.kind === 'watch') primary = () => run(() => ctx.watch(match, title, name));
+  else if (action?.kind === 'replay') primary = () => run(() => ctx.replay(match, action.program, name));
+  else if (remind) primary = remind;
+  else if (later) primary = () => toast({ title: t('watchFrom', { time: watchTime }) });
+  const onRowClick = primary
+    ? (e: MouseEvent<HTMLLIElement>) => {
+        // The row's own buttons (and the "+2") act for themselves.
+        if (busy || (e.target as Element).closest('button, a')) return;
+        primary();
+      }
+    : undefined;
 
   const program = match.program;
   const quality = channelQuality(match.channel.name);
@@ -397,7 +415,13 @@ function StreamRow({
   const slotIsReason = slot !== null && match.reason === 'guide';
   const reasonHidden = slotIsReason || match.regional;
   return (
-    <li className="flex min-w-0 items-center gap-3 py-2" aria-current={playing ? 'true' : undefined} data-testid="sports-stream" data-reason={match.reason}>
+    <li
+      className={cn('flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2', primary && 'cursor-pointer')}
+      aria-current={playing ? 'true' : undefined}
+      onClick={onRowClick}
+      data-testid="sports-stream"
+      data-reason={match.reason}
+    >
       <ChannelLogo src={match.channel.logoUrl} name={name} size={32} sourceId={match.sourceId} />
       {/* A container, so the line below fits what it says to the room the row's action leaves. */}
       <div className="@container flex min-w-0 flex-1 flex-col gap-1">
@@ -475,9 +499,17 @@ function StreamRow({
         </span>
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
-      {!button && first && later ? (
-        // Where nothing can be done yet (no recording, reminders off), the best row says when Watch comes.
-        <WatchFrom time={watchTime} />
+      {later && (first || remindButton) ? (
+        // Before Watch comes, a line under the name says when Watch comes (the best row) and offers Remind
+        // me, with Record above it in the row's own place: both buttons beside the name left it a few letters.
+        <div className="flex basis-full flex-wrap items-center justify-end gap-2 ps-11">
+          {first ? (
+            <span className="me-auto">
+              <WatchFrom time={watchTime} />
+            </span>
+          ) : null}
+          {remindButton}
+        </div>
       ) : null}
     </li>
   );

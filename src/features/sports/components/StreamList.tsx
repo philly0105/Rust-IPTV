@@ -405,7 +405,8 @@ function StreamRow({
               // First, so the rows' qualities line up down the list; the name's own marker is often cut
               // off or a superscript ("ᴴᴰ").
               quality ? <QualityTag key="quality" quality={quality} /> : null,
-              // After the quality, which stays lined up down the list. Quiet words, not another badge: the order already puts the surest, sharpest stream first.
+              // After the quality, which stays lined up down the list. Quiet words, not another badge: the
+              // order already puts the surest, sharpest stream first.
               best ? (
                 <span key="best" className="font-medium text-fg-muted" title={t('bestHint')} data-testid="sports-best">
                   {t('best')}

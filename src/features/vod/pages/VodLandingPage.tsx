@@ -7,6 +7,7 @@ import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type Category, type ItemSnapshot, type PlaybackPosition, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 // The module itself, not the player barrel: small, no imports, already in the player core chunk.
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { preloadEngines } from '@/features/player/enginePreload';
 import { groupRegion, groupRegions, readRegion, writeRegion, type GroupRegion } from '@/features/live/lib/groupRegion';
 import { snapshotTitle } from '@/lib/title';
@@ -499,11 +500,16 @@ const LandingRail = memo(function LandingRail({
 }) {
   const input = useMemo(() => (grid ? { ...grid, categoryId, sort } : undefined), [grid, categoryId, sort]);
   const seeAll = useMemo(() => ({ to: seeAllTo }), [seeAllTo]);
+  // A category's name as the chips draw it, its language's tag after it, quiet; "Top rated" as it is.
+  const heading = useMemo(
+    () => (categoryId === ALL_CATEGORIES ? title : <ChannelName name={title} className="block min-w-0 truncate" />),
+    [categoryId, title],
+  );
   const railCard = useMemo<CatalogRailProps['card']>(
     () => (categoryLanguage ? (item, i, rail, watched) => card(item, i, rail, watched, categoryLanguage) : card),
     [card, categoryLanguage],
   );
-  return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={railCard} menu={menu} />;
+  return <CatalogRail title={heading} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={railCard} menu={menu} />;
 });
 
 /**
@@ -782,9 +788,8 @@ function CategoryChips({
               <li key={c.id} className="shrink-0">
                 <Link to={hrefFor(c.id)} state={FROM_LANDING} className={filterChipClass(false, 'max-w-[16rem]')} title={c.name} data-testid="vod-category-chip">
                   {c.locked && <Lock aria-hidden size={14} className="shrink-0" />}
-                  <span dir="auto" className="truncate">
-                    {c.label}
-                  </span>
+                  {/* "EN | ACTION" as group names read: the name, its language's tag after it, quiet. */}
+                  <ChannelName name={c.label} className="min-w-0 truncate" />
                   {c.locked && <span className="sr-only">, {t('locked')}</span>}
                 </Link>
               </li>

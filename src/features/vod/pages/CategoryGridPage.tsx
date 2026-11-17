@@ -66,6 +66,7 @@ import { sectionlessCategoryName } from '../lib/categoryName';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
 import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, Toggle, Tooltip, VirtualGrid, buttonClass, cn, filterChipClass, type VirtualItemState } from '@/ui';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -482,8 +483,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const categoryMissing = categoryId !== ALL_CATEGORIES && cats.isSuccess && !category;
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
-  // Under Movies, "Movies | Action" reads "Action" (the grid's accessible name keeps the provider's).
-  const shownName = categoryId === ALL_CATEGORIES ? categoryName : sectionlessCategoryName(categoryName, kind);
+  // Under Movies, "Movies | Action" reads "Action" (the grid's accessible name keeps the provider's),
+  // and "EN | ACTION" reads "ACTION (EN)", as plain text writes a group's tag: the name first.
+  const shownName = categoryId === ALL_CATEGORIES ? categoryName : plainChannelName(sectionlessCategoryName(categoryName, kind), false);
   // "EN | ACTION": every poster would carry the same EN badge and "English" in its caption, which
   // the title already says (realdata-22). A title in another language than its category keeps it.
   const quietLanguage = categoryId !== ALL_CATEGORIES && category ? itemLanguage('', category.name)?.code : undefined;

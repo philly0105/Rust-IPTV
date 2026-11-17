@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { intlLocale } from '@/lib/intl';
 import { Dialog, SearchInput, cn, useListVirtualizer } from '@/ui';
 
@@ -88,15 +89,14 @@ export function CategoryPickerDialog({ open, onClose, kind, categories, currentI
                     onClick={close}
                     data-grid-index={row.index}
                     aria-current={current ? 'page' : undefined}
-                    title={c.name && c.name !== c.label ? c.name : undefined}
+                    title={c.name || undefined}
                     className={cn(
                       'flex h-11 items-center gap-3 rounded-md px-3 text-sm',
                       current ? 'tuning-tick bg-selected font-medium text-fg' : 'text-fg-muted hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg',
                     )}
                   >
-                    <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">
-                      {c.label}
-                    </span>
+                    {/* "EN | ACTION" as group names read: the name, its language's tag after it, quiet. */}
+                    <ChannelName name={c.label} className="min-w-0 flex-1 truncate text-match-parent" />
                     {isLocked && <Lock className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={t('locked')} />}
                     {c.count > 0 && <span className="tabular text-caption text-fg-subtle">{fmt.format(c.count)}</span>}
                   </Link>

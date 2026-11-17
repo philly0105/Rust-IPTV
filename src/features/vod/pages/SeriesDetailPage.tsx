@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import { sameRef, type Episode, type ItemRef, type SeriesItem, type VodItem } from '@/api/types';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
@@ -626,7 +627,7 @@ export function SeriesDetailPage() {
 
         {item.categoryId && source.data && (
           <CatalogRail
-            title={categoryName ? t('moreInCategory', { category: sectionlessCategoryName(categoryName, 'series') }) : t('moreFromSource', { source: sourceName })}
+            title={categoryName ? t('moreInCategory', { category: plainChannelName(sectionlessCategoryName(categoryName, 'series'), false) }) : t('moreFromSource', { source: sourceName })}
             seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/series/c/${encodeURIComponent(item.categoryId)}` }}
             input={{
               sourceKind: source.data.kind,

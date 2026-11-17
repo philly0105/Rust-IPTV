@@ -2,12 +2,12 @@
 //! `.part`, in-task retry with backoff, and the no-overwrite finalize.
 
 use super::manager::{DownloadManager, StopReason, TaskCtl};
-use super::mirrors;
 use super::naming::{self, Reservation};
 use super::segments::stats as xstats;
 use super::segments::{self, MirrorPlan, Ranges, SegEnd, SegSource};
-use super::shared::{self, Endpoint, Fingerprint};
+use super::shared::{self, Endpoint};
 use super::store::{self, DownloadRow};
+use super::{mirrors, probe};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{apply_source_headers, backoff_delay};
 use crate::model::{
@@ -883,7 +883,7 @@ async fn attempt(
         (Some(p), Some(t)) if t >= shared::MIN_MIRROR_TOTAL => {
             if p.fingerprint
                 .as_ref()
-                .is_some_and(|fp| !still_matches(fp, t, rep.validator.as_deref()))
+                .is_some_and(|fp| !mirrors::still_matches(fp, t, rep.validator.as_deref()))
             {
                 p.fingerprint = None;
             }
@@ -893,7 +893,11 @@ async fn attempt(
     // Where the answer came from after redirects: segment requests go there.
     let landed = resp.url().as_str();
     let pinned = (landed != url.as_str()).then(|| landed.to_string());
-    if worth_splitting(offset) && (mgr.allowance_on(ctl, source) >= 2 || plan.is_some()) {
+    if worth_splitting(offset)
+        && (mgr.allowance_on(ctl, source) >= 2
+            || plan.is_some()
+            || probe_wanted(state, mgr, ctl, split_total, offset))
+    {
         if sparse(mgr, dest).await {
             let ranges = Ranges::new(rep.total.unwrap_or(0), authority_source(&auth, rep), offset);
             let first = Some((resp.bytes_stream().boxed(), offset));
@@ -963,7 +967,9 @@ async fn attempt(
                     split_checked = Instant::now();
                     if !catchup
                         && may_split(state, source, ctl, rep.one_connection)
-                        && (mgr.allowance_on(ctl, source) >= 2 || plan.is_some())
+                        && (mgr.allowance_on(ctl, source) >= 2
+                            || plan.is_some()
+                            || probe_wanted(state, mgr, ctl, split_total, offset))
                     {
                         // Asked before the stream is let go: a file system
                         // that cannot leave holes keeps it.
@@ -1090,6 +1096,22 @@ pub(super) fn may_split(
             .any(|s| s == source)
 }
 
+/// Whether a splittable answer (`split_total`, read up to `offset`) goes
+/// through the engine on one connection so a due connection-limit probe
+/// can run (amendment A5): an account that reports one connection never
+/// gives a transfer a second one, and the engine is where the probe runs
+/// and where a raise it learns is used.
+fn probe_wanted(
+    state: &AppState,
+    mgr: &DownloadManager,
+    ctl: &TaskCtl,
+    split_total: Option<i64>,
+    offset: i64,
+) -> bool {
+    split_total.is_some_and(|t| t - offset >= segments::PROBE_MIN_LEFT)
+        && probe::probe_due(state, mgr, ctl, &ctl.source)
+}
+
 /// Lets the `.part` take writes far past its end without filling the gap
 /// first (see [`segments::make_sparse`]).
 async fn sparse(mgr: &DownloadManager, dest: &Dest) -> bool {
@@ -1119,20 +1141,6 @@ fn no_holes(ctl: &TaskCtl, rep: &mut Representation) {
         });
     }
     rep.one_connection = true;
-}
-
-/// Whether fingerprint `fp` still describes a file of `total` bytes with
-/// `validator`.
-///
-/// Replace with `mirrors::still_matches` (B2) after the merge: this is a
-/// local shim of the same shape.
-fn still_matches(fp: &Fingerprint, total: i64, validator: Option<&str>) -> bool {
-    fp.total == total
-        && match (&fp.validator, validator) {
-            (Some(a), Some(b)) => a == b,
-            (Some(_), None) => false,
-            (None, _) => true,
-        }
 }
 
 /// The mirrors a transfer may draw on: with "Use identical copies" on, a
@@ -1171,7 +1179,7 @@ async fn mirror_plan(
     }
     let cached = cached.filter(|fp| {
         rep.total
-            .is_none_or(|t| still_matches(fp, t, rep.validator.as_deref()))
+            .is_none_or(|t| mirrors::still_matches(fp, t, rep.validator.as_deref()))
     });
     let fp = match cached {
         Some(fp) => fp,

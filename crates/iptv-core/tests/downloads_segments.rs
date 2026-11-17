@@ -509,10 +509,12 @@ async fn a_split_download_makes_room_for_playback_while_a_slow_disk_saves_its_pl
     // download to make room.
     iptv_core::downloads::set_slow_sync(&c.state, Duration::from_secs(3));
     let panel = dl_panel::Panel::spawn(6).await;
-    let size = 48 * MIB;
+    let size = 80 * MIB;
     // The open answer covers the first half at loopback speed, and the two
     // quarters come at 2 MiB/s: once the half is written, the next split
-    // saves the plan while both quarters still stream.
+    // saves the plan while both quarters still stream. Each new segment
+    // waits for a save (up to two, 6 s), so the first quarter is large
+    // enough to still stream when the second one starts.
     panel.file(1, size, 0);
     let head = panel.hold_next_head();
     let d = c.start_titled("src", "1", "Movie", &panel.url(1)).await;

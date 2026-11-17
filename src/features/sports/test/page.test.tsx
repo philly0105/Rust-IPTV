@@ -6,6 +6,8 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import deSports from '@/i18n/de/sports.json';
+
 import type { Game, League } from '../lib/types';
 import type { StreamMatch } from '../lib/match';
 
@@ -379,6 +381,25 @@ describe('sports page', () => {
     data.cache.clear();
     open();
     expect(within(card(nfl)).getByTestId('sports-notes').textContent).toBe('2nd & 7 at NO 35');
+  });
+
+  it("says a live game's clock in the user's language, from ESPN's status, and keeps ESPN's words it can't read", async () => {
+    const running = h.liveGame('1', { clock: { kind: 'running', period: 3, clock: '5:42' } });
+    const overtime = h.liveGame('2', { league: 'nfl', clock: { kind: 'endOfPeriod', period: 6 }, shortDetail: 'End of 2OT', home: h.team('NO', 'New Orleans Saints'), away: h.team('PIT', 'Pittsburgh Steelers') });
+    const inning = h.liveGame('3', { league: 'mlb', clock: { kind: 'inning', half: 'bottom', inning: 7 }, shortDetail: 'Bot 7th', home: h.team('NYY', 'New York Yankees'), away: h.team('BOS', 'Boston Red Sox') });
+    const delayed = h.liveGame('4', { league: 'mlb', shortDetail: 'Rain Delay', home: h.team('CHC', 'Chicago Cubs'), away: h.team('STL', 'St. Louis Cardinals') });
+    setDay([running, overtime, inning, delayed]);
+    open();
+    const clocks = () => [running, overtime, inning, delayed].map((g) => within(card(g)).getByTestId('sports-clock').textContent);
+    // English keeps ESPN's own line.
+    expect(clocks()).toEqual(['Q3 5:42', 'End of 2OT', 'Bot 7th', 'Rain Delay']);
+    h.i18n.addResourceBundle('de', 'sports', deSports);
+    await act(() => h.i18n.changeLanguage('de'));
+    try {
+      expect(clocks()).toEqual(['3. Viertel 5:42', 'Ende 2. Verlängerung', '7. Inning unten', 'Rain Delay']);
+    } finally {
+      await act(() => h.i18n.changeLanguage('en'));
+    }
   });
 
   it("puts a live game's best stream on the multi-view wall from its menu", async () => {

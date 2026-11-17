@@ -24,10 +24,42 @@ function localDate(t: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+type T = (key: string, opts?: Record<string, unknown>) => string;
+
 /** "Final", or "Final/OT", "Final/2OT", "Final/10" (extra innings) from ESPN's short detail. */
-function finalLabel(game: Game, t: (key: string, opts?: Record<string, unknown>) => string): string {
+function finalLabel(game: Game, t: T): string {
   const extra = /^Final\/(\S+)$/i.exec(game.shortDetail.trim())?.[1];
   return extra ? t('finalAfter', { period: extra }) : t('final');
+}
+
+/** "Q3", or past the fourth quarter "OT", "2OT", in the user's language. */
+function periodLabel(period: number, t: T): string {
+  if (period <= 4) return t('periodQuarter', { n: period });
+  const ot = period - 4;
+  return ot === 1 ? t('periodOvertime') : t('periodOvertimeN', { n: ot });
+}
+
+/**
+ * The live clock line. In English, ESPN's own ("5:12 - 3rd", "End of 1st", "Top 5th"); in another
+ * language it is built from the status ESPN's parser read (lib/espn.ts), so it is not the one English
+ * sentence on the card. A status it couldn't read (a rain delay) keeps ESPN's words.
+ */
+function clockLine(game: Game, lang: string, t: T): string {
+  const english = game.shortDetail || game.displayClock;
+  const c = game.clock;
+  if (!c || /^en\b/i.test(lang)) return english;
+  switch (c.kind) {
+    case 'running': {
+      const period = periodLabel(c.period, t);
+      return c.clock ? t('clockAt', { period, clock: c.clock }) : period;
+    }
+    case 'halftime':
+      return t('halftime');
+    case 'endOfPeriod':
+      return t('endOfPeriod', { period: periodLabel(c.period, t) });
+    case 'inning':
+      return t(c.half === 'top' ? 'inningTop' : c.half === 'bottom' ? 'inningBottom' : c.half === 'middle' ? 'inningMiddle' : 'inningEnd', { n: c.inning });
+  }
 }
 
 function GameStatus({ game }: { game: Game }) {
@@ -38,9 +70,9 @@ function GameStatus({ game }: { game: Game }) {
       return (
         <span className="flex min-w-0 items-center gap-2">
           <LivePill dot="still" />
-          {/* ESPN's own clock line ("Q3 5:42", "Top 5th", "Halftime"). */}
+          {/* The clock line ("5:42 - 3rd", "Top 5th", "Halftime"), in the user's language. */}
           <span dir="auto" className="truncate text-body font-semibold text-fg tabular-nums" data-testid="sports-clock">
-            {game.shortDetail || game.displayClock}
+            {clockLine(game, lang, t)}
           </span>
         </span>
       );

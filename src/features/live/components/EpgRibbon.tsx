@@ -85,6 +85,11 @@ export interface EpgRibbonProps {
   onMapEpg(channel: Channel): void;
   guideHref?: string;
   /**
+   * The page header has its own labelled TV guide button from md up (Live): the ribbon's guide
+   * link is then for phones only. A channel list's header has none, so there it stays at every width.
+   */
+  guideInHeader?: boolean;
+  /**
    * The player's item as it concerns `channel` (`ribbonPlayback`), when the page hands it over
    * with the channel, in the same background render (Live): a zap then re-renders the ribbon once,
    * for the new channel, instead of also when the stream changes under the old one. Without it the
@@ -446,9 +451,10 @@ export function EpgRibbon(props: EpgRibbonProps) {
               to={props.guideHref}
               aria-label={t('openGuide')}
               // The icon buttons' 44 px touch square, so the row reads 44 px across on a touch screen.
-              // From md the shell header's labelled TV guide button is a little above: one is enough.
+              // From md Live's header has a labelled TV guide button a little above: one is enough.
               className={cn(
-                'inline-flex size-8 md:hidden items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus',
+                'inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus',
+                props.guideInHeader && 'md:hidden',
                 TOUCH_TARGET,
                 'pointer-coarse:min-w-[calc(44rem/15)]',
               )}

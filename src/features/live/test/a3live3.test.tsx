@@ -52,7 +52,7 @@ const day: EpgProgram[] = [
   program('Late Movie', now + 6 * HOUR, now + 7 * HOUR),
 ];
 
-function ribbon(extra: { compact?: boolean } = {}) {
+function ribbon(extra: { compact?: boolean; guideHref?: string; guideInHeader?: boolean } = {}) {
   rpcMock.handlers['epg.programs'] = () => day;
   renderAt('/', [
     {
@@ -83,5 +83,19 @@ describe('the stacked stage of a portrait tablet (v-live-01)', () => {
     ribbon();
     expect(await screen.findByTestId('up-next', {}, { timeout: 10_000 })).toBeTruthy();
     expect(screen.getByTestId('epg-ribbon').className).toContain('md:flex-1');
+  });
+});
+
+describe("the ribbon's TV guide link (v-vod-02)", () => {
+  it('stays at every width on a channel list, whose header has no guide button', async () => {
+    ribbon({ guideHref: '/epg?view=list:l1' });
+    const link = await screen.findByRole('link', { name: 'TV guide' }, { timeout: 10_000 });
+    expect(link.className).not.toContain('md:hidden');
+  });
+
+  it("is for phones only on Live, whose header has a labelled one", async () => {
+    ribbon({ guideHref: '/epg', guideInHeader: true });
+    const link = await screen.findByRole('link', { name: 'TV guide' }, { timeout: 10_000 });
+    expect(link.className).toContain('md:hidden');
   });
 });

@@ -862,6 +862,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         onPlayLive={onPlayLive}
         onMapEpg={setMapping}
         guideHref={ribbon.guideHref}
+        guideInHeader
         playback={ribbon.playback}
         details
         compact={stacked}
@@ -955,12 +956,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         />
         {/* Radio has no picture: its stations are never filtered by quality. */}
         {isRadio ? null : <QualityFilterButton min={quality.min} hideUntagged={quality.hideUntagged} onChange={quality.update} />}
-        {/* The header's TV guide button, while the header steps aside for a playing channel on a phone. */}
+        {/* The header's TV guide button, while the header steps aside for a playing channel on a phone.
+            Under 400 px it squeezed the groups button and the search field to a few letters: there
+            the opened ribbon's guide link (and the tab bar's TV guide) are the way. */}
         {toolbarGuideHref ? (
           <Link
             to={toolbarGuideHref}
             aria-label={t('openGuide')}
-            className={buttonClass('ghost', 'sm', 'w-8 shrink-0 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)]')}
+            className={buttonClass('ghost', 'sm', 'w-8 shrink-0 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)] max-[399px]:hidden')}
             data-testid="live-toolbar-guide"
           >
             <CalendarClock className="size-4" aria-hidden />

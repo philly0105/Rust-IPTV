@@ -52,6 +52,12 @@ import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;
 /**
+ * A timeline block shows its title and time only with this much of it in view (v-live-14):
+ * narrower, both truncate to a letter and an ellipsis, which reads as noise. The block keeps its
+ * tooltip and accessible name.
+ */
+const CELL_TEXT_SHOWN_PX = 56;
+/**
  * An hour label ("10:00 PM" at 11 px) and the now line's dot, in px: the timeline keeps this much
  * before now when it rests, so the dot never sits under the label at the edge.
  */
@@ -843,6 +849,7 @@ function Timeline(
               key={`${b.program.start}|${b.program.title}`}
               block={b}
               textMax={cellTextMaxPx(view.left, b.left, b.width)}
+              bare={Math.min(b.left + b.width, view.left + view.width) - Math.max(b.left, view.left) < CELL_TEXT_SHOWN_PX}
               now={now}
               channel={channel}
               kind={kind}
@@ -881,6 +888,7 @@ function Timeline(
 const TimelineBlock = memo(function TimelineBlock({
   block,
   textMax,
+  bare,
   now,
   channel,
   kind,
@@ -897,6 +905,8 @@ const TimelineBlock = memo(function TimelineBlock({
   block: Block;
   /** The text's width cap while the block began before the visible edge (cellTextMaxPx). */
   textMax: number | undefined;
+  /** Too little of the block is in view for its text: it keeps the tooltip and the label only. */
+  bare: boolean;
   now: number;
   channel: Channel;
   kind?: SourceKind;
@@ -970,20 +980,22 @@ const TimelineBlock = memo(function TimelineBlock({
       {/* A show that began before the visible edge keeps its title in view: the text sticks 8 px
           past the edge until the block's end pushes it out, and ends in an ellipsis inside the
           block (L3-live-5). */}
-      <span data-testid="ribbon-block-text" className="sticky block w-max max-w-full" style={{ insetInlineStart: 8, maxWidth: textMax }}>
-        <span className="relative flex items-center gap-1 truncate text-xs font-medium">
-          {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
-          <span dir="auto" className="truncate text-match-parent">
-            {p.title}
+      {bare ? null : (
+        <span data-testid="ribbon-block-text" className="sticky block w-max max-w-full" style={{ insetInlineStart: 8, maxWidth: textMax }}>
+          <span className="relative flex items-center gap-1 truncate text-xs font-medium">
+            {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
+            <span dir="auto" className="truncate text-match-parent">
+              {p.title}
+            </span>
+            {/* recording: */}
+            <ScheduleMarkView index={schedule} channelRef={channel.ref} program={p} />
           </span>
-          {/* recording: */}
-          <ScheduleMarkView index={schedule} channelRef={channel.ref} program={p} />
+          {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
+          <span className={`relative block truncate text-caption tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
+            {formatClock(ms(p.start), i18n.language)}
+          </span>
         </span>
-        {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
-        <span className={`relative block truncate text-caption tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
-          {formatClock(ms(p.start), i18n.language)}
-        </span>
-      </span>
+      )}
     </button>
   );
 });

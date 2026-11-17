@@ -198,6 +198,7 @@
   "titleLoadFailed": "Δεν ήταν δυνατό το άνοιγμα αυτού του τίτλου",
   "searchFailed": "Δεν ήταν δυνατή η αναζήτηση",
   "searchPartialError": "Ορισμένα αποτελέσματα δεν φορτώθηκαν.",
+  "searchGuideFailed": "Δεν ήταν δυνατή η αναζήτηση στον οδηγό προγράμματος",
   "previousEpisode": "Προηγούμενο επεισόδιο",
   "previousEpisodeCode": "Προηγούμενο επεισόδιο ({{code}})",
   "captionMyList": "Η λίστα μου",

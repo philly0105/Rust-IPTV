@@ -218,6 +218,7 @@
   "titleLoadFailed": "Не ўдалося адкрыць гэтую назву",
   "searchFailed": "Не ўдалося выканаць пошук",
   "searchPartialError": "Некаторыя вынікі не атрымалася загрузіць.",
+  "searchGuideFailed": "Не атрымалася пашукаць у праграме перадач",
   "previousEpisode": "Папярэдні эпізод",
   "previousEpisodeCode": "Папярэдні эпізод ({{code}})",
   "captionMyList": "Мой спіс",

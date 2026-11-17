@@ -226,6 +226,8 @@ describe('Live list: states', () => {
     await screen.findByText('Channel 0');
     fireEvent.change(searchBox(), { target: { value: 'zzz' } });
     expect(await screen.findByText('No channels match "zzz"', undefined, { timeout: 4000 })).toBeTruthy();
+    // Or the search of everything, which looks in the other sources and the guide too.
+    expect(screen.getByTestId('search-everything-for').getAttribute('href')).toBe('/search?q=zzz');
     // The empty state's button (the input's own X is the first one).
     fireEvent.click(screen.getAllByRole('button', { name: 'Clear search' }).at(-1)!);
     await waitFor(() => expect(within(list()).getByText('Channel 0')).toBeTruthy(), { timeout: 4000 });

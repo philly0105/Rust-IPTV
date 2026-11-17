@@ -135,6 +135,8 @@ describe('L1-vod-7: empty states name the search first', () => {
   it('a query with no match inside a year range shows the search state, and clearing it shows the year state', async () => {
     renderAt('/s/src1/movies/c/c1?q=zzz&yf=1990&yt=1991', gridRoute);
     await screen.findByText(i18n.t('vod:noSearchMatchTitle', { query: 'zzz' }));
+    // Not in this category: the search of everything is one press away.
+    expect(screen.getByTestId('search-everything-for').getAttribute('href')).toBe('/search?q=zzz');
     expect(screen.queryByText(i18n.t('vod:yearEmptyTitle'))).toBeNull();
     // The empty state's button (the search box has its own, icon-only clear button).
     const clear = screen.getAllByRole('button', { name: i18n.t('vod:clearSearch') }).find((b) => !b.hasAttribute('aria-label'));

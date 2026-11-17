@@ -198,6 +198,7 @@
   "titleLoadFailed": "Dieser Titel konnte nicht geöffnet werden",
   "searchFailed": "Die Suche ist fehlgeschlagen",
   "searchPartialError": "Einige Ergebnisse konnten nicht geladen werden.",
+  "searchGuideFailed": "Der Programmführer konnte nicht durchsucht werden",
   "previousEpisode": "Vorherige Folge",
   "previousEpisodeCode": "Vorherige Folge ({{code}})",
   "captionMyList": "Meine Liste",

@@ -198,6 +198,7 @@
   "titleLoadFailed": "このタイトルを開けませんでした",
   "searchFailed": "検索できませんでした",
   "searchPartialError": "一部の結果を読み込めませんでした。",
+  "searchGuideFailed": "番組表を検索できませんでした",
   "previousEpisode": "前のエピソード",
   "previousEpisodeCode": "前のエピソード（{{code}}）",
   "captionMyList": "マイリスト",

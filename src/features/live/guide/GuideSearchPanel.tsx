@@ -19,6 +19,7 @@ import { useRpcQuery } from '@/api/query';
 import type { Channel, GuideSearchHit } from '@/api/types';
 import { ProgramActionsView, ScheduleMarkView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
 import { useShell } from '@/shell';
+import { SearchEverythingLink } from '@/shell/SearchEverythingLink';
 import { buttonClass, cn, EmptyState, ErrorState, IconButton, Skeleton, TOUCH_TARGET } from '@/ui';
 import { intlLocale, numberFormat } from '@/lib/intl';
 
@@ -390,7 +391,14 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
           {t('searchEmpty', { query: q ?? typed })}
         </p>
       ) : (
-        <EmptyState size="inline" icon={<SearchX size={20} aria-hidden />} title={t('searchEmpty', { query: q ?? typed })} description={t('searchEmptyHint')} />
+        <EmptyState
+          size="inline"
+          icon={<SearchX size={20} aria-hidden />}
+          title={t('searchEmpty', { query: q ?? typed })}
+          description={t('searchEmptyHint')}
+          // The guide holds programmes; the search of everything also finds channels, movies and series.
+          action={<SearchEverythingLink query={q ?? typed} size="sm" />}
+        />
       );
   } else {
     state = 'results';

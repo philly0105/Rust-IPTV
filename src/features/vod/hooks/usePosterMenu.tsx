@@ -22,6 +22,8 @@ export interface PosterMenuItem {
   posterUrl?: string | undefined;
   /** The title's group, so the parental gate can check group locks. */
   categoryId?: string | undefined;
+  /** The title's own source kind, where one menu serves several sources (Search); else the menu's. */
+  sourceKind?: SourceKind | undefined;
 }
 
 export interface PosterMenuOptions {
@@ -64,8 +66,9 @@ export function usePosterMenu({ sourceKind, resume, openDetails }: PosterMenuOpt
   const play = usePlayTitle();
   const playFromMenu = (item: PosterMenuItem, index: number) => {
     // A series has no single thing to play from here: its details pick the episode.
-    if (item.ref.contentType !== 'movie' || !sourceKind) return openDetails(item.ref, index);
-    const target: PlayTarget = { ref: item.ref, sourceKind, title: item.title ?? item.name };
+    const kind = item.sourceKind ?? sourceKind;
+    if (item.ref.contentType !== 'movie' || !kind) return openDetails(item.ref, index);
+    const target: PlayTarget = { ref: item.ref, sourceKind: kind, title: item.title ?? item.name };
     if (item.categoryId) target.categoryId = item.categoryId;
     if (item.posterUrl) target.posterUrl = item.posterUrl;
     void play(target);

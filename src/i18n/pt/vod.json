@@ -208,6 +208,7 @@
   "titleLoadFailed": "Não foi possível abrir este título",
   "searchFailed": "Não foi possível pesquisar",
   "searchPartialError": "Não foi possível carregar alguns resultados.",
+  "searchGuideFailed": "Não foi possível pesquisar no guia de TV",
   "previousEpisode": "Episódio anterior",
   "previousEpisodeCode": "Episódio anterior ({{code}})",
   "captionMyList": "Minha lista",

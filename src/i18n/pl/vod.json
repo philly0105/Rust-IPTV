@@ -218,6 +218,7 @@
   "titleLoadFailed": "Nie udało się otworzyć tego tytułu",
   "searchFailed": "Nie udało się wyszukać",
   "searchPartialError": "Nie udało się wczytać części wyników.",
+  "searchGuideFailed": "Nie udało się przeszukać przewodnika TV",
   "previousEpisode": "Poprzedni odcinek",
   "previousEpisodeCode": "Poprzedni odcinek ({{code}})",
   "captionMyList": "Moja lista",

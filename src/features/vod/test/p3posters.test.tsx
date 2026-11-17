@@ -95,6 +95,8 @@ beforeEach(() => {
   h['watchlist.list'] = () => [];
   h['positions.watchedContains'] = () => [];
   h['catalog.search'] = () => ({ live: [], movies: Array.from({ length: 60 }, (_, i) => film(i)), series: [] });
+  // The guide finds nothing (a failed guide search now shows its own error on the page).
+  h['epg.search'] = () => [];
 
   reads = [];
   for (const prop of ['clientWidth', 'clientHeight', 'scrollTop'] as const) {

@@ -218,6 +218,7 @@
   "titleLoadFailed": "Не удалось открыть это название",
   "searchFailed": "Не удалось выполнить поиск",
   "searchPartialError": "Не удалось загрузить часть результатов.",
+  "searchGuideFailed": "Не удалось выполнить поиск по телегиду",
   "previousEpisode": "Предыдущий эпизод",
   "previousEpisodeCode": "Предыдущий эпизод ({{code}})",
   "captionMyList": "Мой список",

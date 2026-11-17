@@ -122,6 +122,8 @@ describe('GuideSearchPanel states', () => {
     await waitFor(() => expect(state()).toBe('empty'));
     expect(screen.getByText('Nothing matches “zzz”')).toBeTruthy();
     expect(screen.getByText('Searches titles for the next 14 days.')).toBeTruthy();
+    // The search of everything finds channels, movies and series as well as programmes.
+    expect(screen.getByTestId('search-everything-for').getAttribute('href')).toBe('/search?q=zzz');
   });
 
   it('without a loaded guide it says so, links to the guide settings and does not search', async () => {

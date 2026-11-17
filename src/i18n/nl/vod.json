@@ -198,6 +198,7 @@
   "titleLoadFailed": "Deze titel kon niet worden geopend",
   "searchFailed": "Zoeken is mislukt",
   "searchPartialError": "Sommige resultaten konden niet worden geladen.",
+  "searchGuideFailed": "Kan niet zoeken in de programmagids",
   "previousEpisode": "Vorige aflevering",
   "previousEpisodeCode": "Vorige aflevering ({{code}})",
   "captionMyList": "Mijn lijst",

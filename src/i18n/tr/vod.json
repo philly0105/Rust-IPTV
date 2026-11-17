@@ -198,6 +198,7 @@
   "titleLoadFailed": "Bu başlık açılamadı",
   "searchFailed": "Arama yapılamadı",
   "searchPartialError": "Bazı sonuçlar yüklenemedi.",
+  "searchGuideFailed": "TV rehberinde arama yapılamadı",
   "previousEpisode": "Önceki bölüm",
   "previousEpisodeCode": "Önceki bölüm ({{code}})",
   "captionMyList": "Listem",

@@ -37,7 +37,7 @@ import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
 // Pure helpers (no React): the Search page's first-page arguments and detail paths.
-import { detailHref, normalizeQuery, SEARCH_LIMIT, searchRequestLimit } from '@/features/vod/lib/search';
+import { detailHref, normalizeQuery, rankChannels, SEARCH_LIMIT, searchRequestLimit } from '@/features/vod/lib/search';
 // The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
@@ -267,7 +267,8 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
         .filter((x) => sourceById.has(x.ref.sourceId) && !skip.has(itemKey(x.ref)) && !listed.has(itemKey(x.ref)) && paletteFilter(title(x), q, keywords) > 0)
         .slice(0, CATALOG_LIMIT);
 
-    for (const c of pick(data.live, (c) => c.name)) {
+    // As the Search page lists them: no provider heading rows, the user's region and whole-word names first.
+    for (const c of pick(rankChannels(data.live, q), (c) => c.name)) {
       const source = sourceById.get(c.ref.sourceId)!;
       items.push({
         id: `catalog.${itemKey(c.ref)}`,

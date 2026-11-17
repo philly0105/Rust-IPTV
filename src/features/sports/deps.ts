@@ -30,6 +30,7 @@ export {
   tabPanelProps,
   useToast,
 } from '@/ui';
+export { SearchEverythingLink } from '@/shell/SearchEverythingLink';
 export { useShell } from '@/shell/store';
 export { useSettingsValue } from '@/shell/useSettings';
 export { useVisibleSources } from '@/shell/useVisibleSources';

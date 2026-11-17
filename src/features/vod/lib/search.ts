@@ -10,6 +10,8 @@
 
 import type { CatalogSearchResult } from '@/api/rpc';
 import { itemKey, type Channel, type ItemRef, type SeriesItem, type Source, type SourceKind, type VodItem } from '@/api/types';
+import { groupRegion, readRegion } from '@/features/live/lib/groupRegion';
+import { isSeparatorName, splitPlaceTag } from '@/lib/channelName';
 
 export const MIN_QUERY_LENGTH = 2;
 /**
@@ -81,6 +83,58 @@ export function withNumberHits(result: CatalogSearchResult | undefined, numbered
   return { live: [...numbered, ...live.filter((c) => !first.has(itemKey(c.ref)))], movies: result?.movies ?? [], series: result?.series ?? [] };
 }
 
+/** A channel's place as its provider tags it: the tag on its name ("US" for "US: ESPN2"), else its group's ("US| SPORTS"). */
+function channelRegion(c: Channel): string | null {
+  const tag = splitPlaceTag(c.name).tag;
+  if (tag) return tag.normalize('NFKC');
+  return c.categoryName ? groupRegion(c.categoryName) : null;
+}
+
+/** The region the browser's language names ("US" for en-US, "UK" for en-GB, as playlists write it), or null. */
+function localeRegion(): string | null {
+  try {
+    const region = new Intl.Locale(navigator.language).maximize().region;
+    return region === 'GB' ? 'UK' : (region ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The region a source's channels are ranked for: the one picked in its Live TV groups, else the
+ * browser language's.
+ */
+function userRegion(sourceId: string): string | null {
+  return readRegion(`${sourceId}:live`) ?? localeRegion();
+}
+
+/**
+ * Channel hits as the searches list them (realdata-08). A provider's heading rows ("####### ESPN+
+ * #######") are no channels and drop out. Of the rest, those in the user's region (userRegion) come
+ * first, and within each, those holding every typed word whole ("ESPN HD" for "espn", not "ESPN2");
+ * otherwise the core's order stays. The core ranks and caps the list before it gets here, so on a
+ * huge playlist this orders the first page only: ranking every match needs `catalog.search` itself.
+ */
+export function rankChannels(channels: readonly Channel[], query: string): Channel[] {
+  const terms = searchTerms(query);
+  const regions = new Map<string, string | null>();
+  const score = (c: Channel) => {
+    let region = regions.get(c.ref.sourceId);
+    if (region === undefined) {
+      region = userRegion(c.ref.sourceId);
+      regions.set(c.ref.sourceId, region);
+    }
+    const words = searchTerms(splitPlaceTag(c.name).name);
+    const exact = terms.length > 0 && terms.every((t) => words.includes(t));
+    return (region && channelRegion(c) === region ? 2 : 0) + (exact ? 1 : 0);
+  };
+  return channels
+    .filter((c) => !isSeparatorName(c.name))
+    .map((c, i) => ({ c, i, s: score(c) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .map((x) => x.c);
+}
+
 export type SearchGroupKind = 'live' | 'movies' | 'series';
 export const SEARCH_GROUP_ORDER: readonly SearchGroupKind[] = ['movies', 'series', 'live'];
 
@@ -89,7 +143,7 @@ export interface SearchHit {
   group: SearchGroupKind;
   ref: ItemRef;
   title: string;
-  /** Year for VOD, channel number and category for live. */
+  /** Year for VOD (a channel's card reads its number and group from the channel). */
   meta?: string;
   imageUrl?: string;
   sourceId: string;
@@ -216,10 +270,9 @@ export function groupSearchResults(input: GroupInput): SearchGroup[] {
     push('series', s, compact({ title: s.title, meta: s.year?.toString(), imageUrl: s.posterUrl, href: detailHref(s.ref) }));
   }
   for (const c of input.result?.live ?? []) {
-    const meta = [c.number !== undefined ? String(c.number) : undefined, c.categoryName || undefined]
-      .filter(Boolean)
-      .join('  ');
-    push('live', c, compact({ title: c.name, meta: meta || undefined, imageUrl: c.logoUrl }));
+    // A provider's heading row is no channel to play.
+    if (isSeparatorName(c.name)) continue;
+    push('live', c, compact({ title: c.name, imageUrl: c.logoUrl }));
   }
 
   return SEARCH_GROUP_ORDER.map((kind) => ({ kind, hits: groups[kind] })).filter((g) => g.hits.length > 0);

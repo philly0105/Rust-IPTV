@@ -198,6 +198,7 @@
   "titleLoadFailed": "Nem sikerült megnyitni ezt a címet",
   "searchFailed": "Nem sikerült a keresés",
   "searchPartialError": "Néhány találatot nem sikerült betölteni.",
+  "searchGuideFailed": "Nem sikerült keresni a műsorújságban",
   "previousEpisode": "Előző epizód",
   "previousEpisodeCode": "Előző epizód ({{code}})",
   "captionMyList": "Saját lista",

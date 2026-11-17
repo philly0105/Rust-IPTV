@@ -605,6 +605,15 @@ describe('sports page', () => {
     expect(useShellStore.getState().header?.search?.value).toBe('');
   });
 
+  it('with no game in the coming week either, offers the search of everything', async () => {
+    setDay([h.game('1')]);
+    await openReady('/sports?league=nfl');
+    act(() => useShellStore.getState().header!.search!.onChange('lakers'));
+    fireEvent.click(await screen.findByTestId('sports-search-week'));
+    await screen.findByText('No game for “lakers” in the coming week');
+    expect(screen.getByTestId('search-everything-for').getAttribute('href')).toBe('/search?q=lakers');
+  });
+
   it('looks through the coming week for a team the picked day has no game of, and opens its day', async () => {
     const days = etDays(Date.now(), 7, 7);
     const lakers = h.game('7', { startMs: Date.now() + 2 * 24 * h.HOUR, etDate: days[9]!, home: h.team('LAL', 'Los Angeles Lakers'), away: h.team('DEN', 'Denver Nuggets') });

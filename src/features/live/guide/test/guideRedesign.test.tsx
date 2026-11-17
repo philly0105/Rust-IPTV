@@ -143,9 +143,12 @@ describe('genre buckets (CB-GUIDE-GENRE)', () => {
     expect(movie.className).toContain('text-fg-subtle');
     // A cell of another genre stays a (faint) box: a guide without genre tags would otherwise
     // lose every cell edge (guide-05).
-    expect(movie.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-bg', 'inset-ring', 'inset-ring-edge']));
+    // Its edge is half strength in light, and a matching cell there is the white panel, so the
+    // two do not read alike (v-guide-02).
+    expect(movie.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-bg', 'inset-ring', 'inset-ring-edge/50', 'dark:inset-ring-edge']));
     expect(screen.queryByTestId('guide-genre-hint')).toBeNull();
     expect(within(sports).getByTestId('cell-genre')).toBeTruthy();
+    expect(sports.className.split(/\s+/)).toContain('bg-surface');
     // Remembered for the next visit; pressing the chosen chip again shows everything.
     expect(localStorage.getItem('guide.genreFilter')).toBe('sports');
     fireEvent.click(within(chips).getByRole('button', { name: 'Sports' }));

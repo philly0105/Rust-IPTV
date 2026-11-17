@@ -601,17 +601,20 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                 ? // Filtered to another genre: quiet text in an outlined box of the page's own
                   // colour (opaque, so the now line stays off it). Plain text with no edge turned a
                   // guide without genre tags into loose words with no cells.
-                  'bg-bg text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-2'
+                  // In light its edge is half strength: matching cells are white there.
+                  'bg-bg text-fg-subtle inset-ring inset-ring-edge/50 hover:bg-surface-2 dark:inset-ring-edge'
                 : // On now: the raised cell (white with a shadow in light, the next surface step
                   // in dark), never a grey or amber wash. Light rows sit on the grey page:
                   // there a cell is the white panel; dark keeps the lifted surface step. Later
                   // and ended cells in light are 1.05:1 against the page, so an inset edge
                   // draws them; dark's surface steps separate on their own.
+                  // With a genre chosen, a matching cell in light is the white panel too: on
+                  // surface-2 it was 1.04:1 from the page-coloured cells the filter dims.
                   b.when === 'now'
                   ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
                   : b.when === 'past'
-                    ? 'bg-surface-2 text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3'
-                    : 'bg-surface-2 text-fg inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3',
+                    ? cn(genreFilter ? 'bg-surface' : 'bg-surface-2', 'text-fg-subtle inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3')
+                    : cn(genreFilter ? 'bg-surface' : 'bg-surface-2', 'text-fg inset-ring inset-ring-edge hover:bg-surface-3 dark:bg-surface-2 dark:inset-ring-0 dark:hover:bg-surface-3'),
             )}
             style={{ ...inlineStart(b.left - chunk.left + 1, rtl), width: Math.max(2, b.width - 2) }}
           >

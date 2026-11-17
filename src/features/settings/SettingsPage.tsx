@@ -179,13 +179,15 @@ export function SettingsNav({ current, variant = 'sidebar' }: { current?: Sectio
   );
 }
 
-/** How long a group opened at one of its settings (`#<setting>`) stays marked. */
-const MARK_MS = 1000;
+/** How long a group opened at one of its settings (`#<setting>`) stays marked: long enough to find on a slow paint. */
+const MARK_MS = 2500;
 /**
  * The mark: the selected fill, spread a little past the group's edges by a shadow of the same
  * colour, so it frames the title and rows without moving them. It fades out (`MARK_FADE` stays).
  */
 const MARK = ['bg-selected', 'shadow-[0_0_0_0.5rem_var(--color-selected)]'];
+/** What a deep link may focus in a settings row or group. */
+const SETTING_CONTROL = 'button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
 const MARK_FADE = ['rounded-lg', 'motion-safe:transition-[background-color,box-shadow]', 'motion-safe:duration-(--duration-slow)'];
 
 /**
@@ -193,7 +195,8 @@ const MARK_FADE = ['rounded-lg', 'motion-safe:transition-[background-color,box-s
  * scrolls to the group that holds the setting and marks it for a moment. The group is found by
  * an element with that id, else by the label the setting's row (or the group's heading) draws,
  * so the link holds wherever the setting moves. A section fills in over a few frames, so it
- * looks for up to 1.5 s.
+ * looks for up to 1.5 s. Keyboard focus moves to the setting's control (the group's first control
+ * for a group heading), so a keyboard user who asked for a setting starts on it (v-setup-04).
  */
 function useSettingAnchor(ready: boolean) {
   const { hash, key } = useLocation();
@@ -208,18 +211,24 @@ function useSettingAnchor(ready: boolean) {
       const own = document.getElementById(id);
       const byId = own && page?.contains(own) ? own : undefined;
       const el = byId ?? (label ? [...(page?.querySelectorAll<HTMLElement>('h3, label') ?? [])].find((n) => n.textContent?.trim() === label) : undefined);
-      return el ? (el.closest<HTMLElement>('[data-settings-group]') ?? el) : null;
+      return el ?? null;
     };
     const deadline = Date.now() + 1500;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let marked: HTMLElement | null = null;
     const step = () => {
-      marked = find();
-      if (!marked) {
+      const found = find();
+      if (!found) {
         if (Date.now() < deadline) timer = setTimeout(step, 50);
         return;
       }
+      marked = found.closest<HTMLElement>('[data-settings-group]') ?? found;
       marked.scrollIntoView({ block: 'start' });
+      // A row's label names its control; a heading or an id leads to the first control under it.
+      const scope = found.closest<HTMLElement>('[data-settings-row]') ?? marked;
+      const forId = found instanceof HTMLLabelElement ? found.htmlFor : '';
+      const control = (forId ? document.getElementById(forId) : null) ?? scope.querySelector<HTMLElement>(SETTING_CONTROL);
+      control?.focus({ preventScroll: true });
       marked.classList.add(...MARK_FADE, ...MARK);
       const el = marked;
       timer = setTimeout(() => el.classList.remove(...MARK), MARK_MS);

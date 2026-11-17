@@ -1159,9 +1159,13 @@ describe('B7 shell fixes', () => {
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     const btn = await within(nav).findByRole('button', { name: /Broken One.*The last refresh failed/ });
     expect(nav.querySelector('span[aria-label]')).toBeNull();
+    // Folded, it names no list (the list is not in the page); open, the list it names (w-a11y-11).
+    if (btn.getAttribute('aria-expanded') !== 'true') {
+      expect(btn.hasAttribute('aria-controls')).toBe(false);
+      fireEvent.click(btn);
+    }
     const controls = btn.getAttribute('aria-controls')!;
     expect(controls).not.toMatch(/\s/);
-    if (btn.getAttribute('aria-expanded') !== 'true') fireEvent.click(btn);
     expect(document.getElementById(controls)).toBeTruthy();
     cleanup();
     act(() => useShellStore.setState({ railCollapsed: true }));

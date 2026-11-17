@@ -74,7 +74,7 @@ describe('DownloadsPage', () => {
     }),
   );
 
-  it('renders one row per non-completed status with its actions', async () => {
+  it('renders one queue row per unfinished status with its actions', async () => {
     rpc.handlers['downloads.list'] = () => list;
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
 
@@ -94,7 +94,8 @@ describe('DownloadsPage', () => {
     expect(screen.getByText('Queue')).toBeTruthy();
     expect(screen.getByText('Needs attention')).toBeTruthy();
     expect(screen.getByText('HTTP 403')).toBeTruthy();
-    expect(screen.queryByText('Title completed')).toBeNull();
+    // The finished one is listed under the queue, not as a transfer.
+    expect(within(screen.getByTestId('finished-row')).getByText('Title completed')).toBeTruthy();
     expect(screen.getByRole('progressbar', { name: 'Download progress for Title downloading' })).toBeTruthy();
   });
 
@@ -370,11 +371,24 @@ describe('DownloadsPage', () => {
     expect((await screen.findByRole('link', { name: 'Browse movies' })).getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
   });
 
-  it('shows the empty state when only completed items remain', async () => {
-    rpc.handlers['downloads.list'] = () => [list[3]];
+  it('keeps a finished download on the page with Play and its page in My videos', async () => {
+    rpc.handlers['downloads.list'] = () => [
+      makeDownload({ id: 21, status: 'completed', title: 'Heat', totalBytes: 2048, fileAvailable: true, completedAt: '2026-10-02T00:00:00Z' }),
+      makeDownload({ id: 22, status: 'completed', title: 'Ronin', fileAvailable: false, completedAt: '2026-10-03T00:00:00Z' }),
+    ];
+    rpc.handlers['myvideos.playSource'] = () => ({ url: 'file:///heat.mkv', kind: 'file' });
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
-    expect(await screen.findByText('Nothing is downloading')).toBeTruthy();
-    expect(screen.getByText('Your 1 finished download is in My videos.')).toBeTruthy();
+    const rows = await screen.findAllByTestId('finished-row');
+    expect(screen.queryByText('Nothing is downloading')).toBeNull();
+    expect(screen.getByText('Recently finished')).toBeTruthy();
+    // Newest first; a file that is gone offers to download it again instead of Play.
+    expect(rows.map((r) => r.dataset['downloadId'])).toEqual(['22', '21']);
+    expect(within(rows[0]!).getByText('File missing')).toBeTruthy();
+    fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Download Ronin again' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.retry')).toEqual([{ id: 22 }]));
+    expect(within(rows[1]!).getByRole('link', { name: 'Show Heat in My videos' }).getAttribute('href')).toBe('/my-videos/21');
+    fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Play Heat' }));
+    await waitFor(() => expect(rpc.callsOf('myvideos.playSource')).toEqual([{ id: 21 }]));
   });
 
   it('shows the error state', async () => {

@@ -21,11 +21,20 @@ describe('queue', () => {
     makeDownload({ id: 100 + i, status, createdAt: `2026-10-01T10:0${i}:00Z`, updatedAt: `2026-10-01T11:0${i}:00Z` }),
   );
 
-  it('drops completed rows and orders active then attention', () => {
-    const { active, attention } = partitionQueue(all);
+  it('orders active, then attention, then finished rows', () => {
+    const { active, attention, finished } = partitionQueue(all);
     // Active rows stay in the order they were added, whatever their status.
     expect(active.map((d) => d.status)).toEqual(['queued', 'downloading', 'paused']);
     expect(attention.map((d) => d.status)).toEqual(['canceled', 'failed']);
+    expect(finished.map((d) => d.status)).toEqual(['completed']);
+  });
+
+  it('keeps the latest finished downloads, newest first', () => {
+    const done = Array.from({ length: 12 }, (_, i) =>
+      makeDownload({ id: i + 1, status: 'completed', completedAt: `2026-10-${String(i + 1).padStart(2, '0')}T00:00:00Z` }),
+    );
+    const { finished } = partitionQueue(done);
+    expect(finished.map((d) => d.id)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
   });
 
   it('keeps queued rows in FIFO order', () => {
@@ -45,9 +54,9 @@ describe('queue', () => {
 
   it('builds section headers with counts', () => {
     const rows = buildQueueRows(all);
-    expect(rows.map((r) => r.key)).toEqual(['h-active', 'd-100', 'd-101', 'd-102', 'h-attention', 'd-105', 'd-104']);
+    expect(rows.map((r) => r.key)).toEqual(['h-active', 'd-100', 'd-101', 'd-102', 'h-attention', 'd-105', 'd-104', 'h-finished', 'd-103']);
     expect(rows[0]).toMatchObject({ kind: 'header', count: 3 });
-    expect(buildQueueRows([makeDownload({ status: 'completed' })])).toEqual([]);
+    expect(buildQueueRows([])).toEqual([]);
   });
 
   it('offers the right actions per status', () => {

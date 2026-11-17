@@ -1,4 +1,4 @@
-/** /downloads: the transfer queue. Completed items leave this page for My Videos. */
+/** /downloads: the transfer queue, then the latest finished downloads. My Videos keeps every finished one. */
 
 import { Download as DownloadIcon, Eraser, Gauge, Library, Pause } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
@@ -14,7 +14,7 @@ import { formatList } from '@/lib/intl';
 
 import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useMediaQuery, useSettings, useShortcut } from '../deps';
 import { BrowseMoviesAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
-import { DownloadRow, SM_QUERY, downloadRowHeight } from '../components/DownloadRow';
+import { DownloadRow, FinishedRow, SM_QUERY, downloadRowHeight, finishedRowHeight } from '../components/DownloadRow';
 import { DownloadSpeedDialog } from '../components/DownloadSpeedDialog';
 import { FolderBar } from '../components/FolderBar';
 import { VirtualRows, type RowRenderInfo } from '../components/VirtualRows';
@@ -23,7 +23,7 @@ import { useDownloads, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatSpeedLimit } from '../lib/format';
 import { actionsFor, buildQueueRows, downloadNames, queueCounts, type QueueAction, type QueueRow } from '../lib/queue';
-import { playActiveCatchupDownload } from '../lib/playDownload';
+import { playActiveCatchupDownload, playDownload } from '../lib/playDownload';
 
 const HEADER_HEIGHT = 52;
 
@@ -99,10 +99,18 @@ export function DownloadsPage() {
     );
   }, [t]);
 
+  const onPlayFinished = useCallback((d: Download) => {
+    void playDownload(d).catch((err: unknown) =>
+      toast({ title: t('playFailed', { title: downloadNames(d).title }), description: errorDescription(err), variant: 'error' }),
+    );
+  }, [t]);
+  const onRedownload = useCallback((d: Download) => void perform('redownload', d), [perform]);
+
   const runFocused = (pick: (d: Download, actions: readonly QueueAction[]) => QueueAction | undefined) => {
     const id = focusedDownloadId();
     const d = id !== undefined ? all.find((x) => x.id === id) : undefined;
-    if (!d) return;
+    // A finished row's own buttons are its actions; removing one belongs to My Videos.
+    if (!d || d.status === 'completed') return;
     const actions = actionsFor(d.status, { canReveal: isDesktop, hasFile: !!d.filePath });
     const action = pick(d, actions);
     if (action && actions.includes(action)) onAction(action, d);
@@ -163,9 +171,11 @@ export function DownloadsPage() {
       if (row.kind === 'header') {
         return (
           <SectionHeading
-            title={t(row.section === 'active' ? 'sectionActive' : 'sectionAttention')}
+            title={t(row.section === 'active' ? 'sectionActive' : row.section === 'attention' ? 'sectionAttention' : 'sectionFinished')}
             count={row.count}
-            {...(row.section === 'attention'
+            {...(row.section === 'finished'
+              ? {}
+              : row.section === 'attention'
               ? {
                   hint: t('sectionAttentionHint'),
                   // VL-clear-finished-copy: beside the rows it removes.
@@ -195,6 +205,9 @@ export function DownloadsPage() {
         );
       }
       const d = row.download;
+      if (row.section === 'finished') {
+        return <FinishedRow download={d} busy={pending.has(d.id)} tabbable={info.tabStop} onPlay={onPlayFinished} onRedownload={onRedownload} />;
+      }
       return (
         <DownloadRow
           download={d}
@@ -211,7 +224,7 @@ export function DownloadsPage() {
       );
     },
     // Each row subscribes to its own live sample (VD-4): a progress event re-renders that row only.
-    [mixedSources, onAction, onPlayCatchup, pending, sources, t, editSpeed, globalLimit, bulk, perform],
+    [mixedSources, onAction, onPlayCatchup, onPlayFinished, onRedownload, pending, sources, t, editSpeed, globalLimit, bulk, perform],
   );
 
   let body;
@@ -230,21 +243,13 @@ export function DownloadsPage() {
       />
     );
   } else if (rows.length === 0) {
+    // Nothing queued and nothing saved (a finished download is listed): the catalogue, where a download starts.
     body = (
       <EmptyState
         icon={<DownloadIcon size={28} aria-hidden />}
         title={t('queueEmptyTitle')}
-        description={completedCount > 0 ? t('queueEmptyWithLibrary', { count: completedCount }) : t('queueEmptyBody')}
-        action={
-          completedCount > 0 ? (
-            <Link to="/my-videos" className={buttonClass('primary', 'md')}>
-              {t('openMyVideos')}
-            </Link>
-          ) : (
-            // Nothing saved either: the catalogue, where a download starts.
-            <BrowseMoviesAction sources={sources} loading={sourcesLoading} />
-          )
-        }
+        description={t('queueEmptyBody')}
+        action={<BrowseMoviesAction sources={sources} loading={sourcesLoading} />}
       />
     );
   } else {
@@ -252,13 +257,20 @@ export function DownloadsPage() {
       <VirtualRows
         rows={rows}
         label={t('queueListLabel')}
-        rowHeight={(r) => (r.kind === 'header' ? HEADER_HEIGHT : downloadRowHeight(r.download, wide))}
+        rowHeight={(r) =>
+          r.kind === 'header' ? HEADER_HEIGHT : r.section === 'finished' ? finishedRowHeight(r.download, wide) : downloadRowHeight(r.download, wide)
+        }
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         onRowKeyDown={(r, e) => {
           if (r.kind !== 'item' || e.key !== 'Enter') return;
           e.preventDefault();
           const d = r.download;
+          if (r.section === 'finished') {
+            if (d.fileAvailable === false) onRedownload(d);
+            else onPlayFinished(d);
+            return;
+          }
           const primary = actionsFor(d.status, { canReveal: isDesktop, hasFile: !!d.filePath })[0];
           if (primary) onAction(primary, d);
         }}

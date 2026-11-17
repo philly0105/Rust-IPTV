@@ -1,16 +1,18 @@
 /** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
-import { ArrowUpToLine, Download as DownloadIcon, FolderOpen, Gauge, MonitorPlay, Pause, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowUpToLine, Download as DownloadIcon, FolderOpen, Gauge, Library, MonitorPlay, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 
 import type { Download, Source } from '@/api/types';
+import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 
-import { IconButton, Menu, Poster, PosterCellWidthContext, useMediaQuery, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
+import { Badge, Button, IconButton, Menu, Poster, PosterCellWidthContext, useMediaQuery, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
 import { etaSeconds, formatBytes, formatDuration, formatSpeed, formatSpeedLimit, percentOf } from '../lib/format';
 import { useLiveProgress } from '../lib/progress';
 import { downloadNames, type QueueAction } from '../lib/queue';
@@ -372,3 +374,117 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
 }
 
 export const DownloadRow = memo(DownloadRowImpl);
+
+/** A finished row's height: a transfer's from sm (the artwork sets it), and a line shorter on a phone, with no bar. */
+export function finishedRowHeight(d: Pick<Download, 'title' | 'subtitle' | 'episodeId'>, wide: boolean): number {
+  if (wide) return DOWNLOAD_ROW_HEIGHT;
+  return downloadNames(d).subtitle ? 84 : 72;
+}
+
+export interface FinishedRowProps {
+  download: Download;
+  busy: boolean;
+  tabbable?: boolean;
+  onPlay: (d: Download) => void;
+  onRedownload: (d: Download) => void;
+}
+
+/**
+ * A finished download under the queue (walkthrough-07): where it ended up, so the user who
+ * started it finds it here, with Play (or Download again when its file is gone) and the way to
+ * its page in My videos.
+ */
+function FinishedRowImpl({ download: d, busy, tabbable = false, onPlay, onRedownload }: FinishedRowProps) {
+  const { t, i18n } = useTranslation('library');
+  const lang = i18n.language;
+  const names = downloadNames(d);
+  const wide = useMediaQuery(SM_QUERY);
+  const artWidth = usePosterWidthBox(useScaledPx(wide ? ART_SM_PX : ART_PX, true));
+  const missing = d.fileAvailable === false;
+  const at = Date.parse(d.completedAt ?? d.updatedAt);
+  const detail = [
+    formatBytes(d.totalBytes ?? d.bytesDownloaded, lang),
+    Number.isNaN(at) ? '' : dateTimeFormat(intlLocale(lang), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const tabIndex = tabbable ? 0 : -1;
+
+  return (
+    <div
+      className="group flex h-full items-center gap-3 rounded-md px-2 hover:bg-hover in-focus-visible:bg-hover focus-within:bg-hover motion-safe:transition-colors sm:gap-4"
+      data-testid="finished-row"
+      data-download-id={d.id}
+      data-status={d.status}
+    >
+      <div className="w-10 shrink-0 overflow-hidden rounded-sm ring-1 ring-edge sm:w-12">
+        <PosterCellWidthContext.Provider value={artWidth}>
+          <Poster src={d.posterUrl} sourceId={d.ref.sourceId} alt="" label={d.title} aspect="poster" />
+        </PosterCellWidthContext.Provider>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 items-center gap-2">
+          <span dir="auto" className="min-w-0 truncate text-body-sm font-medium text-fg" title={names.title}>
+            {names.title}
+          </span>
+          {names.subtitle && wide && (
+            <span dir="auto" className="min-w-0 truncate text-caption text-fg-muted" title={names.subtitle}>
+              {names.subtitle}
+            </span>
+          )}
+        </div>
+        {names.subtitle && !wide && (
+          <span dir="auto" className="min-w-0 truncate text-caption text-fg-muted">
+            {names.subtitle}
+          </span>
+        )}
+        <div className="flex min-w-0 items-center gap-2 text-caption text-fg-muted">
+          {missing && <Badge variant="warning">{t('fileMissing')}</Badge>}
+          <span className="min-w-0 truncate tabular-nums">{detail}</span>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1" data-testid="finished-actions">
+        {/* Its page in My videos: icon only on a phone, where the row has room for one labelled button. */}
+        <Link
+          to={`/my-videos/${d.id}`}
+          className={buttonClass('ghost', 'sm')}
+          aria-label={t('showInMyVideosAria', { title: names.title })}
+          tabIndex={tabIndex}
+          data-action="open"
+        >
+          <Library size={16} aria-hidden />
+          <span className="max-sm:hidden">{t('scheduledShowFiles')}</span>
+        </Link>
+        {missing ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<RotateCcw size={14} aria-hidden />}
+            aria-label={t('episodeRedownloadAria', { title: names.title })}
+            loading={busy}
+            tabIndex={tabIndex}
+            data-action="redownload"
+            onClick={() => onRedownload(d)}
+          >
+            {t('redownload')}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Play size={14} aria-hidden className="fill-current" />}
+            aria-label={t('playTitle', { title: names.title })}
+            disabled={busy}
+            tabIndex={tabIndex}
+            data-action="play"
+            onClick={() => onPlay(d)}
+          >
+            {t('playOffline')}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const FinishedRow = memo(FinishedRowImpl);

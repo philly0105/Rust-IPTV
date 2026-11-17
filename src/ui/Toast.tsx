@@ -391,6 +391,14 @@ interface Announcement {
 }
 
 /**
+ * What goes between two spoken parts of a toast: ". ", or only a space after a part that already
+ * ends a sentence ("…on its source." then "Press F8…"), so a reader does not hear "source.. Press".
+ */
+export function spokenBreak(part: ReactNode): string {
+  return typeof part === 'string' && /[.!?…。！？؟]\s*$/u.test(part) ? ' ' : '. ';
+}
+
+/**
  * Which toasts to read out after the stack changed: those that are new, and
  * those updated in place with a different title (an import moving from
  * "Importing" to "Imported"). Progress ticks that only change the description
@@ -563,9 +571,9 @@ export function ToastViewport() {
     a && (
       <p key={a.seq}>
         {a.toast.title}
-        {a.toast.description ? <>. {a.toast.description}</> : null}
+        {a.toast.description ? <>{spokenBreak(a.toast.title)}{a.toast.description}</> : null}
         {/* The action is a button in the corner: say it is there and how to reach it. */}
-        {a.toast.action ? <>. {t('toastActionHint', { action: a.toast.action.label })}</> : null}
+        {a.toast.action ? <>{spokenBreak(a.toast.description || a.toast.title)}{t('toastActionHint', { action: a.toast.action.label })}</> : null}
       </p>
     );
   return createPortal(

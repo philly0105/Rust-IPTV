@@ -289,8 +289,39 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
   const parts = channelNameParts(name, strip, group);
   if (!parts.tag && !parts.variant && parts.name === parts.full) {
     return (
-      <span dir="auto" className={cn(className, twoLines && 'line-clamp-2 break-words')} title={title} data-testid={testId}>
+      <span dir="auto" className={cn(className, twoLines && 'line-clamp-2 break-words text-balance')} title={title} data-testid={testId}>
         {parts.full}
+      </span>
+    );
+  }
+  const tag = parts.tag ? (
+    <span
+      className={cn(!twoLines && 'ms-1.5 whitespace-nowrap', 'text-caption font-medium tracking-wide text-fg-subtle', tagClassName)}
+      data-testid="channel-name-tag"
+    >
+      {parts.tag}
+    </span>
+  ) : null;
+  if (twoLines) {
+    return (
+      <span className={className} title={title} data-testid={testId}>
+        {/* Two lines, as running text: the station wraps onto the second line rather than being
+            cut on the first, and its quality words and tag follow it, kept together so neither is
+            left alone on a line. The space before them is an ordinary one, so a wrapped tail
+            starts flush. Balanced, so "SKY SPORTS / ACTION HD US" rather than a full first line
+            and a short tail. */}
+        <span aria-hidden className="line-clamp-2 break-words text-balance">
+          <span dir="auto">{parts.name}</span>
+          {parts.variant || tag ? ' ' : null}
+          {parts.variant || tag ? (
+            <span className="whitespace-nowrap">
+              {parts.variant}
+              {parts.variant && tag ? ' ' : null}
+              {tag}
+            </span>
+          ) : null}
+        </span>
+        <span className="sr-only">{parts.full}</span>
       </span>
     );
   }
@@ -302,32 +333,14 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
           the tag first by flex-shrink weights also took a fraction of a pixel from the name, and
           that was enough to draw an ellipsis on a complete one. Within the name, the station's
           words give way and the feed's quality words stay. */}
-      {/* Two lines: the name wraps onto the second, and a tag that no longer fits goes the same
-          way. With quality words, the station takes the first line and they start the second. */}
-      <span aria-hidden className={cn('flex min-w-0 flex-wrap items-baseline overflow-hidden', twoLines ? 'max-h-[2lh]' : 'h-[1lh]')}>
-        {twoLines ? (
-          <>
-            <span dir="auto" className={cn('max-w-full shrink-0', parts.variant ? 'truncate' : 'line-clamp-2 break-words')}>
-              {parts.name}
-            </span>
-            {parts.variant ? <span className={VARIANT}>{` ${parts.variant}`}</span> : null}
-          </>
-        ) : (
-          <span className="flex max-w-full min-w-0 shrink-0">
-            <span dir="auto" className="min-w-0 truncate">
-              {parts.name}
-            </span>
-            {parts.variant ? <span className={VARIANT}>{` ${parts.variant}`}</span> : null}
+      <span aria-hidden className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
+        <span className="flex max-w-full min-w-0 shrink-0">
+          <span dir="auto" className="min-w-0 truncate">
+            {parts.name}
           </span>
-        )}
-        {parts.tag ? (
-          <span
-            className={cn('ms-1.5 whitespace-nowrap text-caption font-medium tracking-wide text-fg-subtle', tagClassName)}
-            data-testid="channel-name-tag"
-          >
-            {parts.tag}
-          </span>
-        ) : null}
+          {parts.variant ? <span className={VARIANT}>{` ${parts.variant}`}</span> : null}
+        </span>
+        {tag}
       </span>
       <span className="sr-only">{parts.full}</span>
     </span>

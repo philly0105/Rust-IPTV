@@ -334,7 +334,13 @@ describe('the channel column names a channel as Live TV does (round 5)', () => {
     const row = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
     const tag = within(row).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
-    expect(tag.previousElementSibling!.textContent).toBe('Channel 0');
+    // Running text over two lines (v-guide-11): the tag follows the name after an ordinary space,
+    // so a wrapped tag starts flush, and stays with the quality words in a no-wrap tail.
+    const drawn = tag.closest<HTMLElement>('[aria-hidden]')!;
+    expect(drawn.textContent).toBe('Channel 0 US');
+    expect(drawn.className).toContain('line-clamp-2');
+    expect(drawn.querySelector('[dir="auto"]')!.textContent).toBe('Channel 0');
+    expect(tag.parentElement!.className).toContain('whitespace-nowrap');
     expect(tag.className).toContain('text-fg-subtle');
     expect(row.title).toBe('Play US| Channel 0');
   });

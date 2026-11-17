@@ -343,6 +343,8 @@ describe('the channel column names a channel as Live TV does (round 5)', () => {
     expect(tag.parentElement!.className).toContain('whitespace-nowrap');
     expect(tag.className).toContain('text-fg-subtle');
     expect(row.title).toBe('Play US| Channel 0');
+    // Screen readers hear the cleaned name, as toasts give it (w-a11y-03); the tooltip keeps the provider's.
+    expect(screen.getByRole('button', { name: /Channel 0 \(US\)/ })).toBe(row);
   });
 
   it('leaves the tag out with "Hide country tags" on', async () => {

@@ -25,7 +25,7 @@ import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useDebounced } from '../hooks/useDebounced';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { displayChannelName, isSeparatorName } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, plainChannelName } from '../lib/channelName';
 import { formatClock, formatDay, localDayDiff, ms, programWhen } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { displayHits, foldHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchWindow } from './search';
@@ -556,6 +556,8 @@ const HitRow = memo(function HitRow({
   const { t: ts } = useTranslation('shell');
   const { program } = hit;
   const name = displayChannelName(hit.channelName, strip);
+  // Screen readers hear the cleaned name ("ESPN HD (US)").
+  const srName = plainChannelName(hit.channelName, strip);
   const start = ms(program.start);
   const airing = programWhen(program, now) === 'now';
   const time = formatClock(start, lang);
@@ -578,7 +580,7 @@ const HitRow = memo(function HitRow({
           type="button"
           data-hit=""
           onClick={() => onSelect(hit)}
-          aria-label={t('hitLabel', { title: program.title, channel: name, time })}
+          aria-label={t('hitLabel', { title: program.title, channel: srName, time })}
           className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-1 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
         >
           {/* Wide enough for a 12-hour "05:00 AM" on one line; a longer local format widens it, never wraps it. */}
@@ -598,13 +600,13 @@ const HitRow = memo(function HitRow({
             </span>
             <span className="flex min-w-0 gap-1.5 text-xs text-fg-muted">
               {hit.channelNumber !== undefined ? <span className="shrink-0 tabular-nums text-fg-subtle">{hit.channelNumber}</span> : null}
-              <ChannelName name={hit.channelName} strip={strip} className="min-w-0 truncate" />
+              <ChannelName name={hit.channelName} strip={strip} srName={srName} className="min-w-0 truncate" />
             </span>
           </span>
         </button>
         <span className="flex shrink-0 items-center">
           {airing ? (
-            <IconButton size="sm" label={t('watchNow', { channel: name })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(hit)} data-testid="guide-search-watch" />
+            <IconButton size="sm" label={t('watchNow', { channel: srName })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(hit)} data-testid="guide-search-watch" />
           ) : null}
           {/* A column of record and remind buttons on every hit read as a list of alerts: they
               come with hover or focus. A touch screen has neither, and three 44 px buttons per hit
@@ -636,13 +638,14 @@ const HitRow = memo(function HitRow({
         <ul ref={alsoList} className="flex flex-col pb-1" data-testid="guide-search-also">
           {(all ? also : also.slice(0, ALSO_SHOWN)).map((a) => {
             const other = displayChannelName(a.channelName, strip);
+            const otherSr = plainChannelName(a.channelName, strip);
             return (
               <li key={hitKey(a)} className="flex items-center gap-1 pe-2 hover:bg-hover" data-hit-row="">
                 <button
                   type="button"
                   data-hit=""
                   onClick={() => onSelect(a)}
-                  aria-label={t('hitLabel', { title: program.title, channel: other, time })}
+                  aria-label={t('hitLabel', { title: program.title, channel: otherSr, time })}
                   className="flex min-w-0 flex-1 items-center gap-3 py-1.5 ps-[calc(7rem+28px)] pe-1 text-start text-xs text-fg-muted outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
                 >
                   <ChannelLogo src={a.logoUrl} name={other} size={20} sourceId={a.ref.sourceId} />

@@ -3183,7 +3183,7 @@ function GuideRowMenu({
   const favorites = useRpcQuery('favorites.contains', { refs: [ch.ref] });
   const favorite = favoriteOverride ?? (favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined);
   const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide, programme, now, onProgrammeLink });
-  return <ContextMenu pos={menu.pos} items={items} header={channelMenuHeader(ch, name, nowTitle)} label={name} onClose={onClose} />;
+  return <ContextMenu pos={menu.pos} items={items} header={channelMenuHeader(ch, name, nowTitle)} label={plainChannelName(ch.name, stripCountryPrefix)} onClose={onClose} />;
 }
 
 function ProgramPopover({
@@ -3225,6 +3225,8 @@ function ProgramPopover({
   const catchupOk = canCatchUp(program, channel, kind, now);
   const { stripCountryPrefix, epgOffsetMinutes } = useDisplayPrefs();
   const channelName = displayChannelName(channel.name, stripCountryPrefix);
+  // Screen readers hear the cleaned name ("ESPN HD (US)").
+  const srChannelName = plainChannelName(channel.name, stripCountryPrefix);
   // The grid comes without descriptions: this one is asked for when the detail opens.
   const { description, pending: descriptionPending } = useProgramDescription(channel.ref, program, epgOffsetMinutes * MINUTE);
   // An ended programme's archive: download it, copy its link (as the row's menu offers them).
@@ -3330,7 +3332,7 @@ function ProgramPopover({
                 "US, 2:00 – 3:00 PM" (v-guide-09). Screen readers still hear the two parts joined by
                 that separator. Each part isolated (the name by its dir="auto"). */}
             <p className="flex min-w-0 flex-col text-caption tabular-nums text-fg-muted">
-              <ChannelName name={channel.name} strip={stripCountryPrefix} className="min-w-0 truncate" />
+              <ChannelName name={channel.name} strip={stripCountryPrefix} srName={srChannelName} className="min-w-0 truncate" />
               <span className="sr-only">{listSeparator(i18n.language)}</span>
               <bdi>{formatRange(program, i18n.language)}</bdi>
             </p>
@@ -3371,7 +3373,7 @@ function ProgramPopover({
               variant="ghost"
               icon={<Play className="size-3.5" />}
               onClick={onLive}
-              aria-label={t('playChannel', { name: channelName })}
+              aria-label={t('playChannel', { name: srChannelName })}
               data-autofocus={!catchupOk || undefined}
             >
               {t('watchChannel')}

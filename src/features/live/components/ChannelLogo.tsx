@@ -258,6 +258,8 @@ export interface ChannelNameProps {
   testId?: string | undefined;
   /** Up to two lines instead of one (the guide's channel column, whose row has room for them). */
   twoLines?: boolean | undefined;
+  /** What screen readers hear instead of the provider's name (the guide passes `plainChannelName`). */
+  srName?: string | undefined;
 }
 
 /**
@@ -285,7 +287,7 @@ export interface ChannelNameProps {
  */
 const VARIANT = 'shrink-0 whitespace-pre';
 
-export function ChannelName({ name, strip, group, className, tagClassName, title, testId, twoLines }: ChannelNameProps) {
+export function ChannelName({ name, strip, group, className, tagClassName, title, testId, twoLines, srName }: ChannelNameProps) {
   const parts = channelNameParts(name, strip, group);
   if (!parts.tag && !parts.variant && parts.name === parts.full) {
     return (
@@ -323,7 +325,7 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
             </span>
           ) : null}
         </span>
-        <span className="sr-only">{parts.full}</span>
+        <span className="sr-only">{srName ?? parts.full}</span>
       </span>
     );
   }
@@ -344,7 +346,7 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
         </span>
         {tag}
       </span>
-      <span className="sr-only">{parts.full}</span>
+      <span className="sr-only">{srName ?? parts.full}</span>
     </span>
   );
 }

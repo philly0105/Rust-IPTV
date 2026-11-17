@@ -16,7 +16,7 @@ import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/record
 
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName, isSeparatorName, separatorLabel, splitPlaceTag } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, plainChannelName, separatorLabel, splitPlaceTag } from '../lib/channelName';
 import { CELL_TEXT_MIN_PX, MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
@@ -289,6 +289,8 @@ export const GuideRow = memo(function GuideRow({
     handlers.menu(ch, x, y, cell ? programs?.find((p) => p.start === cell.dataset.start) : undefined);
   });
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
+  // Screen readers hear the cleaned name ("ESPN HD (US)"); the tooltip keeps the provider's.
+  const srName = plainChannelName(ch?.name, stripCountryPrefix);
   // Catch-up remains in the accessible name and tooltip.
   const archive = !!ch && hasUsableArchive(ch, kind);
   const channelKey = ch ? `${ch.ref.sourceId}|${ch.ref.contentType}|${ch.ref.itemId}` : null;
@@ -387,7 +389,7 @@ export const GuideRow = memo(function GuideRow({
                   }
                 />
                 <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
-                <span className="sr-only">{playing ? `${chName}, ${labels.playingNow}` : chName}</span>
+                <span className="sr-only">{playing ? `${srName}, ${labels.playingNow}` : srName}</span>
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
               </>
             ) : (
@@ -402,6 +404,7 @@ export const GuideRow = memo(function GuideRow({
                   name={ch.name}
                   strip={stripCountryPrefix}
                   twoLines
+                  srName={srName}
                   className={cn('min-w-0 flex-1 text-body-sm leading-tight text-match-parent text-fg', playing && 'font-semibold')}
                 />
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}

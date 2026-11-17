@@ -10,6 +10,7 @@ import '@/i18n';
 
 import type { PlayerSource } from '@/api/types';
 import { PHONE_QUERY } from '@/shell/navigation';
+import { focusableIn } from '@/ui/focus';
 
 vi.mock('@/api/transport', () => ({
   rpc: vi.fn(() => Promise.reject(new Error('offline'))),
@@ -134,6 +135,26 @@ describe('player window fill', () => {
     act(() => usePlayerStore.getState().toggleWindowFill());
     expect(row.inert).toBe(false);
     expect(document.activeElement).toBe(row);
+  });
+
+  it('wraps Tab inside the filled player instead of letting it out to the browser (v-player-09)', () => {
+    phone(false);
+    playing(live);
+    render(<><PlayerStage className="h-40 w-64" /><PlayerDock /></>);
+    act(() => usePlayerStore.getState().toggleWindowFill());
+    const host = document.querySelector<HTMLElement>('[data-player-host]')!;
+    const stops = focusableIn(host);
+    const first = stops[0]!;
+    const last = stops[stops.length - 1]!;
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    // Between the ends Tab is the browser's own.
+    stops[1]!.focus();
+    expect(fireEvent.keyDown(stops[1]!, { key: 'Tab' })).toBe(true);
+    expect(document.activeElement).toBe(stops[1]);
   });
 });
 

@@ -10,6 +10,7 @@ import '../player.css';
 import { PHONE_QUERY } from '@/shell/navigation';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { IconButton } from '@/ui/Button';
+import { focusableIn } from '@/ui/focus';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
@@ -380,7 +381,23 @@ export const PlayerDock = memo(function PlayerDock() {
       made.push(el);
     }
     if (!(before instanceof Node) || !host.contains(before)) host.querySelector<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
+    // Tab wraps inside the player: past its last control it went to the browser (the address bar)
+    // before it came round, one press with no focus ring anywhere.
+    const wrapTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      const stops = focusableIn(host);
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      if (!first || !last) return;
+      const at = document.activeElement;
+      if (e.shiftKey ? at === first || at === host.querySelector('[data-player-focus]') : at === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    host.addEventListener('keydown', wrapTab);
     return () => {
+      host.removeEventListener('keydown', wrapTab);
       for (const el of made) el.inert = false;
       const now = document.activeElement;
       const lost = !now || now === document.body || host.contains(now);

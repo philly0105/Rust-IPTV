@@ -122,6 +122,13 @@ export const RAIL_WATCH_LINKS = WATCH_LINKS.filter((l) => !l.notInRail);
 /** The phone tab bar's width limit (Tailwind `sm`): below it the rail goes and the bar shows. */
 export const PHONE_QUERY = '(max-width: 639px)';
 
+/**
+ * Below 1100 px (about 69rem) the rail docks as icons and opens over the page (Expand sidebar). At
+ * 1024 the 248 px labelled rail left Live TV a 300 px list ("Around the H…"), so a 1024 px tablet
+ * gets the icon rail too (v-live-05).
+ */
+export const RAIL_DOCK_QUERY = '(max-width: 1099px)';
+
 // ---------------------------------------------------------------------------
 // The last source the user opened, for the phone tab bar's Live TV tab and the Watch group's
 // Live TV, Movies and Series.

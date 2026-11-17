@@ -268,7 +268,8 @@ describe('a page of a source that is not there (shell-nav-07)', () => {
     expect(screen.queryByText('live page')).toBeNull();
     expect(screen.getByRole('link', { name: i18n.t('shell:railLive') }).getAttribute('href')).toBe('/s/tv/live');
     expect(screen.getByRole('link', { name: i18n.t('shell:manageSources') }).getAttribute('href')).toBe('/sources');
-    expect(useShellStore.getState().header?.title).toBe(i18n.t('common:errorTitleNotFound'));
+    // The header (and so the route announcement) says what the page says (v-shell-home-14).
+    expect(useShellStore.getState().header?.title).toBe(i18n.t('shell:sourceMissing'));
     cleanup();
     open('/live/archive/old/ch1');
     expect(await screen.findByRole('heading', { level: 1, name: i18n.t('shell:sourceMissing') })).toBeTruthy();

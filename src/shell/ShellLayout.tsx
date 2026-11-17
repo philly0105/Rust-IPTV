@@ -1,3 +1,4 @@
+import { PanelLeftOpen } from 'lucide-react';
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate, useNavigationType } from 'react-router';
@@ -10,7 +11,7 @@ import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import '@/i18n';
-import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
+import { cn, focusToasts, IconButton, Skeleton, ToastViewport } from '@/ui';
 import { isTypingTarget } from '@/ui/focus';
 
 import { ConnectionBanner, ConnectionWatcher } from './connection';
@@ -18,10 +19,11 @@ import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
 import { focusSearchWhenReady, SEARCH_FIELD } from './focusSearch';
 import { Header, HEADER_SEARCH_WIDTH } from './Header';
-import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
+import { LIBRARY_LINKS, PHONE_QUERY, RAIL_DOCK_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
+import { bufferPaletteKeys } from './paletteKeys';
 import { modalOpen, useShortcut } from './shortcuts';
 import { PLAYER_PREFETCH_DELAY_MS, scheduleIdleLoad, schedulePlayerLoad } from './idleLoad';
 import { useShellStore, type ShellStore } from './store';
@@ -149,6 +151,7 @@ const OnboardingHost = lazy(() => import('@/features/onboarding/host').then((m) 
 
 /** Opens the command palette from anywhere. */
 export function openPalette(): void {
+  bufferPaletteKeys();
   useShellStore.getState().setPaletteOpen(true);
 }
 
@@ -204,6 +207,8 @@ function GlobalShortcuts() {
       const s = useShellStore.getState();
       // Inside the palette it closes it; over another dialog it does not open.
       if (!s.paletteOpen && modalOpen()) return;
+      // What is typed right after the press belongs in the palette's field, on its first open too.
+      if (!s.paletteOpen) bufferPaletteKeys();
       s.setPaletteOpen(!s.paletteOpen);
     },
     { description: t('scPalette'), area, allowInInput: true, allowInModal: true },
@@ -266,7 +271,12 @@ function GlobalShortcuts() {
       if (s.paletteOpen) return s.setPaletteOpen(false);
       if (s.helpOpen) return s.setHelpOpen(false);
       if (s.panelOpen) return s.setPanelOpen(false);
-      if (s.railPeek) return s.setRailPeek(false);
+      if (s.railPeek) {
+        // Focus goes back to Expand sidebar, the button that opened it (the rail is the same element).
+        s.setRailPeek(false);
+        document.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
+        return;
+      }
       // Leaves a search or text field; a focused link, card or button keeps focus (and the Tab position).
       const active = document.activeElement;
       if (active instanceof HTMLElement && isTextEntry(active)) active.blur();
@@ -324,7 +334,78 @@ function ShellNavigationEffects() {
     if (s.railPeek) s.setRailPeek(false);
   }, [key]);
   useOutletScrollMemory();
+  useMainFocusRescue();
   return null;
+}
+
+/**
+ * Room at the end of a page that scrolls in <main>, as tall as the floating mini player sits over
+ * the window's foot (PlayerDock writes --player-float-inset), so the page's last row can scroll
+ * clear of it (v-shell-home-13). A page that fills <main> and scrolls inside itself (the guide, a
+ * catalog grid) gets none: a strip across the whole width would only shorten it.
+ */
+function FloatInsetSpacer() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const spacer = ref.current;
+    const main = spacer?.parentElement;
+    if (!spacer || !main || typeof ResizeObserver === 'undefined') return;
+    const check = () => setScrolls(main.scrollHeight - spacer.offsetHeight > main.clientHeight + 1);
+    const resize = new ResizeObserver(check);
+    const watch = () => {
+      resize.disconnect();
+      resize.observe(main);
+      for (const child of main.children) if (child !== spacer) resize.observe(child);
+      check();
+    };
+    const children = new MutationObserver(watch);
+    children.observe(main, { childList: true });
+    watch();
+    return () => {
+      resize.disconnect();
+      children.disconnect();
+    };
+  }, []);
+  return <div ref={ref} aria-hidden className="shrink-0" style={{ height: scrolls ? 'var(--player-float-inset, 0px)' : 0 }} data-player-float-spacer="" />;
+}
+
+/**
+ * When the focused control inside the page goes away (Try again swaps an error for a skeleton,
+ * a dismissed card unmounts), focus would fall to <body>, where Tab starts over from the skip
+ * link. It moves to the page's main region instead, in this one place for every page.
+ */
+function useMainFocusRescue() {
+  useEffect(() => {
+    const main = document.getElementById('main');
+    if (!main) return;
+    let held: Element | null = null;
+    const observer = new MutationObserver(() => {
+      if (!held || held.isConnected) return;
+      held = null;
+      observer.disconnect();
+      const active = document.activeElement;
+      if (!active || active === document.body) main.focus({ preventScroll: true });
+    });
+    const onFocusIn = (e: FocusEvent) => {
+      held = e.target as Element;
+      observer.observe(main, { childList: true, subtree: true });
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      // Focus moved on to something else (a dialog, the rail): nothing to rescue.
+      if (e.relatedTarget && !main.contains(e.relatedTarget as Node)) {
+        held = null;
+        observer.disconnect();
+      }
+    };
+    main.addEventListener('focusin', onFocusIn);
+    main.addEventListener('focusout', onFocusOut);
+    return () => {
+      observer.disconnect();
+      main.removeEventListener('focusin', onFocusIn);
+      main.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
 }
 
 /** How long after a new page opens the announcer names it: its header is set by then. */
@@ -466,7 +547,7 @@ export function ShellSkeleton({
         </div>
       )}
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider px-(--page-gutter) sm:gap-4">
+        <div aria-hidden className="flex h-[calc(var(--header-height)+env(safe-area-inset-top,0px))] shrink-0 pt-[env(safe-area-inset-top,0px)] items-center gap-3 border-b border-divider px-(--page-gutter) sm:gap-4">
           <Skeleton className="h-6 w-32" />
           <div className="flex-1" />
           {!phone && (
@@ -504,6 +585,41 @@ export function ShellSkeleton({
 }
 
 /**
+ * The way back to the rail while a page has the whole window (railAside): Expand sidebar, floating
+ * on glass in the top-start corner. It takes focus back when the rail it opened closes (Escape, the
+ * scrim, Collapse), since the rail's own button goes with the rail.
+ */
+function RailAsideButton() {
+  const { t } = useTranslation('shell');
+  const setRailPeek = useShellStore((s) => s.setRailPeek);
+  const ref = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    // Only when focus went with the rail: a link in it may have opened a page that took it.
+    if (railAsideOpened && (!document.activeElement || document.activeElement === document.body)) ref.current?.focus();
+    railAsideOpened = false;
+  }, []);
+  return (
+    <IconButton
+      ref={ref}
+      label={t('expandRail')}
+      tooltipSide="inline-end"
+      tooltipTone="glass"
+      icon={<PanelLeftOpen aria-hidden size={18} className="rtl:-scale-x-100" />}
+      aria-expanded={false}
+      onClick={() => {
+        railAsideOpened = true;
+        setRailPeek(true);
+      }}
+      data-rail-peek=""
+      data-testid="rail-aside"
+      className="fixed start-[calc(env(safe-area-inset-left,0px)+0.5rem)] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] z-30 bg-glass-strong text-on-glass shadow-1 hover:bg-glass-strong hover:text-on-glass"
+    />
+  );
+}
+/** Set when the floating Expand sidebar opens the rail, so the button that comes back takes focus. */
+let railAsideOpened = false;
+
+/**
  * While the phone tab bar shows, --shell-bottom-inset on <html> holds its height (safe area
  * included), so overlays fixed to the bottom of the window (the mini player, toasts) can lift
  * above it; 0px otherwise. On <html>, not the shell's root, because those overlays portal to
@@ -528,17 +644,20 @@ export function ShellLayout() {
   const { t } = useTranslation('shell');
   const language = useSettingsValue(selectLanguage);
   const railPref = useShellStore((s) => s.railCollapsed);
-  const narrow = useMediaQuery('(max-width: 1023px)');
+  const narrow = useMediaQuery(RAIL_DOCK_QUERY);
   const wide = useMediaQuery('(min-width: 1440px)');
   // Below sm the tab bar replaces the rail (CB-PHONE-NAV).
   const phone = useMediaQuery(PHONE_QUERY);
-  // Hiding the rail is a narrow-window choice: from 1024 px up it always shows, and on a phone
+  // Hiding the rail is a narrow-window choice: from 1100 px up it always shows, and on a phone
   // there is no rail to show.
   const railHidden = useShellStore((s) => s.railHidden) && narrow && !phone;
-  // Below 1024 px the icon rail opens over the page (Expand sidebar), only while it is docked.
+  // Below 1100 px the icon rail opens over the page (Expand sidebar), only while it is docked.
   const railPeekPref = useShellStore((s) => s.railPeek);
   const railPeek = railPeekPref && narrow && !phone && !railHidden;
   const collapsed = !railPeek && (railPref || narrow);
+  // A page that takes the whole window (header.stepAside: Multi-view on a phone held sideways)
+  // takes the docked icon rail's column too; a floating Expand sidebar opens it over the page.
+  const railAside = useShellStore((s) => !!s.header?.stepAside) && narrow && !phone && !railHidden;
   // A window widened past the narrow range (or narrowed to a phone) leaves no peek to come back to.
   useEffect(() => {
     if (railPeekPref && !railPeek) useShellStore.getState().setRailPeek(false);
@@ -602,7 +721,8 @@ export function ShellLayout() {
           {t('skipToContent')}
         </a>
         <GlobalShortcuts />
-        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} peek={railPeek} />}
+        {!railHidden && !phone && (!railAside || railPeek) && <Rail collapsed={collapsed} autoCollapsed={narrow} peek={railPeek} aside={railAside} />}
+        {railAside && !railPeek && <RailAsideButton />}
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <Header panelInline={wide} railHidden={railHidden} phone={phone} />
           <ConnectionBanner />
@@ -621,6 +741,7 @@ export function ShellLayout() {
               className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
             >
               <Outlet />
+              {!phone && <FloatInsetSpacer />}
             </main>
             <ShellNavigationEffects />
             <RouteAnnouncer />

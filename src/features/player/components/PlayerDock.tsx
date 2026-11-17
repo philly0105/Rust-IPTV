@@ -532,6 +532,19 @@ export const PlayerDock = memo(function PlayerDock() {
     };
   }, [barShown]);
 
+  // The floating mini player in a bottom corner covers the end of the page: the room it takes from
+  // the window's foot, for the shell to let a page scroll clear of it (v-shell-home-13). In the top
+  // half it covers nothing a page cannot scroll away from.
+  useLayoutEffect(() => {
+    const html = document.documentElement;
+    const height = inMini && !bar ? (miniRef.current?.offsetHeight ?? 0) : 0;
+    const low = height > 0 && pos.bottom + height / 2 < window.innerHeight / 2;
+    html.style.setProperty('--player-float-inset', low ? `${pos.bottom + height + MARGIN}px` : '0px');
+    return () => {
+      html.style.removeProperty('--player-float-inset');
+    };
+  }, [inMini, bar, pos]);
+
   /**
    * Swiping the phone bar down closes the player, as on a phone's own media bars. The bar follows
    * the finger (written to its style, so the dock does not re-render per move) and springs back

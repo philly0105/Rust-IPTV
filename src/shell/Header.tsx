@@ -1,10 +1,11 @@
-import { ListTree, Moon, PanelLeftOpen, Search, Sun } from 'lucide-react';
+import { ListTree, Moon, PanelLeftOpen, Search, Sun, TextSearch } from 'lucide-react';
 import { memo, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { BackButton, IconButton, Kbd, SearchInput, TOUCH_TARGET, cn } from '@/ui';
 
+import { bufferPaletteKeys } from './paletteKeys';
 import { useShellStore, type HeaderState } from './store';
 import { useTheme } from './theme';
 
@@ -43,6 +44,10 @@ export const Header = memo(function Header({
   const panelOpen = useShellStore((s) => s.panelOpen);
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);
+  const openPalette = () => {
+    bufferPaletteKeys();
+    setPaletteOpen(true);
+  };
   const titleScrolledAway = useShellStore((s) => s.titleScrolledAway);
   const { resolved, toggle } = useTheme();
   const windowTitle = header?.documentTitle || header?.title;
@@ -70,7 +75,8 @@ export const Header = memo(function Header({
     <header
       data-testid="shell-header"
       // The page gutter (tokens.css), shared with ui Page, so the title and page content start on one line.
-      className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/95 px-(--page-gutter) sm:gap-4"
+      // A home-screen web app draws under the status bar: the header pads the top safe area (0 in a browser tab).
+      className="group/header flex h-[calc(var(--header-height)+env(safe-area-inset-top,0px))] shrink-0 pt-[env(safe-area-inset-top,0px)] items-center gap-3 border-b border-divider bg-bg/95 px-(--page-gutter) sm:gap-4"
     >
       {railHidden && (
         <IconButton
@@ -120,11 +126,7 @@ export const Header = memo(function Header({
               The subtitle only takes the room the title leaves (flex-basis 0), so it truncates
               first and the title keeps its whole name for as long as it fits.
             */}
-            {header?.subtitle && (
-              <p dir="auto" title={header.subtitle} className="hidden min-w-0 flex-1 basis-0 truncate text-sm text-fg-muted md:block" data-testid="page-subtitle">
-                {header.subtitle}
-              </p>
-            )}
+            {header?.subtitle && <Subtitle text={header.subtitle} end={header.subtitleEnd} />}
           </>
         ) : (
           <span aria-hidden />
@@ -160,19 +162,37 @@ export const Header = memo(function Header({
       {!phone && (
         <div className="flex shrink-0 items-center gap-1">
           {searchField && !header?.search?.hidePalette && (
-            // The page's field takes the trigger's place; the palette keeps a small button before
-            // it, so the slot itself stays put (the same box and edges as on every other page).
-            // It stands in for "Search everything", which the rail no longer repeats, so it carries
-            // that name and the trigger's own glyph: the global search, folded. Ctrl+F focuses the
-            // field. The Search page's field is the global search, so it has no button beside it.
-            <IconButton
-              label={t('searchEverything')}
-              shortcut="mod+k"
-              icon={<Search size={18} />}
-              aria-haspopup="dialog"
-              onClick={() => setPaletteOpen(true)}
-              data-testid="header-palette"
-            />
+            // The page's field takes the trigger's place; the palette keeps a smaller control
+            // before it, so the slot itself stays put (the same box and edges as on every other
+            // page). It stands in for "Search everything", which the rail does not repeat. From lg
+            // it is worded, with its Ctrl K hint; below, an icon whose glyph is not the field's
+            // magnifier, so two look-alike controls never sit side by side. Ctrl+F focuses the
+            // field. The Search page's field is the global search, so it has no control beside it.
+            <>
+              <button
+                type="button"
+                onClick={openPalette}
+                aria-haspopup="dialog"
+                data-testid="header-palette-chip"
+                className={cn(
+                  'me-1 hidden h-8 items-center gap-2 rounded-md border border-border bg-surface-2 ps-3 pe-1.5 text-sm whitespace-nowrap text-fg-subtle lg:flex',
+                  TOUCH_TARGET,
+                  'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
+                )}
+              >
+                {t('searchEverything')}
+                <Kbd combo="mod+k" size="sm" className="pointer-coarse:hidden" />
+              </button>
+              <IconButton
+                label={t('searchEverything')}
+                shortcut="mod+k"
+                icon={<TextSearch size={18} />}
+                aria-haspopup="dialog"
+                onClick={openPalette}
+                className="lg:hidden"
+                data-testid="header-palette"
+              />
+            </>
           )}
           {searchField ? (
             <div className="group/search relative me-1 flex">
@@ -188,7 +208,7 @@ export const Header = memo(function Header({
               type="button"
               // One way in: the palette searches favourites, history, the guide and commands, and
               // hands anything else to the search page. Ctrl+F still opens the search page.
-              onClick={() => setPaletteOpen(true)}
+              onClick={openPalette}
               aria-haspopup="dialog"
               data-tour="search"
               data-testid="open-palette"
@@ -219,8 +239,37 @@ export const Header = memo(function Header({
   );
 });
 
+/**
+ * The header subtitle. When the page names an `end` it must keep (a count), only the text before
+ * it truncates, so a narrow header shows "MegaTV 6 mo… 30,132 channels" rather than losing the
+ * count (v-live-15).
+ */
+function Subtitle({ text, end }: { text: string; end?: string }) {
+  const head = end && text.endsWith(end) ? text.slice(0, -end.length) : null;
+  return (
+    <p
+      dir="auto"
+      title={text}
+      className={cn('hidden min-w-0 flex-1 basis-0 text-sm text-fg-muted', head === null ? 'truncate md:block' : 'whitespace-pre md:flex')}
+      data-testid="page-subtitle"
+    >
+      {head === null ? (
+        text
+      ) : (
+        <>
+          <span className="min-w-0 truncate">{head}</span>
+          <span className="shrink-0">{end}</span>
+        </>
+      )}
+    </p>
+  );
+}
+
 /** The page's own search field in the header slot (header.search). */
 function HeaderField({ search, phone }: { search: NonNullable<HeaderState['search']>; phone: boolean }) {
+  // The Search page's field is the page itself ("type in the search box above"), so it stays a
+  // whole box on a phone even without focus, also when the page was opened cold (v-shell-home-10).
+  const folds = !search.hidePalette;
   return (
     <SearchInput
       className={cn(
@@ -238,11 +287,15 @@ function HeaderField({ search, phone }: { search: NonNullable<HeaderState['searc
         */
         // A touch screen's field is 44 px tall (fieldClass), so the folded one is a 44 px square
         // like the icon buttons beside it.
-        'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0 max-sm:pointer-coarse:w-[calc(44rem/15)]',
-        'max-sm:focus-within:flex-1 max-sm:has-[input:not(:placeholder-shown)]:flex-1',
-        'max-sm:[&:not(:focus-within):has(input:placeholder-shown)>svg]:start-[calc(50%-8px)]',
-        'max-sm:[&:not(:focus-within)>input:placeholder-shown]:cursor-pointer max-sm:[&:not(:focus-within)>input:placeholder-shown]:border-transparent max-sm:[&:not(:focus-within)>input:placeholder-shown]:bg-transparent',
-        'max-sm:[&:not(:focus-within)>input:placeholder-shown:hover]:bg-surface-2 max-sm:[&:not(:focus-within)>input::placeholder]:text-transparent',
+        folds && [
+          'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0 max-sm:pointer-coarse:w-[calc(44rem/15)]',
+          'max-sm:focus-within:flex-1 max-sm:has-[input:not(:placeholder-shown)]:flex-1',
+          'max-sm:[&:not(:focus-within):has(input:placeholder-shown)>svg]:start-[calc(50%-8px)]',
+          'max-sm:[&:not(:focus-within)>input:placeholder-shown]:cursor-pointer max-sm:[&:not(:focus-within)>input:placeholder-shown]:border-transparent max-sm:[&:not(:focus-within)>input:placeholder-shown]:bg-transparent',
+          'max-sm:[&:not(:focus-within)>input:placeholder-shown:hover]:bg-surface-2 max-sm:[&:not(:focus-within)>input::placeholder]:text-transparent',
+        ],
+        // Two thirds of the row, so "Search everything" shows whole beside the page title.
+        !folds && 'max-sm:min-w-0 max-sm:flex-[2]',
       )}
       size="sm"
       value={search.value}

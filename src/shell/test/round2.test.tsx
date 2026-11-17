@@ -142,6 +142,26 @@ function AsidePage() {
   );
 }
 
+/** A page-level error whose Try again swaps itself for a skeleton (the round-2 focus follow-up). */
+function RetryPage() {
+  const [failed, setFailed] = useState(true);
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Live TV', subtitle: 'A very long source name · Sports · 30,132 channels', subtitleEnd: '30,132 channels' });
+  }, [shell]);
+  return (
+    <Page>
+      {failed ? (
+        <button type="button" onClick={() => setFailed(false)}>
+          Try again
+        </button>
+      ) : (
+        <p>loading</p>
+      )}
+    </Page>
+  );
+}
+
 const onBack = vi.fn();
 
 function routes() {
@@ -160,6 +180,7 @@ function routes() {
         { path: 'search', element: <Page>search page</Page> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
         { path: 'aside', element: <AsidePage /> },
+        { path: 'retry', element: <RetryPage /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
       ],
@@ -184,7 +205,7 @@ let matchMedia: typeof window.matchMedia;
 function media(...queries: string[]) {
   window.matchMedia = ((query: string) => ({ ...matchMedia(query), matches: queries.includes(query) })) as typeof window.matchMedia;
 }
-const PHONE = ['(max-width: 639px)', '(max-width: 1023px)'];
+const PHONE = ['(max-width: 639px)', '(max-width: 1099px)'];
 
 beforeAll(() => {
   installDomStubs();
@@ -195,6 +216,7 @@ beforeEach(() => {
   localStorage.clear();
   playerMock.playItem.mockClear();
   onBack.mockClear();
+  onGuideFocus.mockClear();
   queue.calls.length = 0;
   io.callback = null;
   io.observed = [];
@@ -295,11 +317,75 @@ describe('a page can ask the header to step aside', () => {
   });
 
   it('stays while the rail is hidden, whose Show button is in the header', async () => {
-    media('(max-width: 1023px)');
+    media('(max-width: 1099px)');
     useShellStore.setState({ railHidden: true });
     renderRoutes(routes(), '/aside');
     await screen.findByText('aside page');
     expect(within(screen.getByTestId('shell-header')).getByTestId('rail-show')).toBeTruthy();
+  });
+
+  it('takes the docked icon rail with it, leaving a floating Expand sidebar that opens it and gets focus back (v-player-07)', async () => {
+    media('(max-width: 1099px)');
+    useShellStore.setState({ railPeek: false });
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(screen.queryByTestId('shell-rail')).toBeNull();
+    const expand = screen.getByTestId('rail-aside');
+    expect(expand.getAttribute('aria-label')).toBe('Expand sidebar');
+    fireEvent.click(expand);
+    const rail = await screen.findByTestId('shell-rail');
+    expect(rail.hasAttribute('data-peek')).toBe(true);
+    // The opener went with the rail's arrival: focus is on the rail's own toggle.
+    expect(rail.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape', code: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('shell-rail')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByTestId('rail-aside'));
+    // Back in, the docked rail returns.
+    fireEvent.click(screen.getByRole('button', { name: 'back in' }));
+    expect(await screen.findByTestId('shell-rail')).toBeTruthy();
+    expect(screen.queryByTestId('rail-aside')).toBeNull();
+  });
+});
+
+describe('the page under the header', () => {
+  it('the subtitle keeps the end the page names whole, and only the text before it truncates (v-live-15)', async () => {
+    renderRoutes(routes(), '/retry');
+    const sub = await screen.findByTestId('page-subtitle');
+    expect(sub.getAttribute('title')).toBe('A very long source name · Sports · 30,132 channels');
+    const [head, end] = [...sub.children] as HTMLElement[];
+    expect(head!.className).toContain('truncate');
+    expect(head!.textContent).toBe('A very long source name · Sports · ');
+    expect(end!.className).toContain('shrink-0');
+    expect(end!.textContent).toBe('30,132 channels');
+  });
+
+  it('when Try again goes away under focus, focus moves to the main region, not <body>', async () => {
+    renderRoutes(routes(), '/retry');
+    const retry = await screen.findByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
+    await screen.findByText('loading');
+    await waitFor(() => expect(document.activeElement?.id).toBe('main'));
+  });
+
+  it('the header pads the top safe area, which is 0 in a browser tab', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const header = await screen.findByTestId('shell-header');
+    expect(header.className).toContain('pt-[env(safe-area-inset-top,0px)]');
+    expect(header.className).toContain('h-[calc(var(--header-height)+env(safe-area-inset-top,0px))]');
+  });
+
+  it('on a phone the global search field stays a whole box without focus, a page field folds (v-shell-home-10)', async () => {
+    media(...PHONE);
+    renderRoutes(routes(), '/global-search');
+    await screen.findByText('search page');
+    const box = screen.getByRole('searchbox', { name: 'Search everything' }).parentElement!;
+    expect(box.className).not.toContain('max-sm:w-8');
+    expect(box.className).toContain('max-sm:flex-[2]');
+    cleanup();
+    renderRoutes(routes(), '/guide-like');
+    await screen.findByText('guide page');
+    expect(screen.getByRole('searchbox', { name: 'Search the guide' }).parentElement!.className).toContain('max-sm:w-8');
   });
 });
 
@@ -315,9 +401,21 @@ describe('the header search slot', () => {
     expect(screen.queryByTestId('open-palette')).toBeNull();
     // The palette button comes before the field, so the slot keeps its place. It stands in for
     // the "Search everything" box (the rail has no Search row), so it carries that name.
+    // From lg it is the worded chip with its Ctrl K hint; below, an icon whose glyph is not the
+    // field's magnifier (v-guide-05, v-vod-09). CSS shows one of the two.
+    const chip = screen.getByTestId('header-palette-chip');
     const palette = screen.getByTestId('header-palette');
-    expect(palette).toBe(screen.getByRole('button', { name: 'Search everything' }));
+    expect(chip.textContent).toContain('Search everything');
+    expect(chip.textContent).toContain('Ctrl');
+    expect(chip.className).toContain('lg:flex');
+    expect(palette.className).toContain('lg:hidden');
+    expect(palette.getAttribute('aria-label')).toBe('Search everything');
+    expect(palette.querySelector('svg')?.getAttribute('class')).not.toMatch(/\blucide-search\b/);
+    expect(chip.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(palette.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(chip);
+    expect(useShellStore.getState().paletteOpen).toBe(true);
+    useShellStore.getState().setPaletteOpen(false);
     fireEvent.click(palette);
     expect(useShellStore.getState().paletteOpen).toBe(true);
   });

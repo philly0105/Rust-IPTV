@@ -20,7 +20,7 @@ import { statsRoutes } from '@/features/stats/routes';
 import { vodRoutes } from '@/features/vod/routes';
 import { ShellLayout, sourceHomePath, useShellHeader, useShellStore } from '@/shell';
 import { useOffline } from '@/shell/connection';
-import { liveTabTarget, PHONE_QUERY, readLastSource } from '@/shell/navigation';
+import { liveTabTarget, PHONE_QUERY, RAIL_DOCK_QUERY, readLastSource } from '@/shell/navigation';
 import { routeSourceId } from '@/shell/railLinks';
 import { setRouteWarmer } from '@/shell/routeIntent';
 import { ShellSkeleton } from '@/shell/ShellLayout';
@@ -68,7 +68,7 @@ export function NotFoundPage() {
 export function AppLoading() {
   const railPref = useShellStore((s) => s.railCollapsed);
   const railHiddenPref = useShellStore((s) => s.railHidden);
-  const narrow = useMediaQuery('(max-width: 1023px)');
+  const narrow = useMediaQuery(RAIL_DOCK_QUERY);
   const phone = useMediaQuery(PHONE_QUERY);
   // Home's blocks only where Home is coming; any other page gets the neutral line, so its own
   // layout (Live's columns, a grid) does not replace a Home-shaped placeholder.
@@ -206,9 +206,9 @@ export function SourceGuard() {
 
 function SourceGone({ sources }: { sources: readonly Source[] }) {
   const { t } = useTranslation(['shell', 'common']);
-  const headerTitle = t('common:errorTitleNotFound');
-  useShellHeader({ title: headerTitle }, [headerTitle]);
+  // The header and the route announcement say what the page says, not a vaguer 'Not found'.
   const title = t('shell:sourceMissing');
+  useShellHeader({ title }, [title]);
   const live = liveTabTarget(sources, readLastSource());
   return (
     <>

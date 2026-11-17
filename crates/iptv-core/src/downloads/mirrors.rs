@@ -127,8 +127,11 @@ pub fn still_matches(fp: &Fingerprint, total: i64, validator: Option<&str>) -> b
 /// Standing verdicts and cached fingerprints decide first; every other
 /// candidate is sampled under `mgr.try_hold(.., Verify)` on its source, and
 /// a source whose hold is refused is skipped (recorded Unavailable for an
-/// hour). Every comparison is recorded. Never errors: failures become
-/// Unavailable. Empty while `downloadUseMirrors` is off.
+/// hour). Every comparison is recorded: a copy with other bytes is
+/// Equivalent (under both copies' records, for queue spreading) when
+/// [`equivalent`] holds for the two copies' quality, container and total,
+/// else Differs. Equivalent copies are never returned. Never errors:
+/// failures become Unavailable. Empty while `downloadUseMirrors` is off.
 pub async fn identical_copies(
     state: &Arc<AppState>,
     mgr: &DownloadManager,

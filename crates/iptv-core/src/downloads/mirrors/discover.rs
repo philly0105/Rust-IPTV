@@ -5,7 +5,7 @@
 use super::Candidate;
 use crate::catalog::{self, ItemRow};
 use crate::error::{CoreError, CoreResult};
-use crate::live::matcher;
+use crate::live::matcher::{self, Quality};
 use crate::model::{ContentType, CopyRef, ItemRef, Season, SourceKind};
 use crate::state::AppState;
 use futures::StreamExt;
@@ -74,29 +74,54 @@ fn row_container(row: &ItemRow) -> Option<String> {
     container(row.container_extension.as_deref()).or_else(|| url_container(row.url.as_deref()))
 }
 
+/// The searched copy's own quality and container, as [`super::equivalent`]
+/// compares them with a candidate's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Own {
+    pub quality: Option<Quality>,
+    pub container: Option<String>,
+}
+
 pub(super) async fn candidates(
     state: &Arc<AppState>,
     item: &CopyRef,
 ) -> CoreResult<Vec<Candidate>> {
+    Ok(search(state, item).await?.1)
+}
+
+/// [`candidates`], with `item`'s own quality and container.
+pub(super) async fn search(
+    state: &Arc<AppState>,
+    item: &CopyRef,
+) -> CoreResult<(Own, Vec<Candidate>)> {
     if !applies(item) {
-        return Ok(Vec::new());
+        return Ok((Own::default(), Vec::new()));
     }
     let (key, own) = (item.clone(), item.item_ref.source_id.clone());
-    let (rows, own_kind) = state
+    let (rows, own_kind, own_row) = state
         .db_call(move |c| {
             let rows = same_title(c, &key)?
                 .into_iter()
                 .map(|row| Ok((source_kind(c, &row.source_id)?, row)))
                 .collect::<CoreResult<Vec<_>>>()?;
-            Ok((rows, source_kind(c, &own)?))
+            Ok((rows, source_kind(c, &own)?, catalog::get(c, &key.item_ref)?))
         })
         .await?;
+    // A movie's container is its own row's; an episode's comes from its
+    // series' seasons, below.
+    let mut meta = Own {
+        quality: own_row.as_ref().and_then(|r| matcher::quality(&r.title)),
+        container: own_row
+            .as_ref()
+            .filter(|_| item.item_ref.content_type == ContentType::Movie)
+            .and_then(row_container),
+    };
     let rows: Vec<(SourceKind, ItemRow)> = rows
         .into_iter()
         .filter_map(|(kind, row)| Some((kind?, row)))
         .collect();
     if item.item_ref.content_type == ContentType::Movie {
-        return Ok(rows
+        let list = rows
             .into_iter()
             .map(|(kind, row)| Candidate {
                 copy: CopyRef::new(
@@ -112,38 +137,48 @@ pub(super) async fn candidates(
                 quality: matcher::quality(&row.title),
                 title: row.title,
             })
-            .collect());
+            .collect();
+        return Ok((meta, list));
     }
-    episodes(state, item, own_kind, rows).await
+    let (container, list) = episodes(state, item, own_kind, rows).await?;
+    meta.container = container;
+    Ok((meta, list))
 }
 
 /// Episode candidates: the episode of each same-title series with the
-/// primary episode's season and episode numbers.
+/// primary episode's season and episode numbers. Also the primary episode's
+/// container.
 async fn episodes(
     state: &Arc<AppState>,
     item: &CopyRef,
     own_kind: Option<SourceKind>,
     rows: Vec<(SourceKind, ItemRow)>,
-) -> CoreResult<Vec<Candidate>> {
+) -> CoreResult<(Option<String>, Vec<Candidate>)> {
     if rows.is_empty() {
-        return Ok(Vec::new());
+        return Ok((None, Vec::new()));
     }
     let Some(own_kind) = own_kind else {
-        return Ok(Vec::new());
+        return Ok((None, Vec::new()));
     };
     let episode_id = item.episode_id.as_deref().unwrap_or_default();
     let own = seasons(state, own_kind, &item.item_ref).await?;
-    let Some((season, number)) = own
+    let Some((season, number, own_container)) = own
         .iter()
         .flat_map(|s| s.episodes.iter())
         .find(|e| e.id == episode_id)
-        .map(|e| (e.season, e.episode))
+        .map(|e| {
+            (
+                e.season,
+                e.episode,
+                container(e.container_extension.as_deref()),
+            )
+        })
     else {
         tracing::debug!(
             source = %item.item_ref.source_id,
             "the episode is not in its own series any more; no mirrors"
         );
-        return Ok(Vec::new());
+        return Ok((None, Vec::new()));
     };
     let found: Vec<Vec<Candidate>> = futures::stream::iter(rows)
         .map(|(kind, row)| async move {
@@ -174,7 +209,7 @@ async fn episodes(
         .buffered(SEASON_READS)
         .collect()
         .await;
-    Ok(found.into_iter().flatten().collect())
+    Ok((own_container, found.into_iter().flatten().collect()))
 }
 
 /// Seasons of series `r` on a source of `kind`: Xtream through the cached

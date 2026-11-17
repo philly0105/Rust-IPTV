@@ -1,7 +1,8 @@
 //! Mirror discovery, fingerprints, verification and the verdict cache
 //! (`downloads::mirrors`) against `dl_panel` panels: the candidates of a
-//! movie and of an episode across sources, identical / differing /
-//! differing-outside-the-samples copies, verdicts reused and expiring,
+//! movie and of an episode across sources, identical / equivalent /
+//! differing / differing-outside-the-samples copies, verdicts reused and
+//! expiring,
 //! busy sources, junction mismatches, and the lookup's cost on a large
 //! catalog.
 
@@ -461,16 +462,27 @@ async fn identical_differs_and_outside_samples_verdicts() {
     let before = requests(&panels);
 
     // vd differs only outside the windows: it passes, by design (the
-    // engine's overlap checks are what catch it).
+    // engine's overlap checks are what catch it). vc and ve have other bytes
+    // but the same title, container and a size within 15%: equivalent, and
+    // never returned.
     assert_eq!(identical(&app, &item, &fp, &[]).await, vec!["vb", "vd"]);
     use Verdict::*;
     assert_eq!(verdict(&app, &item, &movie("vb", 1)).await, Some(Identical));
-    assert_eq!(verdict(&app, &item, &movie("vc", 1)).await, Some(Differs));
+    assert_eq!(
+        verdict(&app, &item, &movie("vc", 1)).await,
+        Some(Equivalent)
+    );
     assert_eq!(verdict(&app, &item, &movie("vd", 1)).await, Some(Identical));
-    assert_eq!(verdict(&app, &item, &movie("ve", 1)).await, Some(Differs));
-    // Identical is written under both copies' keys.
+    assert_eq!(
+        verdict(&app, &item, &movie("ve", 1)).await,
+        Some(Equivalent)
+    );
+    // Identical and Equivalent are written under both copies' keys.
     assert_eq!(verdict(&app, &movie("vb", 1), &item).await, Some(Identical));
-    assert_eq!(verdict(&app, &movie("vc", 1), &item).await, None);
+    assert_eq!(
+        verdict(&app, &movie("vc", 1), &item).await,
+        Some(Equivalent)
+    );
     assert_eq!(cached_identical(&app, &item).await, vec!["vb", "vd"]);
     assert_eq!(cached_identical(&app, &movie("vb", 1)).await, vec!["va"]);
 
@@ -506,6 +518,67 @@ async fn identical_differs_and_outside_samples_verdicts() {
     // Mirrors off: none.
     app.state.settings.write().download_use_mirrors = false;
     assert!(identical(&app, &item, &fp, &[]).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn equivalent_copies_are_recorded_but_never_mirrors() {
+    let app = app().await;
+    // (source, title, container, size, variant)
+    let copies: [(&str, &str, &str, u64, Variant); 5] = [
+        ("eq0", "Heat (1995) [4K]", "mp4", SIZE, Variant::Same),
+        // Same quality and container, 1 MiB larger (about 6%).
+        (
+            "eq1",
+            "EN - Heat (1995) [4K]",
+            "MP4",
+            SIZE + MIB,
+            Variant::Differs,
+        ),
+        // Same quality and container, twice the size.
+        ("eq2", "Heat (1995) [4K]", "mp4", 2 * SIZE, Variant::Differs),
+        // Same quality and size, another container.
+        ("eq3", "Heat (1995) [4K]", "mkv", SIZE, Variant::Differs),
+        // Same container and size, another quality.
+        ("eq4", "Heat (1995) FHD", "mp4", SIZE, Variant::Differs),
+    ];
+    let mut panels = Vec::new();
+    for (id, title, ext, size, variant) in copies {
+        let p = Panel::with(PanelOptions::default()).await;
+        p.set_reported(1);
+        p.file_variant(1, size, 0, variant);
+        add_xtream_source(&app.state, id, &p).await;
+        add_movie(&app.state, id, 1, title, None, ext).await;
+        panels.push(p);
+    }
+    let item = movie("eq0", 1);
+    let fp = fingerprint_of(&app, &item).await;
+
+    assert!(
+        identical(&app, &item, &fp, &[]).await.is_empty(),
+        "equivalent copies never join a segment plan"
+    );
+    use Verdict::*;
+    assert_eq!(
+        verdict(&app, &item, &movie("eq1", 1)).await,
+        Some(Equivalent)
+    );
+    assert_eq!(verdict(&app, &item, &movie("eq2", 1)).await, Some(Differs));
+    assert_eq!(verdict(&app, &item, &movie("eq3", 1)).await, Some(Differs));
+    assert_eq!(verdict(&app, &item, &movie("eq4", 1)).await, Some(Differs));
+    // The entry carries the candidate's total; the reverse entry the item's.
+    let entry =
+        |rec: MirrorRecord, of: CopyRef| rec.verdicts.into_iter().find(|e| e.copy == of).unwrap();
+    let e = entry(record(&app, &item).await.unwrap(), movie("eq1", 1));
+    assert_eq!(e.total, Some((SIZE + MIB) as i64));
+    let back = entry(record(&app, &movie("eq1", 1)).await.unwrap(), item.clone());
+    assert_eq!((back.verdict, back.total), (Equivalent, Some(SIZE as i64)));
+    assert_eq!(verdict(&app, &movie("eq2", 1), &item).await, None);
+    assert!(cached_identical(&app, &item).await.is_empty());
+
+    // The verdicts stand: a second call asks no panel again.
+    let before = requests(&panels);
+    assert!(identical(&app, &item, &fp, &[]).await.is_empty());
+    assert_eq!(requests(&panels), before);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

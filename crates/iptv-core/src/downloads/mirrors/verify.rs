@@ -12,7 +12,7 @@
 use super::cache::{self, now, stamp};
 use super::discover;
 use super::sample::{sample, SampleError};
-use super::{Candidate, Mirror};
+use super::{Candidate, CopyMeta, Mirror};
 use crate::downloads::manager::{ConnHold, HoldPurpose, TaskCtl};
 use crate::downloads::shared::{
     resolve, Fingerprint, MirrorRecord, Verdict, VerdictEntry, MIN_MIRROR_TOTAL,
@@ -40,8 +40,8 @@ pub(super) async fn identical_copies(
     {
         return Vec::new();
     }
-    let candidates = match discover::candidates(state, item).await {
-        Ok(c) => c,
+    let (own, candidates) = match discover::search(state, item).await {
+        Ok(found) => found,
         Err(err) => {
             tracing::debug!(source = %item.source_id(), error = %err, "no mirror candidates");
             return Vec::new();
@@ -76,9 +76,9 @@ pub(super) async fn identical_copies(
             None
         });
     let checks = groups.into_iter().map(|(source, list)| {
-        let record = record.as_ref();
+        let (record, own) = (record.as_ref(), &own);
         async move {
-            let found = check_source(state, mgr, item, fp, record, &source, list).await;
+            let found = check_source(state, mgr, item, own, fp, record, &source, list).await;
             found.map(|m| (source, m))
         }
     });
@@ -90,25 +90,58 @@ pub(super) async fn identical_copies(
     order(mgr, item, found)
 }
 
-/// Most spare connections first. Ties keep the catalog's order.
+/// Most spare connections first, then fewest holders. Ties keep the
+/// catalog's order.
 fn order(mgr: &DownloadManager, item: &CopyRef, found: Vec<(String, Mirror)>) -> Vec<Mirror> {
-    // A control block that holds nothing: what `allowance_on` gives it on a
-    // mirror's source is that source's spare budget.
-    let probe = TaskCtl::detached(item.source_id());
-    let mut ranked: Vec<(usize, Mirror)> = found
+    let mut ranked: Vec<((usize, usize), Mirror)> = found
         .into_iter()
-        .map(|(source, m)| (mgr.allowance_on(&probe, &source), m))
+        .map(|(source, m)| (spare_and_holders(mgr, item.source_id(), &source), m))
         .collect();
-    ranked.sort_by_key(|(spare, _)| std::cmp::Reverse(*spare));
+    ranked.sort_by_key(|((spare, holders), _)| (std::cmp::Reverse(*spare), *holders));
     ranked.into_iter().map(|(_, m)| m).collect()
 }
 
+/// A transfer of `item_source`'s spare connections on `source`, and how many
+/// holds `source` has now. The one place mirror ordering asks the manager.
+// INT: switch to mgr.spare_on(item_source, source) and mgr.holders(source) after merging dl-speed-b3
+fn spare_and_holders(mgr: &DownloadManager, item_source: &str, source: &str) -> (usize, usize) {
+    // A control block that holds nothing: what `allowance_on` gives it on a
+    // mirror's source is that source's spare budget. No holder count yet.
+    let probe = TaskCtl::detached(item_source);
+    (mgr.allowance_on(&probe, source), 0)
+}
+
+/// How a candidate whose bytes differ from the item's compares: Equivalent
+/// when [`super::equivalent`] holds for their quality, container and
+/// `total`, else Differs.
+fn mismatch(own: &discover::Own, cand: &Candidate, fp: &Fingerprint, total: i64) -> Verdict {
+    let ours = CopyMeta {
+        quality: own.quality,
+        container: own.container.clone(),
+        total: fp.total,
+    };
+    let theirs = CopyMeta {
+        quality: cand.quality,
+        container: cand.container.clone(),
+        total,
+    };
+    if super::equivalent(&ours, &theirs) {
+        Verdict::Equivalent
+    } else {
+        Verdict::Differs
+    }
+}
+
 /// The first identical copy among `list` (all on `source`), recording a
-/// verdict for each candidate checked.
+/// verdict for each candidate checked. A copy with other bytes is recorded
+/// Equivalent when it passes [`super::equivalent`] against `own`, else
+/// Differs; neither is ever returned.
+#[allow(clippy::too_many_arguments)]
 async fn check_source(
     state: &Arc<AppState>,
     mgr: &DownloadManager,
     item: &CopyRef,
+    own: &discover::Own,
     fp: &Fingerprint,
     record: Option<&MirrorRecord>,
     source: &str,
@@ -117,7 +150,7 @@ async fn check_source(
     let mut hold: Option<Hold> = None;
     let mut refused = false;
     for cand in list {
-        let copy = cand.copy;
+        let copy = cand.copy.clone();
         let theirs = {
             let key = copy.clone();
             state
@@ -169,7 +202,8 @@ async fn check_source(
                 }
                 // It no longer resolves: ask the provider below.
             } else {
-                note(state, item, fp, &copy, Verdict::Differs, Some(&theirs)).await;
+                let verdict = mismatch(own, &cand, fp, theirs.total);
+                note(state, item, fp, &copy, verdict, Some(&theirs)).await;
                 continue;
             }
         }
@@ -209,7 +243,8 @@ async fn check_source(
                         fingerprint: print,
                     });
                 }
-                note(state, item, fp, &copy, Verdict::Differs, Some(&print)).await;
+                let verdict = mismatch(own, &cand, fp, print.total);
+                note(state, item, fp, &copy, verdict, Some(&print)).await;
             }
             Ok(Err(SampleError::Total(total))) => {
                 let other = Fingerprint {
@@ -218,7 +253,8 @@ async fn check_source(
                     samples: Default::default(),
                     checked_at: String::new(),
                 };
-                note(state, item, fp, &copy, Verdict::Differs, Some(&other)).await;
+                let verdict = mismatch(own, &cand, fp, total);
+                note(state, item, fp, &copy, verdict, Some(&other)).await;
             }
             Ok(Err(SampleError::Failed(err))) => {
                 tracing::debug!(source, error = %err, "a mirror candidate could not be checked");
@@ -234,7 +270,8 @@ async fn check_source(
 }
 
 /// Records how `copy` compared with `item` (whose fingerprint is `fp`):
-/// under `item`'s record, and an Identical verdict also under `copy`'s.
+/// under `item`'s record, and an Identical or Equivalent verdict also under
+/// `copy`'s (the relation is symmetric; queue spreading reads either side).
 /// `theirs` is what was learned of `copy` (its total and validator).
 async fn note(
     state: &Arc<AppState>,
@@ -252,7 +289,7 @@ async fn note(
         validator: theirs.and_then(|t| t.validator.clone()),
         checked_at: at.clone(),
     };
-    let back = (verdict == Verdict::Identical).then(|| VerdictEntry {
+    let back = matches!(verdict, Verdict::Identical | Verdict::Equivalent).then(|| VerdictEntry {
         copy: item.clone(),
         verdict,
         total: Some(fp.total),

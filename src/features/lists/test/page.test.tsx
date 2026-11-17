@@ -417,12 +417,14 @@ describe('list page', () => {
     // With the column folded away (or a drawer, below 1024 px) the header carries it.
     fireEvent.click(screen.getByRole('button', { name: 'Hide lists' }));
     expect(screen.queryByTestId('lists-section')).toBeNull();
-    await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[title="Manage lists"]')).toBeTruthy());
+    // Found by its name: the button no longer repeats its label as a native title (9a5ddbaf).
+    await waitFor(() => expect(within(render(<>{useShellStore.getState().header!.actions}</>).container).queryByRole('button', { name: 'Manage lists' })).toBeTruthy());
     const folded = render(<>{useShellStore.getState().header!.actions}</>).container;
     // Folded away on a wide page it keeps its label (on a phone the lists are a drawer, where it
     // is a bare gear: see the narrow-page test below).
     const manage = within(folded).getByRole('button', { name: 'Manage lists' });
     expect(manage.textContent).toBe('Manage lists');
+    expect(manage.hasAttribute('title')).toBe(false);
     expect(manage.className.split(' ')).not.toContain('w-8');
     fireEvent.click(manage);
     expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
@@ -513,7 +515,9 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
     expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
     act(() => useListsDialogs.setState({ dialog: null }));
     // The way to the other lists names the list that is open (library-03).
-    const toggle = screen.getByRole('button', { name: 'Show lists: Sports' });
+    // Read as a screen reader reads it: jsdom's name drops the space after the sr-only "Show lists:".
+    const toggle = screen.getByTestId('lists-toggle');
+    expect(toggle.textContent).toBe('Show lists: Sports');
     expect(toggle.getAttribute('aria-haspopup')).toBe('dialog');
     fireEvent.click(toggle);
     const drawer = await screen.findByTestId('lists-drawer');

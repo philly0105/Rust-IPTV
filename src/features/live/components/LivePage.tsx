@@ -50,6 +50,7 @@ import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuI
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useFitsWidth } from '../hooks/useFitsWidth';
+import { useSearchFit } from '../hooks/useSearchFit';
 import { useLastChannel } from '../hooks/useLastChannel';
 import { useListEngaged } from '../hooks/useListEngaged';
 import { LIVE_VIEW_ID, liveViewOf, useLiveViewChannels } from '../hooks/useLiveViewChannels';
@@ -907,6 +908,16 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // The list's toolbar, made once per change: a zap re-renders the page, and the groups button,
   // the search field and the quality filter (tooltips and icons included) rendered again with it.
   const sidebarVisible = wide && !collapsed;
+  // On a narrow page the groups button beside the field names the group, so the field says only
+  // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
+  const searchPlaceholder = groupOnToolbar
+    ? t('common:search')
+    : category
+      ? t('searchInGroup', { group: groupText })
+      : t(isRadio ? 'searchStations' : 'searchChannels');
+  // A placeholder cut beside the key caps gets their room instead.
+  const searchFit = useSearchFit(searchRef, searchPlaceholder);
+
   const toolbar = useMemo(
     () => (
       // On a phone the groups button's icon and the quality button sit on the page gutter, under
@@ -980,16 +991,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           ref={searchRef}
           // Ctrl+F and "/" land here (the shell's page-search rule), and the field shows the key.
           data-page-search=""
-          shortcut="mod+f"
-          // On a narrow page the groups button beside it names the group, so the field says only
-          // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
-          placeholder={
-            groupOnToolbar
-              ? t('common:search')
-              : category
-                ? t('searchInGroup', { group: groupText })
-                : t(isRadio ? 'searchStations' : 'searchChannels')
-          }
+          shortcut={searchFit.caps ? 'mod+f' : undefined}
+          placeholder={searchPlaceholder}
+          // Still too long without the caps (a long group's name), it ends in an ellipsis.
+          style={{ textOverflow: 'ellipsis' }}
           label={t(isRadio ? 'searchStations' : 'searchChannels')}
         />
         {/* Radio has no picture: its stations are never filtered by quality. */}
@@ -1010,7 +1015,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       </div>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- searchRef and focusListPending are refs
-    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, groupText, isRadio, quality.min, quality.hideUntagged, quality.update, toolbarGuideHref, t],
+    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, searchPlaceholder, searchFit, isRadio, quality.min, quality.hideUntagged, quality.update, toolbarGuideHref, t],
   );
 
   // ---- render -------------------------------------------------------------

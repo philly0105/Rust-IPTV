@@ -13,7 +13,7 @@ import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programm
 import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { ChannelLogo, ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/features/live/lib/channelName';
+import { displayChannelName, plainChannelName } from '@/features/live/lib/channelName';
 import { ms } from '@/features/live/lib/epgTime';
 // The Scheduled list's clock and day words, from the module itself (pure helpers, no hooks).
 import { clockTime, dayHeading } from '@/features/recording/lib/schedule';
@@ -1458,16 +1458,18 @@ function ChannelHitButton({
   now?: string | undefined;
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const c = h.item as Channel;
   // The logo's width is known, so it does not read its frame as it mounts (P2-GRID-2).
   const logoWidth = useScaledPx(CHANNEL_LOGO_PX, true);
   const openMenu = useContext(ChannelMenuContext);
-  const menu = (pos: { x: number; y: number }) => openMenu?.({ pos, channel: c, onPlay: () => onPlayChannel(c, h) });
+  const menu = (pos: { x: number; y: number }) => openMenu?.({ pos, channel: c, onPlay: () => onPlayChannel(c, h), nowTitle: now });
   return (
     <button
       type="button"
       data-grid-index={index}
+      // Screen readers hear the name the card shows ("ESPN HD (US)"), not the provider's "US| ESPN HD".
+      aria-label={joinList([plainChannelName(h.title, strip), now, c.number, c.categoryName, showBadges && h.sourceName], i18n.language)}
       onClick={() => onPlayChannel(c, h)}
       onContextMenu={(e) => {
         if (!openMenu) return;

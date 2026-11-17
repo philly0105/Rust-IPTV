@@ -203,9 +203,10 @@ export const ChannelLogo = memo(function ChannelLogo({
         className,
       )}
     >
+      {/* With a `fallback` (a name instead of letters), the tint alone. */}
       {waiting ? (
-        <span data-monogram="" style={monogramStyle(name, size)} className={cn('absolute inset-0', MONOGRAM, TINT_THEME)}>
-          {monogramText(name)}
+        <span data-monogram={fallback === undefined ? '' : undefined} style={monogramStyle(name, size)} className={cn('absolute inset-0', MONOGRAM, TINT_THEME)}>
+          {fallback === undefined ? monogramText(name) : null}
         </span>
       ) : null}
       <img
@@ -277,10 +278,11 @@ export interface ChannelNameProps {
  * page's order, so an Arabic name's tag sits where every other row has it.
  */
 /**
- * The feed's quality words: whole, after the station's name in the page's direction (the gap is on
- * this span, since the name's own direction may be RTL).
+ * The feed's quality words: whole, after the station's name in the page's direction. They lead with
+ * the space between them and the name, kept (`whitespace-pre`), so the gap sits on their side
+ * whatever the name's own direction, and the drawn text reads as the name did.
  */
-const VARIANT = 'shrink-0 whitespace-nowrap ps-[0.3em]';
+const VARIANT = 'shrink-0 whitespace-pre';
 
 export function ChannelName({ name, strip, group, className, tagClassName, title, testId, twoLines }: ChannelNameProps) {
   const parts = channelNameParts(name, strip, group);
@@ -307,14 +309,14 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
             <span dir="auto" className={cn('max-w-full shrink-0', parts.variant ? 'truncate' : 'line-clamp-2 break-words')}>
               {parts.name}
             </span>
-            {parts.variant ? <span className={VARIANT}>{parts.variant}</span> : null}
+            {parts.variant ? <span className={VARIANT}>{` ${parts.variant}`}</span> : null}
           </>
         ) : (
           <span className="flex max-w-full min-w-0 shrink-0">
             <span dir="auto" className="min-w-0 truncate">
               {parts.name}
             </span>
-            {parts.variant ? <span className={VARIANT}>{parts.variant}</span> : null}
+            {parts.variant ? <span className={VARIANT}>{` ${parts.variant}`}</span> : null}
           </span>
         )}
         {parts.tag ? (

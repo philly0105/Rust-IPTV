@@ -345,7 +345,7 @@ describe('groups sidebar', () => {
     renderIn('/', [{ path: '/', element: withScope() }]);
     const picker = screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement;
     // Most groups first; a tag on one group only (DE) is not offered.
-    expect([...picker.options].map((o) => o.textContent)).toEqual(['All regions', 'US · 3 groups', 'UK · 2 groups']);
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['All regions', 'US · United States · 3 groups', 'UK · United Kingdom · 2 groups']);
     fireEvent.change(picker, { target: { value: 'UK' } });
     expect(names()).toEqual(['UK| SPORT', 'UK| NEWS']);
     expect(localStorage.getItem('tsrust.liveRegion:src1:live')).toBe('UK');
@@ -596,8 +596,9 @@ describe('channel logos in reused rows', () => {
   });
 
   it('initials keep whole characters (emoji, astral letters)', () => {
+    // A leading emoji is decoration, not an initial (realdata-05).
     const { container } = render(<ChannelLogo name="🎵 Music" />);
-    expect(container.textContent).toBe('🎵M');
+    expect(container.textContent).toBe('MU');
     const { container: c2 } = render(<ChannelLogo name="𝔸𝔹ℂ" />);
     expect(Array.from(c2.textContent ?? '')).toHaveLength(2);
     expect(c2.textContent).not.toMatch(/[\uD800-\uDFFF](?![\uDC00-\uDFFF])/u);

@@ -10,7 +10,7 @@ import type { Download, Source } from '@/api/types';
 import { cn } from '@/ui/cn';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 
-import { IconButton, Menu, Poster, PosterCellWidthContext, useMediaQuery, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
+import { IconButton, Menu, Poster, PosterCellWidthContext, useBusyButtons, useMediaQuery, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
 import { etaSeconds, formatBytes, formatDuration, formatSpeed, formatSpeedLimit, percentOf } from '../lib/format';
 import { useLiveProgress } from '../lib/progress';
 import { downloadNames, type QueueAction } from '../lib/queue';
@@ -158,6 +158,7 @@ const TRANSFER = new Set<Download['status']>(['downloading', 'queued', 'paused']
 function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, globalRateLimitBps = 0 }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
+  const busyButton = useBusyButtons(busy);
   const lang = i18n.language;
   const pct = percentOf(progress.bytesDownloaded, progress.totalBytes);
   const isActive = d.status === 'downloading';
@@ -214,10 +215,9 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
             label={watchLabel}
             tooltip={t('actionWatchCatchup')}
             icon={<MonitorPlay size={16} aria-hidden />}
-            disabled={busy}
             tabIndex={tabbable ? 0 : -1}
             data-action="watch"
-            onClick={() => onPlayCatchup(d)}
+            {...busyButton('watch', () => onPlayCatchup(d))}
           />
         )}
         {/* Before the queue actions, so Pause and Cancel keep their places at the end of the row. */}
@@ -240,11 +240,10 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
             tooltip={t(k('action', a))}
             shortcut={SHORTCUT_KEYS[a]?.toLowerCase()}
             icon={iconFor(a)}
-            disabled={busy}
             tabIndex={tabbable ? 0 : -1}
             data-action={a}
             className={a === 'remove' || a === 'cancel' ? 'hover:text-danger' : undefined}
-            onClick={() => onAction(a, d)}
+            {...busyButton(a, () => onAction(a, d))}
           />
         ))}
       </>
@@ -275,10 +274,9 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
             label={t(k('action', primary) + 'Aria', { title: names.title })}
             tooltip={t(k('action', primary))}
             icon={iconFor(primary)}
-            disabled={busy}
             tabIndex={tabbable ? 0 : -1}
             data-action={primary}
-            onClick={() => onAction(primary, d)}
+            {...busyButton(primary, () => onAction(primary, d))}
           />
         )}
         {items.length > 0 && (

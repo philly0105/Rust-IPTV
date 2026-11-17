@@ -10,18 +10,16 @@
  */
 
 import { useCallback, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
 
-import { invalidate, useRpcQuery } from '@/api/query';
-import { rpc } from '@/api/transport';
+import { useRpcQuery } from '@/api/query';
 import type { Channel, ItemRef, Source } from '@/api/types';
 import { ContextMenu } from '@/features/live/components/ContextMenu';
 import { channelMenuHeader, useChannelMenuItems } from '@/features/live/hooks/useChannelMenuItems';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { displayChannelName } from '@/features/live/lib/channelName';
 
-import { errorDescription, useToast } from '../deps';
 import { snapshotChannel, type EntryMenuRequest } from '../lib/entryMenu';
+import { toggleFavoriteWithUndo } from '../lib/favoriteToggle';
 
 const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /** A channel's catch-up and group rarely change; the lookup is kept this long. */
@@ -30,8 +28,6 @@ const ITEM_STALE_MS = 5 * 60_000;
 export type { EntryMenuRequest };
 
 export function EntryChannelMenu({ request, sources, onClose }: { request: EntryMenuRequest | null; sources: ReadonlyMap<string, Source>; onClose(): void }) {
-  const { t: tl } = useTranslation('live');
-  const { toast } = useToast();
   const { stripCountryPrefix } = useDisplayPrefs();
   const ref = request?.ref ?? NO_REF;
   const item = useRpcQuery('catalog.item', { ref }, { enabled: !!request, staleTime: ITEM_STALE_MS });
@@ -51,14 +47,9 @@ export function EntryChannelMenu({ request, sources, onClose }: { request: Entry
         return;
       }
       const name = displayChannelName(c.name, stripCountryPrefix);
-      void rpc('favorites.toggle', { ref: c.ref, snapshot: { title: c.name, subtitle: c.categoryName, posterUrl: c.logoUrl, contentType: c.ref.contentType } })
-        .then((res) => toast({ title: res.isFavorite ? tl('favoriteAdded', { name }) : tl('favoriteRemoved', { name }), variant: 'success' }))
-        .catch((err: unknown) =>
-          toast({ title: wasFavorite ? tl('favoriteRemoveFailed') : tl('favoriteAddFailed'), description: errorDescription(err), variant: 'error' }),
-        )
-        .finally(() => void invalidate('favorites.'));
+      void toggleFavoriteWithUndo(c.ref, { title: c.name, subtitle: c.categoryName, posterUrl: c.logoUrl, contentType: c.ref.contentType }, name, wasFavorite);
     },
-    [request, stripCountryPrefix, tl, toast],
+    [request, stripCountryPrefix],
   );
   const onPlay = useCallback(() => request?.onPlay(), [request]);
 

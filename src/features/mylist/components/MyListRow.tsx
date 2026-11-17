@@ -23,7 +23,7 @@ import type { Source, WatchlistEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 import { joinList } from '@/shell/dashboard/cards';
 
-import { IconButton, Poster, PosterCellWidthContext, ProgressBar, cn, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, ProgressBar, cn, useBusyButtons, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
 
 /**
  * Fixed row height for the virtual list: a 48 x 72 poster plus breathing room,
@@ -126,6 +126,7 @@ function MyListRowImpl({
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true));
   const onOpen = () => openEntry(entry);
+  const busyButton = useBusyButtons(busy);
 
   return (
     <div
@@ -264,8 +265,7 @@ function MyListRowImpl({
             tabIndex={-1}
             label={progress ? t('resumeTitle', { title }) : t('playTitle', { title })}
             icon={<Play aria-hidden size={14} className="fill-current" />}
-            disabled={busy}
-            onClick={() => playEntry(entry)}
+            {...busyButton('play', () => playEntry(entry))}
             // On touch the Play circle stays only for a title with progress to resume (library-07).
             className={cn('rounded-full', revealOnFine, onMenu && !(progress && progress > 0) && 'pointer-coarse:hidden')}
             data-action="play"
@@ -280,10 +280,9 @@ function MyListRowImpl({
             label={t('markWatched', { title })}
             tooltip={watched ? t('watchedHintOn') : t('watchedHintOff')}
             pressed={watched}
-            disabled={busy}
             // One glyph in both states (an empty circle read as a radio button); the colour and the pressed state carry it.
             icon={<CircleCheck aria-hidden size={18} />}
-            onClick={() => toggleEntry(entry)}
+            {...busyButton('watched', () => toggleEntry(entry))}
             className={cn(watched ? 'bg-transparent text-success hover:text-success' : cn('text-fg-subtle', revealOnFine), onMenu && TOUCH_IN_MENU)}
             data-action="watched"
           />
@@ -298,8 +297,8 @@ function MyListRowImpl({
               tabIndex={-1}
               label={t('moveUp', { title })}
               icon={<ArrowUp aria-hidden size={14} />}
-              disabled={!canUp || busy}
-              onClick={() => reorder.onMove(entry, -1)}
+              disabled={!canUp}
+              {...busyButton('up', () => reorder.onMove(entry, -1))}
               // The end a row cannot move past is not drawn (library-08), as on Favorites; invisible,
               // so the other arrow keeps its place in the stack.
               className={cn('sm:h-7 sm:rounded-b-none', !canUp && 'invisible')}
@@ -310,8 +309,8 @@ function MyListRowImpl({
               tabIndex={-1}
               label={t('moveDown', { title })}
               icon={<ArrowDown aria-hidden size={14} />}
-              disabled={!canDown || busy}
-              onClick={() => reorder.onMove(entry, 1)}
+              disabled={!canDown}
+              {...busyButton('down', () => reorder.onMove(entry, 1))}
               className={cn('sm:h-7 sm:rounded-t-none', !canDown && 'invisible')}
               data-action="move-down"
             />
@@ -322,8 +321,7 @@ function MyListRowImpl({
           tabIndex={-1}
           label={t('remove', { title })}
           icon={<X aria-hidden size={16} />}
-          disabled={busy}
-          onClick={() => removeEntry(entry)}
+          {...busyButton('remove', () => removeEntry(entry))}
           className={cn('ms-auto hover:text-danger sm:ms-0', revealOnFine, onMenu && TOUCH_IN_MENU)}
           data-action="remove"
         />

@@ -3,13 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInRouterContext } from 'react-router';
 
-import { invalidate, queryClient, rpcKey } from '@/api/query';
+import { queryClient, rpcKey } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { ItemRef } from '@/api/types';
+import { toggleFavoriteWithUndo } from '@/features/library/lib/favoriteToggle';
 import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
 import { plainChannelName } from '@/lib/channelName';
-import { errorDescription } from '@/ui/States';
-import { toast } from '@/ui/Toast';
 
 import { usePlayerStore } from '../store';
 import { usePlayerSettings } from '../useSettings';
@@ -62,15 +61,7 @@ function FavoriteAction({ channel, onDone }: { channel: ItemRef; onDone(): void 
     busy.current = true;
     const { title = '', posterUrl } = usePlayerStore.getState().source ?? {};
     try {
-      const res = await rpc('favorites.toggle', {
-        ref: channel,
-        snapshot: { title, contentType: channel.contentType, ...(posterUrl ? { posterUrl } : {}) },
-      });
-      await invalidate('favorites.');
-      const name = plainChannelName(title, strip);
-      toast({ title: res.isFavorite ? t('favoriteAdded', { name }) : t('favoriteRemoved', { name }), variant: 'success' });
-    } catch (err) {
-      toast({ title: favorite ? t('favoriteRemoveFailed') : t('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
+      await toggleFavoriteWithUndo(channel, { title, contentType: channel.contentType, ...(posterUrl ? { posterUrl } : {}) }, plainChannelName(title, strip), favorite);
     } finally {
       busy.current = false;
     }

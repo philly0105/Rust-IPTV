@@ -36,6 +36,7 @@ import { canZap, isPendingZap } from '@/features/player/store';
 import { catchupResumeFor } from '@/features/player/catchupResume';
 import { hideZapBanner } from '@/features/player/zapBanner';
 import { preloadChannelEditDialogs, useChannelEditShortcuts, useHiddenChannelCount } from '@/features/channeledit';
+import { toggleFavoriteWithUndo } from '@/features/library/lib/favoriteToggle';
 import { ListsSidebarSection, openAddGroupToList, useAddToListShortcut } from '@/features/lists';
 import { requestPin } from '@/features/parental/gate';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
@@ -644,27 +645,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       favInFlight.current.add(key);
       setOverride(key, !wasFavorite);
       try {
-        const res = await rpc('favorites.toggle', {
-          ref: channel.ref,
-          snapshot: { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
-        });
-        setOverride(key, res.isFavorite);
-        await invalidate('favorites.');
         const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
-        toast({ title: res.isFavorite ? t('favoriteAdded', { name }) : t('favoriteRemoved', { name }), variant: 'success' });
-      } catch (err) {
-        toast({
-          title: wasFavorite ? t('favoriteRemoveFailed') : t('favoriteAddFailed'),
-          description: errorDescription(err),
-          variant: 'error',
-        });
+        // The toast names the channel; a removal carries Undo, which restores its place.
+        await toggleFavoriteWithUndo(
+          channel.ref,
+          { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
+          name,
+          wasFavorite,
+        );
       } finally {
         favInFlight.current.delete(key);
         // The refetched `favorites.contains` is the truth from here on.
         setOverride(key, undefined);
       }
     },
-    [t, toast, prefs.stripCountryPrefix, setOverride],
+    [prefs.stripCountryPrefix, setOverride],
   );
   const onToggleFavorite = useCallback((c: Channel, fav: boolean) => void toggleFavorite(c, fav), [toggleFavorite]);
   // The menu's header says what is on: the row's own now/next, read when the menu opens.

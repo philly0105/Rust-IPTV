@@ -28,7 +28,7 @@ import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
-import { ChannelLogo, IconButton, Menu, Poster, PosterCellWidthContext, ProgressBar, Skeleton, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
+import { ChannelLogo, IconButton, Menu, Poster, PosterCellWidthContext, ProgressBar, Skeleton, useBusyButtons, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
 import type { NowOn } from '../hooks/useNowOn';
 import { ContentIcon, SourceBadge } from './bits';
 
@@ -130,6 +130,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   const playable = type === 'live' || type === 'radio';
   // Older movie and series snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
   const title = snapshotTitle(entryRef, snapshot.title).title;
+  const busyButton = useBusyButtons(!!busy);
   const minutesLeft = now ? Math.max(1, Math.round(now.leftSeconds / 60)) : 0;
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
@@ -317,8 +318,8 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
               tabIndex={-1}
               label={t('moveUp', { title })}
               icon={<ArrowUp size={14} aria-hidden />}
-              disabled={!reorder.canUp || busy}
-              onClick={() => reorder.onMove(-1)}
+              disabled={!reorder.canUp}
+              {...busyButton('up', () => reorder.onMove(-1))}
               className={REORDER_ARROW}
             />
             <IconButton
@@ -326,8 +327,8 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
               tabIndex={-1}
               label={t('moveDown', { title })}
               icon={<ArrowDown size={14} aria-hidden />}
-              disabled={!reorder.canDown || busy}
-              onClick={() => reorder.onMove(1)}
+              disabled={!reorder.canDown}
+              {...busyButton('down', () => reorder.onMove(1))}
               className={REORDER_ARROW}
             />
           </>
@@ -361,8 +362,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           tabIndex={-1}
           label={removeLabel}
           icon={<X size={14} aria-hidden />}
-          disabled={busy}
-          onClick={onRemove}
+          {...busyButton('remove', onRemove)}
           className="hover:text-danger"
           data-action="remove"
         />

@@ -1,5 +1,5 @@
 // The one place app language codes become Intl locales (F-INTL-LOCALE).
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { dateTimeFormat, formatList, intlLocale, listSeparator, numberFormat, relativeTimeFormat } from './intl';
 
@@ -20,6 +20,22 @@ describe('intlLocale', () => {
     expect(intlLocale(null)).toBe('en');
     expect(intlLocale('')).toBe('en');
     expect(intlLocale('not a tag')).toBe('en');
+  });
+
+  it('formats Belarusian in Russian, not English, where the runtime has no Belarusian data (Chrome)', async () => {
+    const real = Intl.NumberFormat.supportedLocalesOf;
+    const spy = vi
+      .spyOn(Intl.NumberFormat, 'supportedLocalesOf')
+      .mockImplementation((locales, opts) => (String(locales).startsWith('be') ? [] : real(locales, opts)));
+    vi.resetModules();
+    try {
+      const fresh = await import('./intl');
+      expect(fresh.intlLocale('by')).toBe('ru');
+      expect(fresh.intlLocale('be')).toBe('ru');
+      expect(fresh.intlLocale('de')).toBe('de');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('formats Moroccan Arabic numbers as Arabic, not in the machine locale', () => {

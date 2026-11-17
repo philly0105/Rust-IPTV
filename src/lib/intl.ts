@@ -19,6 +19,15 @@ import { LANGUAGES } from '@/i18n/languages';
 /** App codes (and i18next keys) whose `Intl` locale is not their own tag. */
 const INTL_TAGS: Readonly<Record<string, string>> = { ary: 'ar', by: 'be', zhtw: 'zh-TW', zh: 'zh-CN' };
 
+/**
+ * A related language to format in when the runtime has no data for the tag, before English.
+ * Of the app's languages only Belarusian lacks it, in Chrome and WebView2 (whose ICU leaves `be`
+ * out of NumberFormat, DateTimeFormat and RelativeTimeFormat): Russian month and weekday names
+ * and "11 часов назад" read naturally to a Belarusian reader, in the same script, where English
+ * dates were the one untranslated text on screen.
+ */
+const FALLBACK_TAGS: Readonly<Record<string, string>> = { be: 'ru' };
+
 const resolved = new Map<string, string>();
 
 // The process's first supportedLocalesOf takes about 8 ms (32 ms in a 4x-slowed profile), but that
@@ -28,7 +37,8 @@ const resolved = new Map<string, string>();
 // not save it (P2-BOOT-5).
 function resolve(lang: string): string {
   const tag = INTL_TAGS[lang] ?? LANGUAGES.find((l) => l.code === lang)?.bcp47 ?? lang;
-  for (const c of [tag, tag.split('-')[0]]) {
+  const base = tag.split('-')[0] ?? '';
+  for (const c of [tag, base, FALLBACK_TAGS[base]]) {
     if (!c) continue;
     try {
       if (Intl.NumberFormat.supportedLocalesOf(c).length > 0) return c;
@@ -42,7 +52,8 @@ function resolve(lang: string): string {
 /**
  * A BCP 47 tag `Intl` supports for an app language code or i18next language
  * (`ary` -> `ar`, `by` -> `be`, `zhtw` -> `zh-TW`, `zh` -> `zh-CN`, the rest
- * from the LANGUAGES table), falling back to English. Cached per input.
+ * from the LANGUAGES table). Without data for it, a related language (`be` -> `ru`), then
+ * English. Cached per input.
  */
 export function intlLocale(language: string | null | undefined): string {
   const lang = language || 'en';

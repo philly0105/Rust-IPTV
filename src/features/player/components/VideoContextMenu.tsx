@@ -177,7 +177,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[min(70vh,420px)] w-64 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[calc(100dvh-1rem)] w-64 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>

@@ -68,7 +68,7 @@ import { canZap, replay, reportStatus, retryResolve, sameSource, selectEnded, us
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { canEnterFullscreen } from '../fullscreen';
 import { InlineSpinner } from './InlineSpinner';
-import { DROP_BELOW_PX, MENU_HEADER, menuFrameClass, menuFrameStyle, playerMenuLayer, SHEET_BELOW_PX, type MenuFit } from './menuFrame';
+import { MENU_HEADER, menuFrameClass, menuFrameStyle, playerMenuLayer, SHEET_BELOW_PX, type MenuFit } from './menuFrame';
 import { useNarrow } from './useNarrow';
 // failover: AlternatesMenu, AlternatesRow
 import {
@@ -638,48 +638,73 @@ const MENU_EDGE = 8;
 
 /**
  * The height a menu that grows up from its bottom edge may take: up to the app header (or the top
- * of the screen in fullscreen) and the top of the player it floats in, which clips it (a docked
- * stage, the mini frame). Null when it cannot be measured.
+ * of the screen in fullscreen and Fill window, which cover the header) and the top of the player
+ * it floats in, which clips it (a docked stage, the mini frame). Null when it cannot be measured.
  */
 export function roomAbove(menu: HTMLElement): number | null {
   const bottom = menu.getBoundingClientRect().bottom;
-  const header = document.fullscreenElement ? null : document.querySelector<HTMLElement>('[data-testid="shell-header"]');
   const host = menu.closest<HTMLElement>('[data-player-host]');
+  const header = fillsWindow(host) ? null : document.querySelector<HTMLElement>('[data-testid="shell-header"]');
   const top = Math.max(0, header?.getBoundingClientRect().bottom ?? 0, host?.getBoundingClientRect().top ?? 0) + MENU_EDGE;
   const room = Math.floor(bottom - top);
   return Number.isFinite(room) && bottom > 0 ? Math.max(room, 0) : null;
 }
 
+/** The player is all there is: fullscreen, Fill window, picture-in-picture. */
+function fillsWindow(host: Element | null): boolean {
+  return !!document.fullscreenElement || !!host?.closest('[data-player-window-layer], [data-pip-layer]');
+}
+
+/** A menu's full height, rows it scrolls included (its border too). */
+function naturalHeight(menu: HTMLElement): number {
+  return menu.scrollHeight + menu.offsetHeight - menu.clientHeight;
+}
+
 /**
- * Where a player menu opens from the bar (the options menu, the channel history). `className`
- * places this frame, and with it the menu's bottom edge, just above the bar. The room from there
- * up to the top of the player is measured here and handed to the menu (`fit`), again whenever the
- * bar or the player changes size: the live seek row arriving under an open menu, fullscreen,
- * a resized window. With less room than a header and a few rows (`SHEET_BELOW_PX`: a phone's
- * inline player, the mini player), and when `sheet` allows it, the menu opens as a sheet from the
- * bottom of the screen instead, over a scrim that closes it (`onScrim`). The frame stays in place
- * empty then, so the room is still measured from the same edge and the sheet goes back to a popover
- * when the player grows.
+ * Where a player menu taller than the room above the bar goes (`natural`: its full height), or
+ * null to keep it above the bar. A player that is the whole window has nothing beside it: a side
+ * panel (`side`). A docked stage (the Live page's, a movie's) has the page around it: the menu
+ * hangs from the player's bottom edge over the page, slid up as far as it must to show whole
+ * (`at`: fixed, below the app header, `room` down to the bottom of the window). The mini player
+ * keeps it inside (a sheet when that is too short). `out`: the menu already left the bar, and stays
+ * out when a shorter view now fits there, so it does not jump while open. `align`: the side of the
+ * frame the menu keeps to (`end` grows toward the start).
  */
-/**
- * Where a menu on a short docked player hangs below it instead (see `DROP_BELOW_PX`), or null to
- * keep it above the bar: in fullscreen, Fill window and picture-in-picture the player is all there
- * is, and a player at the bottom of the window (the mini player) has less room under it.
- * `align`: the side of the frame the menu keeps to (`end` grows toward the start).
- */
-export function dropBelow(frame: HTMLElement, room: number | null, align: 'start' | 'end'): { room: number; at: CSSProperties } | null {
-  if (room === null || room >= DROP_BELOW_PX || document.fullscreenElement) return null;
+export function placeMenu(
+  frame: HTMLElement,
+  above: number | null,
+  natural: number | null,
+  align: 'start' | 'end',
+  out = false,
+): { side: true } | { room: number; at: CSSProperties } | null {
+  if (above === null || natural === null || (natural <= above && !out)) return null;
   const host = frame.closest<HTMLElement>('[data-player-host]');
-  if (!host || host.closest('[data-player-window-layer], [data-pip-layer], [data-player-mini]')) return null;
-  const top = host.getBoundingClientRect().bottom + MENU_EDGE / 2;
-  const below = Math.floor(window.innerHeight - top - MENU_EDGE);
-  if (below <= room) return null;
+  if (!host || host.closest('[data-player-mini]')) return null;
+  if (fillsWindow(host)) return { side: true };
+  const header = document.querySelector<HTMLElement>('[data-testid="shell-header"]')?.getBoundingClientRect().bottom ?? 0;
+  const bottom = window.innerHeight - MENU_EDGE;
+  const top = Math.max(header + MENU_EDGE, Math.min(host.getBoundingClientRect().bottom + MENU_EDGE / 2, bottom - natural));
+  const room = Math.floor(bottom - top);
+  if (room <= above && !out) return null;
   const r = frame.getBoundingClientRect();
   const rtl = getComputedStyle(frame).direction === 'rtl';
   const towardLeft = (align === 'end') !== rtl;
-  return { room: below, at: towardLeft ? { top, right: Math.max(MENU_EDGE, window.innerWidth - r.right) } : { top, left: Math.max(MENU_EDGE, r.left) } };
+  return { room, at: towardLeft ? { top, right: Math.max(MENU_EDGE, window.innerWidth - r.right) } : { top, left: Math.max(MENU_EDGE, r.left) } };
 }
 
+/**
+ * Where a player menu opens from the bar (the options menu, the channel history). `className`
+ * places this frame, and with it the menu's bottom edge, just above the bar. The room from there
+ * up to the top of the player and the menu's own full height are measured here and handed to the
+ * menu (`fit`), again whenever the bar, the player or the menu changes size: the live seek row
+ * arriving under an open menu, fullscreen, a resized window, another view of the menu. A menu
+ * taller than that room leaves the bar (`placeMenu`): it shows every row whenever the window has
+ * the room, and takes what there is when it has not. With less room than a header and a few rows
+ * (`SHEET_BELOW_PX`: a phone's inline player, the mini player), and when `sheet` allows it, the
+ * menu opens as a sheet from the bottom of the screen instead, over a scrim that closes it
+ * (`onScrim`). The frame stays in place empty then, so the room is still measured from the same
+ * edge and the sheet goes back to a popover when the player grows.
+ */
 function PlayerPopup({
   className,
   align,
@@ -688,41 +713,53 @@ function PlayerPopup({
   children,
 }: {
   className: string;
-  /** The side of the bar the menu opens at, for a menu that drops below the player (`dropBelow`). */
+  /** The side of the bar the menu opens at, for a menu that leaves the player (`placeMenu`). */
   align: 'start' | 'end';
   sheet: boolean;
   onScrim(): void;
   children(fit: MenuFit): ReactNode;
 }) {
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
+  const [menuEl, setMenuEl] = useState<HTMLElement | null>(null);
   const [room, setRoom] = useState<number | null>(null);
-  const [drop, setDrop] = useState<{ room: number; at: CSSProperties } | null>(null);
+  const [place, setPlace] = useState<ReturnType<typeof placeMenu>>(null);
+  // Out of the bar already: a shorter view keeps the menu where it is.
+  const out = useRef(false);
+  out.current = place !== null;
   useLayoutEffect(() => {
     if (!frame) return;
     const measure = (): void => {
       const above = roomAbove(frame);
       setRoom(above);
-      const next = dropBelow(frame, above, align);
-      setDrop((d) => (JSON.stringify(d) === JSON.stringify(next) ? d : next));
+      const natural = menuEl ? naturalHeight(menuEl) : null;
+      // The dock bar (embedded mpv) keeps its menus in place, as it never turns them into sheets.
+      const next = sheetAllowed ? placeMenu(frame, above, natural, align, out.current) : null;
+      setPlace((p) => (JSON.stringify(p) === JSON.stringify(next) ? p : next));
     };
     measure();
     window.addEventListener('resize', measure);
-    // The page under a dropped menu may scroll: it follows the player.
+    // The page under a floating menu may scroll: it follows the player.
     window.addEventListener('scroll', measure, true);
     document.addEventListener('fullscreenchange', measure);
     const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
     for (const el of [frame.closest('[data-player-controls]'), frame.closest('[data-player-host]')]) if (el) ro?.observe(el);
+    // Another view (Sleep, Subtitles) changes the menu's height.
+    const rows = !menuEl || typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(measure);
+    if (menuEl) rows?.observe(menuEl, { childList: true, subtree: true });
     return () => {
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
       document.removeEventListener('fullscreenchange', measure);
       ro?.disconnect();
+      rows?.disconnect();
     };
-  }, [frame, align]);
-  const sheet = sheetAllowed && room !== null && room < SHEET_BELOW_PX;
-  // The dock bar (embedded mpv) keeps its menus in place, as it never turns them into sheets.
-  const dropped = sheetAllowed && !sheet && drop !== null;
-  const menu = children(dropped ? { room: drop.room, sheet: false, drop: drop.at } : { room, sheet });
+  }, [frame, menuEl, align, sheetAllowed]);
+  const side = place !== null && 'side' in place;
+  const sheet = sheetAllowed && (side || (room !== null && room < SHEET_BELOW_PX));
+  const dropped = !sheet && place !== null && 'at' in place;
+  const menu = children(
+    dropped ? { room: place.room, sheet: false, drop: place.at, menuRef: setMenuEl } : { room, sheet, side: side || undefined, menuRef: setMenuEl },
+  );
   return (
     <div ref={setFrame} data-menu-frame="" className={cn('absolute z-10', className)}>
       {dropped
@@ -811,7 +848,15 @@ function OptionsMenu({
   const syncSummary = useSyncSummary();
   const syncAvailable = useSyncAvailable();
   const pictureValue = usePictureSummary();
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const { menuRef } = fit;
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      ref.current = el;
+      menuRef?.(el);
+    },
+    [menuRef],
+  );
   // The style view holds form fields (radio groups, a slider), which a menu may not contain: it
   // is a small dialog in the same frame instead.
   const styleView = view === 'subStyle';
@@ -914,7 +959,7 @@ function OptionsMenu({
 
   return (
     <div
-      ref={ref}
+      ref={setRef}
       id={id}
       role={styleView ? 'dialog' : 'menu'}
       aria-label={styleView ? t('subtitleStyle.menuTitle') : t('settingsMenu')}
@@ -936,10 +981,9 @@ function OptionsMenu({
         }
       }}
       data-sheet={fit.sheet ? '' : undefined}
-      // 460 px: a live channel's whole root view (Audio track included) shows without scrolling.
-      style={menuFrameStyle(fit, '70vh, 460px')}
+      style={menuFrameStyle(fit)}
       onScroll={updateMore}
-      className={menuFrameClass(fit, 'max-h-[min(70vh,460px)] w-64 max-w-[calc(100vw-1.5rem)]')}
+      className={menuFrameClass(fit, 'max-h-[calc(100dvh-1rem)] w-64 max-w-[calc(100vw-1.5rem)]')}
     >
       {view === 'root' && (
         <>

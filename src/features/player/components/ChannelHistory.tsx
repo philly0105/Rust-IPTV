@@ -1,5 +1,5 @@
 import { Radio, Tv, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
@@ -73,7 +73,15 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
   usePlayerStore((s) => s.source);
   const current = currentLiveKey();
   const now = useNowPlaying(entries);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const { menuRef } = fit;
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      ref.current = el;
+      menuRef?.(el);
+    },
+    [menuRef],
+  );
 
   useEffect(() => {
     const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
@@ -89,7 +97,7 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
 
   return (
     <div
-      ref={ref}
+      ref={setRef}
       role="menu"
       aria-label={t('channelHistory')}
       data-testid="channel-history"
@@ -111,8 +119,8 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
         }
       }}
       data-sheet={fit.sheet ? '' : undefined}
-      style={menuFrameStyle(fit, '60vh, 420px')}
-      className={menuFrameClass(fit, 'max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)]')}
+      style={menuFrameStyle(fit)}
+      className={menuFrameClass(fit, 'max-h-[calc(100dvh-1rem)] w-72 max-w-[calc(100vw-1rem)]')}
     >
       {/* The options menu's header: the title, then Close. */}
       <div className={MENU_HEADER}>

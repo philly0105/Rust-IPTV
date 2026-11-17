@@ -173,8 +173,9 @@ pub fn equivalent(a: &CopyMeta, b: &CopyMeta) -> bool {
 /// `against_authority`: the other side was the authority's bytes, so the
 /// pair is recorded as differing (under both copies' records); otherwise
 /// any Identical verdict for the pair is dropped, with the mirror's cached
-/// fingerprint, so the next use re-verifies with the provider. Never fails;
-/// a write that fails is logged.
+/// fingerprint, so the next use re-verifies with the provider, and an
+/// Equivalent one becomes Differs. Never fails; a write that fails is
+/// logged.
 pub async fn record_mismatch(
     state: &Arc<AppState>,
     item: &CopyRef,

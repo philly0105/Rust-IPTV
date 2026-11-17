@@ -1966,6 +1966,9 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     crate::m3u::remove_cached_playlist(state, id);
     crate::stalker::forget_source(state, id).await;
     crate::catchup::forget_source(state, id);
+    // downloads: runs on the source's copies stop; rows bound to them start
+    // over from their own.
+    crate::downloads::manager::forget_source(state, id);
     // recording: drop its reminders, cancel or stop its recordings.
     crate::recording::forget_source(state, id).await;
     // lists: the cascade dropped the source's list items; announce `lists.changed`.

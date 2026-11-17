@@ -48,6 +48,7 @@ import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlay
 import { useSourcePin } from '../hooks/useSourcePin';
 import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { formatClock, isResumable, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
@@ -437,7 +438,7 @@ export function MovieDetailPage() {
         )}
         {item.categoryId && source.data && (
           <CatalogRail
-            title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
+            title={categoryName ? t('moreInCategory', { category: sectionlessCategoryName(categoryName, 'movie') }) : t('moreFromSource', { source: sourceName })}
             seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/movies/c/${encodeURIComponent(item.categoryId || ALL_CATEGORIES)}` }}
             input={{
               sourceKind: source.data.kind,

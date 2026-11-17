@@ -247,6 +247,8 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
 
   it('shows "More in <category>" from the catalog, without the title itself', async () => {
     vi.stubGlobal('IntersectionObserver', EagerObserver);
+    // The rail names the category as the grid it opens does, without the section word (v-vod-05).
+    rpcMock.handlers['catalog.categories'] = () => [cat('c1', 'Movies | Action', 12)];
     rpcMock.handlers['catalog.movies'] = (a) => {
       const q = (a as { query: PageQuery }).query;
       return { items: [{ ...movie(7), ref: mref, title: 'Dune: Part Two' }, movie(8)], total: 2, offset: q.offset, limit: q.limit };

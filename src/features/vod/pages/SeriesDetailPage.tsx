@@ -47,6 +47,7 @@ import { recallSeason, rememberSeason, useScrollMemory } from '../hooks/useScrol
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { effectiveMinRating } from '../lib/paging';
@@ -619,7 +620,7 @@ export function SeriesDetailPage() {
 
         {item.categoryId && source.data && (
           <CatalogRail
-            title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
+            title={categoryName ? t('moreInCategory', { category: sectionlessCategoryName(categoryName, 'series') }) : t('moreFromSource', { source: sourceName })}
             seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/series/c/${encodeURIComponent(item.categoryId)}` }}
             input={{
               sourceKind: source.data.kind,

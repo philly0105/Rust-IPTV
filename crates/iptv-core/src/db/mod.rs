@@ -327,6 +327,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0029_guide_search_sets",
         sql: include_str!("migrations/0029_guide_search_sets.sql"),
     },
+    // downloads: the equivalent copy a row's bytes came from.
+    Migration {
+        version: 30,
+        name: "0030_download_origin",
+        sql: include_str!("migrations/0030_download_origin.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

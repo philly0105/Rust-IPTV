@@ -84,7 +84,7 @@ pub const EXT_PARENTAL_SETTINGS: &str = "tsrustParental";
 /// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Every
 /// other settings field is in [`APP_SETTING_EXCLUDED`] with its reason; a
 /// test fails for a field in neither list.
-pub const APP_SETTING_KEYS: [&str; 41] = [
+pub const APP_SETTING_KEYS: [&str; 43] = [
     // general:
     "language",
     "theme",
@@ -134,12 +134,15 @@ pub const APP_SETTING_KEYS: [&str; 41] = [
     "subtitlePosition",
     // vod:
     "vodHideWatched",
+    // downloads:
+    "downloadUseMirrors",
+    "downloadAllowEquivalent",
 ];
 
 /// Settings fields a backup never carries, each with the reason. `epgUrls`
 /// travels on its own (IPTVnator's field) and is listed here only so the
 /// completeness test accounts for it.
-pub const APP_SETTING_EXCLUDED: [(&str, &str); 23] = [
+pub const APP_SETTING_EXCLUDED: [(&str, &str); 25] = [
     ("epgUrls", "exported as the manifest's own settings.epgUrls"),
     (
         "player",
@@ -180,6 +183,14 @@ pub const APP_SETTING_EXCLUDED: [(&str, &str); 23] = [
     (
         "downloadSingleConnection",
         "names sources by this install's ids, which a restore does not keep",
+    ),
+    (
+        "downloadProbeDisabled",
+        "names sources by this install's ids, which a restore does not keep",
+    ),
+    (
+        "downloadMaxConnections",
+        "a network setting tuned for this machine's line",
     ),
 ];
 

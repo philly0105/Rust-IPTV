@@ -68,6 +68,10 @@ pub const SUBTITLE_POSITION_RANGE: std::ops::RangeInclusive<u32> = 0..=40;
 // Run 3:
 /// Accepted `imageCacheMaxMb` range: the on-disk image cache cap in MB.
 pub const IMAGE_CACHE_MAX_MB_RANGE: std::ops::RangeInclusive<u32> = 50..=5000;
+// downloads:
+/// Accepted `downloadMaxConnections` range: 0 is Auto, otherwise the most
+/// connections one download may open across all its sources.
+pub const DOWNLOAD_MAX_CONNECTIONS_RANGE: std::ops::RangeInclusive<u8> = 0..=8;
 /// Longest accepted `lastSeenVersion` (characters of `[0-9A-Za-z.+-]`).
 pub const LAST_SEEN_VERSION_MAX_LEN: usize = 32;
 
@@ -359,6 +363,13 @@ pub fn normalize(mut s: Settings) -> Settings {
         .filter(|id| !id.is_empty() && seen.insert(id.clone()))
         .collect();
     seen.clear();
+    s.download_probe_disabled = s
+        .download_probe_disabled
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect();
+    seen.clear();
     s.epg_urls = s
         .epg_urls
         .into_iter()
@@ -456,6 +467,12 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
             IMAGE_CACHE_MAX_MB_RANGE.start(),
             IMAGE_CACHE_MAX_MB_RANGE.end()
         )));
+    }
+    // downloads:
+    if !DOWNLOAD_MAX_CONNECTIONS_RANGE.contains(&next.download_max_connections) {
+        return Err(CoreError::invalid(
+            "downloadMaxConnections must be between 0 (Auto) and 8",
+        ));
     }
     if !is_valid_version_marker(&next.last_seen_version) {
         return Err(CoreError::invalid(format!(
@@ -976,6 +993,38 @@ mod tests {
         };
         let n = apply_patch(&cur, &json!({"theme": "light"})).unwrap();
         assert_eq!(n.mpv_path.as_deref(), Some("Z:/gone/mpv.exe"));
+    }
+
+    #[test]
+    fn download_speed_fields_validate() {
+        let cur = Settings::default();
+        assert!(cur.download_use_mirrors);
+        assert!(!cur.download_allow_equivalent);
+        assert!(cur.download_probe_disabled.is_empty());
+        assert_eq!(cur.download_max_connections, 0);
+        for ok in [0, 1, 8] {
+            let n = apply_patch(&cur, &json!({"downloadMaxConnections": ok})).unwrap();
+            assert_eq!(n.download_max_connections, ok);
+        }
+        let err = apply_patch(&cur, &json!({"downloadMaxConnections": 9})).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            CoreError::invalid("downloadMaxConnections must be between 0 (Auto) and 8").to_string()
+        );
+        assert!(apply_patch(&cur, &json!({"downloadMaxConnections": 300})).is_err());
+        assert!(apply_patch(&cur, &json!({"downloadMaxConnections": -1})).is_err());
+        let n = apply_patch(
+            &cur,
+            &json!({
+                "downloadUseMirrors": false,
+                "downloadAllowEquivalent": true,
+                "downloadProbeDisabled": [" xt-a ", "xt-a", "", "xt-b"],
+            }),
+        )
+        .unwrap();
+        assert!(!n.download_use_mirrors);
+        assert!(n.download_allow_equivalent);
+        assert_eq!(n.download_probe_disabled, vec!["xt-a", "xt-b"]);
     }
 
     #[test]

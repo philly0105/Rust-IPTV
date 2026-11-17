@@ -343,6 +343,16 @@ pub async fn series_detail(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Ser
     Ok(build_series_detail(r, cx.item, &raw))
 }
 
+/// Seasons of series `r` through the cached series info: unlike
+/// [`series_detail`] it does not refetch what the cache holds, so matching
+/// episodes across sources costs at most one request per series.
+pub async fn series_seasons(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Vec<Season>> {
+    expect_type(r, &[ContentType::Series], "xtream.seriesSeasons")?;
+    let cx = ctx(state, r).await?;
+    let raw = series_info(state, &cx.client, r).await?;
+    Ok(build_seasons(r, &raw))
+}
+
 pub fn build_seasons(r: &ItemRef, raw: &RawSeriesInfo) -> Vec<Season> {
     let mut seasons: BTreeMap<i64, Season> = BTreeMap::new();
     let mut seen = HashSet::new();

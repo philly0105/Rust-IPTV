@@ -3,7 +3,7 @@
 
 use crate::db::{now_rfc3339, to_rfc3339};
 use crate::error::{CoreError, CoreResult};
-use crate::model::{ContentType, Download, DownloadStatus, ItemRef, RequestHeaders};
+use crate::model::{ContentType, CopyRef, Download, DownloadStatus, ItemRef, RequestHeaders};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::Path;
 use std::str::FromStr;
@@ -19,7 +19,7 @@ pub struct DownloadRow {
 const COLUMNS: &str =
     "id, source_id, content_type, item_id, episode_id, title, subtitle, url, file_name, \
     file_path, poster_url, headers_json, status, bytes_downloaded, total_bytes, resume_validator, \
-    error_message, position_seconds, created_at, updated_at, completed_at, duration_seconds, rate_limit_bps";
+    error_message, position_seconds, created_at, updated_at, completed_at, duration_seconds, rate_limit_bps, origin_json";
 
 fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
     let content_type: String = r.get(2)?;
@@ -29,6 +29,7 @@ fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
     let created_at: String = r.get(18)?;
     let updated_at: String = r.get(19)?;
     let completed_at: Option<String> = r.get(20)?;
+    let origin_json: Option<String> = r.get(23)?;
     let content_type = ContentType::from_str(&content_type).unwrap_or(ContentType::Movie);
     let status = DownloadStatus::from_str(&status).unwrap_or(DownloadStatus::Failed);
     let headers = headers_json
@@ -57,6 +58,12 @@ fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
             position_seconds: r.get(17)?,
             waiting: None,
             connections: None,
+            sources: None,
+            served_by: None,
+            stats: None,
+            origin: origin_json
+                .as_deref()
+                .and_then(|j| serde_json::from_str::<CopyRef>(j).ok()),
             duration_seconds: r.get(21)?,
             rate_limit_bps: r.get(22)?,
         },
@@ -84,6 +91,20 @@ pub fn set_rate_limit(conn: &Connection, id: i64, bps: Option<u64>) -> CoreResul
     let changed = conn.execute(
         "UPDATE downloads SET rate_limit_bps = ?2, updated_at = ?3 WHERE id = ?1",
         params![id, bps, now_rfc3339()],
+    )?;
+    if changed == 0 {
+        return Err(CoreError::NotFound(format!("download {id} not found")));
+    }
+    Ok(())
+}
+
+/// Records the equivalent copy whose bytes the row holds (`None` = the
+/// row's own item). Changes nothing else, not even `updated_at`.
+pub fn set_origin(conn: &Connection, id: i64, origin: Option<&CopyRef>) -> CoreResult<()> {
+    let json = origin.map(serde_json::to_string).transpose()?;
+    let changed = conn.execute(
+        "UPDATE downloads SET origin_json = ?2 WHERE id = ?1",
+        params![id, json],
     )?;
     if changed == 0 {
         return Err(CoreError::NotFound(format!("download {id} not found")));
@@ -212,7 +233,7 @@ pub fn reset(conn: &Connection, id: i64, n: &NewDownload<'_>) -> CoreResult<()> 
     conn.execute(
         "UPDATE downloads SET title = ?2, subtitle = ?3, url = ?4, poster_url = ?5, headers_json = ?6, duration_seconds = ?8, \
          status = 'queued', bytes_downloaded = 0, total_bytes = NULL, resume_validator = NULL, \
-         error_message = NULL, file_name = NULL, file_path = NULL, completed_at = NULL, updated_at = ?7 \
+         error_message = NULL, file_name = NULL, file_path = NULL, completed_at = NULL, origin_json = NULL, updated_at = ?7 \
          WHERE id = ?1",
         params![
             id,
@@ -236,7 +257,7 @@ pub fn restart_completed(conn: &Connection, id: i64) -> CoreResult<bool> {
     Ok(conn.execute(
         "UPDATE downloads SET status = 'queued', file_path = NULL, bytes_downloaded = 0, \
          total_bytes = NULL, resume_validator = NULL, error_message = NULL, completed_at = NULL, \
-         updated_at = ?2 WHERE id = ?1 AND status = 'completed'",
+         origin_json = NULL, updated_at = ?2 WHERE id = ?1 AND status = 'completed'",
         params![id, now_rfc3339()],
     )? > 0)
 }

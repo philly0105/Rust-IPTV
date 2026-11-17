@@ -40,6 +40,7 @@ import type {
   SeriesItem,
   Settings,
   Source,
+  SourceConnectionLimit,
   SourceKind,
   StalkerSourceConfig,
   TmdbBrief,
@@ -48,6 +49,7 @@ import type {
   TmdbPerson,
   TmdbSeason,
   TmdbTv,
+  TransferStats,
   VodDetail,
   VodItem,
   WindowState,
@@ -562,6 +564,12 @@ export interface RpcMap {
    * lapses after 90 s unless renewed. Resolves once yielding downloads let go (at most 2 s).
    */
   'downloads.playback': Cmd<{ clientId: string; sourceIds: string[] }, void>;
+  /** Live breakdown of a running download; null when it is not downloading. */
+  'downloads.stats': Cmd<{ id: number }, TransferStats | null>;
+  /** Every source's connection limit as downloads see it (reported, learned by probing). */
+  'downloads.connectionLimits': Cmd<void, SourceConnectionLimit[]>;
+  /** Forgets what probing learned about a source, so the next eligible download may probe again. */
+  'downloads.resetConnectionLimit': Cmd<{ sourceId: string }, void>;
   /** Completed downloads with `fileAvailable`. */
   'myvideos.list': Cmd<void, Download[]>;
   /**
@@ -896,6 +904,9 @@ export const RPC_COMMANDS = [
   'downloads.setPosition',
   'downloads.prioritize',
   'downloads.playback',
+  'downloads.stats',
+  'downloads.connectionLimits',
+  'downloads.resetConnectionLimit',
   'myvideos.list',
   'myvideos.playSource',
   'tmdb.movie',

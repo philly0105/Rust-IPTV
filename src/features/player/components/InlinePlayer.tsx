@@ -24,7 +24,7 @@ import {
 } from '../engines';
 import { afterPaint } from '../enginePreload';
 import { NO_VIDEO_MESSAGE } from '../errors';
-import { useAlternatesStore } from '../failover';
+import { failoverOriginTitle, useAlternatesStore } from '../failover';
 import { bindInlineExtras } from '../inlineExtras';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
 import { noteEngineError, tryAnotherSource, useReconnectStore } from '../reconnect';
@@ -627,6 +627,20 @@ function ErrorOverlay({
   // Raw TS only fails for lack of MSE when mpegts.js could not run at all.
   const isRawTs = !!source && looksLikeMpegTs(source) && !mseSupported();
   const hint = isRawTs ? t(rawTsHintKey(source, settings, view.external, view.others)) : view.hint;
+  // Live failover moved here from the channel the user picked: that one failed first. Read as the
+  // error shows; the switch was made before this copy failed.
+  const [switchedFrom] = useState(() => failoverOriginTitle(source));
+  const switchedText = switchedFrom && t('liveFailoverSwitchedDetail', { channel: switchedFrom });
+  const switchedLine = switchedText && (
+    <p
+      dir="auto"
+      data-testid="error-failover"
+      className={cn('max-w-full text-on-glass-muted', tight ? 'truncate text-caption' : 'text-body-sm text-pretty')}
+      title={tight ? switchedText : undefined}
+    >
+      {switchedText}
+    </p>
+  );
 
   if (compact) {
     return (
@@ -702,6 +716,7 @@ function ErrorOverlay({
       <div className={cn('m-auto flex w-full max-w-md flex-col items-center text-center', tight ? 'gap-2' : 'gap-4')}>
         {tight ? (
           <>
+            {switchedLine}
             {/* A short player hides its title bar over an error: name what failed here, which
                 matters most after an automatic switch to another copy. */}
             {source?.title && (
@@ -719,6 +734,7 @@ function ErrorOverlay({
             <span aria-hidden className="flex size-14 items-center justify-center rounded-full bg-white/8 ring-1 ring-white/15">
               <AlertTriangle className="size-6 text-warning" />
             </span>
+            {switchedLine}
             <h2 className="text-title-sm text-balance">{view.title}</h2>
           </>
         )}

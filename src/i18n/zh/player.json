@@ -24,6 +24,7 @@
   "quality": "画质",
   "qualityAuto": "自动",
   "audioTrack": "音轨",
+  "audioTrackOnlyOne": "仅一条",
   "speed": "播放速度",
   "speedValue": "{{speed}} 倍",
   "speedNormal": "正常",

@@ -24,6 +24,7 @@
   "quality": "الجودة",
   "qualityAuto": "تلقائي",
   "audioTrack": "المسار الصوتي",
+  "audioTrackOnlyOne": "مسار واحد فقط",
   "speed": "سرعة التشغيل",
   "speedValue": "{{speed}}x",
   "speedNormal": "عادية",

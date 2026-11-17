@@ -24,6 +24,7 @@
   "quality": "画質",
   "qualityAuto": "自動",
   "audioTrack": "音声トラック",
+  "audioTrackOnlyOne": "1つのみ",
   "speed": "再生速度",
   "speedValue": "{{speed}}x",
   "speedNormal": "標準",

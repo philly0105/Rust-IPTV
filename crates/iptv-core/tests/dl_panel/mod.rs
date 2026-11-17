@@ -1,29 +1,71 @@
 //! A scriptable provider for download tests (`downloads_segments.rs`,
-//! `downloads_conn_limit.rs`, `downloads_stress.rs`): files whose every byte
-//! is known ([`content`]), `Range` and `If-Range` answered the way panels
-//! answer them, a speed cap per connection, an account limit counted per open
-//! body (with the lag a panel takes to notice a closed one), and faults a test
-//! turns on at random (refusals, 503s, bodies that stall or drop) or scripts
-//! (a response head held back, a segment request refused just as the open
-//! stream reaches it).
+//! `downloads_conn_limit.rs`, `downloads_stress.rs`, `downloads_speed.rs`):
+//! files whose every byte is known ([`content`]), `Range` and `If-Range`
+//! answered the way panels answer them, a speed cap per connection, an
+//! account limit counted per open body (with the lag a panel takes to notice
+//! a closed one), and faults a test turns on at random (refusals, 503s,
+//! bodies that stall or drop) or scripts (a response head held back, a
+//! segment request refused just as the open stream reaches it).
 //!
-//! Files are served at `/f/<id>`, the account at `/player_api.php` (any
-//! credentials; `max_connections` is [`Panel::set_reported`]).
+//! Built with [`Panel::with`] ([`PanelOptions`]), a panel also models what
+//! separates real panels from each other:
+//!
+//! - **Validators** ([`Validators`]): ETag (the default), Last-Modified,
+//!   both, or none at all, in which case `If-Range` is ignored.
+//! - **Limit mode** ([`LimitMode`]): past `set_enforced`, refuse with 403
+//!   (the default) or accept and end the oldest open body (kick-oldest).
+//! - **Copies** ([`Variant`]): a file may differ from the canonical bytes
+//!   everywhere, or only outside the three fingerprint windows.
+//! - **Redirects** ([`Redirect`]): `/movie/` and `/series/` answer 302 to
+//!   `/edge/{id}?t=<token>` on the same listener or a second one; a token
+//!   past its lifetime answers 403.
+//! - **A shared line** ([`Line`]): one byte budget pacing every body of every
+//!   panel given the same line.
+//!
+//! Routes:
+//!
+//! - `/f/{id}`: file `id`, never redirected.
+//! - `/movie/{u}/{p}/{id}.{ext}` and `/series/{u}/{p}/{id}.{ext}`: file `id`
+//!   (any credentials and extension), redirected when the panel redirects.
+//! - `/edge/{id}?t=<token>`: where a redirect points.
+//! - `/player_api.php`: the account (any credentials; `max_connections` is
+//!   [`Panel::set_reported`]), `action=get_vod_info` and
+//!   `action=get_series_info&series_id=N` ([`Panel::series`]).
+//!
+//! [`add_xtream_source`], [`add_movie`] and [`add_series`] put a panel into
+//! an `AppState` as an Xtream source with catalog rows, so the app's own
+//! lookups (same-title copies, stream URLs, account limits) find it.
 
 #![allow(dead_code)]
 
-use axum::extract::{Path, State};
+mod api;
+mod catalog;
+mod line;
+mod variant;
+
+// Each test binary uses its own share of these.
+#[allow(unused_imports)]
+pub use catalog::{
+    add_movie, add_series, add_xtream_source, movie_ref, series_ref, PASSWORD, USERNAME,
+};
+pub use line::Line;
+#[allow(unused_imports)]
+pub use variant::{inside_samples, sample_offsets, variant_content, Variant, SAMPLE_LEN};
+
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::collections::{BTreeMap, HashMap};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 /// `len` bytes of file `file` from `offset`. Files differ from each other,
 /// so a `.part` that took another row's bytes is caught too.
@@ -57,8 +99,31 @@ pub fn is_exact(file: u32, size: u64, path: &std::path::Path) -> Result<(), Stri
     }
 }
 
-fn etag(file: u32, size: u64) -> String {
-    format!("\"panel-{file}-{size:x}\"")
+/// The strong ETag of `variant`'s copy of `file`. The canonical copy's tag
+/// is the same on every panel, as on panels behind one origin; a copy with
+/// other bytes has another tag.
+fn etag(file: u32, size: u64, variant: Variant) -> String {
+    match variant {
+        Variant::Same => format!("\"panel-{file}-{size:x}\""),
+        Variant::Differs => format!("\"panel-{file}-{size:x}-d\""),
+        Variant::DiffersOutsideSamples => format!("\"panel-{file}-{size:x}-o\""),
+    }
+}
+
+/// The Last-Modified date of `variant`'s copy of `file` (an HTTP-date,
+/// fixed per file, size and variant).
+fn last_modified(file: u32, size: u64, variant: Variant) -> String {
+    const BASE: i64 = 1_767_225_600; // 2026-01-01T00:00:00Z
+    let salt = match variant {
+        Variant::Same => 0,
+        Variant::Differs => 3_600,
+        Variant::DiffersOutsideSamples => 7_200,
+    };
+    let secs = BASE + i64::from(file % 300) * 86_400 + (size % 86_400) as i64 + salt;
+    chrono::DateTime::from_timestamp(secs, 0)
+        .expect("a 2026 date")
+        .format("%a, %d %b %Y %H:%M:%S GMT")
+        .to_string()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -66,6 +131,75 @@ pub struct Spec {
     pub size: u64,
     /// KiB/s per connection; 0 = as fast as the loopback goes.
     pub kbps: u64,
+}
+
+/// Which validators a panel sends with a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Validators {
+    /// A strong `ETag`; `If-Range` must match it.
+    #[default]
+    ETag,
+    /// `Last-Modified` only; `If-Range` must match the date exactly.
+    LastModified,
+    /// Both; `If-Range` may match either.
+    Both,
+    /// Neither, and `If-Range` is ignored: every `Range` is served (the
+    /// provider that kept the user's downloads on one connection).
+    None,
+}
+
+impl Validators {
+    fn etag(self) -> bool {
+        matches!(self, Validators::ETag | Validators::Both)
+    }
+
+    fn last_modified(self) -> bool {
+        matches!(self, Validators::LastModified | Validators::Both)
+    }
+}
+
+/// What a panel does with a request past [`Panel::set_enforced`] open bodies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LimitMode {
+    /// `403` (what most panels do).
+    #[default]
+    Refuse,
+    /// Accepts it and ends the oldest open body ([`Panel::kicked`] counts
+    /// them): its slot is free at once, and its client reads what was
+    /// already sent, then an error. Bodies inside their close lag are not
+    /// open any more, so a request that finds only those is still refused.
+    KickOldest,
+}
+
+/// How a panel sends `/movie/` and `/series/` requests to where the bytes are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Redirect {
+    /// `302` to `/edge/{id}?t=<token>` on the panel's own listener.
+    SameHost { token_ttl: Duration },
+    /// `302` to `/edge/{id}?t=<token>` on a second listener (another port:
+    /// another origin), like a CDN edge.
+    EdgeHost { token_ttl: Duration },
+}
+
+impl Redirect {
+    fn token_ttl(self) -> Duration {
+        match self {
+            Redirect::SameHost { token_ttl } | Redirect::EdgeHost { token_ttl } => token_ttl,
+        }
+    }
+}
+
+/// How [`Panel::with`] builds a panel. `Default` is what [`Panel::spawn`]
+/// builds (with seed 0).
+#[derive(Debug, Clone, Default)]
+pub struct PanelOptions {
+    /// Drives the random faults.
+    pub seed: u64,
+    pub validators: Validators,
+    pub limit_mode: LimitMode,
+    pub redirect: Option<Redirect>,
+    /// A line shared with other panels; `None`: only the per-connection caps.
+    pub line: Option<Line>,
 }
 
 /// Random faults, in per mille of file requests (or of bodies).
@@ -81,13 +215,17 @@ pub struct Faults {
     pub drop: u32,
 }
 
-/// One file request.
+/// One file request (redirects and refused edge tokens included).
 #[derive(Debug, Clone)]
 pub struct Logged {
     pub file: u32,
     /// The `Range` header's first byte and last byte, when it had one.
     pub range: Option<(u64, Option<u64>)>,
     pub status: u16,
+    /// `"f"`, `"movie"`, `"series"` or `"edge"`.
+    pub route: &'static str,
+    /// The address of the listener that answered.
+    pub local: IpAddr,
 }
 
 #[derive(Default)]
@@ -114,8 +252,35 @@ struct Cut {
 /// multiple of any read size, so the next chunk the client reads crosses it.
 const CUT_LEAD: u64 = 1000;
 
+/// Redirect tokens kept before expired ones are swept.
+const TOKENS_KEPT: usize = 4096;
+
+/// `(season, episode, file id)` of one episode of [`Panel::series`].
+type EpisodeFile = (i64, i64, u32);
+
+/// One open body, as the limit sees it.
+struct OpenBody {
+    /// Ends the body (kick-oldest, or the panel going away).
+    kill: CancellationToken,
+    /// Its slot no longer counts (the body ended, or was kicked).
+    released: AtomicBool,
+}
+
+impl OpenBody {
+    /// Gives the slot back now; false when it already was.
+    fn release(&self, open: &AtomicUsize) -> bool {
+        let first = !self.released.swap(true, Ordering::SeqCst);
+        if first {
+            open.fetch_sub(1, Ordering::SeqCst);
+        }
+        first
+    }
+}
+
 struct Shared {
     files: Mutex<HashMap<u32, Spec>>,
+    /// Files whose copy here is not the canonical one.
+    variants: Mutex<HashMap<u32, Variant>>,
     /// Bodies open at once before a request is refused (0: no limit).
     enforced: AtomicUsize,
     reported: AtomicUsize,
@@ -129,6 +294,27 @@ struct Shared {
     hold_head: Mutex<Option<Arc<Gate>>>,
     cut: Mutex<Option<Arc<Cut>>>,
     counts: Mutex<HashMap<&'static str, u64>>,
+    validators: Mutex<Validators>,
+    limit_mode: Mutex<LimitMode>,
+    redirect: Option<Redirect>,
+    line: Option<Line>,
+    /// `http://127.0.0.1:<port>` of the panel itself.
+    base: String,
+    /// Where redirects point: `base`, or the edge listener's.
+    edge_base: Option<String>,
+    /// Redirect token -> (file, expiry).
+    tokens: Mutex<HashMap<String, (u32, Instant)>>,
+    /// Series id -> its episodes, in the order given.
+    series: Mutex<BTreeMap<u32, Vec<EpisodeFile>>>,
+    /// Open bodies by opening order (oldest first), for kick-oldest. Also
+    /// the lock every slot is taken under.
+    bodies: Mutex<BTreeMap<u64, Arc<OpenBody>>>,
+    next_body: AtomicU64,
+    /// Requests answered per listener address.
+    served_on: Mutex<HashMap<IpAddr, u64>>,
+    /// Cancelled when the panel is dropped: every listener stops and every
+    /// open body ends.
+    shutdown: CancellationToken,
 }
 
 impl Shared {
@@ -147,68 +333,194 @@ impl Shared {
     fn count(&self, what: &'static str) {
         *self.counts.lock().entry(what).or_default() += 1;
     }
+
+    fn counted(&self, what: &str) -> u64 {
+        self.counts.lock().get(what).copied().unwrap_or(0)
+    }
+
+    fn variant(&self, file: u32) -> Variant {
+        self.variants.lock().get(&file).copied().unwrap_or_default()
+    }
+
+    fn outage(&self) -> bool {
+        self.outage_until
+            .lock()
+            .is_some_and(|until| Instant::now() < until)
+    }
 }
+
+/// The state of one listener's routes.
+struct Listener {
+    shared: Arc<Shared>,
+    ip: IpAddr,
+}
+
+type Ctx = State<Arc<Listener>>;
 
 pub struct Panel {
     pub base: String,
     shared: Arc<Shared>,
-    _shutdown: tokio::sync::oneshot::Sender<()>,
+}
+
+impl Drop for Panel {
+    fn drop(&mut self) {
+        self.shared.shutdown.cancel();
+    }
 }
 
 impl Panel {
     /// Starts a panel on a free loopback port, on the current runtime.
     /// `seed` drives its random faults.
     pub async fn spawn(seed: u64) -> Panel {
+        Panel::with(PanelOptions {
+            seed,
+            ..PanelOptions::default()
+        })
+        .await
+    }
+
+    /// Starts a panel built from `opts` on a free loopback port (and, for
+    /// [`Redirect::EdgeHost`], its edge on another), on the current runtime.
+    pub async fn with(opts: PanelOptions) -> Panel {
+        let listener = bind(IpAddr::V4(Ipv4Addr::LOCALHOST), 0).await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let edge = match opts.redirect {
+            Some(Redirect::EdgeHost { .. }) => {
+                Some(bind(IpAddr::V4(Ipv4Addr::LOCALHOST), 0).await.unwrap())
+            }
+            _ => None,
+        };
+        let edge_base = match (&opts.redirect, &edge) {
+            (Some(_), Some(l)) => Some(format!("http://{}", l.local_addr().unwrap())),
+            (Some(_), None) => Some(base.clone()),
+            (None, _) => None,
+        };
         let shared = Arc::new(Shared {
             files: Mutex::new(HashMap::new()),
+            variants: Mutex::new(HashMap::new()),
             enforced: AtomicUsize::new(0),
             reported: AtomicUsize::new(0),
             open: Arc::new(AtomicUsize::new(0)),
             peak: AtomicUsize::new(0),
             lag_ms: AtomicU64::new(0),
             faults: Mutex::new(Faults::default()),
-            rng: Mutex::new(seed | 1),
+            rng: Mutex::new(opts.seed | 1),
             outage_until: Mutex::new(None),
             log: Mutex::new(Vec::new()),
             hold_head: Mutex::new(None),
             cut: Mutex::new(None),
             counts: Mutex::new(HashMap::new()),
+            validators: Mutex::new(opts.validators),
+            limit_mode: Mutex::new(opts.limit_mode),
+            redirect: opts.redirect,
+            line: opts.line,
+            base: base.clone(),
+            edge_base,
+            tokens: Mutex::new(HashMap::new()),
+            series: Mutex::new(BTreeMap::new()),
+            bodies: Mutex::new(BTreeMap::new()),
+            next_body: AtomicU64::new(0),
+            served_on: Mutex::new(HashMap::new()),
+            shutdown: CancellationToken::new(),
         });
-        let app = Router::new()
-            .route("/f/{file}", get(file))
-            .route("/player_api.php", get(account))
-            .with_state(Arc::clone(&shared));
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, app)
-                .with_graceful_shutdown(async {
-                    let _ = rx.await;
-                })
-                .await;
-        });
-        Panel {
-            base,
-            shared,
-            _shutdown: tx,
+        serve(
+            listener,
+            panel_routes(&shared, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            &shared,
+        );
+        if let Some(edge) = edge {
+            serve(
+                edge,
+                edge_routes(&shared, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+                &shared,
+            );
         }
+        Panel { base, shared }
+    }
+
+    /// Also answers on `ip` at the panel's own port (for example 127.0.0.2,
+    /// so a host name that resolves to two loopback addresses reaches the
+    /// panel on both). Fails where the system has no such address (macOS
+    /// has only 127.0.0.1 unless aliased).
+    pub async fn listen_also(&self, ip: IpAddr) -> std::io::Result<SocketAddr> {
+        let listener = bind(ip, self.port()).await?;
+        let addr = listener.local_addr()?;
+        serve(listener, panel_routes(&self.shared, ip), &self.shared);
+        Ok(addr)
+    }
+
+    /// The panel's port.
+    pub fn port(&self) -> u16 {
+        self.base
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse().ok())
+            .expect("base ends with a port")
+    }
+
+    /// Where redirects point (`None` without [`PanelOptions::redirect`]):
+    /// the panel's own base for [`Redirect::SameHost`], the edge
+    /// listener's for [`Redirect::EdgeHost`].
+    pub fn edge_base(&self) -> Option<String> {
+        self.shared.edge_base.clone()
     }
 
     pub fn url(&self, file: u32) -> String {
         format!("{}/f/{file}", self.base)
     }
 
+    /// The Xtream movie URL of file `id`, as `xtream::service::stream_url`
+    /// builds it for an `mp4` row of a source added by [`add_xtream_source`].
+    pub fn movie_url(&self, id: u32) -> String {
+        format!("{}/movie/{USERNAME}/{PASSWORD}/{id}.mp4", self.base)
+    }
+
+    /// The Xtream episode URL of file `id` (episode ids are file ids).
+    pub fn episode_url(&self, id: u32) -> String {
+        format!("{}/series/{USERNAME}/{PASSWORD}/{id}.mp4", self.base)
+    }
+
+    /// Serves the canonical file `file` (also resets its variant).
     pub fn file(&self, file: u32, size: u64, kbps: u64) {
+        self.file_variant(file, size, kbps, Variant::Same);
+    }
+
+    /// Serves `variant`'s copy of file `file`. Calling it again for a file
+    /// already served swaps its bytes for requests from then on (bodies
+    /// already open keep theirs): the provider changing a file mid-download.
+    pub fn file_variant(&self, file: u32, size: u64, kbps: u64, variant: Variant) {
         self.shared.files.lock().insert(file, Spec { size, kbps });
+        let mut variants = self.shared.variants.lock();
+        match variant {
+            Variant::Same => variants.remove(&file),
+            v => variants.insert(file, v),
+        };
     }
 
     pub fn set_speed(&self, file: u32, kbps: u64) {
         if let Some(s) = self.shared.files.lock().get_mut(&file) {
             s.kbps = kbps;
         }
+    }
+
+    /// Validators sent from the next request on.
+    pub fn set_validators(&self, v: Validators) {
+        *self.shared.validators.lock() = v;
+    }
+
+    /// What happens past the limit, from the next request on.
+    pub fn set_limit_mode(&self, m: LimitMode) {
+        *self.shared.limit_mode.lock() = m;
+    }
+
+    /// The series `get_series_info&series_id=series_id` describes:
+    /// `(season, episode, file id)` per episode. Episode ids are the file
+    /// ids, so [`Panel::episode_url`] serves each. Replaces an earlier call.
+    pub fn series(&self, series_id: u32, episodes: &[(i64, i64, u32)]) {
+        self.shared
+            .series
+            .lock()
+            .insert(series_id, episodes.to_vec());
     }
 
     /// Bodies the panel lets this app open at once (0: no limit).
@@ -251,6 +563,26 @@ impl Panel {
 
     pub fn counts(&self) -> HashMap<&'static str, u64> {
         self.shared.counts.lock().clone()
+    }
+
+    /// Bodies ended by kick-oldest.
+    pub fn kicked(&self) -> u64 {
+        self.shared.counted("kicked")
+    }
+
+    /// `302`s sent.
+    pub fn redirects(&self) -> u64 {
+        self.shared.counted("redirected")
+    }
+
+    /// Edge requests refused because their token had expired.
+    pub fn expired(&self) -> u64 {
+        self.shared.counted("expired")
+    }
+
+    /// Requests (files and `player_api.php`) answered on the listener at `ip`.
+    pub fn requests_on(&self, ip: IpAddr) -> u64 {
+        self.shared.served_on.lock().get(&ip).copied().unwrap_or(0)
     }
 
     /// Holds the head of the next file request until the returned gate is
@@ -296,19 +628,57 @@ impl HeldHead {
     }
 }
 
-async fn account(State(s): State<Arc<Shared>>) -> Response {
-    let max = s.reported.load(Ordering::SeqCst);
-    let body = serde_json::json!({
-        "user_info": {
-            "username": "panel",
-            "auth": 1,
-            "status": "Active",
-            "max_connections": max.to_string(),
-            "active_cons": "0",
-        },
-        "server_info": {"url": "127.0.0.1", "timezone": "UTC"},
+async fn bind(ip: IpAddr, port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::bind((ip, port)).await
+}
+
+fn serve(listener: tokio::net::TcpListener, app: Router, shared: &Shared) {
+    let stop = shared.shutdown.clone();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(stop.cancelled_owned())
+            .await;
     });
-    axum::Json(body).into_response()
+}
+
+fn panel_routes(shared: &Arc<Shared>, ip: IpAddr) -> Router {
+    let mut app = Router::new()
+        .route("/f/{file}", get(plain_file))
+        .route("/movie/{u}/{p}/{name}", get(movie))
+        .route("/series/{u}/{p}/{name}", get(episode))
+        .route("/player_api.php", get(api::player_api));
+    if matches!(shared.redirect, Some(Redirect::SameHost { .. })) {
+        app = app.route("/edge/{file}", get(edge));
+    }
+    app.with_state(Arc::new(Listener {
+        shared: Arc::clone(shared),
+        ip,
+    }))
+}
+
+fn edge_routes(shared: &Arc<Shared>, ip: IpAddr) -> Router {
+    Router::new()
+        .route("/edge/{file}", get(edge))
+        .with_state(Arc::new(Listener {
+            shared: Arc::clone(shared),
+            ip,
+        }))
+}
+
+impl Listener {
+    fn note_request(&self) {
+        *self.shared.served_on.lock().entry(self.ip).or_default() += 1;
+    }
+
+    fn log(&self, file: u32, range: Option<(u64, Option<u64>)>, status: u16, route: &'static str) {
+        self.shared.log.lock().push(Logged {
+            file,
+            range,
+            status,
+            route,
+            local: self.ip,
+        });
+    }
 }
 
 /// `bytes=a-b` / `bytes=a-`.
@@ -328,18 +698,111 @@ fn status(code: StatusCode, s: &Shared, what: &'static str) -> Response {
     (code, what).into_response()
 }
 
-async fn file(State(s): State<Arc<Shared>>, Path(id): Path<u32>, headers: HeaderMap) -> Response {
+/// The file id of an Xtream stream name (`123.mp4`, `123`).
+fn file_id(name: &str) -> Option<u32> {
+    name.rsplit_once('.')
+        .map_or(name, |(id, _)| id)
+        .parse()
+        .ok()
+}
+
+async fn plain_file(State(l): Ctx, Path(id): Path<u32>, headers: HeaderMap) -> Response {
+    serve_file(&l, id, &headers, "f").await
+}
+
+async fn movie(
+    State(l): Ctx,
+    Path((_, _, name)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    vod(&l, &name, &headers, "movie").await
+}
+
+async fn episode(
+    State(l): Ctx,
+    Path((_, _, name)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    vod(&l, &name, &headers, "series").await
+}
+
+/// A `/movie/` or `/series/` request: the file, or a redirect to it.
+async fn vod(l: &Arc<Listener>, name: &str, headers: &HeaderMap, route: &'static str) -> Response {
+    let Some(id) = file_id(name) else {
+        l.note_request();
+        return (StatusCode::NOT_FOUND, "no such stream").into_response();
+    };
+    let s = &l.shared;
+    let Some(redirect) = s.redirect else {
+        return serve_file(l, id, headers, route).await;
+    };
+    l.note_request();
+    let range = parse_range(headers);
+    let resp = if !s.files.lock().contains_key(&id) {
+        (StatusCode::NOT_FOUND, "no such file").into_response()
+    } else if s.outage() {
+        status(StatusCode::SERVICE_UNAVAILABLE, s, "unavailable")
+    } else {
+        let token = format!("{:016x}", s.next());
+        let now = Instant::now();
+        {
+            let mut tokens = s.tokens.lock();
+            if tokens.len() >= TOKENS_KEPT {
+                tokens.retain(|_, (_, until)| *until > now);
+            }
+            tokens.insert(token.clone(), (id, now + redirect.token_ttl()));
+        }
+        s.count("redirected");
+        let edge = s.edge_base.as_deref().unwrap_or(&s.base);
+        let mut r = StatusCode::FOUND.into_response();
+        r.headers_mut().insert(
+            header::LOCATION,
+            HeaderValue::from_str(&format!("{edge}/edge/{id}?t={token}")).unwrap(),
+        );
+        r
+    };
+    l.log(id, range, resp.status().as_u16(), route);
+    resp
+}
+
+/// `/edge/{id}?t=<token>`: the file, while the token lives.
+async fn edge(
+    State(l): Ctx,
+    Path(id): Path<u32>,
+    Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let s = &l.shared;
+    let token = q.get("t").and_then(|t| s.tokens.lock().get(t).copied());
+    let refused = match token {
+        Some((file, _)) if file != id => Some("badToken"),
+        Some((_, until)) if Instant::now() >= until => Some("expired"),
+        Some(_) => None,
+        None => Some("badToken"),
+    };
+    if let Some(why) = refused {
+        l.note_request();
+        let resp = status(StatusCode::FORBIDDEN, s, why);
+        l.log(id, parse_range(&headers), resp.status().as_u16(), "edge");
+        return resp;
+    }
+    serve_file(&l, id, &headers, "edge").await
+}
+
+async fn serve_file(
+    l: &Arc<Listener>,
+    id: u32,
+    headers: &HeaderMap,
+    route: &'static str,
+) -> Response {
+    l.note_request();
+    let s = &l.shared;
     let Some(spec) = s.files.lock().get(&id).copied() else {
         return (StatusCode::NOT_FOUND, "no such file").into_response();
     };
-    let tag = etag(id, spec.size);
-    let range = parse_range(&headers);
-    let resp = answer(&s, id, spec, &tag, &headers, range).await;
-    s.log.lock().push(Logged {
-        file: id,
-        range,
-        status: resp.status().as_u16(),
-    });
+    let range = parse_range(headers);
+    let resp = answer(s, id, spec, headers, range).await;
+    l.log(id, range, resp.status().as_u16(), route);
     resp
 }
 
@@ -347,7 +810,6 @@ async fn answer(
     s: &Arc<Shared>,
     id: u32,
     spec: Spec,
-    tag: &str,
     headers: &HeaderMap,
     range: Option<(u64, Option<u64>)>,
 ) -> Response {
@@ -356,9 +818,17 @@ async fn answer(
         gate.held.notify_one();
         gate.release.notified().await;
     }
-    let same = headers
-        .get(header::IF_RANGE)
-        .is_none_or(|v| v.to_str().is_ok_and(|v| v.trim() == tag));
+    let variant = s.variant(id);
+    let validators = *s.validators.lock();
+    let tag = etag(id, spec.size, variant);
+    let modified = last_modified(id, spec.size, variant);
+    let same = validators == Validators::None
+        || headers.get(header::IF_RANGE).is_none_or(|v| {
+            v.to_str().is_ok_and(|v| {
+                let v = v.trim();
+                (validators.etag() && v == tag) || (validators.last_modified() && v == modified)
+            })
+        });
     let (start, last) = match range {
         Some((a, _)) if same && a >= spec.size => {
             let mut r = status(StatusCode::RANGE_NOT_SATISFIABLE, s, "unsatisfiable");
@@ -398,10 +868,7 @@ async fn answer(
         }
     }
 
-    if s.outage_until
-        .lock()
-        .is_some_and(|until| Instant::now() < until)
-    {
+    if s.outage() {
         return status(StatusCode::SERVICE_UNAVAILABLE, s, "unavailable");
     }
     let faults = *s.faults.lock();
@@ -426,12 +893,16 @@ async fn answer(
     }
     let body = Body {
         file: id,
+        variant,
+        total: spec.size,
         pos: start,
         end: last + 1,
         kbps: spec.kbps,
         stall_at,
         drop_at,
         cut: cut.filter(|_| start == 0),
+        line: s.line.clone(),
+        kill: slot.body.kill.clone(),
         began: Instant::now(),
         sent: 0,
         _slot: slot,
@@ -447,7 +918,15 @@ async fn answer(
         StatusCode::OK
     };
     let h = r.headers_mut();
-    h.insert(header::ETAG, HeaderValue::from_str(tag).unwrap());
+    if validators.etag() {
+        h.insert(header::ETAG, HeaderValue::from_str(&tag).unwrap());
+    }
+    if validators.last_modified() {
+        h.insert(
+            header::LAST_MODIFIED,
+            HeaderValue::from_str(&modified).unwrap(),
+        );
+    }
     h.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
     h.insert(header::CONTENT_LENGTH, HeaderValue::from(len));
     if partial {
@@ -459,33 +938,47 @@ async fn answer(
     r
 }
 
-/// One open body: counts against the limit until dropped (plus the lag).
+/// One open body: counts against the limit until dropped (plus the lag) or
+/// kicked.
 struct Slot {
-    open: Arc<AtomicUsize>,
+    shared: Arc<Shared>,
+    id: u64,
+    body: Arc<OpenBody>,
     lag: Duration,
 }
 
 impl Slot {
-    fn take(s: &Shared) -> Option<Slot> {
+    /// A slot under the limit, kicking the oldest open body first when the
+    /// panel kicks. Slots are only ever taken under the `bodies` lock, so
+    /// the count never overshoots the limit; they are given back without it.
+    fn take(s: &Arc<Shared>) -> Option<Slot> {
+        let mut bodies = s.bodies.lock();
         let max = s.enforced.load(Ordering::SeqCst);
-        // A compare-exchange loop: newer Rust deprecates fetch_update, and its
-        // replacement try_update is missing in the MSRV.
-        let mut taken = s.open.load(Ordering::SeqCst);
-        loop {
-            if max != 0 && taken >= max {
-                return None;
-            }
-            match s
-                .open
-                .compare_exchange_weak(taken, taken + 1, Ordering::SeqCst, Ordering::SeqCst)
-            {
-                Ok(_) => break,
-                Err(now) => taken = now,
+        if max != 0
+            && s.open.load(Ordering::SeqCst) >= max
+            && *s.limit_mode.lock() == LimitMode::KickOldest
+        {
+            if let Some((_, oldest)) = bodies.pop_first() {
+                oldest.release(&s.open);
+                oldest.kill.cancel();
+                s.count("kicked");
             }
         }
-        s.peak.fetch_max(taken + 1, Ordering::SeqCst);
+        if max != 0 && s.open.load(Ordering::SeqCst) >= max {
+            return None;
+        }
+        let before = s.open.fetch_add(1, Ordering::SeqCst);
+        s.peak.fetch_max(before + 1, Ordering::SeqCst);
+        let id = s.next_body.fetch_add(1, Ordering::SeqCst);
+        let body = Arc::new(OpenBody {
+            kill: s.shutdown.child_token(),
+            released: AtomicBool::new(false),
+        });
+        bodies.insert(id, Arc::clone(&body));
         Some(Slot {
-            open: Arc::clone(&s.open),
+            shared: Arc::clone(s),
+            id,
+            body,
             lag: Duration::from_millis(s.lag_ms.load(Ordering::SeqCst)),
         })
     }
@@ -493,21 +986,27 @@ impl Slot {
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        let open = Arc::clone(&self.open);
+        self.shared.bodies.lock().remove(&self.id);
+        if self.body.released.load(Ordering::SeqCst) {
+            // Kicked: the panel let go of it already.
+            return;
+        }
         if self.lag.is_zero() {
-            open.fetch_sub(1, Ordering::SeqCst);
+            self.body.release(&self.shared.open);
             return;
         }
         let lag = self.lag;
+        let body = Arc::clone(&self.body);
+        let open = Arc::clone(&self.shared.open);
         match tokio::runtime::Handle::try_current() {
             Ok(h) => {
                 h.spawn(async move {
                     tokio::time::sleep(lag).await;
-                    open.fetch_sub(1, Ordering::SeqCst);
+                    body.release(&open);
                 });
             }
             Err(_) => {
-                open.fetch_sub(1, Ordering::SeqCst);
+                body.release(&open);
             }
         }
     }
@@ -515,12 +1014,17 @@ impl Drop for Slot {
 
 struct Body {
     file: u32,
+    variant: Variant,
+    total: u64,
     pos: u64,
     end: u64,
     kbps: u64,
     stall_at: Option<u64>,
     drop_at: Option<u64>,
     cut: Option<Arc<Cut>>,
+    line: Option<Line>,
+    /// Kick-oldest or the panel going away.
+    kill: CancellationToken,
     began: Instant,
     sent: u64,
     _slot: Slot,
@@ -531,6 +1035,23 @@ impl Body {
         if self.pos >= self.end {
             return None;
         }
+        let kill = self.kill.clone();
+        let step = tokio::select! {
+            biased;
+            () = kill.cancelled() => None,
+            step = self.step() => Some(step),
+        };
+        match step {
+            Some(step) => step,
+            None => {
+                // The panel closed the connection under it.
+                self.pos = self.end;
+                Some(Err(std::io::Error::other("panel: connection closed")))
+            }
+        }
+    }
+
+    async fn step(&mut self) -> Option<std::io::Result<Bytes>> {
         let rate = self.kbps * 1024;
         let mut n = if rate == 0 {
             64 * 1024
@@ -572,7 +1093,10 @@ impl Body {
             let due = self.began + Duration::from_secs_f64((self.sent + n) as f64 / rate as f64);
             tokio::time::sleep_until(due.into()).await;
         }
-        let bytes = content(self.file, self.pos, n as usize);
+        if let Some(line) = &self.line {
+            line.pass(n).await;
+        }
+        let bytes = variant_content(self.file, self.variant, self.total, self.pos, n as usize);
         self.pos += n;
         self.sent += n;
         Some(Ok(Bytes::from(bytes)))

@@ -182,8 +182,12 @@ export function guideDataStart(viewAt: number): number {
 export function guideDataLength(viewportMs: number): number {
   return Math.max(GRID_DATA_LENGTH, Math.ceil(viewportMs / GRID_DATA_STEP) * GRID_DATA_STEP + 2 * GRID_DATA_BEFORE + GRID_DATA_STEP);
 }
-/** Channel column of a phone-width guide: the logo and number only, so the track gets the room. */
-export const GRID_CHANNEL_COMPACT = 72;
+/**
+ * Channel column of a phone-width guide: the logo (else the name, two lines) over the number, so
+ * the track gets the room. 88 px fits about ten capitals a line ("SPORTSNET", "CHANNEL ᵁᴴᴰ"); at
+ * 72 the provider's long words broke mid-word or lost their last letters.
+ */
+export const GRID_CHANNEL_COMPACT = 88;
 
 /**
  * Half the now pill's width in the ruler ("12:42 PM" at the 125 % UI scale) with a margin, in px:

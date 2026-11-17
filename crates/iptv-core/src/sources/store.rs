@@ -419,6 +419,18 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
         "DELETE FROM app_state WHERE key = 'm3u_staged:' || ?1",
         [id],
     )?;
+    // downloads: the learned connection limit.
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'dl_conn_limit:' || ?1",
+        [id],
+    )?;
+    // downloads: fingerprints and mirror verdicts of the source's copies.
+    // A prefix compare, not LIKE: ids may hold `_` or `%`.
+    tx.execute(
+        "DELETE FROM app_state \
+         WHERE substr(key, 1, length('dl_mirror:' || ?1 || ':')) = 'dl_mirror:' || ?1 || ':'",
+        [id],
+    )?;
     tx.commit()?;
     Ok(())
 }

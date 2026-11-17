@@ -28,6 +28,9 @@ pub const COMMANDS: &[&str] = &[
     "downloads.setRateLimit",
     "myvideos.list",
     "myvideos.playSource",
+    "downloads.stats",
+    "downloads.connectionLimits",
+    "downloads.resetConnectionLimit",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +101,12 @@ pub struct SetRateLimitArgs {
     pub id: i64,
     /// null/missing inherits the global default; zero is unlimited.
     pub bytes_per_second: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceIdArgs {
+    pub source_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -197,6 +206,23 @@ pub fn register(r: &mut RpcRouter) {
     r.add("myvideos.playSource", |s: S, a: IdArgs| async move {
         Ok::<_, RpcError>(super::play_source(&s, a.id).await?)
     });
+    r.add("downloads.stats", |s: S, a: IdArgs| async move {
+        Ok::<_, RpcError>(super::transfer_stats(&s, a.id))
+    });
+    r.add("downloads.connectionLimits", |s: S, _: ()| async move {
+        Ok::<_, RpcError>(super::probe::list(&s).await?)
+    });
+    r.add(
+        "downloads.resetConnectionLimit",
+        |s: S, a: SourceIdArgs| async move {
+            let source = a.source_id.trim();
+            if source.is_empty() {
+                return Err(RpcError::invalid("sourceId must not be empty"));
+            }
+            super::probe::reset(&s, source).await?;
+            Ok(())
+        },
+    );
 }
 
 #[cfg(test)]

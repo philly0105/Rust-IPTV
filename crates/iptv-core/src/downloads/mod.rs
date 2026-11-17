@@ -11,17 +11,25 @@
 //! - [`naming`]: Windows-safe names, atomic numbered `.part` reservation,
 //!   finalize without overwrite.
 //! - [`store`]: SQL for the `downloads` table.
+//! - [`shared`]: sample windows, `app_state` record keys, and
+//!   [`shared::resolve`] (the stream URL of any copy of a title).
+//! - [`mirrors`]: identical copies on other sources.
+//! - [`probe`]: connection limits learned by probing a panel.
 
 pub mod manager;
+pub mod mirrors;
 pub mod naming;
+pub mod probe;
 pub mod rpc;
 pub mod segments;
+pub mod shared;
 pub mod store;
 pub mod transfer;
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
     ContentType, Download, DownloadStatus, ItemRef, PlayerKind, PlayerSource, RequestHeaders,
+    SourceConnectionLimit, TransferStats,
 };
 use crate::state::AppState;
 use manager::{StopReason, Stopped};
@@ -163,6 +171,56 @@ pub fn fail_next_claims(state: &AppState, failures: u32, retry: std::time::Durat
     manager::manager(state).fail_next_claims(failures, retry);
 }
 
+/// Sets how split transfers ramp: how long an added connection has to
+/// raise the speed (`gain_window`, 1 s otherwise) and when the slowest one
+/// is replaced (`recycle_after`, 10 s otherwise). Test hook; not a C4
+/// command.
+pub fn set_ramp_timing(
+    state: &AppState,
+    gain_window: std::time::Duration,
+    recycle_after: std::time::Duration,
+) {
+    manager::manager(state).set_ramp_timing(gain_window, recycle_after);
+}
+
+/// Sets how connection-limit probes pace themselves: how long each extra
+/// connection is held (`step`, 3 s otherwise) and when a learned limit is
+/// tested again (`retest_after`, 7 days otherwise). Test hook; not a C4
+/// command.
+pub fn set_probe_timing(
+    state: &AppState,
+    step: std::time::Duration,
+    retest_after: std::time::Duration,
+) {
+    manager::manager(state).set_probe_timing(step, retest_after);
+}
+
+/// Moves `source_id`'s probe record `by` into the past, so a probe can be
+/// due again. Test hook; not a C4 command.
+pub async fn age_connection_limit(
+    state: &Arc<AppState>,
+    source_id: &str,
+    by: std::time::Duration,
+) -> CoreResult<()> {
+    probe::age(state, source_id, by).await
+}
+
+/// Every source's connection limit as downloads see it (what
+/// `downloads.connectionLimits` answers).
+pub async fn connection_limits(state: &Arc<AppState>) -> CoreResult<Vec<SourceConnectionLimit>> {
+    probe::list(state).await
+}
+
+/// The latest breakdown of running download `id` (what `downloads.stats`
+/// answers).
+pub fn transfer_stats(state: &AppState, id: i64) -> Option<TransferStats> {
+    manager::manager(state).transfer_stats(id)
+}
+
+/// Makes DNS lookups of a host answer fixed addresses. Test hook; not a C4
+/// command.
+pub use crate::http::set_dns_override;
+
 /// Public view of a row: live byte count for running transfers and derived
 /// `fileAvailable`.
 fn present(state: &AppState, mut d: Download) -> Download {
@@ -174,6 +232,9 @@ fn present(state: &AppState, mut d: Download) -> Download {
         d.waiting = m.waiting(d.id);
     }
     d.connections = m.connections(d.id);
+    d.sources = m.sources_in_use(d.id);
+    d.served_by = m.served_by(d.id);
+    d.stats = m.transfer_stats(d.id);
     store::derive_availability(&mut d);
     d
 }
@@ -203,6 +264,9 @@ async fn present_all(
             d.waiting = m.waiting(d.id);
         }
         d.connections = m.connections(d.id);
+        d.sources = m.sources_in_use(d.id);
+        d.served_by = m.served_by(d.id);
+        d.stats = m.transfer_stats(d.id);
     }
     Ok(list)
 }

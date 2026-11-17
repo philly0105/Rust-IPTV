@@ -12,10 +12,14 @@
 //! yields: it stops like a pause, keeps its `.part`, and waits at the front
 //! of the queue until the connection is free again.
 
+use super::shared::Endpoint;
 use super::store;
 use super::transfer::{self, Outcome};
 use crate::error::{CoreError, CoreResult};
-use crate::model::{DownloadStatus, DownloadWait, WaitReason};
+use crate::model::{
+    CopyRef, DownloadStatus, DownloadWait, LimitKind, Limiting, TransferNote, TransferStats,
+    WaitReason,
+};
 use crate::state::AppState;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -91,9 +95,28 @@ pub struct TaskCtl {
     /// Source the transfer downloads from.
     pub source: String,
     /// Connections the transfer holds open (more than one while it
-    /// downloads in segments).
+    /// downloads in segments): the sum of [`TaskCtl::holdings`].
     pub(crate) connections: AtomicUsize,
+    /// The row's own source (`item_ref.source_id`); differs from `source`
+    /// only when the queue spread the row to another copy.
+    pub row_source: String,
+    /// The copy this run downloads; `None` is the row's own ref and episode.
+    pub copy: Option<CopyRef>,
+    /// Connections held per source, the authority (`source`) first.
+    holdings: Mutex<Vec<(String, usize)>>,
+    /// Streams that ended early (error or EOF, not the engine's own cut),
+    /// per source.
+    drops: Mutex<Vec<(String, u64)>>,
+    /// Status lines for [`TransferStats::notes`], oldest first.
+    notes: Mutex<VecDeque<(Instant, TransferNote)>>,
+    /// The latest breakdown the transfer published.
+    stats: Mutex<Option<TransferStats>>,
 }
+
+/// How long a [`TransferNote`] stays in [`TaskCtl::recent_notes`].
+const NOTE_TTL: Duration = Duration::from_secs(60);
+/// Most notes [`TaskCtl::recent_notes`] returns.
+const MAX_NOTES: usize = 5;
 
 impl TaskCtl {
     fn new(seq: u64, source: String) -> Self {
@@ -104,9 +127,106 @@ impl TaskCtl {
             rate_limit: AtomicU64::new(u64::MAX),
             done: tokio::sync::watch::channel(false).0,
             seq,
+            row_source: source.clone(),
+            copy: None,
+            holdings: Mutex::new(vec![(source.clone(), 1)]),
+            drops: Mutex::new(Vec::new()),
+            notes: Mutex::new(VecDeque::new()),
+            stats: Mutex::new(None),
             source,
             connections: AtomicUsize::new(1),
         }
+    }
+
+    /// A control block no runtime tracks. Tests only.
+    #[doc(hidden)]
+    pub fn detached(source: &str) -> Arc<TaskCtl> {
+        Arc::new(Self::new(0, source.to_string()))
+    }
+
+    /// Records that the transfer holds `n` connections on `source` and
+    /// updates `connections` to the sum over all sources. True when the sum
+    /// went down: the caller then calls [`DownloadManager::released`].
+    pub fn set_held(&self, source: &str, n: usize) -> bool {
+        let mut holdings = self.holdings.lock();
+        match holdings.iter_mut().find(|(s, _)| s == source) {
+            Some(entry) => entry.1 = n,
+            None if n > 0 => holdings.push((source.to_string(), n)),
+            None => {}
+        }
+        holdings.retain(|(s, n)| *n > 0 || *s == self.source);
+        let sum = holdings.iter().map(|(_, n)| n).sum();
+        let before = self.connections.swap(sum, Ordering::Relaxed);
+        sum < before
+    }
+
+    /// Connections held on `source`.
+    pub fn held(&self, source: &str) -> usize {
+        self.holdings
+            .lock()
+            .iter()
+            .find(|(s, _)| s == source)
+            .map_or(0, |(_, n)| *n)
+    }
+
+    /// Connections held per source, the authority first.
+    pub fn holdings(&self) -> Vec<(String, usize)> {
+        self.holdings.lock().clone()
+    }
+
+    /// A stream on `source` ended early, by error or EOF (not by the
+    /// engine's own cut).
+    pub fn note_drop(&self, source: &str) {
+        let mut drops = self.drops.lock();
+        match drops.iter_mut().find(|(s, _)| s == source) {
+            Some(entry) => entry.1 += 1,
+            None => drops.push((source.to_string(), 1)),
+        }
+    }
+
+    /// Streams on `source` that ended early so far.
+    pub fn drops(&self, source: &str) -> u64 {
+        self.drops
+            .lock()
+            .iter()
+            .find(|(s, _)| s == source)
+            .map_or(0, |(_, n)| *n)
+    }
+
+    /// Adds a status line for the transfer's breakdown.
+    pub fn push_note(&self, note: TransferNote) {
+        let now = Instant::now();
+        let mut notes = self.notes.lock();
+        notes.push_back((now, note));
+        while notes
+            .front()
+            .is_some_and(|(at, _)| now.duration_since(*at) > NOTE_TTL)
+            || notes.len() > MAX_NOTES
+        {
+            notes.pop_front();
+        }
+    }
+
+    /// Status lines of the last minute, oldest first, at most five.
+    pub fn recent_notes(&self) -> Vec<TransferNote> {
+        let now = Instant::now();
+        let notes = self.notes.lock();
+        let fresh: Vec<TransferNote> = notes
+            .iter()
+            .filter(|(at, _)| now.duration_since(*at) <= NOTE_TTL)
+            .map(|(_, n)| n.clone())
+            .collect();
+        fresh[fresh.len().saturating_sub(MAX_NOTES)..].to_vec()
+    }
+
+    /// Stores the transfer's latest breakdown (`downloads.stats`).
+    pub fn publish_stats(&self, s: TransferStats) {
+        *self.stats.lock() = Some(s);
+    }
+
+    /// The transfer's latest breakdown, once it published one.
+    pub fn stats(&self) -> Option<TransferStats> {
+        self.stats.lock().clone()
     }
 
     fn connections(&self) -> usize {
@@ -242,6 +362,16 @@ pub fn download_budget(limit: Option<i64>, playing: usize, recording: usize) -> 
             (limit - kept).min(limit.saturating_sub(playing + recording))
         }
     }
+}
+
+/// [`download_budget`] for a source whose probe learned a limit above the
+/// reported one: everything playback and recordings leave, with no
+/// connection kept free (yield hands playback its connection back). Not
+/// wired into the runtime yet.
+pub fn learned_download_budget(learned: i64, playing: usize, recording: usize) -> usize {
+    usize::try_from(learned)
+        .unwrap_or(0)
+        .saturating_sub(playing + recording)
 }
 
 impl Inner {
@@ -411,6 +541,74 @@ pub struct DownloadManager {
     /// Extra time every sidecar save of a split file takes, in
     /// milliseconds: a slow disk's sync. Tests only.
     slow_sync_ms: AtomicU64,
+    /// How a split transfer adds and recycles connections.
+    ramp_timing: Mutex<RampTiming>,
+    /// How connection-limit probes pace themselves.
+    probe_timing: Mutex<ProbeTiming>,
+}
+
+/// How a transfer ramps its connections up ([`DownloadManager::ramp_timing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RampTiming {
+    /// How long an added connection has to raise the total speed.
+    pub gain_window: Duration,
+    /// Age after which the slowest connection is replaced.
+    pub recycle_after: Duration,
+}
+
+impl Default for RampTiming {
+    fn default() -> Self {
+        Self {
+            gain_window: Duration::from_secs(1),
+            recycle_after: Duration::from_secs(10),
+        }
+    }
+}
+
+/// How connection-limit probes pace themselves
+/// ([`DownloadManager::probe_timing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProbeTiming {
+    /// How long each extra connection is held before the next one.
+    pub step: Duration,
+    /// How long a learned limit stands before the source is probed again.
+    pub retest_after: Duration,
+}
+
+impl Default for ProbeTiming {
+    fn default() -> Self {
+        Self {
+            step: Duration::from_secs(3),
+            retest_after: Duration::from_secs(7 * 24 * 3600),
+        }
+    }
+}
+
+/// Why a connection is held outside any transfer's plan
+/// ([`DownloadManager::try_hold`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HoldPurpose {
+    /// Reading a copy's sample windows.
+    Fingerprint,
+    /// Comparing a candidate mirror with a fingerprint.
+    Verify,
+}
+
+/// One connection of `source` held outside any transfer's plan. Dropping it
+/// gives the connection back and pumps the queue.
+pub struct ConnHold {
+    pub source: String,
+    pub purpose: HoldPurpose,
+    state: Option<Weak<AppState>>,
+}
+
+impl Drop for ConnHold {
+    fn drop(&mut self) {
+        if let Some(state) = self.state.as_ref().and_then(Weak::upgrade) {
+            let mgr = manager(&state);
+            pump_if_running(&state, &mgr);
+        }
+    }
 }
 
 /// What a stop request found.
@@ -564,6 +762,103 @@ impl DownloadManager {
         };
         let others = inner.used(source).saturating_sub(ctl.connections());
         budget.saturating_sub(others).max(1)
+    }
+
+    /// Connections `ctl` may hold on `source` now, counting the ones it
+    /// already holds there. On its own source this is
+    /// [`connection_allowance`](Self::connection_allowance); mirrors get
+    /// none yet.
+    pub fn allowance_on(&self, ctl: &TaskCtl, source: &str) -> usize {
+        if source == ctl.source {
+            self.connection_allowance(ctl)
+        } else {
+            0
+        }
+    }
+
+    /// A short hold on one connection of `source` outside any transfer's
+    /// plan (fingerprints, verification). `None` when the source has no
+    /// spare connection; for now every request gets one.
+    pub fn try_hold(&self, source: &str, purpose: HoldPurpose) -> Option<ConnHold> {
+        Some(ConnHold {
+            source: source.to_string(),
+            purpose,
+            state: self.state.get().cloned(),
+        })
+    }
+
+    /// A mirror connection to `source` was refused. Mirrors are not used
+    /// yet, so nothing changes.
+    pub fn mirror_refused(&self, _source: &str) {}
+
+    /// The runtime's reason `ctl` may not hold more connections on `source`
+    /// (playback, other downloads, the account limit, a refusal). None yet.
+    pub fn limit_reason(&self, _ctl: &TaskCtl, _source: &str) -> Option<Limiting> {
+        None
+    }
+
+    /// `source`'s connection limit for the transfer breakdown: the
+    /// account's reported limit, once known.
+    pub fn effective_limit(&self, source: &str) -> (Option<i64>, LimitKind) {
+        match self.inner.lock().limits.get(source) {
+            Some(Limit::Known(Some(limit))) => (Some(*limit), LimitKind::Reported),
+            _ => (None, LimitKind::Unknown),
+        }
+    }
+
+    /// An endpoint resolved ahead for row `id`. None yet.
+    pub fn take_preresolved(&self, _id: i64) -> Option<Endpoint> {
+        None
+    }
+
+    fn active(&self, id: i64) -> Option<Arc<TaskCtl>> {
+        self.inner.lock().active.get(&id).cloned()
+    }
+
+    /// The latest breakdown of running transfer `id`.
+    pub fn transfer_stats(&self, id: i64) -> Option<TransferStats> {
+        self.active(id)?.stats()
+    }
+
+    /// Sources running transfer `id` draws on, when more than one.
+    pub fn sources_in_use(&self, id: i64) -> Option<usize> {
+        let n = self
+            .active(id)?
+            .holdings()
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .count();
+        (n > 1).then_some(n)
+    }
+
+    /// The source running transfer `id` downloads from, when it is not the
+    /// row's own.
+    pub fn served_by(&self, id: i64) -> Option<String> {
+        let ctl = self.active(id)?;
+        (ctl.source != ctl.row_source).then(|| ctl.source.clone())
+    }
+
+    /// How split transfers ramp their connections.
+    pub fn ramp_timing(&self) -> RampTiming {
+        *self.ramp_timing.lock()
+    }
+
+    /// Overrides [`RampTiming`]. Used by tests.
+    pub fn set_ramp_timing(&self, gain_window: Duration, recycle_after: Duration) {
+        *self.ramp_timing.lock() = RampTiming {
+            gain_window,
+            recycle_after,
+        };
+    }
+
+    /// How connection-limit probes pace themselves.
+    pub fn probe_timing(&self) -> ProbeTiming {
+        *self.probe_timing.lock()
+    }
+
+    /// Overrides [`ProbeTiming`]. Used by tests.
+    pub fn set_probe_timing(&self, step: Duration, retest_after: Duration) {
+        *self.probe_timing.lock() = ProbeTiming { step, retest_after };
     }
 
     /// A split transfer gave a connection back: a queued download of its
@@ -1447,5 +1742,150 @@ mod tests {
         assert_eq!(ctl.rate_limit(1024), None);
         ctl.set_rate_limit(None);
         assert_eq!(ctl.rate_limit(1024), Some(1024));
+    }
+
+    #[test]
+    fn holdings_sum_into_connections() {
+        let ctl = TaskCtl::detached("a");
+        assert_eq!(ctl.row_source, "a");
+        assert!(ctl.copy.is_none());
+        assert_eq!(ctl.holdings(), vec![("a".to_string(), 1)]);
+        assert_eq!(ctl.connections(), 1);
+        assert!(!ctl.set_held("a", 3));
+        assert!(!ctl.set_held("b", 2));
+        assert_eq!(ctl.connections(), 5);
+        assert_eq!((ctl.held("a"), ctl.held("b"), ctl.held("c")), (3, 2, 0));
+        assert!(ctl.set_held("b", 0), "a smaller sum asks for a pump");
+        assert_eq!(ctl.holdings(), vec![("a".to_string(), 3)]);
+        // The authority keeps its place even at zero.
+        assert!(ctl.set_held("a", 0));
+        assert!(!ctl.set_held("c", 1));
+        assert_eq!(
+            ctl.holdings(),
+            vec![("a".to_string(), 0), ("c".to_string(), 1)]
+        );
+        assert_eq!(ctl.connections(), 1);
+        assert!(!ctl.set_held("zz", 0));
+        assert_eq!(ctl.holdings().len(), 2);
+    }
+
+    #[test]
+    fn drops_count_per_source() {
+        let ctl = TaskCtl::detached("a");
+        assert_eq!(ctl.drops("a"), 0);
+        ctl.note_drop("a");
+        ctl.note_drop("b");
+        ctl.note_drop("a");
+        assert_eq!((ctl.drops("a"), ctl.drops("b")), (2, 1));
+    }
+
+    #[test]
+    fn recent_notes_keep_the_last_five() {
+        let ctl = TaskCtl::detached("a");
+        assert!(ctl.recent_notes().is_empty());
+        for limit in 1..=7 {
+            ctl.push_note(TransferNote::ProbeAccepted {
+                source_id: "a".into(),
+                limit,
+            });
+        }
+        let limits: Vec<i64> = ctl
+            .recent_notes()
+            .into_iter()
+            .map(|n| match n {
+                TransferNote::ProbeAccepted { limit, .. } => limit,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(limits, vec![3, 4, 5, 6, 7]);
+        // A note older than a minute is gone.
+        ctl.notes.lock().front_mut().unwrap().0 -= NOTE_TTL + Duration::from_secs(1);
+        assert_eq!(ctl.recent_notes().len(), 4);
+    }
+
+    #[test]
+    fn stats_are_published_per_running_transfer() {
+        let mgr = DownloadManager::default();
+        assert_eq!(mgr.transfer_stats(1), None);
+        let ctl = TaskCtl::detached("a");
+        mgr.inner.lock().active.insert(1, ctl.clone());
+        assert_eq!(mgr.transfer_stats(1), None);
+        let stats = TransferStats {
+            id: 1,
+            bytes_per_second: 10,
+            connections: vec![],
+            sources: vec![],
+            limiting: None,
+            notes: vec![],
+        };
+        ctl.publish_stats(stats.clone());
+        assert_eq!(ctl.stats(), Some(stats.clone()));
+        assert_eq!(mgr.transfer_stats(1), Some(stats));
+        assert_eq!(mgr.sources_in_use(1), None);
+        ctl.set_held("b", 1);
+        assert_eq!(mgr.sources_in_use(1), Some(2));
+        assert_eq!(mgr.served_by(1), None);
+        let mut spread = TaskCtl::new(1, "b".into());
+        spread.row_source = "a".into();
+        mgr.inner.lock().active.insert(2, Arc::new(spread));
+        assert_eq!(mgr.served_by(2).as_deref(), Some("b"));
+        assert_eq!(mgr.sources_in_use(9), None);
+        assert_eq!(mgr.served_by(9), None);
+    }
+
+    #[test]
+    fn stubs_keep_todays_behaviour() {
+        let mgr = DownloadManager::default();
+        let ctl = TaskCtl::detached("a");
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 0);
+        assert_eq!(mgr.allowance_on(&ctl, "a"), mgr.connection_allowance(&ctl));
+        assert_eq!(mgr.limit_reason(&ctl, "a"), None);
+        assert!(mgr.take_preresolved(1).is_none());
+        mgr.mirror_refused("a");
+        let hold = mgr.try_hold("a", HoldPurpose::Verify).unwrap();
+        assert_eq!(
+            (hold.source.as_str(), hold.purpose),
+            ("a", HoldPurpose::Verify)
+        );
+        drop(hold);
+        assert_eq!(mgr.effective_limit("a"), (None, LimitKind::Unknown));
+        mgr.inner
+            .lock()
+            .limits
+            .insert("a".into(), Limit::Known(Some(2)));
+        mgr.inner.lock().limits.insert("b".into(), Limit::Loading);
+        assert_eq!(mgr.effective_limit("a"), (Some(2), LimitKind::Reported));
+        assert_eq!(mgr.effective_limit("b"), (None, LimitKind::Unknown));
+    }
+
+    #[test]
+    fn timings_default_and_override() {
+        let mgr = DownloadManager::default();
+        assert_eq!(
+            mgr.ramp_timing(),
+            RampTiming {
+                gain_window: Duration::from_secs(1),
+                recycle_after: Duration::from_secs(10),
+            }
+        );
+        assert_eq!(mgr.probe_timing().step, Duration::from_secs(3));
+        assert_eq!(
+            mgr.probe_timing().retest_after,
+            Duration::from_secs(7 * 24 * 3600)
+        );
+        mgr.set_ramp_timing(Duration::from_millis(50), Duration::from_millis(500));
+        mgr.set_probe_timing(Duration::from_millis(20), Duration::from_secs(1));
+        assert_eq!(mgr.ramp_timing().recycle_after, Duration::from_millis(500));
+        assert_eq!(mgr.probe_timing().step, Duration::from_millis(20));
+    }
+
+    #[test]
+    fn learned_budget_keeps_no_connection_free() {
+        assert_eq!(learned_download_budget(3, 0, 0), 3);
+        assert_eq!(learned_download_budget(3, 1, 1), 1);
+        assert_eq!(learned_download_budget(2, 3, 0), 0);
+        assert_eq!(learned_download_budget(-1, 0, 0), 0);
+        // The reported rule keeps one free on the same account.
+        assert_eq!(download_budget(Some(3), 0, 0), 2);
     }
 }

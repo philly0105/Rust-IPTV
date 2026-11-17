@@ -1201,9 +1201,141 @@ fn size_text(bytes: usize) -> String {
     }
 }
 
+/// Extension key of the DNS answers tests pin ([`set_dns_override`]).
+const DNS_OVERRIDE_EXT: &str = "http.dns_override";
+/// Extension key of the clients [`pinned_client`] built.
+const PINNED_CLIENTS_EXT: &str = "http.pinned";
+/// Most clients [`pinned_client`] keeps.
+const MAX_PINNED_CLIENTS: usize = 16;
+
+#[derive(Default)]
+struct DnsOverride(Mutex<HashMap<String, Vec<SocketAddr>>>);
+
+#[derive(Default)]
+struct PinnedClients(Mutex<HashMap<(String, SocketAddr), reqwest::Client>>);
+
+/// Makes [`host_addresses`] answer `addrs` for `host` (any port) instead of
+/// asking DNS. An empty list removes the override. Tests only.
+pub fn set_dns_override(state: &AppState, host: &str, addrs: Vec<SocketAddr>) {
+    let map = state.ext_or_insert_with(DNS_OVERRIDE_EXT, || Arc::new(DnsOverride::default()));
+    let host = normalize_host(host);
+    let mut map = map.0.lock();
+    if addrs.is_empty() {
+        map.remove(&host);
+    } else {
+        map.insert(host, addrs);
+    }
+}
+
+/// The addresses `host:port` resolves to, in DNS order, or the ones
+/// [`set_dns_override`] set (with `port`). Empty when the lookup fails.
+pub async fn host_addresses(state: &AppState, host: &str, port: u16) -> Vec<SocketAddr> {
+    let host = normalize_host(host);
+    if let Some(map) = state.ext::<DnsOverride>(DNS_OVERRIDE_EXT) {
+        if let Some(addrs) = map.0.lock().get(&host) {
+            return addrs
+                .iter()
+                .map(|a| SocketAddr::new(a.ip(), port))
+                .collect();
+        }
+    }
+    let found = match tokio::net::lookup_host((host.as_str(), port)).await {
+        Ok(addrs) => addrs.collect(),
+        Err(err) => {
+            tracing::debug!(%err, "host lookup failed");
+            Vec::new()
+        }
+    };
+    found
+}
+
+/// A desktop client like `state.http` (same User-Agent, timeouts and
+/// redirect policy) that connects to `addr` for `host`, so the TLS name stays
+/// the host. `None` in server mode, where the guarded resolver must see
+/// every connection. Built once per `(host, addr)`; at most
+/// [`MAX_PINNED_CLIENTS`] are kept.
+pub fn pinned_client(state: &AppState, host: &str, addr: SocketAddr) -> Option<reqwest::Client> {
+    if is_server_mode(state) {
+        return None;
+    }
+    let host = normalize_host(host);
+    let cache = state.ext_or_insert_with(PINNED_CLIENTS_EXT, || Arc::new(PinnedClients::default()));
+    let mut cache = cache.0.lock();
+    let key = (host, addr);
+    if let Some(client) = cache.get(&key) {
+        return Some(client.clone());
+    }
+    if cache.len() >= MAX_PINNED_CLIENTS {
+        if let Some(old) = cache.keys().next().cloned() {
+            cache.remove(&old);
+        }
+    }
+    let client = build(
+        builder(None)
+            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+            .resolve(&key.0, addr),
+    );
+    cache.insert(key, client.clone());
+    Some(client)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn dns_override_answers_host_addresses() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let a: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let b: SocketAddr = "127.0.0.2:1".parse().unwrap();
+        set_dns_override(&state, "Panel.Example.", vec![a, b]);
+        let got = host_addresses(&state, "panel.example", 8080).await;
+        assert_eq!(
+            got,
+            vec![
+                "127.0.0.1:8080".parse::<SocketAddr>().unwrap(),
+                "127.0.0.2:8080".parse().unwrap()
+            ]
+        );
+        // An IP literal resolves without DNS; an override replaces it.
+        let local = host_addresses(&state, "127.0.0.1", 81).await;
+        assert_eq!(local, vec!["127.0.0.1:81".parse::<SocketAddr>().unwrap()]);
+        set_dns_override(&state, "127.0.0.1", vec![b]);
+        assert_eq!(
+            host_addresses(&state, "127.0.0.1", 81).await,
+            vec!["127.0.0.2:81".parse::<SocketAddr>().unwrap()]
+        );
+        set_dns_override(&state, "127.0.0.1", Vec::new());
+        assert_eq!(host_addresses(&state, "127.0.0.1", 81).await, local);
+    }
+
+    #[tokio::test]
+    async fn pinned_clients_are_cached_and_capped() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let cache = || state.ext::<PinnedClients>(PINNED_CLIENTS_EXT).unwrap();
+        for i in 0..20u16 {
+            let addr = SocketAddr::from(([127, 0, 0, 1], 1000 + i));
+            assert!(pinned_client(&state, "h.example", addr).is_some());
+        }
+        assert_eq!(cache().0.lock().len(), MAX_PINNED_CLIENTS);
+        let addr = SocketAddr::from(([127, 0, 0, 1], 1019));
+        pinned_client(&state, "H.EXAMPLE", addr).unwrap();
+        assert_eq!(cache().0.lock().len(), MAX_PINNED_CLIENTS);
+    }
 
     /// Review round 1: the 401/403 hint fits every source kind, and a 5xx is
     /// `Server` (C12) except 504, which stays a timeout.

@@ -258,7 +258,15 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
             <span className="text-sm font-medium text-fg" aria-hidden>
               {tl('pickerShow')}
             </span>
-            <ScopePicker label={tl('pickerShow')} value={scope} sections={sections} onChange={setScope} className="h-10" testId="add-channels-scope" />
+            <ScopePicker
+              label={tl('pickerShow')}
+              value={scope}
+              sections={sections}
+              onChange={setScope}
+              regionScope={source ? `${source}:live` : undefined}
+              className="h-10"
+              testId="add-channels-scope"
+            />
           </div>
           <SearchInput
             ref={searchRef}
@@ -283,8 +291,10 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
         </p>
       ) : null}
       {/* One height whatever the search finds: a sheet on a phone grows from its top edge, so a
-          box that shrank with the results would carry the search field down under the keyboard. */}
-      <div className="h-[min(26rem,55dvh)] overflow-y-auto" data-testid="add-channels-results">
+          box that shrank with the results would carry the search field down under the keyboard.
+          From sm it takes what the dialog's height cap leaves (realdata-15): a dozen rows of a
+          30,000-channel source on a laptop screen, not seven. */}
+      <div className="h-[min(26rem,55dvh)] overflow-y-auto sm:h-[min(44rem,calc(88dvh-18rem))]" data-testid="add-channels-results">
         {body}
       </div>
       <p className="sr-only" role="status" aria-live="polite">

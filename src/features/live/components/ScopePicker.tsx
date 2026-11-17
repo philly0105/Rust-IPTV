@@ -64,6 +64,11 @@ export interface ScopePickerProps {
    * The trigger's height has to allow two lines (`h-auto`).
    */
   wrapLabel?: boolean;
+  /**
+   * Live TV's region key for these groups (`${sourceId}:live`): with it, a source whose groups carry
+   * country tags gets Live's region select beside the filter, and the two share the pick.
+   */
+  regionScope?: string;
   className?: string;
   testId?: string;
 }
@@ -112,6 +117,7 @@ export function ScopePicker({
   triggerIcon,
   optionIcon = true,
   wrapLabel,
+  regionScope,
   className,
   testId,
 }: ScopePickerProps) {
@@ -143,7 +149,8 @@ export function ScopePicker({
     const below = window.innerHeight - r.bottom - GAP - MARGIN;
     const above = r.top - GAP - MARGIN;
     const up = below < 240 && above > below;
-    const width = Math.min(Math.max(r.width, 256), 352, window.innerWidth - 2 * MARGIN);
+    // A little wider with a region select beside the filter, so the filter keeps room to type.
+    const width = Math.min(Math.max(r.width, regionScope ? 320 : 256), 352, window.innerWidth - 2 * MARGIN);
     const rtl = getComputedStyle(el).direction === 'rtl';
     const left = Math.max(MARGIN, Math.min(rtl ? r.right - width : r.left, window.innerWidth - width - MARGIN));
     const maxHeight = Math.max(160, Math.min(420, up ? above : below));
@@ -284,6 +291,7 @@ export function ScopePicker({
                 filterFrom={filterFrom}
                 listId={listId}
                 maxHeight={place.maxHeight}
+                regionScope={regionScope}
                 onPick={pick}
               />
             </div>,

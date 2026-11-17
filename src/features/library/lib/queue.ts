@@ -1,18 +1,19 @@
 /**
- * Pure queue model for /downloads. The page shows every row that is not
- * completed: transfers in flight (downloading, queued, paused) and rows that
- * need attention (failed, canceled). Completed rows live in My Videos.
+ * Pure queue model for /downloads. The page shows transfers in flight
+ * (downloading, queued, paused), rows that need attention (failed, canceled)
+ * and the latest finished ones, so a download that just finished is still
+ * where the user left it. Every completed row lives in My Videos.
  */
 
 import type { Download, DownloadStatus } from '@/api/types';
 
 export type QueueAction = 'pause' | 'resume' | 'cancel' | 'retry' | 'remove' | 'reveal' | 'next';
-export type QueueSection = 'active' | 'attention';
+export type QueueSection = 'active' | 'attention' | 'finished';
 
-export function sectionOf(status: DownloadStatus): QueueSection | undefined {
+export function sectionOf(status: DownloadStatus): QueueSection {
   if (status === 'downloading' || status === 'queued' || status === 'paused') return 'active';
   if (status === 'failed' || status === 'canceled') return 'attention';
-  return undefined;
+  return 'finished';
 }
 
 function byCreatedAsc(a: Download, b: Download): number {
@@ -23,23 +24,35 @@ function byUpdatedDesc(a: Download, b: Download): number {
   return b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id;
 }
 
+const finishedAt = (d: Download) => d.completedAt ?? d.updatedAt;
+
+function byFinishedDesc(a: Download, b: Download): number {
+  return finishedAt(b).localeCompare(finishedAt(a)) || b.id - a.id;
+}
+
+/** How many finished downloads the page keeps under the queue; My Videos has them all. */
+const FINISHED_SHOWN = 10;
+
 /**
- * Splits the list into the two sections. Active rows keep the order they were
- * added in (each row shows its own status), so pausing or resuming one never
- * moves it out from under the pointer; attention rows show the most recent
- * failure first. Completed rows are dropped.
+ * Splits the list into the three sections. Active rows keep the order they
+ * were added in (each row shows its own status), so pausing or resuming one
+ * never moves it out from under the pointer; attention rows show the most
+ * recent failure first, and finished rows the latest `FINISHED_SHOWN`, newest first.
  */
-export function partitionQueue(downloads: readonly Download[]): { active: Download[]; attention: Download[] } {
+export function partitionQueue(downloads: readonly Download[]): { active: Download[]; attention: Download[]; finished: Download[] } {
   const active: Download[] = [];
   const attention: Download[] = [];
+  const finished: Download[] = [];
   for (const d of downloads) {
     const s = sectionOf(d.status);
     if (s === 'active') active.push(d);
     else if (s === 'attention') attention.push(d);
+    else finished.push(d);
   }
   active.sort(byCreatedAsc);
   attention.sort(byUpdatedDesc);
-  return { active, attention };
+  finished.sort(byFinishedDesc);
+  return { active, attention, finished: finished.slice(0, FINISHED_SHOWN) };
 }
 
 export type QueueRow =
@@ -48,7 +61,7 @@ export type QueueRow =
 
 /** Flattens the sections into one virtualizable row list with section headers. */
 export function buildQueueRows(downloads: readonly Download[]): QueueRow[] {
-  const { active, attention } = partitionQueue(downloads);
+  const { active, attention, finished } = partitionQueue(downloads);
   const rows: QueueRow[] = [];
   const push = (section: QueueSection, list: Download[]) => {
     if (list.length === 0) return;
@@ -57,6 +70,7 @@ export function buildQueueRows(downloads: readonly Download[]): QueueRow[] {
   };
   push('active', active);
   push('attention', attention);
+  push('finished', finished);
   return rows;
 }
 

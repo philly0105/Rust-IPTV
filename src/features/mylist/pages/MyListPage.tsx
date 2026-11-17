@@ -515,6 +515,8 @@ export function MyListPage() {
     <Page width={layout === 'grid' ? 'wide' : 'default'} className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="mylist-page" data-view={layout}>
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
+      {/* The header's purpose line, which a phone's header has no room for. */}
+      {showToolbar && <p className="mb-2 text-body-sm text-fg-muted md:hidden">{t('lead')}</p>}
       {showToolbar && (
         <MyListToolbar
           className="mb-3 shrink-0 border-b border-divider pb-3"

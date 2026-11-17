@@ -3265,8 +3265,9 @@ function ProgramPopover({
               {t('watchChannel')}
             </Button>
           ) : null}
-          {/* guide: K6, the one archive entry point of the programme dialog. */}
-          {canBrowseArchive(channel, kind) ? (
+          {/* guide: K6, the one archive entry point of the programme dialog. Not on a programme that
+              has not aired (walkthrough-10): there is nothing of it to catch up on yet. */}
+          {when !== 'future' && canBrowseArchive(channel, kind) ? (
             <Button size="sm" variant="ghost" icon={<CalendarClock className="size-3.5" />} onClick={() => navigate(archivePath(channel.ref), { state: { from: location.pathname + location.search } })} data-testid="program-browse-archive">
               {t('browseArchive')}
             </Button>

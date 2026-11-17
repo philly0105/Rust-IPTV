@@ -420,7 +420,7 @@ describe('edit save failure', () => {
 });
 
 describe('refresh failures', () => {
-  it('bad credentials point to the settings instead of a blind retry', async () => {
+  it("bad credentials say so once, in the card's words, with Try again on the toast and Check settings on the card (v-setup-02)", async () => {
     rpcMock.handlers['sources.list'] = () => [xtream('x')];
     rpcMock.handlers['sources.refresh'] = () => {
       throw new RpcError('auth', 'xt.example.com answered HTTP 401');
@@ -429,11 +429,10 @@ describe('refresh failures', () => {
     fireEvent.click(await screen.findByTestId('source-refresh'));
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     const toast = useToastStore.getState().toasts[0]!;
-    expect(toast.description).toBe("The server didn't accept the login. The provider turned down the sign-in. Check the username and password.");
-    expect(toast.action?.label).toBe('Check settings');
+    expect(toast.description).toBe('The provider turned down the sign-in. Check the username and password.');
+    expect(toast.action?.label).toBe('Try again');
     act(() => toast.action!.onClick());
-    expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(input(/^Username/).value).toBe('alice');
+    await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(2));
   });
 
   it('a timeout offers Try again, which refreshes once more', async () => {
@@ -445,7 +444,7 @@ describe('refresh failures', () => {
     fireEvent.click(await screen.findByTestId('source-refresh'));
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     const toast = useToastStore.getState().toasts[0]!;
-    expect(toast.description).toContain("The server didn't answer in time.");
+    expect(toast.description).toBe("xt.example.com didn't answer in time. Check that the server is online, then try again.");
     expect(toast.action?.label).toBe('Try again');
     act(() => toast.action!.onClick());
     await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(2));
@@ -500,7 +499,9 @@ describe('refresh failures', () => {
     const toasts = useToastStore.getState().toasts;
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.title).toBe("Couldn't refresh Old provider");
-    expect(toasts[0]!.action?.label).toBe('Check settings');
+    // One sentence, the one the card says, not a summary followed by a hint that repeats it.
+    expect(toasts[0]!.description).toBe("The address wasn't found on the server. Check the URL; the provider may have changed it.");
+    expect(toasts[0]!.action?.label).toBe('Try again');
   });
 
   it('a card refresh that finishes with an error shows its own toast', async () => {

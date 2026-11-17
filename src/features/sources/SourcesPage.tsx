@@ -22,7 +22,7 @@ import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDi
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
 import { RemoveAllDialog } from './components/RemoveAllDialog';
-import { SourceCard, statColumnsOf, type StatKey } from './components/SourceCard';
+import { SourceCard, sourceHost, statColumnsOf, type StatKey } from './components/SourceCard';
 import { ViewPopover } from './components/ViewPopover';
 import { newlyEnabledEpgUrls, refreshGuides, useGuideProgressFeed } from './lib/epgRefresh';
 import { claimImportErrors, importErrorCode, nextStepKey, summaryKey } from './lib/errors';
@@ -45,6 +45,7 @@ import { isRemovalPending, scheduleRemoval, usePendingRemovals } from './lib/pen
 import { beginImport, cancelImport, isRunningPhase, useImportProgressFeed, useImportProgressStore, wasCancelled } from './lib/progress';
 import { formatCount } from './lib/format';
 import { redactText } from './lib/redact';
+import { SOURCE_ERROR_KEYS, classifySourceError } from './lib/sourceError';
 import { dropSourcesFromLists } from './lib/userLists';
 import { applyOrder, moveItem } from './lib/reorder';
 import { useNextFrame } from './lib/useNextFrame';
@@ -57,8 +58,11 @@ const COMPACT_MAX = 2;
 /** How one refresh ended: `failed` includes an import that finished with `lastError`. */
 type RefreshOutcome = 'ok' | 'failed' | 'cancelled';
 
-/** What a failed refresh reports: the error's class, and the core's text when there is one. */
-type ErrLike = { code: RpcErrorCode; message?: string };
+/**
+ * What a failed refresh reports: the error's class, and the core's text when there is one. `stored`:
+ * the code the source itself stored with that text (what its card classifies by).
+ */
+type ErrLike = { code: RpcErrorCode; message?: string; stored?: RpcErrorCode | null };
 
 function SourcesSkeleton() {
   return (
@@ -218,23 +222,30 @@ export function SourcesPage() {
 
   const setCache = (list: Source[]) => queryClient.setQueryData(rpcKey('sources.list'), list);
 
-  /** The toast for one failed refresh: what went wrong, the next step, and the way to fix it. */
+  /**
+   * The toast for one failed refresh: the source card's own sentence for the error (what failed and
+   * what to check, naming the host), and Try again. The card under it keeps Check settings.
+   */
   const refreshFailed = (s: Source, err: ErrLike) => {
-    // Unknown failures keep the core's text: the generic summary would hide the only detail.
-    const what = err.code === 'internal' ? redactText(err.message ?? '') : t(summaryKey(err));
+    // Classified as the card under it classifies the same failure, so both say the same sentence.
+    const info = classifySourceError(err.message ?? '', err.stored === undefined ? err.code : (err.stored ?? undefined));
+    let description: string;
+    if (info.kind !== 'unknown') {
+      description = t(info.kind === 'auth' ? `sourceErrorAuth_${s.kind}` : SOURCE_ERROR_KEYS[info.kind], {
+        host: info.host ?? sourceHost(s) ?? t('sourceErrorHostFallback'),
+      });
+    } else {
+      // Unknown failures keep the core's text: the generic summary would hide the only detail.
+      const what = err.code === 'internal' ? redactText(err.message ?? '') : t(summaryKey(err));
+      description = `${what} ${t(nextStepKey(err, s.kind))}`;
+    }
     toast({
       variant: 'error',
       title: t('refreshFailedTitle', { name: s.name }),
-      description: `${what} ${t(nextStepKey(err, s.kind))}`,
-      // Bad credentials or a wrong address will fail the same way again: send the user to the settings.
-      action:
-        err.code === 'auth' || err.code === 'not_found' || err.code === 'invalid'
-          ? { label: t('checkSettings'), onClick: () => openEdit(latest(s)) }
-          : { label: t('tryAgain'), onClick: () => void refreshOne(s) },
+      description,
+      action: { label: t('tryAgain'), onClick: () => void refreshOne(s) },
     });
   };
-  // The source as the list has it now, with the error this refresh stored, for Check settings.
-  const latest = (s: Source) => queryClient.getQueryData<Source[]>(rpcKey('sources.list'))?.find((x) => x.id === s.id) ?? s;
 
   // The page reports its own refreshes' failures (one toast per Refresh, one summary for Refresh
   // all), so the shell's "didn't import" toast does not repeat them. A run stays claimed a moment
@@ -261,7 +272,7 @@ export function SourcesPage() {
       const guides = newlyEnabledEpgUrls(s.epg, updated.epg);
       if (guides.length > 0) void refreshGuides(guides);
       if (!updated.lastError) return { outcome: 'ok' };
-      const err = { code: importErrorCode(updated.lastError, updated.lastErrorCode), message: updated.lastError };
+      const err = { code: importErrorCode(updated.lastError, updated.lastErrorCode), message: updated.lastError, stored: updated.lastErrorCode ?? null };
       if (!quiet) refreshFailed(s, err);
       return { outcome: 'failed', err };
     } catch (e) {

@@ -911,7 +911,7 @@ const ProgrammeList = memo(function ProgrammeList({
                       // The wrapper's pull-in matches the links' padding, so every wrapped line's
                       // names start under the channel above; under a finger each link is a full
                       // touch target, not a 15 px line of text.
-                      <span className="col-start-2 -ms-1 flex flex-wrap items-center gap-x-1 gap-y-1 pe-3 pb-2 pointer-coarse:gap-y-1.5" data-testid="search-programme-also">
+                      <span className="col-start-2 -ms-1 flex flex-wrap items-center gap-x-1 gap-y-1 pe-3 pb-2 pointer-coarse:ms-0 pointer-coarse:gap-1.5" data-testid="search-programme-also">
                         {(opened.has(rowKey(hit, at)) ? also : also.slice(0, ALSO_SHOWN)).map((a) => (
                           <button
                             key={itemKey(a.hit.ref)}
@@ -920,7 +920,13 @@ const ProgrammeList = memo(function ProgrammeList({
                             onClick={() => open(a.hit)}
                             aria-label={channelLabel(a.hit)}
                             dir="auto"
-                            className={cn('inline-flex max-w-full items-center rounded-xs px-1 text-xs text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus', TOUCH_TARGET)}
+                            // Under a finger each is a chip, so a row of channel names reads as
+                            // things to tap rather than loose text (walkthrough-06).
+                            className={cn(
+                              'inline-flex max-w-full items-center rounded-xs px-1 text-xs text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus',
+                              'pointer-coarse:rounded-full pointer-coarse:border pointer-coarse:border-edge pointer-coarse:bg-surface-2 pointer-coarse:px-3 pointer-coarse:text-fg pointer-coarse:active:bg-pressed',
+                              TOUCH_TARGET,
+                            )}
                           >
                             <span className="flex min-w-0 items-baseline">{channelOf(a.hit)}</span>
                           </button>

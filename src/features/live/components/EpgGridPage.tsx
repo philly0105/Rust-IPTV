@@ -183,8 +183,12 @@ export function guideDataStart(viewAt: number): number {
 export function guideDataLength(viewportMs: number): number {
   return Math.max(GRID_DATA_LENGTH, Math.ceil(viewportMs / GRID_DATA_STEP) * GRID_DATA_STEP + 2 * GRID_DATA_BEFORE + GRID_DATA_STEP);
 }
-/** Channel column of a phone-width guide: the logo and number only, so the track gets the room. */
-export const GRID_CHANNEL_COMPACT = 72;
+/**
+ * Channel column of a phone-width guide: the logo (else the name, two lines) over the number, so
+ * the track gets the room. 88 px fits about ten capitals a line ("SPORTSNET", "CHANNEL ᵁᴴᴰ"); at
+ * 72 the provider's long words broke mid-word or lost their last letters.
+ */
+export const GRID_CHANNEL_COMPACT = 88;
 
 /**
  * Half the now pill's width in the ruler ("12:42 PM" at the 125 % UI scale) with a margin, in px:
@@ -336,6 +340,8 @@ interface Reveal {
   categoryId: string | undefined;
   /** Opening on the playing channel (LG-01): no toast when it is not in the list. */
   quiet?: boolean;
+  /** A programme picked in the palette or on the Search page: its detail opens once its cell is on screen. */
+  open?: boolean;
 }
 
 /**
@@ -611,7 +617,7 @@ export function EpgGridPage() {
 
   // A view pages nothing from the source: the source's own list stays idle meanwhile.
   const sourcePaged = usePagedChannels({ sourceId: view ? '' : sourceId, categoryId, withExtras: false });
-  const viewPaged = useGuideViewChannels(view, sourceId);
+  const viewPaged = useGuideViewChannels(view, sourceId, prefs.epgOffsetMinutes);
   const paged = viewPaged ?? sourcePaged;
   const count = paged.total ?? 0;
   // The Live TV quality filter applies here too; a guide it empties says so (Live sets it).
@@ -1147,6 +1153,8 @@ export function EpgGridPage() {
   // ---- keyboard cursor ------------------------------------------------------
   const [cursor, setCursor] = useState<{ row: number; time: number }>({ row: 0, time: now });
   const focusPending = useRef(false);
+  /** The cell the pending focus lands on also opens its detail (a programme picked elsewhere). */
+  const openPending = useRef(false);
   const windowPrograms = (row: number) => (programsFor(paged.getChannel(row)) ?? []).filter((p) => ms(p.end) > dataStart && ms(p.start) < dataEnd);
   const cursorProgram = (row: number, time: number) => {
     const inWindow = windowPrograms(row);
@@ -1516,6 +1524,7 @@ export function EpgGridPage() {
     if (!focusPending.current) return;
     if (!root.contains(document.activeElement)) {
       focusPending.current = false; // focus went elsewhere meanwhile: leave it there
+      openPending.current = false;
       return;
     }
     // The window a move asked for is not on screen yet: its cell does not exist, and a cell of
@@ -1533,6 +1542,11 @@ export function EpgGridPage() {
     // (L2-guide-library-3): the sticky channel column covers the track's inline start.
     const p = cursorProgram(cursor.row, cursor.time);
     if (!p) return;
+    // A programme picked in the palette or on the Search page opens as a click on its cell would:
+    // its detail (record, remind, watch) and the cell marked, whether it was picked by mouse or keys.
+    const opening = paged.getChannel(cursor.row);
+    if (openPending.current && opening) openCell(cursor.row, opening, p, el);
+    openPending.current = false;
     const left = ((ms(p.start) - start) / MINUTE) * pxPerMin;
     const right = ((ms(p.end) - start) / MINUTE) * pxPerMin;
     const x = ((viewAtRef.current - start) / MINUTE) * pxPerMin;
@@ -1577,14 +1591,40 @@ export function EpgGridPage() {
   // "Match guide channel" from the row menu and the no-match notice, as on the Live page.
   const [mapping, setMapping] = useState<Channel | null>(null);
   const closeMapping = useCallback(() => setMapping(null), []);
+  // As on Live: the menu shows the new state at once (reopened before the core answers, it says
+  // "Remove from favorites" already), and one toggle per channel is in flight at a time, so two
+  // quick presses cannot add and remove in a race.
+  const [favOverrides, setFavOverrides] = useState<ReadonlyMap<ItemKey, boolean>>(() => new Map());
+  const favInFlight = useRef(new Set<ItemKey>());
+  const setFavOverride = (key: ItemKey, value: boolean | undefined) =>
+    setFavOverrides((prev) => {
+      const next = new Map(prev);
+      if (value === undefined) next.delete(key);
+      else next.set(key, value);
+      return next;
+    });
   const toggleFavorite = useStable(async (channel: Channel, wasFavorite: boolean) => {
+    const key = itemKey(channel.ref);
+    if (favInFlight.current.has(key)) return;
+    favInFlight.current.add(key);
+    setFavOverride(key, !wasFavorite);
     const name = plainChannelName(channel.name, prefs.stripCountryPrefix);
-    await toggleFavoriteWithUndo(
-      channel.ref,
-      { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
-      name,
-      wasFavorite,
-    );
+    try {
+      // The toast names the channel; a removal carries Undo, which restores its place.
+      const now = await toggleFavoriteWithUndo(
+        channel.ref,
+        { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
+        name,
+        wasFavorite,
+      );
+      // The menu's own question, answered: closed, it is not refetched, and a reopen would show
+      // the old state until the refetch landed.
+      if (now !== undefined) queryClient.setQueryData(rpcKey('favorites.contains', { refs: [channel.ref] }), now ? [channel.ref] : []);
+    } finally {
+      favInFlight.current.delete(key);
+      // The refetched `favorites.contains` is the truth from here on.
+      setFavOverride(key, undefined);
+    }
   });
   /** The keyboard's way in: the menu of the cursor row's channel, anchored at its channel cell. */
   const openRowMenuAt = (row: number) => {
@@ -1598,6 +1638,8 @@ export function EpgGridPage() {
 
   const onGridKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (count === 0 || selection) return;
+    // A key pressed before the picked programme's cell arrived moves on from it: no detail opens.
+    openPending.current = false;
     if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault();
       openRowMenuAt(cursorRef.current.row);
@@ -1753,6 +1795,32 @@ export function EpgGridPage() {
   // The dialog reads the window's start only as it opens: closed, it gets a fixed value, so a
   // scroll or a drag does not re-render it on every frame.
   const [jumpIdleStart] = useState(() => shownTime[0]);
+  // How far the guide reaches, so the dialog can dim the days it has nothing for: as it opens, the
+  // next fourteen days of a few rows on screen that have programmes (no descriptions). Rows with
+  // only the provider's short guide count for nothing, and with none the days are not dimmed.
+  const [extent, setExtent] = useState<{ refs: ItemRef[]; from: string; to: string } | null>(null);
+  useEffect(() => {
+    if (!jumpOpen) return;
+    const refs: ItemRef[] = [];
+    for (const v of vItems) {
+      const ch = paged.getChannel(v.index);
+      if (ch && (programsFor(ch)?.length ?? 0) > 0) refs.push(ch.ref);
+      if (refs.length >= 8) break;
+    }
+    const from = Date.now() - offsetMs;
+    setExtent(refs.length > 0 ? { refs, from: new Date(from).toISOString(), to: new Date(from + GRID_TRACK_AFTER).toISOString() } : null);
+  }, [jumpOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const extentGrid = useRpcQuery('epg.grid', gridArgs(extent?.refs ?? NO_REFS, extent?.from ?? '', extent?.to ?? ''), {
+    enabled: jumpOpen && !!extent,
+    staleTime: GRID_STALE_MS,
+    // Hashed once per refs array like the grid's own keys: the page renders on every scroll frame.
+    queryKeyHashFn: gridKeyHash,
+  });
+  const guideEnd = useMemo(() => {
+    let end = 0;
+    for (const list of Object.values(extentGrid.data ?? {})) for (const p of list) end = Math.max(end, ms(p.end));
+    return end > 0 ? end + offsetMs : undefined;
+  }, [extentGrid.data, offsetMs]);
   // The toolbar's window label reads the visible span from context (GuideWindowContext), so the
   // rest of the toolbar (pickers, genre chips, buttons) does not re-render on every scroll frame.
   const guideWindow = useMemo(() => ({ start: shownTime[0], end: shownTime[1] }), [shownTime]);
@@ -1797,7 +1865,7 @@ export function EpgGridPage() {
     const hit = location.state.guideHit;
     if (hit.ref.sourceId !== sourceId) return;
     setHighlight(null);
-    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time: ms(hit.program.start), channelName: plainChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId });
+    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time: ms(hit.program.start), channelName: plainChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId, open: true });
   }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // LG-01: Live's guide link names the channel playing there (`focus`): the guide opens at its row,
@@ -1901,6 +1969,7 @@ export function EpgGridPage() {
       cursorRef.current = { row: index, time: reveal.time };
       setCursor({ row: index, time: reveal.time });
       focusPending.current = true;
+      openPending.current = !!reveal.open;
       scroller.current?.focus({ preventScroll: true });
       return;
     }
@@ -1924,6 +1993,7 @@ export function EpgGridPage() {
         cursorRef.current = { row: index, time: reveal.time };
         setCursor({ row: index, time: reveal.time });
         focusPending.current = true;
+        openPending.current = !!reveal.open;
         scroller.current?.focus({ preventScroll: true });
         setHighlight(reveal.key);
       })
@@ -2124,6 +2194,7 @@ export function EpgGridPage() {
         categoryId={categoryId}
         view={view}
         lists={lists.data}
+        withGuideView={guidesLoaded}
         bar={bar}
         nowInWindow={nowInViewport}
         now={now}
@@ -2157,7 +2228,7 @@ export function EpgGridPage() {
           onPointerLeave={releaseHover}
         />
       ) : null}
-      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={jumpOpen ? shownTime[0] : jumpIdleStart} now={now} onJump={goTo} onNow={toNow} />
+      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={jumpOpen ? shownTime[0] : jumpIdleStart} now={now} guideEnd={jumpOpen ? guideEnd : undefined} onJump={goTo} onNow={toNow} />
 
       {gridError ? (
         <div role="alert" className="border-b border-divider bg-surface-2 px-3 py-2 text-sm text-danger">
@@ -2191,8 +2262,8 @@ export function EpgGridPage() {
       ) : count === 0 && view ? (
         <EmptyState
           icon={<Tv className="size-8" />}
-          title={tg(view.kind === 'favorites' ? 'viewFavoritesEmpty' : 'viewListEmpty')}
-          description={tg('viewEmptyHint')}
+          title={tg(view.kind === 'favorites' ? 'viewFavoritesEmpty' : view.kind === 'list' ? 'viewListEmpty' : 'viewWithGuideEmpty')}
+          description={tg(view.kind === 'withGuide' ? 'viewWithGuideHint' : 'viewEmptyHint')}
           action={
             <Button variant="secondary" size="sm" onClick={() => setQuery('view', undefined)}>
               {t('allChannels')}
@@ -2402,6 +2473,7 @@ export function EpgGridPage() {
               : programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title
           }
           programme={rowMenu.programme}
+          favoriteOverride={favOverrides.get(itemKey(rowMenu.channel.ref))}
           now={now}
           onProgrammeLink={offerProgrammeLink}
           onPlay={playLive}
@@ -2593,6 +2665,7 @@ const GuideToolbar = memo(function GuideToolbar({
   categoryId,
   view,
   lists,
+  withGuideView,
   bar,
   nowInWindow,
   now,
@@ -2616,6 +2689,8 @@ const GuideToolbar = memo(function GuideToolbar({
   categoryId: string | undefined;
   view: GuideView | undefined;
   lists: readonly { id: string; name: string }[] | undefined;
+  /** The guides hold programmes: offer the view of the channels that have some. */
+  withGuideView: boolean;
   bar: 'full' | 'stacked' | 'phone';
   nowInWindow: boolean;
   /** For the phone's day label ("Today"). */
@@ -2648,10 +2723,17 @@ const GuideToolbar = memo(function GuideToolbar({
     () => [{ id: 'sources', options: (sources ?? []).map((s) => ({ value: s.id, label: s.name, count: s.channelCount })) }],
     [sources],
   );
-  // All channels, then the views (favorites, each custom list), then the source's groups.
+  // All channels (and those of them with guide data: a patchy guide leaves most rows empty), then
+  // the views (favorites, each custom list), then the source's groups.
   const groupSections: PickerSection[] = useMemo(
     () => [
-      { id: 'all', options: [{ value: '', label: t('allChannels'), icon: <LayoutList size={14} /> }] },
+      {
+        id: 'all',
+        options: [
+          { value: '', label: t('allChannels'), icon: <LayoutList size={14} /> },
+          ...(withGuideView ? [{ value: `${VIEW_OPTION}${guideViewParam({ kind: 'withGuide' })}`, label: tg('viewWithGuide'), icon: <CalendarClock size={14} /> }] : []),
+        ],
+      },
       {
         id: 'views',
         heading: t('pickerViews'),
@@ -2670,7 +2752,7 @@ const GuideToolbar = memo(function GuideToolbar({
         options: (categories ?? []).filter((c) => !c.hidden).map((c) => ({ value: c.id, label: c.name, count: c.itemCount })),
       },
     ],
-    [categories, lists, t, tg],
+    [categories, lists, withGuideView, t, tg],
   );
   const stacked = bar !== 'full';
   const phone = bar === 'phone';
@@ -2819,7 +2901,9 @@ const GuideWindowButton = memo(function GuideWindowButton({ stacked, lang, onJum
         data-testid="guide-window"
         className={cn(
           'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-          stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+          // Wide: the secondary button's frame, so the date reads as something to press (the stacked
+          // and phone labels are filled the same way).
+          stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 border border-edge bg-surface-2 text-sm whitespace-nowrap hover:bg-surface-3',
         )}
       >
         {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
@@ -2960,6 +3044,7 @@ function GuideRowMenu({
   source,
   nowTitle,
   programme,
+  favoriteOverride,
   now,
   onProgrammeLink,
   onPlay,
@@ -2971,6 +3056,8 @@ function GuideRowMenu({
   source: Source | undefined;
   nowTitle: string | undefined;
   programme?: EpgProgram;
+  /** The state a toggle still in flight set, before `favorites.contains` has the core's answer. */
+  favoriteOverride?: boolean;
   now: number;
   onProgrammeLink(url: string, programme: EpgProgram): void;
   onPlay(channel: Channel): void;
@@ -2982,7 +3069,7 @@ function GuideRowMenu({
   const ch = menu.channel;
   const name = displayChannelName(ch.name, stripCountryPrefix);
   const favorites = useRpcQuery('favorites.contains', { refs: [ch.ref] });
-  const favorite = favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined;
+  const favorite = favoriteOverride ?? (favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined);
   const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide, programme, now, onProgrammeLink });
   return <ContextMenu pos={menu.pos} items={items} header={channelMenuHeader(ch, name, nowTitle)} label={name} onClose={onClose} />;
 }

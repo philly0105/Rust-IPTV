@@ -284,7 +284,7 @@ describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
     // No logo: the name is drawn where the logo goes (three "ES" monograms told nothing apart).
     expect(within(channel).getByTestId('guide-compact-name').textContent).toBe('Channel 0');
     expect(channel.querySelector('[data-monogram]')).toBeNull();
-    expect((channel.closest('[role="rowheader"]') as HTMLElement).style.width).toBe('72px');
+    expect((channel.closest('[role="rowheader"]') as HTMLElement).style.width).toBe('88px');
   });
 
   it('a programme opens as a bottom sheet over a scrim; pressing the scrim closes it', async () => {

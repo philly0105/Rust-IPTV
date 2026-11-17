@@ -20,7 +20,7 @@ import type { Channel, GuideSearchHit } from '@/api/types';
 import { ProgramActionsView, ScheduleMarkView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
 import { useShell } from '@/shell';
 import { buttonClass, cn, EmptyState, ErrorState, IconButton, Skeleton, TOUCH_TARGET } from '@/ui';
-import { intlLocale } from '@/lib/intl';
+import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useDebounced } from '../hooks/useDebounced';
 import { displayChannelName } from '../lib/channelName';
@@ -496,6 +496,13 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
   );
 }
 
+/**
+ * Other channels listed at first when a row's "+N channels" opens, as the Search page lists them:
+ * on a large library one show airs on dozens of regional and backup copies, and all of them at
+ * once pushed the next shows out of the panel. "Show all" lists the rest.
+ */
+export const ALSO_SHOWN = 8;
+
 const HitRow = memo(function HitRow({
   hit,
   also,
@@ -531,6 +538,16 @@ const HitRow = memo(function HitRow({
   const time = formatClock(start, lang);
 
   const key = hitKey(hit);
+  const [all, setAll] = useState(false);
+  if (all && !opened) setAll(false);
+  const alsoList = useRef<HTMLUListElement>(null);
+  // "Show all" goes as it is pressed: focus moves on to the first channel it brought in.
+  const focusFirstMore = useRef(false);
+  useLayoutEffect(() => {
+    if (!all || !focusFirstMore.current) return;
+    focusFirstMore.current = false;
+    alsoList.current?.querySelectorAll<HTMLElement>('[data-hit]')[ALSO_SHOWN]?.focus();
+  }, [all]);
   return (
     <li data-testid="guide-search-hit">
       <div className="group flex items-center gap-1 pe-2 hover:bg-hover" data-hit-row="">
@@ -593,8 +610,8 @@ const HitRow = memo(function HitRow({
         </div>
       ) : null}
       {opened ? (
-        <ul className="flex flex-col pb-1" data-testid="guide-search-also">
-          {also.map((a) => {
+        <ul ref={alsoList} className="flex flex-col pb-1" data-testid="guide-search-also">
+          {(all ? also : also.slice(0, ALSO_SHOWN)).map((a) => {
             const other = displayChannelName(a.channelName, strip);
             return (
               <li key={hitKey(a)} className="flex items-center gap-1 pe-2 hover:bg-hover" data-hit-row="">
@@ -617,6 +634,26 @@ const HitRow = memo(function HitRow({
               </li>
             );
           })}
+          {also.length > ALSO_SHOWN && !all ? (
+            <li className="ps-[calc(7rem+28px)] pe-2" data-hit-row="">
+              <button
+                type="button"
+                data-hit=""
+                onClick={() => {
+                  focusFirstMore.current = true;
+                  setAll(true);
+                }}
+                data-testid="guide-search-also-all"
+                className={cn(
+                  '-ms-1 inline-flex items-center rounded-xs px-1 text-caption font-medium text-fg outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus',
+                  TOUCH_TARGET,
+                )}
+              >
+                {/* Counts every channel, the one in the row's title too, as the Search page's does. */}
+                {`${tv('showAll')} (${numberFormat(intlLocale(lang)).format(also.length + 1)})`}
+              </button>
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </li>

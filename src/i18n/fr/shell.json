@@ -193,6 +193,7 @@
   "scNextItem": "Lire l'épisode suivant de la file d'attente",
   "scChannelFavorite": "Ajouter la chaîne sélectionnée aux favoris ou l'en retirer",
   "scItemMenu": "Ouvrir le menu de la chaîne sélectionnée",
+  "scFocusedItemMenu": "Ouvrir le menu de l'élément sélectionné",
   "scListsDialogMoveUp": "Monter la liste ou la chaîne sélectionnée (Gérer les listes, Modifier les chaînes)",
   "scListsDialogMoveDown": "Descendre la liste ou la chaîne sélectionnée (Gérer les listes, Modifier les chaînes)",
   "scListJump": "Aller au premier ou au dernier élément",

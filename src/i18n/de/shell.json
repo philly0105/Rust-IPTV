@@ -188,6 +188,7 @@
   "scNextItem": "Nächste Folge in der Warteschlange abspielen",
   "scChannelFavorite": "Fokussierten Sender zu den Favoriten hinzufügen oder daraus entfernen",
   "scItemMenu": "Menü für den fokussierten Sender öffnen",
+  "scFocusedItemMenu": "Menü für das fokussierte Element öffnen",
   "scListsDialogMoveUp": "Ausgewählte Liste oder ausgewählten Sender nach oben verschieben (Listen verwalten, Sender bearbeiten)",
   "scListsDialogMoveDown": "Ausgewählte Liste oder ausgewählten Sender nach unten verschieben (Listen verwalten, Sender bearbeiten)",
   "scListJump": "Zum ersten oder letzten Element springen",

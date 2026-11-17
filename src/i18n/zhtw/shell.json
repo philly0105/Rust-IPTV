@@ -188,6 +188,7 @@
   "scNextItem": "播放佇列中的下一集",
   "scChannelFavorite": "將目前頻道加入或移出我的最愛",
   "scItemMenu": "開啟目前頻道的選單",
+  "scFocusedItemMenu": "開啟目前項目的選單",
   "scListsDialogMoveUp": "上移選取的清單或頻道（管理清單、編輯頻道）",
   "scListsDialogMoveDown": "下移選取的清單或頻道（管理清單、編輯頻道）",
   "scListJump": "跳到第一個或最後一個項目",

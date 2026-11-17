@@ -13,7 +13,7 @@ import {
   Star,
   TriangleAlert,
 } from 'lucide-react';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
@@ -247,6 +247,82 @@ function RatingFloorChip({ setting, on, onChange, className }: { setting: number
   );
 }
 
+/** The search field's narrowest width beside the chips (the old sm:w-56). */
+const SEARCH_MIN_W = 224;
+/** The field's start padding with the glyph (ps-9), its end padding with and without the key hint (pe-16, pe-3), and its border. */
+const SEARCH_CHROME_W = 36 + 2;
+const SEARCH_HINT_PAD = 64;
+const SEARCH_PLAIN_PAD = 12;
+
+/**
+ * Whether the grid toolbar's row holds every decade chip beside the controls with the whole search
+ * placeholder (v-vod-03), and whether the field has room for its Ctrl+F hint too. Measured, not a
+ * breakpoint: the chips' width follows the library (8 decades with thousands each on a big one)
+ * and the placeholder's the language. The hint goes first, then the chips take their own line.
+ * `deps` changes whenever the row's content does (chips loaded, placeholder, rating chip).
+ */
+function useToolbarFit(rowRef: RefObject<HTMLDivElement | null>, deps: string) {
+  const [fit, setFit] = useState({ chipsInline: false, hint: false, searchWidth: 0 });
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const measure = () => {
+      // Not laid out (a hidden page, tests): keep the stacked toolbar.
+      if (!row.clientWidth) return;
+      const chipsWrap = row.querySelector<HTMLElement>('[data-toolbar-chips]');
+      const input = row.querySelector<HTMLInputElement>('input[data-page-search]');
+      const field = input?.parentElement;
+      let placeholderW = 0;
+      if (input) {
+        const ctx = document.createElement('canvas').getContext('2d');
+        if (ctx) {
+          ctx.font = getComputedStyle(input).font;
+          placeholderW = Math.ceil(ctx.measureText(input.placeholder).width);
+        }
+      }
+      const plainW = Math.max(SEARCH_MIN_W, placeholderW + SEARCH_CHROME_W + SEARCH_PLAIN_PAD);
+      const hintW = Math.max(SEARCH_MIN_W, placeholderW + SEARCH_CHROME_W + SEARCH_HINT_PAD);
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      // The other controls of the row keep their width wherever the chips go.
+      let others = 0;
+      let items = 0;
+      for (const el of row.children) {
+        if (!(el instanceof HTMLElement) || el === chipsWrap || el === field || !el.offsetParent || getComputedStyle(el).position === 'absolute') continue;
+        others += el.offsetWidth;
+        items++;
+      }
+      // The chips' own width: their row's scrollWidth is its box's when they have room to spare.
+      let chips = 0;
+      const chipRow = chipsWrap?.offsetParent ? chipsWrap.firstElementChild : null;
+      if (chipRow instanceof HTMLElement && chipRow.children.length) {
+        const cs = getComputedStyle(chipRow);
+        chips = (parseFloat(cs.columnGap) || 0) * (chipRow.children.length - 1);
+        for (const chip of chipRow.children) chips += (chip as HTMLElement).offsetWidth;
+      }
+      // What is left for the field with the chips inline (gaps between the controls, the chips and the field).
+      const room = row.clientWidth - others - chips - gap * (items + (chips ? 1 : 0) + (field ? 1 : 0) - 1);
+      const chipsInline = chips > 0 && (!field || room >= plainW);
+      const hint = chipsInline ? room >= hintW : (field?.offsetWidth ?? 0) >= hintW;
+      const searchWidth = chipsInline ? (hint ? hintW : plainW) : 0;
+      setFit((f) => (f.chipsInline === chipsInline && f.hint === hint && f.searchWidth === searchWidth ? f : { chipsInline, hint, searchWidth }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(row);
+    // The field grows when the chips leave the row, and the hint waits for that width.
+    const field = row.querySelector('input[data-page-search]')?.parentElement;
+    if (field) ro.observe(field);
+    let live = true;
+    // Webfonts change the chips' and the placeholder's widths once they load.
+    void document.fonts?.ready.then(() => live && measure());
+    return () => {
+      live = false;
+      ro.disconnect();
+    };
+  }, [rowRef, deps]);
+  return fit;
+}
+
 /**
  * A grid card's caption at 100 %: the 8 px gap, two title lines (13.5/18.56) and the year line
  * (16), so a title that wraps keeps its year inside the cell and every row has the same gap.
@@ -457,6 +533,10 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const fewTitles = (category?.itemCount ?? allCount ?? Infinity) < FEW_TITLES;
   const showChips = !fewTitles || yearFiltered;
   const showSearch = !fewTitles || searchDraft !== '';
+  // The header's field searches everything; this one says what it narrows.
+  const searchPlaceholder = categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('searchAllMovies') : t('searchAllSeries')) : t('searchInCategory');
+  const toolbarRowRef = useRef<HTMLDivElement>(null);
+  const fit = useToolbarFit(toolbarRowRef, `${showChips}|${showSearch}|${yearFilter.loading}|${yearFilter.chips.length}|${ratingFilterSet}|${searchPlaceholder}`);
 
   const sortOptions = VOD_SORT_KEYS.map((k) => ({ value: k, label: t(`sort_${k}`) }));
   const coverWidth = useCoverWidth(settings.coverSize);
@@ -655,13 +735,18 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         {/*
           VL-grid-toolbars: one toolbar under the header, one hairline. Back, the decade chips, the
           rating floor, search and sort share a row; From/To and Hide watched wait behind Filters,
-          whose badge counts what is on. Where the toolbar is narrower than 56rem (a tablet beside
-          the expanded rail) the chips take a line of their own under the controls, and the search
-          grows to fill the row. Below sm the row wraps: the search takes a line, and the sort and
-          the chips move into the Filters panel.
+          whose badge counts what is on. Where the row has no room for every chip beside the
+          controls and the whole search placeholder (useToolbarFit, v-vod-03), the chips take a line
+          of their own under the controls and the search grows to fill the row; the field's Ctrl+F
+          hint shows only while the placeholder still fits beside it. Below sm the row wraps: the
+          search takes a line, and the sort and the chips move into the Filters panel.
         */}
-        <div className="@container flex flex-col gap-2 border-b border-divider px-(--page-gutter) py-2.5" data-testid="vod-grid-toolbar">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-2 border-b border-divider px-(--page-gutter) py-2.5" data-testid="vod-grid-toolbar">
+          <div
+            ref={toolbarRowRef}
+            className="flex flex-wrap items-center gap-2"
+            style={fit.searchWidth ? ({ '--vod-search-w': `${fit.searchWidth}px` } as CSSProperties) : undefined}
+          >
             <BackButton to={backHref} label={kind === 'movie' ? t('movies') : t('series')} className="-ms-2" />
             <h1 className="sr-only">{pageTitle}</h1>
             {/* Another category without going back to the landing (Netflix's Genres, Plex's library menu). */}
@@ -685,7 +770,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             {/* Mounted from the first frame (L2-vod-5): its placeholder chips hold the row while the source loads. */}
             <div
               id={`${filtersId}-chips`}
-              className={cn('min-w-0 @max-4xl:empty:hidden @4xl:flex-1', '@max-4xl:order-3 @max-4xl:basis-full', !filtersOpen && 'max-sm:hidden')}
+              data-toolbar-chips=""
+              className={cn('min-w-0', fit.chipsInline ? 'flex-1' : 'order-3 basis-full empty:hidden', !filtersOpen && 'max-sm:hidden')}
             >
               {sourceId && !source.isError && showChips && <DecadeChips filter={yearFilter} />}
             </div>
@@ -702,12 +788,11 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 value={searchDraft}
                 onChange={setSearchDraft}
                 size="sm"
-                className="w-full max-sm:order-1 sm:w-56 sm:@max-4xl:flex-1"
-                // The header's field searches everything; this one says what it narrows.
-                placeholder={categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('searchAllMovies') : t('searchAllSeries')) : t('searchInCategory')}
+                className={cn('w-full max-sm:order-1', fit.chipsInline ? 'sm:w-(--vod-search-w)' : 'sm:w-56 sm:flex-1')}
+                placeholder={searchPlaceholder}
                 // Ctrl+F and "/" land here (the shell's page-search rule), and the field shows the key.
                 data-page-search=""
-                shortcut="mod+f"
+                shortcut={fit.hint ? 'mod+f' : undefined}
                 onSubmit={focusGrid}
                 onKeyDown={(e) => {
                   // ArrowDown leaves the search box for the posters.

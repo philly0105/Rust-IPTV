@@ -877,8 +877,10 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'));
     expect(useThemeStore.getState().theme).toBe('light');
     await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'settings.update' && JSON.stringify(c.args).includes('"theme":"light"'))).toBe(true));
+    // Back to what the OS shows (dark here) is Match system again, not a fixed Dark.
     key('L', { code: 'KeyL', ctrlKey: true, shiftKey: true });
-    await waitFor(() => expect(useThemeStore.getState().theme).toBe('dark'));
+    await waitFor(() => expect(useThemeStore.getState().theme).toBe('system'));
+    expect(document.documentElement.dataset['theme']).toBe('dark');
   });
 
   it('F8 jumps into the toast stack, Escape dismisses and returns focus', async () => {

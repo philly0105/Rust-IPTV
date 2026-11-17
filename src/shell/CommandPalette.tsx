@@ -626,7 +626,7 @@ function useSuggestedItems(query: string): PaletteItem[] {
   const { t } = useTranslation('shell');
   const navigate = useNavigate();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
-  const { resolved } = useTheme();
+  const { resolved, toggle } = useTheme();
   const empty = !query.trim();
   return useMemo(() => {
     if (!empty) return [];
@@ -638,12 +638,12 @@ function useSuggestedItems(query: string): PaletteItem[] {
         group,
         icon: resolved === 'dark' ? Sun : Moon,
         shortcut: 'mod+shift+l',
-        run: () => void persistTheme(resolved === 'dark' ? 'light' : 'dark'),
+        run: toggle,
       },
       { id: 'suggest.addSource', title: t('addSource'), group, icon: Plus, run: () => navigate('/sources?add=1') },
       { id: 'suggest.shortcuts', title: t('keyboardShortcuts'), group, icon: Keyboard, shortcut: '?', run: () => setHelpOpen(true) },
     ];
-  }, [empty, resolved, t, navigate, setHelpOpen]);
+  }, [empty, resolved, toggle, t, navigate, setHelpOpen]);
 }
 
 /** Groups the empty palette shows; the rest (sources, settings) wait for a query. */

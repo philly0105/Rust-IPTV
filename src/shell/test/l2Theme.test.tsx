@@ -25,7 +25,7 @@ vi.mock('@/api/events', () => ({
 }));
 
 const { RpcError } = await import('@/api/transport');
-const { ThemeSync, persistTheme, useThemeStore } = await import('../theme');
+const { ThemeSync, persistTheme, useTheme, useThemeStore } = await import('../theme');
 
 function setConnection(s: ConnState): void {
   act(() => {
@@ -113,5 +113,40 @@ describe('theme toggled while the server is down', () => {
     expect(themeWrites()).toEqual(['light']);
     view.rerender(<ThemeSync settingsTheme="system" />);
     expect(useThemeStore.getState().theme).toBe('system');
+  });
+});
+
+describe('the header toggle and Match system (w-walkthrough-14)', () => {
+  function osPrefers(scheme: 'light' | 'dark'): void {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === `(prefers-color-scheme: ${scheme})`, media: query }));
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function toggleTwice(): Promise<void> {
+    let toggle = () => {};
+    function Probe() {
+      toggle = useTheme().toggle;
+      return null;
+    }
+    serverUp();
+    render(<Probe />);
+    await act(async () => toggle());
+    await act(async () => toggle());
+  }
+
+  it('a round trip from System on a dark OS ends on System, not on a pinned Dark', async () => {
+    osPrefers('dark');
+    useThemeStore.getState().set('system');
+    await toggleTwice();
+    expect(themeWrites()).toEqual(['light', 'system']);
+    expect(useThemeStore.getState().theme).toBe('system');
+  });
+
+  it('on a light OS the way back to light is System too, and away from it a fixed Dark', async () => {
+    osPrefers('light');
+    useThemeStore.getState().set('system');
+    await toggleTwice();
+    expect(themeWrites()).toEqual(['dark', 'system']);
+    expect(cachedTheme()).toBe('system');
   });
 });

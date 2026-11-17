@@ -339,6 +339,8 @@ interface Reveal {
   categoryId: string | undefined;
   /** Opening on the playing channel (LG-01): no toast when it is not in the list. */
   quiet?: boolean;
+  /** A programme picked in the palette or on the Search page: its detail opens once its cell is on screen. */
+  open?: boolean;
 }
 
 /**
@@ -1150,6 +1152,8 @@ export function EpgGridPage() {
   // ---- keyboard cursor ------------------------------------------------------
   const [cursor, setCursor] = useState<{ row: number; time: number }>({ row: 0, time: now });
   const focusPending = useRef(false);
+  /** The cell the pending focus lands on also opens its detail (a programme picked elsewhere). */
+  const openPending = useRef(false);
   const windowPrograms = (row: number) => (programsFor(paged.getChannel(row)) ?? []).filter((p) => ms(p.end) > dataStart && ms(p.start) < dataEnd);
   const cursorProgram = (row: number, time: number) => {
     const inWindow = windowPrograms(row);
@@ -1519,6 +1523,7 @@ export function EpgGridPage() {
     if (!focusPending.current) return;
     if (!root.contains(document.activeElement)) {
       focusPending.current = false; // focus went elsewhere meanwhile: leave it there
+      openPending.current = false;
       return;
     }
     // The window a move asked for is not on screen yet: its cell does not exist, and a cell of
@@ -1536,6 +1541,11 @@ export function EpgGridPage() {
     // (L2-guide-library-3): the sticky channel column covers the track's inline start.
     const p = cursorProgram(cursor.row, cursor.time);
     if (!p) return;
+    // A programme picked in the palette or on the Search page opens as a click on its cell would:
+    // its detail (record, remind, watch) and the cell marked, whether it was picked by mouse or keys.
+    const opening = paged.getChannel(cursor.row);
+    if (openPending.current && opening) openCell(cursor.row, opening, p, el);
+    openPending.current = false;
     const left = ((ms(p.start) - start) / MINUTE) * pxPerMin;
     const right = ((ms(p.end) - start) / MINUTE) * pxPerMin;
     const x = ((viewAtRef.current - start) / MINUTE) * pxPerMin;
@@ -1605,6 +1615,8 @@ export function EpgGridPage() {
 
   const onGridKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (count === 0 || selection) return;
+    // A key pressed before the picked programme's cell arrived moves on from it: no detail opens.
+    openPending.current = false;
     if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault();
       openRowMenuAt(cursorRef.current.row);
@@ -1804,7 +1816,7 @@ export function EpgGridPage() {
     const hit = location.state.guideHit;
     if (hit.ref.sourceId !== sourceId) return;
     setHighlight(null);
-    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time: ms(hit.program.start), channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId });
+    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time: ms(hit.program.start), channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId, open: true });
   }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // LG-01: Live's guide link names the channel playing there (`focus`): the guide opens at its row,
@@ -1908,6 +1920,7 @@ export function EpgGridPage() {
       cursorRef.current = { row: index, time: reveal.time };
       setCursor({ row: index, time: reveal.time });
       focusPending.current = true;
+      openPending.current = !!reveal.open;
       scroller.current?.focus({ preventScroll: true });
       return;
     }
@@ -1931,6 +1944,7 @@ export function EpgGridPage() {
         cursorRef.current = { row: index, time: reveal.time };
         setCursor({ row: index, time: reveal.time });
         focusPending.current = true;
+        openPending.current = !!reveal.open;
         scroller.current?.focus({ preventScroll: true });
         setHighlight(reveal.key);
       })

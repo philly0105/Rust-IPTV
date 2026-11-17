@@ -226,4 +226,22 @@ describe('a programme opened from the global search or the palette (F-SEARCH-PRO
     act(() => void router.navigate!(link.to, { state: link.state }));
     await waitFor(() => expect(document.querySelector('[data-channel-row="6"]')?.hasAttribute('data-highlighted')).toBe(true));
   });
+
+  it('opens the programme’s detail on its cell, marked, as a click on the cell would (walkthrough-06)', async () => {
+    const start = Math.floor(Date.now() / 1_800_000) * 1_800_000 + 3_600_000;
+    rpc.handlers['epg.grid'] = (a) =>
+      Object.fromEntries(
+        (a as { refs: ItemRef[] }).refs.map((r) => [
+          key(r),
+          r.itemId === 'c6' ? [{ channelId: 'c6', title: 'Late news', start: new Date(start).toISOString(), end: new Date(start + 1_800_000).toISOString() }] : [],
+        ]),
+      );
+    await openGuide();
+    const link = guideHitLink(hit('Late news', start, start + 1_800_000, { ref: CHANNELS[6]!.ref, channelName: 'Channel 6' }));
+    act(() => void router.navigate!(link.to, { state: link.state }));
+    const popover = await screen.findByTestId('program-popover');
+    expect(within(popover).getByText('Late news')).toBeTruthy();
+    const cell = document.querySelector<HTMLElement>('[data-cell-row="6"]')!;
+    expect(cell.hasAttribute('data-selected')).toBe(true);
+  });
 });

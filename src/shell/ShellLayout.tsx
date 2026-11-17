@@ -334,7 +334,78 @@ function ShellNavigationEffects() {
     if (s.railPeek) s.setRailPeek(false);
   }, [key]);
   useOutletScrollMemory();
+  useMainFocusRescue();
   return null;
+}
+
+/**
+ * Room at the end of a page that scrolls in <main>, as tall as the floating mini player sits over
+ * the window's foot (PlayerDock writes --player-float-inset), so the page's last row can scroll
+ * clear of it (v-shell-home-13). A page that fills <main> and scrolls inside itself (the guide, a
+ * catalog grid) gets none: a strip across the whole width would only shorten it.
+ */
+function FloatInsetSpacer() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const spacer = ref.current;
+    const main = spacer?.parentElement;
+    if (!spacer || !main || typeof ResizeObserver === 'undefined') return;
+    const check = () => setScrolls(main.scrollHeight - spacer.offsetHeight > main.clientHeight + 1);
+    const resize = new ResizeObserver(check);
+    const watch = () => {
+      resize.disconnect();
+      resize.observe(main);
+      for (const child of main.children) if (child !== spacer) resize.observe(child);
+      check();
+    };
+    const children = new MutationObserver(watch);
+    children.observe(main, { childList: true });
+    watch();
+    return () => {
+      resize.disconnect();
+      children.disconnect();
+    };
+  }, []);
+  return <div ref={ref} aria-hidden className="shrink-0" style={{ height: scrolls ? 'var(--player-float-inset, 0px)' : 0 }} data-player-float-spacer="" />;
+}
+
+/**
+ * When the focused control inside the page goes away (Try again swaps an error for a skeleton,
+ * a dismissed card unmounts), focus would fall to <body>, where Tab starts over from the skip
+ * link. It moves to the page's main region instead, in this one place for every page.
+ */
+function useMainFocusRescue() {
+  useEffect(() => {
+    const main = document.getElementById('main');
+    if (!main) return;
+    let held: Element | null = null;
+    const observer = new MutationObserver(() => {
+      if (!held || held.isConnected) return;
+      held = null;
+      observer.disconnect();
+      const active = document.activeElement;
+      if (!active || active === document.body) main.focus({ preventScroll: true });
+    });
+    const onFocusIn = (e: FocusEvent) => {
+      held = e.target as Element;
+      observer.observe(main, { childList: true, subtree: true });
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      // Focus moved on to something else (a dialog, the rail): nothing to rescue.
+      if (e.relatedTarget && !main.contains(e.relatedTarget as Node)) {
+        held = null;
+        observer.disconnect();
+      }
+    };
+    main.addEventListener('focusin', onFocusIn);
+    main.addEventListener('focusout', onFocusOut);
+    return () => {
+      observer.disconnect();
+      main.removeEventListener('focusin', onFocusIn);
+      main.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
 }
 
 /** How long after a new page opens the announcer names it: its header is set by then. */
@@ -476,7 +547,7 @@ export function ShellSkeleton({
         </div>
       )}
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider px-(--page-gutter) sm:gap-4">
+        <div aria-hidden className="flex h-[calc(var(--header-height)+env(safe-area-inset-top,0px))] shrink-0 pt-[env(safe-area-inset-top,0px)] items-center gap-3 border-b border-divider px-(--page-gutter) sm:gap-4">
           <Skeleton className="h-6 w-32" />
           <div className="flex-1" />
           {!phone && (
@@ -670,6 +741,7 @@ export function ShellLayout() {
               className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
             >
               <Outlet />
+              {!phone && <FloatInsetSpacer />}
             </main>
             <ShellNavigationEffects />
             <RouteAnnouncer />

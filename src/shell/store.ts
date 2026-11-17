@@ -29,7 +29,8 @@ export interface HeaderSearch {
   disabled?: boolean;
   /**
    * The field is the global search itself (the Search page), so the header leaves out the palette
-   * button it otherwise keeps beside a page's own field; Ctrl+K still opens the palette.
+   * button it otherwise keeps beside a page's own field; Ctrl+K still opens the palette. On a phone
+   * the field stays a whole box instead of folding into an icon.
    */
   hidePalette?: boolean;
 }
@@ -50,6 +51,11 @@ export interface HeaderState {
    */
   documentTitle?: string;
   subtitle?: string;
+  /**
+   * The end of `subtitle` that must stay whole (a count, "30,132 channels"): on a narrow header
+   * the text before it truncates instead.
+   */
+  subtitleEnd?: string;
   actions?: ReactNode;
   search?: HeaderSearch;
   /** A Back control before the title: detail pages, which the window has no browser chrome to leave. */

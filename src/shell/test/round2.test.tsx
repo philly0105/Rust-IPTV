@@ -142,6 +142,26 @@ function AsidePage() {
   );
 }
 
+/** A page-level error whose Try again swaps itself for a skeleton (the round-2 focus follow-up). */
+function RetryPage() {
+  const [failed, setFailed] = useState(true);
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Live TV', subtitle: 'A very long source name · Sports · 30,132 channels', subtitleEnd: '30,132 channels' });
+  }, [shell]);
+  return (
+    <Page>
+      {failed ? (
+        <button type="button" onClick={() => setFailed(false)}>
+          Try again
+        </button>
+      ) : (
+        <p>loading</p>
+      )}
+    </Page>
+  );
+}
+
 const onBack = vi.fn();
 
 function routes() {
@@ -160,6 +180,7 @@ function routes() {
         { path: 'search', element: <Page>search page</Page> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
         { path: 'aside', element: <AsidePage /> },
+        { path: 'retry', element: <RetryPage /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
       ],
@@ -195,6 +216,7 @@ beforeEach(() => {
   localStorage.clear();
   playerMock.playItem.mockClear();
   onBack.mockClear();
+  onGuideFocus.mockClear();
   queue.calls.length = 0;
   io.callback = null;
   io.observed = [];
@@ -322,6 +344,48 @@ describe('a page can ask the header to step aside', () => {
     fireEvent.click(screen.getByRole('button', { name: 'back in' }));
     expect(await screen.findByTestId('shell-rail')).toBeTruthy();
     expect(screen.queryByTestId('rail-aside')).toBeNull();
+  });
+});
+
+describe('the page under the header', () => {
+  it('the subtitle keeps the end the page names whole, and only the text before it truncates (v-live-15)', async () => {
+    renderRoutes(routes(), '/retry');
+    const sub = await screen.findByTestId('page-subtitle');
+    expect(sub.getAttribute('title')).toBe('A very long source name · Sports · 30,132 channels');
+    const [head, end] = [...sub.children] as HTMLElement[];
+    expect(head!.className).toContain('truncate');
+    expect(head!.textContent).toBe('A very long source name · Sports · ');
+    expect(end!.className).toContain('shrink-0');
+    expect(end!.textContent).toBe('30,132 channels');
+  });
+
+  it('when Try again goes away under focus, focus moves to the main region, not <body>', async () => {
+    renderRoutes(routes(), '/retry');
+    const retry = await screen.findByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
+    await screen.findByText('loading');
+    await waitFor(() => expect(document.activeElement?.id).toBe('main'));
+  });
+
+  it('the header pads the top safe area, which is 0 in a browser tab', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const header = await screen.findByTestId('shell-header');
+    expect(header.className).toContain('pt-[env(safe-area-inset-top,0px)]');
+    expect(header.className).toContain('h-[calc(var(--header-height)+env(safe-area-inset-top,0px))]');
+  });
+
+  it('on a phone the global search field stays a whole box without focus, a page field folds (v-shell-home-10)', async () => {
+    media(...PHONE);
+    renderRoutes(routes(), '/global-search');
+    await screen.findByText('search page');
+    const box = screen.getByRole('searchbox', { name: 'Search everything' }).parentElement!;
+    expect(box.className).not.toContain('max-sm:w-8');
+    expect(box.className).toContain('max-sm:flex-[2]');
+    cleanup();
+    renderRoutes(routes(), '/guide-like');
+    await screen.findByText('guide page');
+    expect(screen.getByRole('searchbox', { name: 'Search the guide' }).parentElement!.className).toContain('max-sm:w-8');
   });
 });
 

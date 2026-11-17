@@ -586,7 +586,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   useEffect(() => {
     shell.setHeader({
       title,
-      ...(headerSubtitle ? { subtitle: headerSubtitle } : {}),
+      // The count is what a narrow header keeps; the source and group truncate before it (v-live-15).
+      ...(headerSubtitle ? { subtitle: headerSubtitle, subtitleEnd: countText || undefined } : {}),
       stepAside: headerAside,
       actions: !headerGuideHref ? undefined : (
         <Link
@@ -607,7 +608,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         </Link>
       ),
     });
-  }, [title, headerSubtitle, headerGuideHref, headerAside, i18n.language]);
+  }, [title, headerSubtitle, countText, headerGuideHref, headerAside, i18n.language]);
   useEffect(() => () => shell.setHeader({ title: '' }), []);
 
   // ---- remote control -----------------------------------------------------

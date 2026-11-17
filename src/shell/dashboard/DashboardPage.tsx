@@ -1056,7 +1056,8 @@ const OnNowRail = memo(function OnNowRail({
             channelName={c.name}
             sourceName={manySources ? sourceById.get(c.ref.sourceId)?.name : undefined}
             logoUrl={c.logoUrl}
-            left={left}
+            // Beside the source the line has no room for "50 minutes left": Live TV's rows' "50m".
+            left={manySources && c.left !== undefined ? t('live:minutesLeftShort', { count: c.left }) : left}
             progress={c.progress}
             sourceId={c.ref.sourceId}
             ariaLabel={joinList([t('playTitle', { title: c.name }), c.programme.title, left], i18n.language)}

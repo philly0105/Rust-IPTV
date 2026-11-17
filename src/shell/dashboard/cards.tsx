@@ -910,7 +910,8 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, sourceNa
   // player over Home, the pressed card left On now (its channel joins Recently watched) and the
   // rail shifted under the pointer.
   const watch = useWatchChannel(onPlay, channel, channel && itemPath(channel.ref));
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch, nowTitle: programme }) : undefined;
+  const label = plainChannelName(channelName, strip);
   return (
     // Its visible "more" button beside the card's button, as on the channel and Continue cards.
     <div className="group/wide relative min-w-0">
@@ -939,9 +940,10 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, sourceNa
           {sourceName ? (
             // With the source after it the line has no room to spare, and a place tag that did not
             // fit still widened the name's box, leaving a gap before the source: the name goes bare.
-            <span title={joinList([channelName, sourceName], i18n.language)} className="flex min-w-0 items-baseline gap-1.5">
-              {/* The channel comes first: whole while the source can still show a few letters. */}
-              <span dir="auto" className="max-w-[calc(100%-3rem)] shrink-0 truncate text-match-parent">
+            <span title={joinList([channelName, sourceName], i18n.language)} className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
+              {/* The channel gets the room. The source gives way: shortened down to a few letters,
+                  then onto the hidden second line, never "Me…" beside a cut channel name. */}
+              <span dir="auto" className="max-w-full shrink-0 truncate text-match-parent">
                 {strip ? stripCountryPrefix(channelName) : splitPlaceTag(channelName).name}
               </span>
               <span aria-hidden className="shrink-0 text-fg-subtle">·</span>

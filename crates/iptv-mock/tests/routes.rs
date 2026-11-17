@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use iptv_mock::{catalog, gen, stalker, xtream};
+use iptv_mock::{catalog, gen, media, stalker, xtream};
 use reqwest::header;
 use serde_json::Value;
 
@@ -33,6 +33,36 @@ async fn spawn() -> Mock {
 
 fn client() -> reqwest::Client {
     reqwest::Client::builder().no_gzip().build().unwrap()
+}
+
+#[tokio::test]
+async fn timeshift_ts_honors_duration_and_ranges_across_loops() {
+    let m = spawn().await;
+    let c = client();
+    let path = "/xtream/timeshift/demo/secret";
+    let expected: Vec<u8> = (0..30).flat_map(media::live_segment).collect();
+    let r = c
+        .get(format!("{}{path}/1/2026-01-01:10-00/101.ts", m.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.content_length(), Some(expected.len() as u64));
+    assert_eq!(r.bytes().await.unwrap().as_ref(), expected);
+
+    // Seek far beyond the old 32-second fixture without downloading the archive.
+    let start = media::live_loop_ts().len() * 100 + 188;
+    let r = c
+        .get(format!("{}{path}/60/2026-01-01:10-00/101.ts", m.base))
+        .header(header::RANGE, format!("bytes={start}-{}", start + 375))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.content_length(), Some(376));
+    assert_eq!(
+        r.bytes().await.unwrap().as_ref(),
+        &media::live_segment(16 * 100)[188..564]
+    );
 }
 
 #[tokio::test]

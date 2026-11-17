@@ -104,12 +104,18 @@ export function DownloadMirrorRows({ settings, update }: { settings: Settings; u
           <>
             {t('downloadAllowEquivalentHint')}
             <span className="mt-1 flex items-start gap-1.5" data-testid="equivalent-warning">
-              <TriangleAlert size={14} aria-hidden className="mt-0.5 shrink-0 text-warning" />
+              <TriangleAlert size={14} aria-hidden className={`mt-0.5 shrink-0 ${mirrors ? 'text-warning' : 'text-fg-subtle'}`} />
               <span className="min-w-0">{t('downloadAllowEquivalentWarning')}</span>
             </span>
+            {!mirrors && (
+              <span className="mt-1 block" data-testid="equivalent-needs-mirrors">
+                {t('downloadAllowEquivalentNeedsMirrors', { label: t('downloadUseMirrors') })}
+              </span>
+            )}
           </>
         }
-        checked={settings.downloadAllowEquivalent === true}
+        // Off while mirrors are off, as it then does nothing; the stored choice comes back with them.
+        checked={mirrors && settings.downloadAllowEquivalent === true}
         onChange={(downloadAllowEquivalent) => void update({ downloadAllowEquivalent })}
         disabled={!mirrors}
         testId="toggle-downloadAllowEquivalent"

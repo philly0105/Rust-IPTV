@@ -8,7 +8,7 @@ import type { TFunction } from 'i18next';
 
 import type { Download, Limiting, MirrorDropReason, OneConnectionReason, SourceStat, TransferNote, TransferStats } from '@/api/types';
 
-import { formatSpeed, formatSpeedLimit } from './format';
+import { formatSpeedLimit } from './format';
 
 /** A source's name for a sentence; the caller decides what a removed source reads as. */
 export type NameOf = (sourceId: string) => string;
@@ -103,7 +103,7 @@ export function limitingText(t: TFunction<'library'>, limiting: Limiting, nameOf
     case 'line':
       return t('limitingLine');
     case 'perConnection':
-      return t('limitingPerConnection', { speed: formatSpeed(limiting.bytesPerSecond, lang) });
+      return t('limitingPerConnection', { speed: formatSpeedLimit(limiting.bytesPerSecond, lang) });
     case 'accountLimit':
       return t('limitingAccountLimit', { name: nameOf(limiting.sourceId), count: limiting.limit });
     default:

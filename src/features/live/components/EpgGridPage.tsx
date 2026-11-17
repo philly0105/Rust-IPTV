@@ -1098,9 +1098,12 @@ export function EpgGridPage() {
       setRequestedView({ id: ++requestId.current, time, live });
     }
   };
+  /** Counts explicit jumps (Now, a day or step, Jump to, a search hit): only those announce the window. */
+  const [jumpSeq, setJumpSeq] = useState(0);
   /** Moves the window to `at` (floored to its slot), with a new history entry. `category: null` also shows all channels. */
   const goTo = useStable((at: number, opts: { category?: null } = {}) => {
     const slot = floorLocal(at, GRID_SLOT_MIN);
+    setJumpSeq((n) => n + 1);
     startRef.current = slot - GRID_TRACK_BEFORE;
     navigationAt.current = slot;
     setWinAt(slot);
@@ -1128,6 +1131,7 @@ export function EpgGridPage() {
   const shiftDay = useStable((days: number) => goTo(addLocalDays(navigationAt.current, days)));
   const toNow = useStable(() => {
     const s = defaultStart(Date.now());
+    setJumpSeq((n) => n + 1);
     manualView.current = false;
     setNowStart(s);
     startRef.current = s - GRID_TRACK_BEFORE;
@@ -2249,6 +2253,7 @@ export function EpgGridPage() {
         onTogglePreview={togglePreview}
         onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined}
       />
+      <GuideWindowAnnouncer seq={jumpSeq} lang={lang} />
       </GuideWindowContext.Provider>
       {showPreview && sourceId ? (
         <GuidePreview
@@ -3003,6 +3008,35 @@ const GuideToolbar = memo(function GuideToolbar({
  */
 const GuideWindowContext = createContext<{ start: number; end: number }>({ start: 0, end: 0 });
 
+/** How long after a jump the window is read out: the view has moved by then. */
+const JUMP_ANNOUNCE_MS = 400;
+
+/**
+ * Reads the window's span out after an explicit jump (`seq` changes), not on every scroll: the
+ * labels themselves were live regions, so each horizontal scroll step was spoken (w-a11y-08).
+ */
+const GuideWindowAnnouncer = memo(function GuideWindowAnnouncer({ seq, lang }: { seq: number; lang: string }) {
+  const { start, end } = useContext(GuideWindowContext);
+  const latest = useRef({ start, end });
+  useLayoutEffect(() => {
+    latest.current = { start, end };
+  });
+  const [text, setText] = useState('');
+  useEffect(() => {
+    if (seq === 0) return;
+    const id = window.setTimeout(() => {
+      const w = latest.current;
+      setText(`${formatDay(w.start, lang)} ${formatTimeRange(w.start, w.end, lang)}`);
+    }, JUMP_ANNOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [seq, lang]);
+  return (
+    <span role="status" className="sr-only" data-testid="guide-window-announce">
+      {text}
+    </span>
+  );
+});
+
 /** The window's span in the toolbar (wide and stacked layouts); pressing it opens Jump to date and time. */
 const GuideWindowButton = memo(function GuideWindowButton({ stacked, lang, onJump }: { stacked: boolean; lang: string; onJump(): void }) {
   const { t: tg } = useTranslation('guide');
@@ -3023,7 +3057,7 @@ const GuideWindowButton = memo(function GuideWindowButton({ stacked, lang, onJum
         )}
       >
         {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-        <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
+        <span className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
           <span className={stacked ? 'max-w-full truncate text-caption leading-tight text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
           <span className={stacked ? 'max-w-full truncate text-body-sm leading-tight font-medium' : undefined}>{range}</span>
         </span>
@@ -3076,7 +3110,7 @@ const GuideWindowDay = memo(function GuideWindowDay({
             TOUCH_TARGET,
           )}
         >
-          <span aria-live="polite" className="flex max-w-full min-w-0 justify-center">
+          <span className="flex max-w-full min-w-0 justify-center">
             {/* The visible day leads the spoken name, so "Today" is what voice control hears it called. */}
             <span className="truncate text-sm font-medium @min-[11rem]:hidden">
               {day}

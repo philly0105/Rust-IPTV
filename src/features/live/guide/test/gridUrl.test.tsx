@@ -102,6 +102,30 @@ const showsLiveData = () => {
 };
 
 describe('the window in the URL', () => {
+  it('reads the window out after a jump, not while scrolling (w-a11y-08)', async () => {
+    const base = defaultStart(Date.now()) + 6 * HOUR;
+    renderGuide({ path: `/epg?source=src1&at=${base}`, routes: GRID });
+    await screen.findByText('Channel 0');
+    const label = screen.getByTestId('guide-window');
+    const announce = screen.getByTestId('guide-window-announce');
+    expect(label.querySelector('[aria-live]')).toBeNull();
+    expect(announce.getAttribute('role')).toBe('status');
+    // A scroll moves the label, silently.
+    const grid = screen.getByTestId('epg-grid');
+    const before = label.textContent;
+    act(() => {
+      grid.scrollLeft -= 200;
+      fireEvent.scroll(grid);
+    });
+    await waitFor(() => expect(label.textContent).not.toBe(before));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 500)));
+    expect(announce.textContent).toBe('');
+    // A day button is a jump: the new window is read out.
+    fireEvent.click(screen.getByRole('button', { name: 'Next day' }));
+    await waitFor(() => expect(announce.textContent).toContain(formatDay(addLocalDays(base, 1), 'en')));
+    expect(label.textContent).toContain(announce.textContent);
+  });
+
   it('stays three hours earlier when moving back from the live window', async () => {
     const trackStart = defaultStart(Date.now());
     renderGuide({ path: '/epg?source=src1', routes: GRID });

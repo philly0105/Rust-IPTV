@@ -1469,7 +1469,7 @@ function ChannelHitButton({
       type="button"
       data-grid-index={index}
       // Screen readers hear the name the card shows ("ESPN HD (US)"), not the provider's "US| ESPN HD".
-      aria-label={joinList([plainChannelName(h.title, strip), now, c.number, c.categoryName, showBadges && h.sourceName], i18n.language)}
+      aria-label={joinList([plainChannelName(h.title, strip), now, c.number, c.categoryName && plainChannelName(c.categoryName, false), showBadges && h.sourceName], i18n.language)}
       onClick={() => onPlayChannel(c, h)}
       onContextMenu={(e) => {
         if (!openMenu) return;
@@ -1507,11 +1507,10 @@ function ChannelHitButton({
             90 characters: it truncates first, and the source keeps its own share of the line. */}
         <div className="flex min-w-0 gap-1.5 overflow-hidden text-caption text-fg-subtle" data-testid="search-channel-meta">
           {c.number !== undefined && <span className="tabular shrink-0">{c.number}</span>}
-          {c.categoryName && (
-            <span dir="auto" title={c.categoryName} className="min-w-0 truncate">
-              {c.categoryName}
-            </span>
-          )}
+          {/* Drawn as Live TV's groups column draws a group: "SPORTS US", not "US| SPORTS". It takes
+              the free room, so when a narrow card drops the tag its space lands before the source,
+              which sits at the line's end, not as a gap after the group. */}
+          {c.categoryName && <ChannelName name={c.categoryName} title={c.categoryName} className="min-w-0 flex-1 truncate" />}
           {showBadges && (c.number !== undefined || !!c.categoryName) && <span aria-hidden className="shrink-0">·</span>}
           {showBadges && (
             <span dir="auto" title={h.sourceName} className="max-w-[60%] shrink-0 truncate" data-testid="search-channel-source">

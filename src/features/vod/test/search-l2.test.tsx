@@ -325,6 +325,18 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     expect(parts[1]!.className).toContain('min-w-0');
     expect(parts[1]!.className).toContain('truncate');
   });
+
+  it("draws a group's place tag after its name, quiet, as Live TV's groups column does (shell4)", async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [{ ...channel(1, 'src2'), number: 1, categoryName: 'US| SPORTS' }], movies: [], series: [] });
+    renderApp('/search?q=news');
+    const grid = await screen.findByTestId('vod-search-channels');
+    const meta = grid.querySelector<HTMLElement>('[data-testid="search-channel-meta"]')!;
+    const tag = within(meta).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.previousElementSibling!.textContent).toBe('SPORTS');
+    expect(within(meta).getByText('SPORTS (US)')).toBeTruthy();
+    expect(within(meta).getByTitle('US| SPORTS')).toBeTruthy();
+  });
 });
 
 describe('VD-1: poster results scroll without re-rendering every card', () => {

@@ -274,13 +274,17 @@ describe('palette library matches', () => {
     const channels = within(palette).getByText('Channels').closest('[cmdk-group]') as HTMLElement;
     expect(channels.querySelectorAll('[cmdk-item]')).toHaveLength(4);
     const item = row.closest('[cmdk-item]') as HTMLElement;
-    expect(within(item).getByText('US| SPORTS')).toBeTruthy();
+    // The group drawn as Live TV's groups column draws it, "SPORTS" with "US" after it, and heard
+    // as "SPORTS (US)" (shell4 follow-up).
+    expect(within(item).getByText('SPORTS (US)')).toBeTruthy();
+    expect(within(item).getByTitle('US| SPORTS')).toBeTruthy();
     // Named as Live TV's rows name it: the name first, the country tag after it in its own quiet
     // span, and the cleaned name for screen readers; data-value keeps the provider's name for matching.
-    const tag = within(item).getByTestId('channel-name-tag');
-    expect(tag.textContent).toBe('US');
+    const [tag, groupTag] = within(item).getAllByTestId('channel-name-tag');
+    expect(tag!.textContent).toBe('US');
+    expect(groupTag!.previousElementSibling!.textContent).toBe('SPORTS');
     // Drawn as the station and its quality words ("FOX" + " HD").
-    expect(tag.previousElementSibling!.textContent).toBe('FOX HD');
+    expect(tag!.previousElementSibling!.textContent).toBe('FOX HD');
     expect(item.getAttribute('data-value')).toContain('US| FOX HD');
     // The Search page's first page (every source, 60 and the probe row), so "Search for" opens warm.
     expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toContainEqual({ query: 'fox', limit: 61 });
@@ -294,7 +298,9 @@ describe('palette library matches', () => {
     rpcMock.handlers['settings.get'] = () => settings({ stripCountryPrefix: true });
     const { palette } = await openPaletteWith('fox');
     const item = (await within(palette).findByText('FOX HD')).closest('[cmdk-item]') as HTMLElement;
-    expect(within(item).queryByTestId('channel-name-tag')).toBeNull();
+    // The one tag left is the group's, which keeps it as Live TV's groups column does.
+    expect(within(item).getAllByTestId('channel-name-tag')).toHaveLength(1);
+    expect(within(item).getByText('SPORTS (US)')).toBeTruthy();
     expect(within(item).queryByText('US| FOX HD')).toBeNull();
   });
 

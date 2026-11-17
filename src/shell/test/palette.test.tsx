@@ -273,8 +273,10 @@ describe('palette library matches', () => {
     expect(within(item).getByText('US| SPORTS')).toBeTruthy();
     // Named as Live TV's rows name it: the name first, the country tag after it in its own quiet
     // span, and the provider's name for screen readers (which the row's text stays for matching).
-    expect(within(item).getByTestId('channel-name-tag').textContent).toBe('US');
-    expect(within(item).getByText('FOX HD')).toBeTruthy();
+    const tag = within(item).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    // Drawn as the station and its quality words ("FOX" + " HD").
+    expect(tag.previousElementSibling!.textContent).toBe('FOX HD');
     expect(item.getAttribute('data-value')).toContain('US| FOX HD');
     // The Search page's first page (every source, 60 and the probe row), so "Search for" opens warm.
     expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toContainEqual({ query: 'fox', limit: 61 });
@@ -425,7 +427,8 @@ describe('single settings, numbers and pending answers (search lane, 2026-11-16)
         ? { ref: tbs, name: 'US| TBS FHD', categoryId: 'c1', categoryName: 'US| ENTERTAINMENT', isRadio: false, number: 12 }
         : null;
     const { palette } = await openPaletteWith('12');
-    const row = (await within(palette).findByText('TBS FHD')).closest('[cmdk-item]') as HTMLElement;
+    // The provider's name, as screen readers hear it (the drawn name puts "US" after "TBS FHD").
+    const row = (await within(palette).findByText('US| TBS FHD')).closest('[cmdk-item]') as HTMLElement;
     expect(within(row).getByText('Channel 12')).toBeTruthy();
     fireEvent.click(row);
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: tbs, isLive: true })));

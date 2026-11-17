@@ -747,8 +747,11 @@ describe('empty wall', () => {
     renderPage();
     fireEvent.click(await screen.findByTestId('multiview-add'));
     const [row] = await screen.findAllByTestId('multiview-picker-row');
-    expect(within(row!).getByTestId('channel-name-tag').textContent).toBe('US');
-    expect(within(row!).getByText('ESPN HD')).toBeTruthy();
+    const tag = within(row!).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    // Drawn as the station and its quality words ("ESPN" + " HD"); screen readers hear the
+    // provider's name once, from the label.
+    expect(tag.previousElementSibling!.textContent).toBe('ESPN HD');
     expect(row!.getAttribute('aria-label')).toBe('Add US| ESPN HD to the wall');
   });
 
@@ -819,8 +822,10 @@ describe('empty wall', () => {
     renderPage();
     const list = await screen.findByTestId('multiview-quick-picks');
     const pick = within(list).getByRole('button', { name: 'Add US| ABC HD to the wall' });
-    expect(within(pick).getByTestId('channel-name-tag').textContent).toBe('US');
-    expect(within(pick).getByText('ABC HD')).toBeTruthy();
+    const tag = within(pick).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    // Drawn as the station and its quality words ("ABC" + " HD").
+    expect(tag.previousElementSibling!.textContent).toBe('ABC HD');
   });
 
   it('leaves the tag out of the quick picks with the strip setting on', async () => {

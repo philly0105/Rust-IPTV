@@ -1099,6 +1099,8 @@ describe('sports page', () => {
     expect(tag.className).toContain('text-fg-subtle');
     // Screen readers get the provider's name as it is.
     expect(within(row).getByTestId('sports-stream-name').querySelector('.sr-only')!.textContent).toBe('US| ESPN HD');
+    // Its Watch names the channel as toasts do, cleaned, never "US| ESPN HD" (w-a11y-03).
+    expect(within(row).getByTestId('sports-watch').getAttribute('aria-label')).toBe('Watch Boston Celtics at New York Knicks on ESPN HD (US)');
   });
 
   it("puts the rows that can act first: a final game's one archived copy is not hidden behind Show all", async () => {

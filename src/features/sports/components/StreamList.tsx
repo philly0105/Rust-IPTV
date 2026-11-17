@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router';
 import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type PlayerSource, type Reminder, type Settings } from '@/api/types';
 // Straight from its module (sports/deps.ts re-exports only ChannelLogo from it), the same chunk.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { plainChannelName } from '@/lib/channelName';
 import { channelQuality } from '@/lib/channelQuality';
 
 import {
@@ -143,10 +144,10 @@ export function useStreamContext(now: number, sourceCount: number, hdOnly = fals
           }
         }
       } catch (err) {
-        toast({ variant: 'error', title: t('playFailed', { name }), description: errorDescription(err) });
+        toast({ variant: 'error', title: t('playFailed', { name: plainChannelName(m.channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err) });
       }
     },
-    [t, toast, navigate],
+    [t, toast, navigate, prefs.stripCountryPrefix],
   );
 
   const replay = useCallback(
@@ -282,6 +283,8 @@ function StreamRow({
   const { t, i18n } = useTranslation('sports');
   const [busy, setBusy] = useState(false);
   const name = displayChannelName(match.channel.name, ctx.strip) || match.channel.name;
+  // What a screen reader hears: the cleaned name toasts use ("ESPN HD (US)"), not the provider's "US| ESPN HD".
+  const spoken = plainChannelName(match.channel.name, ctx.strip);
   const action = streamAction(game, match, ctx.now, ctx.canRecord, title);
   const run = (work: () => Promise<unknown>) => {
     setBusy(true);
@@ -310,7 +313,7 @@ function StreamRow({
         variant="secondary"
         icon={<Play size={16} aria-hidden />}
         loading={busy}
-        aria-label={t('watchLabel', { title, name })}
+        aria-label={t('watchLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.watch(match, title, name))}
         data-testid="sports-watch"
       >
@@ -325,7 +328,7 @@ function StreamRow({
         variant="secondary"
         icon={<History size={16} aria-hidden />}
         loading={busy}
-        aria-label={t('replayLabel', { title, name })}
+        aria-label={t('replayLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.replay(match, program, name))}
         data-testid="sports-replay"
       >
@@ -344,7 +347,7 @@ function StreamRow({
         variant="secondary"
         icon={<Circle size={14} aria-hidden className="fill-live text-live" />}
         loading={busy}
-        aria-label={t('recordLabel', { title, name })}
+        aria-label={t('recordLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.record(match, program, name))}
         data-testid="sports-record"
       >
@@ -368,7 +371,7 @@ function StreamRow({
           icon={reminder ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
           aria-pressed={!!reminder}
           loading={busy}
-          aria-label={reminder ? undefined : t('remindLabel', { title, name })}
+          aria-label={reminder ? undefined : t('remindLabel', { title, name: spoken })}
           onClick={() => run(() => ctx.remind(match, remindProgram, name, reminder))}
           data-testid="sports-remind"
         >

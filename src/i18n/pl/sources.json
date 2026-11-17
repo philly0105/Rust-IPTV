@@ -106,7 +106,6 @@
   "testing": "Testowanie…",
   "testOk": "Połączono.",
   "testOkNamed": "Połączono z {{name}}.",
-  "testError": "Nie udało się połączyć: {{message}}",
   "testFailedGeneric": "Serwer nie zaakceptował tych danych.",
   "checkFailedTitle": "Z tymi danymi nie udało się połączyć",
   "checkFailedNote": "Nic jeszcze nie zapisano. Popraw dane albo zapisz je mimo to, jeśli serwer jest tylko chwilowo niedostępny.",
@@ -213,7 +212,6 @@
   "removeSource": "Usuń {{name}}",
   "removeTitle": "Usunąć {{name}}?",
   "removeBody": "Kanały, ulubione, historia oglądania i tytuły z Mojej listy tego źródła zostaną usunięte. Możesz dodać źródło ponownie później.",
-  "removeConfirm": "Usuń źródło",
   "removedTitle": "Usunięto: {{name}}",
   "removeFailed": "Nie udało się usunąć: {{name}}",
 
@@ -283,7 +281,6 @@
   "statRadio_many": "stacji radiowych",
   "statRadio_other": "stacji radiowej",
   "tabAccount": "Konto",
-  "accountFor": "Szczegóły konta {{name}}",
   "accountLead": "Szczegóły subskrypcji przekazane przez dostawcę.",
   "accountRefresh": "Sprawdź ponownie",
   "accountLoadFailed": "Nie udało się wczytać szczegółów konta",

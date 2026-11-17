@@ -96,7 +96,6 @@
   "testing": "Test ediliyor…",
   "testOk": "Bağlantı kuruldu.",
   "testOkNamed": "Bağlantı kuruldu: {{name}}.",
-  "testError": "Bağlanılamadı: {{message}}",
   "testFailedGeneric": "Sunucu bu bilgileri kabul etmedi.",
   "checkFailedTitle": "Bu bilgilerle bağlanılamadı",
   "checkFailedNote": "Henüz hiçbir şey kaydedilmedi. Bilgileri düzeltin veya sunucu yalnızca şimdilik kapalıysa yine de kaydedin.",
@@ -189,7 +188,6 @@
   "removeSource": "{{name}} kaynağını kaldır",
   "removeTitle": "{{name}} kaldırılsın mı?",
   "removeBody": "Kanalları, favorileri, izleme geçmişi ve Listemdeki başlıkları da silinir. Kaynağı daha sonra yeniden ekleyebilirsiniz.",
-  "removeConfirm": "Kaynağı kaldır",
   "removedTitle": "{{name}} kaldırıldı",
   "removeFailed": "{{name}} kaldırılamadı",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "radyo",
   "statRadio_other": "radyo",
   "tabAccount": "Hesap",
-  "accountFor": "{{name}} hesap ayrıntıları",
   "accountLead": "Sağlayıcının bildirdiği abonelik ayrıntıları.",
   "accountRefresh": "Yeniden kontrol et",
   "accountLoadFailed": "Hesap ayrıntıları yüklenemedi",

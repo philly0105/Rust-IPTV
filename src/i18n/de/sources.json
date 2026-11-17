@@ -96,7 +96,6 @@
   "testing": "Wird getestet…",
   "testOk": "Verbunden.",
   "testOkNamed": "Mit {{name}} verbunden.",
-  "testError": "Verbindung fehlgeschlagen: {{message}}",
   "testFailedGeneric": "Der Server hat diese Angaben nicht akzeptiert.",
   "checkFailedTitle": "Mit diesen Angaben kam keine Verbindung zustande",
   "checkFailedNote": "Noch ist nichts gespeichert. Korrigieren Sie die Angaben oder speichern Sie sie trotzdem, wenn der Server nur gerade nicht erreichbar ist.",
@@ -189,7 +188,6 @@
   "removeSource": "{{name}} entfernen",
   "removeTitle": "{{name}} entfernen?",
   "removeBody": "Ihre Sender, Favoriten, der Wiedergabeverlauf und ihre Titel in meiner Liste werden mit entfernt. Sie können die Quelle später erneut hinzufügen.",
-  "removeConfirm": "Quelle entfernen",
   "removedTitle": "{{name}} entfernt",
   "removeFailed": "{{name}} konnte nicht entfernt werden",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "Radiosender",
   "statRadio_other": "Radiosender",
   "tabAccount": "Konto",
-  "accountFor": "Kontodetails für {{name}}",
   "accountLead": "Abodetails, wie sie der Anbieter meldet.",
   "accountRefresh": "Erneut prüfen",
   "accountLoadFailed": "Die Kontodetails konnten nicht geladen werden",

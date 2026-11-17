@@ -96,7 +96,6 @@
   "testing": "Testen…",
   "testOk": "Verbonden.",
   "testOkNamed": "Verbonden met {{name}}.",
-  "testError": "Kan geen verbinding maken: {{message}}",
   "testFailedGeneric": "De server heeft deze gegevens niet geaccepteerd.",
   "checkFailedTitle": "Met deze gegevens lukte het verbinden niet",
   "checkFailedNote": "Er is nog niets opgeslagen. Verbeter de gegevens, of sla ze toch op als de server alleen tijdelijk niet bereikbaar is.",
@@ -189,7 +188,6 @@
   "removeSource": "{{name}} verwijderen",
   "removeTitle": "{{name}} verwijderen?",
   "removeBody": "De kanalen, favorieten, kijkgeschiedenis en titels in Mijn lijst van deze bron worden ook verwijderd. Je kunt de bron later opnieuw toevoegen.",
-  "removeConfirm": "Bron verwijderen",
   "removedTitle": "{{name}} verwijderd",
   "removeFailed": "Kan {{name}} niet verwijderen",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "radiozender",
   "statRadio_other": "radiozenders",
   "tabAccount": "Account",
-  "accountFor": "Accountgegevens voor {{name}}",
   "accountLead": "Abonnementsgegevens zoals de provider ze doorgeeft.",
   "accountRefresh": "Opnieuw controleren",
   "accountLoadFailed": "Kan de accountgegevens niet laden",

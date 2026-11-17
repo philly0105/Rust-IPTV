@@ -116,7 +116,6 @@
   "testing": "جارٍ الاختبار…",
   "testOk": "تم الاتصال.",
   "testOkNamed": "تم الاتصال بـ {{name}}.",
-  "testError": "تعذّر الاتصال: {{message}}",
   "testFailedGeneric": "لم يقبل الخادم هذه البيانات.",
   "checkFailedTitle": "تعذر الاتصال بهذه البيانات",
   "checkFailedNote": "لم يُحفظ شيء بعد. صحّح البيانات، أو احفظها على أي حال إذا كان الخادم متوقفًا مؤقتًا فقط.",
@@ -237,7 +236,6 @@
   "removeSource": "إزالة {{name}}",
   "removeTitle": "إزالة {{name}}؟",
   "removeBody": "ستُزال معه قنواته ومفضلته وسجل المشاهدة وعناوينه في قائمتي. يمكنك إضافة المصدر مجددًا لاحقًا.",
-  "removeConfirm": "إزالة المصدر",
   "removedTitle": "تمت إزالة {{name}}",
   "removeFailed": "تعذّرت إزالة {{name}}",
 
@@ -309,7 +307,6 @@
   "statRadio_many": "إذاعة",
   "statRadio_other": "إذاعة",
   "tabAccount": "الحساب",
-  "accountFor": "تفاصيل حساب {{name}}",
   "accountLead": "تفاصيل الاشتراك كما أفاد بها المزوّد.",
   "accountRefresh": "التحقق مجددًا",
   "accountLoadFailed": "تعذّر تحميل تفاصيل الحساب",

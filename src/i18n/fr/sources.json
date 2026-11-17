@@ -101,7 +101,6 @@
   "testing": "Test en cours…",
   "testOk": "Connecté.",
   "testOkNamed": "Connecté à {{name}}.",
-  "testError": "Connexion impossible : {{message}}",
   "testFailedGeneric": "Le serveur n'a pas accepté ces informations.",
   "checkFailedTitle": "Ces informations n'ont pas permis de se connecter",
   "checkFailedNote": "Rien n'est encore enregistré. Corrigez les informations, ou enregistrez-les quand même si le serveur est seulement indisponible pour l'instant.",
@@ -201,7 +200,6 @@
   "removeSource": "Supprimer {{name}}",
   "removeTitle": "Supprimer {{name}} ?",
   "removeBody": "Ses chaînes, favoris, historique de visionnage et titres de Ma liste seront supprimés avec elle. Vous pourrez ajouter la source de nouveau plus tard.",
-  "removeConfirm": "Supprimer la source",
   "removedTitle": "{{name}} supprimé",
   "removeFailed": "Impossible de supprimer {{name}}",
 
@@ -270,7 +268,6 @@
   "statRadio_many": "radios",
   "statRadio_other": "radios",
   "tabAccount": "Compte",
-  "accountFor": "Détails du compte {{name}}",
   "accountLead": "Détails de l'abonnement communiqués par le fournisseur.",
   "accountRefresh": "Vérifier de nouveau",
   "accountLoadFailed": "Impossible de charger les détails du compte",

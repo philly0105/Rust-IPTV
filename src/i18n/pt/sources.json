@@ -101,7 +101,6 @@
   "testing": "Testando…",
   "testOk": "Conectado.",
   "testOkNamed": "Conectado a {{name}}.",
-  "testError": "Não foi possível conectar: {{message}}",
   "testFailedGeneric": "O servidor não aceitou esses dados.",
   "checkFailedTitle": "Não foi possível conectar com esses dados",
   "checkFailedNote": "Nada foi salvo ainda. Corrija os dados ou salve-os assim mesmo se o servidor estiver fora do ar só por enquanto.",
@@ -201,7 +200,6 @@
   "removeSource": "Remover {{name}}",
   "removeTitle": "Remover {{name}}?",
   "removeBody": "Os canais, favoritos, histórico e títulos da Minha lista desta fonte também serão removidos. Você pode adicioná-la novamente depois.",
-  "removeConfirm": "Remover fonte",
   "removedTitle": "{{name}} removida",
   "removeFailed": "Não foi possível remover {{name}}",
 
@@ -270,7 +268,6 @@
   "statRadio_many": "rádios",
   "statRadio_other": "rádios",
   "tabAccount": "Conta",
-  "accountFor": "Dados da conta de {{name}}",
   "accountLead": "Dados da assinatura informados pelo provedor.",
   "accountRefresh": "Verificar novamente",
   "accountLoadFailed": "Não foi possível carregar os dados da conta",

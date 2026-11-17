@@ -96,7 +96,6 @@
   "testing": "正在测试…",
   "testOk": "已连接。",
   "testOkNamed": "已连接到 {{name}}。",
-  "testError": "无法连接：{{message}}",
   "testFailedGeneric": "服务器不接受这些信息。",
   "checkFailedTitle": "无法用这些信息连接",
   "checkFailedNote": "尚未保存任何内容。请修正信息；如果服务器只是暂时不可用，也可以仍然保存。",
@@ -189,7 +188,6 @@
   "removeSource": "移除 {{name}}",
   "removeTitle": "移除 {{name}}？",
   "removeBody": "其频道、收藏、观看记录和我的片单中的影片将一并移除。你之后可以重新添加此播放源。",
-  "removeConfirm": "移除播放源",
   "removedTitle": "已移除 {{name}}",
   "removeFailed": "无法移除 {{name}}",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "电台",
   "statRadio_other": "电台",
   "tabAccount": "账户",
-  "accountFor": "{{name}} 的账户详情",
   "accountLead": "提供商报告的订阅详情。",
   "accountRefresh": "重新检查",
   "accountLoadFailed": "无法加载账户详情",

@@ -96,7 +96,6 @@
   "testing": "正在測試…",
   "testOk": "已連線。",
   "testOkNamed": "已連線到 {{name}}。",
-  "testError": "無法連線：{{message}}",
   "testFailedGeneric": "伺服器不接受這些資訊。",
   "checkFailedTitle": "無法用這些資訊連線",
   "checkFailedNote": "尚未儲存任何內容。請修正資訊；如果伺服器只是暫時無法使用，也可以仍然儲存。",
@@ -189,7 +188,6 @@
   "removeSource": "移除 {{name}}",
   "removeTitle": "要移除 {{name}} 嗎？",
   "removeBody": "其頻道、我的最愛、觀看記錄與我的片單中的影片將一併移除。您之後可以再次新增此播放來源。",
-  "removeConfirm": "移除播放來源",
   "removedTitle": "已移除 {{name}}",
   "removeFailed": "無法移除 {{name}}",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "電台",
   "statRadio_other": "電台",
   "tabAccount": "帳戶",
-  "accountFor": "{{name}} 的帳戶詳細資訊",
   "accountLead": "供應商回報的訂閱詳細資訊。",
   "accountRefresh": "重新檢查",
   "accountLoadFailed": "無法載入帳戶詳細資訊",

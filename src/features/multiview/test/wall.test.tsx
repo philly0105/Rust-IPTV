@@ -753,9 +753,26 @@ describe('empty wall', () => {
     renderPage();
     fireEvent.click(await screen.findByTestId('multiview-add'));
     const [row] = await screen.findAllByTestId('multiview-picker-row');
-    expect(within(row!).getByTestId('channel-name-tag').textContent).toBe('US');
-    expect(within(row!).getByText('ESPN HD')).toBeTruthy();
-    expect(row!.getAttribute('aria-label')).toBe('Add US| ESPN HD to the wall');
+    const tag = within(row!).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.parentElement!.textContent).toBe('ESPN HDUS');
+    // Heard as toasts word it (w-a11y-03).
+    expect(row!.getAttribute('aria-label')).toBe('Add ESPN HD (US) to the wall');
+  });
+
+  it('draws a provider heading row as a quiet caption with nothing to add (w-realdata-01)', async () => {
+    handlers['catalog.channels'] = () => ({
+      items: [{ ...channel(1, 'm3u1'), name: '####### ESPN+ #######' }, channel(2, 'm3u1')],
+      total: 2,
+    });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('multiview-add'));
+    const caption = await screen.findByTestId('multiview-picker-separator');
+    expect(caption.textContent).toBe('ESPN+');
+    expect(within(caption).queryByRole('button')).toBeNull();
+    const rows = screen.getAllByTestId('multiview-picker-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute('aria-label')).toBe('Add Channel 2 to the wall');
   });
 
   it('adds nothing when the PIN prompt is cancelled', async () => {
@@ -824,9 +841,12 @@ describe('empty wall', () => {
     handlers['recent.list'] = () => [{ ref: channel(1, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'US| ABC HD', contentType: 'live' } }];
     renderPage();
     const list = await screen.findByTestId('multiview-quick-picks');
-    const pick = within(list).getByRole('button', { name: 'Add US| ABC HD to the wall' });
-    expect(within(pick).getByTestId('channel-name-tag').textContent).toBe('US');
-    expect(within(pick).getByText('ABC HD')).toBeTruthy();
+    const pick = within(list).getByRole('button', { name: 'Add ABC HD (US) to the wall' });
+    const tag = within(pick).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.parentElement!.textContent).toBe('ABC HDUS');
+    // The tooltip keeps the provider's name.
+    expect(pick.getAttribute('title')).toBe('US| ABC HD');
   });
 
   it('leaves the tag out of the quick picks with the strip setting on', async () => {
@@ -1260,6 +1280,29 @@ describe('picker browsing (LG-19)', () => {
     expect(results.className).not.toContain('max-h-');
     expect(calls.some((c) => c.cmd === 'catalog.channels' && (c.args as { categoryId?: string }).categoryId === 'sport')).toBe(true);
     expect(await within(dialog).findByText('Cup final')).toBeTruthy();
+  });
+
+  it("narrows a source of country-tagged groups by Live TV's region pick (w-realdata-05)", async () => {
+    const group = (id: string, name: string, position: number) => ({ id, sourceId: 'm3u1', contentType: 'live', name, hidden: false, itemCount: 5, position });
+    handlers['catalog.categories'] = () => [
+      group('us1', 'US| SPORTS', 0),
+      group('us2', 'US| NEWS', 1),
+      group('uk1', 'UK| SPORTS', 2),
+      group('uk2', 'UK| NEWS', 3),
+      ...Array.from({ length: 6 }, (_, i) => group(`de${i}`, `DE| KANAL ${i}`, 4 + i)),
+    ];
+    handlers['lists.list'] = () => [];
+    localStorage.setItem('tsrust.liveRegion:m3u1:live', 'UK');
+    renderPage();
+    fireEvent.click(await screen.findByTestId('multiview-add'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add channels' });
+    fireEvent.change(within(dialog).getByLabelText('Source'), { target: { value: 'm3u1' } });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));
+    const region = (await screen.findByTestId('scope-region')) as HTMLSelectElement;
+    expect(region.value).toBe('UK');
+    expect(screen.queryByRole('option', { name: /US\| SPORTS/ })).toBeNull();
+    expect(screen.getByRole('option', { name: /UK\| SPORTS/ })).toBeTruthy();
+    localStorage.removeItem('tsrust.liveRegion:m3u1:live');
   });
 });
 

@@ -9,7 +9,7 @@ import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { ScopePicker } from '@/features/live/components/ScopePicker';
 import { nowTitleOf, SCOPE_ALL, useBrowseSections, useChannelBrowse, type BrowseScope } from '@/features/live/hooks/useChannelBrowse';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/features/live/lib/channelName';
+import { displayChannelName, isSeparatorName, plainChannelName, separatorLabel } from '@/features/live/lib/channelName';
 
 import { addToWall, channelInput, replaceOnWall } from '../addChannel';
 import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, SearchInput, Select, SkeletonList, toast } from '../deps';
@@ -211,13 +211,28 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
         </p>
         <ul ref={listRef} onKeyDown={onListKey} className="flex flex-col gap-0.5" aria-label={title} data-testid="multiview-picker-list">
           {channels.map((ch) => {
+            const rowKey = `${ch.ref.sourceId}|${ch.ref.itemId}`;
+            // A provider's heading row ("#### ESPN+ ####") is no channel: a quiet caption over the
+            // channels it heads, as Live TV draws it, with nothing to add and passed by the arrows.
+            if (isSeparatorName(ch.name)) {
+              return (
+                <li
+                  key={rowKey}
+                  dir="auto"
+                  className="truncate px-2.5 pt-3 pb-1 text-caption font-semibold tracking-wide text-fg-subtle uppercase"
+                  data-testid="multiview-picker-separator"
+                >
+                  {separatorLabel(ch.name)}
+                </li>
+              );
+            }
             const slotOf = tiles.findIndex((tile) => sameRef(tile.ref, ch.ref));
             const onWall = slotOf >= 0;
             const isCurrent = replacing ? sameRef(replacing.ref, ch.ref) : false;
-            const rowKey = `${ch.ref.sourceId}|${ch.ref.itemId}`;
             const busy = pending === rowKey;
             const disabled = (onWall && !isCurrent) || (full && !onWall) || (pending !== null && !busy);
-            const name = display(ch);
+            // Heard as toasts word it: "ESPN HD (US)", not the provider's "US| ESPN HD".
+            const name = plainChannelName(ch.name, stripCountryPrefix);
             const label = mode.kind === 'replace' ? t('pickerPickLabel', { name }) : t('pickerAddLabel', { name });
             // What is on, so a match or a show can be found by its title (LG-19); else the group.
             const nowTitle = nowTitleOf(active.nowNext, ch);
@@ -241,7 +256,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                     'motion-safe:transition-colors motion-safe:duration-100',
                   )}
                 >
-                  <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={name} tint="theme" className="size-9 rounded-md" />
+                  <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={display(ch)} tint="theme" className="size-9 rounded-md" />
                   <span className="flex min-w-0 flex-1 flex-col">
                     {/* Named as Live TV's rows name it: the place tag after the name, quiet. */}
                     <span className={cn('flex min-w-0 items-baseline text-start text-sm font-medium', disabled && !onWall ? 'text-fg-muted' : 'text-fg')}>
@@ -331,6 +346,8 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
               value={scope}
               sections={sections}
               onChange={setScope}
+              // Live's region select over the groups ("GR · Greece · 31 groups"), its pick shared.
+              regionScope={source ? `${source}:live` : undefined}
               className="h-10"
               testId="multiview-picker-scope"
             />

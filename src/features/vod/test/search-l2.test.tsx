@@ -163,7 +163,8 @@ describe('L1-vod-3: search focus and keyboard', () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
     renderApp('/start');
     fireEvent.click(screen.getByRole('link', { name: 'Rail search' }));
-    await screen.findByText('No results for "movie"');
+    // "movie" matches a setting, so the page says in one line that nothing else did (v-shell-home-03).
+    await screen.findByText('No channels, movies, series or programmes match "movie".');
     await waitFor(() => expect(document.activeElement).toBe(field()));
     const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
     field().dispatchEvent(ev);

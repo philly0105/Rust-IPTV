@@ -173,7 +173,7 @@ export function VirtualList<T>({
         if (e.target === e.currentTarget && active < 0 && items.length > 0) setActive(0);
       }}
       data-testid={testId}
-      className={cn('relative h-full overflow-y-auto overscroll-contain', className)}
+      className={cn('relative h-full overflow-y-auto overscroll-contain pb-[var(--player-float-inset,0px)]', className)}
     >
       <div style={{ height: virtualizer.getTotalSize() + footerHeight, position: 'relative', width: '100%' }}>
         {virtualItems.map((vi) => {

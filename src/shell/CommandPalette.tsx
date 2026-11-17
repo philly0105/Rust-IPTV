@@ -31,8 +31,8 @@ import { isDesktop } from '@/api/transport';
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type SourceKind } from '@/api/types';
 // Light modules only (no guide page): programme hits and the guide link they open.
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
-// Live TV's own module for a channel's name (it shares it with ChannelLogo, in Live's chunk).
-import { ChannelName } from '@/features/live/components/ChannelLogo';
+// Live TV's own module for a channel's logo and name, in Live's chunk.
+import { ChannelLogo, ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
@@ -98,6 +98,8 @@ interface PaletteItem {
   image?: { src?: string; sourceId: string; poster?: boolean };
   shortcut?: string;
   keywords?: string[];
+  /** A channel's group, first in the quiet trailing text, drawn as Live TV's groups column draws it. */
+  detailGroup?: string;
   /** Quiet trailing text: a favourite's or recent item's kind, then its source when there are several. */
   detail?: readonly string[];
   /** A channel's provider name after the details, drawn as the channel rows draw theirs (a programme's channel). */
@@ -106,7 +108,8 @@ interface PaletteItem {
   wideDetail?: string;
   /**
    * The title is a channel's provider name: drawn as Live TV's rows draw it (ChannelName), the
-   * place tag after the name and the strip setting applied. Matching still reads the name as it is.
+   * place tag after the name and the strip setting applied, beside its logo or Live's monogram
+   * (ChannelLogo). Matching still reads the name as it is.
    */
   channel?: boolean;
   run(): void;
@@ -286,7 +289,8 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
         image: c.logoUrl ? { src: c.logoUrl, sourceId: c.ref.sourceId } : undefined,
         keywords,
         // The channel's group tells two feeds of one name apart ("FOX HD" in Sports and in Backup).
-        detail: [c.categoryName, many ? source.name : ''].filter(Boolean),
+        detailGroup: c.categoryName || undefined,
+        detail: many ? [source.name] : undefined,
         run: play(c, source.kind),
       });
     }
@@ -626,7 +630,7 @@ function useSuggestedItems(query: string): PaletteItem[] {
   const { t } = useTranslation('shell');
   const navigate = useNavigate();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
-  const { resolved } = useTheme();
+  const { resolved, toggle } = useTheme();
   const empty = !query.trim();
   return useMemo(() => {
     if (!empty) return [];
@@ -638,12 +642,12 @@ function useSuggestedItems(query: string): PaletteItem[] {
         group,
         icon: resolved === 'dark' ? Sun : Moon,
         shortcut: 'mod+shift+l',
-        run: () => void persistTheme(resolved === 'dark' ? 'light' : 'dark'),
+        run: toggle,
       },
       { id: 'suggest.addSource', title: t('addSource'), group, icon: Plus, run: () => navigate('/sources?add=1') },
       { id: 'suggest.shortcuts', title: t('keyboardShortcuts'), group, icon: Keyboard, shortcut: '?', run: () => setHelpOpen(true) },
     ];
-  }, [empty, resolved, t, navigate, setHelpOpen]);
+  }, [empty, resolved, toggle, t, navigate, setHelpOpen]);
 }
 
 /** Groups the empty palette shows; the rest (sources, settings) wait for a query. */
@@ -858,15 +862,21 @@ export function CommandPalette() {
                 const Icon = it.icon;
                 return (
                   <Cmdk.Item key={it.id} value={`${it.title}${VALUE_SEP}${it.id}`} keywords={it.keywords} onSelect={() => run(it.run)} className={row}>
-                    <span aria-hidden className={iconTile}>
-                      {it.image?.poster ? (
-                        <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" className="size-full after:hidden" rounded="sm" />
-                      ) : it.image ? (
-                        <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" fit="contain" kind="live" className="bg-transparent after:hidden [&_img]:p-0.5" rounded="sm" />
-                      ) : (
-                        Icon && <Icon size={16} />
-                      )}
-                    </span>
+                    {it.channel ? (
+                      <span aria-hidden className="flex size-7 shrink-0">
+                        <ChannelLogo src={it.image?.src} name={it.title} size={28} sourceId={it.image?.sourceId} />
+                      </span>
+                    ) : (
+                      <span aria-hidden className={iconTile}>
+                        {it.image?.poster ? (
+                          <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" className="size-full after:hidden" rounded="sm" />
+                        ) : it.image ? (
+                          <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" fit="contain" kind="live" className="bg-transparent after:hidden [&_img]:p-0.5" rounded="sm" />
+                        ) : (
+                          Icon && <Icon size={16} />
+                        )}
+                      </span>
+                    )}
                     {it.channel ? (
                       <ChannelName name={it.title} strip={prefs.stripCountryPrefix} title={it.title} className="min-w-0 flex-1 truncate text-match-parent" />
                     ) : (
@@ -875,6 +885,7 @@ export function CommandPalette() {
                       </span>
                     )}
                     {/* Capped, so a long channel group or source name never squeezes the title. */}
+                    {it.detailGroup && <ChannelName name={it.detailGroup} title={it.detailGroup} className={detailText} />}
                     {it.detail?.map((d, i) => (
                       <span key={i} dir="auto" title={d} className={detailText}>
                         {d}

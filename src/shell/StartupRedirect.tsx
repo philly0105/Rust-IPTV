@@ -51,7 +51,9 @@ function savedRoute(settings: Settings | undefined): string | undefined {
 /**
  * Where `/` goes on start (C7): lastRoute, /dashboard, or /sources. A saved screen that no
  * longer exists is not restored: a path no route knows, a screen of a source that was removed
- * (here or from another client; the catch-up archive included), or a deleted custom list.
+ * (here or from another client; the catch-up archive included), or a deleted custom list. With no
+ * source at all no saved screen is restored either: Home's welcome (Add your first source) is
+ * where a new or emptied library starts, not an empty feature page.
  */
 export function startupTarget(settings: Settings | undefined, checks: StartupChecks = {}): string {
   if (!settings) return '/dashboard';
@@ -63,7 +65,8 @@ export function startupTarget(settings: Settings | undefined, checks: StartupChe
     const dead =
       (checks.isKnownPath && !checks.isKnownPath(pathname)) ||
       (sourceId !== undefined && !!checks.sources && !checks.sources.some((s) => s.id === sourceId)) ||
-      (listId !== undefined && !!checks.lists && !checks.lists.some((l) => l.id === listId));
+      (listId !== undefined && !!checks.lists && !checks.lists.some((l) => l.id === listId)) ||
+      checks.sources?.length === 0;
     if (!dead) return last;
   }
   return settings.showDashboard ? '/dashboard' : '/sources';
@@ -94,7 +97,8 @@ export interface StartupDecision {
 
 /**
  * The startup target of a cold start at `/` (C7), worked out as StartupRedirect does, from the
- * boot's `settings.get` and, when the saved screen needs them, `sources.list` or `lists.list`; on
+ * boot's `settings.get` and, when there is a saved screen, `sources.list` (also prefetched at boot)
+ * and, for a saved list, `lists.list`; on
  * desktop after the one `app.pendingDeepLinks` pull, whose link wins. main.tsx starts the router
  * at it, so the first render is the page itself: no redirect step from `/` and no shell render of
  * the index route before it. Null when settings fail: the router then starts at `/` and
@@ -111,7 +115,7 @@ export async function resolveStartup(isKnownPath?: (pathname: string) => boolean
   if (link) return { path: link, commit: consumeStartupDeepLink };
   const saved = savedRoute(settings);
   const [sources, lists] = await Promise.all([
-    saved !== undefined && routeSourceId(saved) !== undefined
+    saved !== undefined
       ? queryClient.ensureQueryData({ queryKey: rpcKey('sources.list'), queryFn: () => rpc('sources.list') }).catch(() => undefined)
       : undefined,
     saved !== undefined && routeListId(saved) !== undefined
@@ -158,9 +162,10 @@ export function StartupRedirect({ isKnownPath }: { isKnownPath?: (pathname: stri
   const navigation = useNavigation();
   const [userMoved, setUserMoved] = useState(false);
   if (!userMoved && navigation.location && navigation.location.pathname !== '/') setUserMoved(true);
-  // The saved screen points at a source or a list, so startup needs that list to check it.
+  // A saved screen is restored only while a source exists (and its own source or list does), so
+  // startup checks the source list (prefetched at boot) and, for a list screen, the lists.
   const saved = savedRoute(settings.data);
-  const checkSource = saved !== undefined && routeSourceId(saved) !== undefined;
+  const checkSource = saved !== undefined;
   const checkList = saved !== undefined && routeListId(saved) !== undefined;
   const sources = useRpcQuery('sources.list', undefined, { enabled: checkSource });
   const lists = useRpcQuery('lists.list', undefined, { enabled: checkList });

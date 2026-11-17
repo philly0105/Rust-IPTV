@@ -254,7 +254,10 @@ export interface ThemeApi {
   resolved: ResolvedTheme;
   /** Updates locally at once and persists through settings.update. */
   setTheme(theme: Theme): void;
-  /** Flips between light and dark (from system, flips the resolved value). */
+  /**
+   * Flips between light and dark (from system, flips the resolved value). Flipping to what the OS
+   * shows saves System, so a round trip from System ends there and keeps following the OS.
+   */
   toggle(): void;
 }
 
@@ -337,7 +340,10 @@ export function useTheme(): ThemeApi {
   const prefersDark = useSyncExternalStore(subscribeDark, systemPrefersDark, () => true);
   const resolved = resolveTheme(theme, prefersDark);
   const setTheme = useCallback((t: Theme) => void persistTheme(t), []);
-  const toggle = useCallback(() => void persistTheme(resolved === 'dark' ? 'light' : 'dark'), [resolved]);
+  const toggle = useCallback(() => {
+    const next: ResolvedTheme = resolved === 'dark' ? 'light' : 'dark';
+    void persistTheme(next === (prefersDark ? 'dark' : 'light') ? 'system' : next);
+  }, [resolved, prefersDark]);
   return { theme, resolved, setTheme, toggle };
 }
 

@@ -8,6 +8,7 @@ import type { SourcesAddArgs } from '@/api/rpc';
 import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 import type { Source, SourceKind } from '@/api/types';
 
+import { formatList, intlLocale, numberFormat } from '@/lib/intl';
 import { sourceHomePath } from '@/shell/railLinks';
 import { Button, Dialog, Input, Tabs, Toggle, useToast } from '@/ui';
 import {
@@ -89,14 +90,26 @@ export function draftHost(d: SourceDraft): string | undefined {
 
 /**
  * The name an add uses when the optional Name field is left empty: the one the current address or
- * file suggests, or `pasted` for a pasted playlist, which has neither.
+ * file suggests, or `pasted` for a pasted playlist, which has neither. A name another source already
+ * has (`taken`, any case) gets the first free number, "sports (2)", so the rail never lists two
+ * sources that read the same.
  */
-export function defaultName(d: SourceDraft, pasted: string): string {
-  if (d.kind === 'xtream') return suggestName(d.xtream.serverUrl);
-  if (d.kind === 'stalker') return suggestName(d.stalker.portalUrl);
-  if (d.m3u.origin === 'url') return suggestName(d.m3u.url);
-  if (d.m3u.origin === 'file') return suggestName(d.m3u.filePath || d.m3u.fileName);
-  return pasted;
+export function defaultName(d: SourceDraft, pasted: string, taken: readonly string[] = []): string {
+  const name =
+    d.kind === 'xtream'
+      ? suggestName(d.xtream.serverUrl)
+      : d.kind === 'stalker'
+        ? suggestName(d.stalker.portalUrl)
+        : d.m3u.origin === 'url'
+          ? suggestName(d.m3u.url)
+          : d.m3u.origin === 'file'
+            ? suggestName(d.m3u.filePath || d.m3u.fileName)
+            : pasted;
+  const used = new Set(taken.map((n) => n.trim().toLocaleLowerCase()));
+  if (!name || !used.has(name.toLocaleLowerCase())) return name;
+  let n = 2;
+  while (used.has(`${name} (${n})`.toLocaleLowerCase())) n++;
+  return `${name} (${n})`;
 }
 
 /** The kind's name, for the import heading while the source has no name yet. */
@@ -118,7 +131,7 @@ export function AddSourceDialog({
   /** `first`: the list was empty when the add started (SS-6: the host opens the new source). */
   onAdded?: (source: Source, first: boolean) => void;
 }) {
-  const { t } = useTranslation('sources');
+  const { t, i18n } = useTranslation('sources');
   const navigate = useNavigate();
   const { toast } = useToast();
   useImportProgressFeed();
@@ -202,6 +215,12 @@ export function AddSourceDialog({
 
   const sources = useRpcQuery('sources.list', undefined, { enabled: open });
   const knownIds = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
+  // Names the default name must not repeat: not the failed source a retry reuses, nor, while an add
+  // runs, the source it just created (the list refetches mid-import).
+  const takenNames = useMemo(
+    () => (sources.data ?? []).filter((s) => s.id !== failed?.id && (!submitting || idsAtSubmit.includes(s.id))).map((s) => s.name),
+    [sources.data, failed?.id, submitting, idsAtSubmit],
+  );
   const newProgress = useNewSourceProgress(idsAtSubmit, startedAt);
   const retryProgress = useSourceProgress(failed?.id);
   const progress = failed ? retryProgress : newProgress;
@@ -283,7 +302,7 @@ export function AddSourceDialog({
     setSubmitError(null);
     setCancelled(false);
     cancelIdRef.current = null;
-    const named = draft.name.trim() ? draft : { ...draft, name: defaultName(draft, t('originPasted')) };
+    const named = draft.name.trim() ? draft : { ...draft, name: defaultName(draft, t('originPasted'), takenNames) };
     const built = buildAddArgs(named, { isDesktop });
     // An empty Name is optional: it takes the address's name. With no address yet there is none to
     // take, and the address's own error already says what is missing, so Name is not marked too.
@@ -309,12 +328,23 @@ export function AddSourceDialog({
       const guides = enabledEpgUrls(source.epg);
       if (guides.length > 0) void refreshGuides(guides);
       await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('epg.')]);
-      // Every item the import counted, radio included, so the toast agrees with the progress bar.
-      const total = source.channelCount + (source.radioCount ?? 0) + source.movieCount + source.seriesCount;
+      // What arrived, per kind (radio included, as on the progress bar): "109 channels, 20 movies
+      // and 3 series" says whether the channels came, which an item total did not.
+      const radio = source.radioCount ?? 0;
+      const counts =
+        formatList(
+          [
+            source.channelCount > 0 && t('shell:countChannels', { count: source.channelCount }),
+            radio > 0 && t('live:stationCount', { count: radio, formatted: numberFormat(intlLocale(i18n.language)).format(radio) }),
+            source.movieCount > 0 && t('shell:countMovies', { count: source.movieCount }),
+            source.seriesCount > 0 && t('shell:countSeries', { count: source.seriesCount }),
+          ],
+          i18n.language,
+        ) || t('shell:countChannels', { count: 0 });
       toast({
         variant: 'success',
         title: t('addedTitle', { name: source.name }),
-        description: t(guides.length > 0 ? 'addedDescriptionGuide' : 'addedDescription', { count: total }),
+        description: t(guides.length > 0 ? 'addedDescriptionGuide' : 'addedDescription', { counts }),
         // A source without live channels (VOD only) opens on its movies or series.
         action: { label: t('open'), onClick: () => navigate(sourceHomePath(source)) },
       });
@@ -549,7 +579,7 @@ export function AddSourceDialog({
           // The name a submit uses when this is left empty, as a placeholder so it never lands in the middle of
           // what the user is typing. None before there is an address: an invented example name read
           // as the one the source would get.
-          placeholder={defaultName(draft, t('originPasted')) || undefined}
+          placeholder={defaultName(draft, t('originPasted'), takenNames) || undefined}
           value={draft.name}
           // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
           onFocus={(e) => {
@@ -689,7 +719,7 @@ export function AddSourceDialog({
               <p className="flex items-center gap-2 text-body-sm font-medium text-fg">
                 <LoaderCircle aria-hidden size={16} className="shrink-0 text-accent motion-safe:animate-spin" />
                 <span className="min-w-0 truncate" dir="auto">
-                  {t('importingTitle', { name: draft.name.trim() || defaultName(draft, t('originPasted')) || t(KIND_NAME[draft.kind]) })}
+                  {t('importingTitle', { name: draft.name.trim() || defaultName(draft, t('originPasted'), takenNames) || t(KIND_NAME[draft.kind]) })}
                 </span>
               </p>
               <ImportProgressView

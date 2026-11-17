@@ -114,6 +114,14 @@ describe('BOOT-1: the router starts at the startup target', () => {
     expect(window.history.length).toBe(before);
   });
 
+  it("opens Home's welcome, not the saved screen, when the server has no source (w-walkthrough-03)", async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ startupBehavior: 'restore-last-view', lastRoute: '/favorites' });
+    rpcMock.handlers['sources.list'] = () => [];
+    await boot('/', 'home page');
+    expect(window.location.pathname).toBe('/dashboard');
+    expect(env.indexRenders).toBe(0);
+  });
+
   it('opens Sources when Home is off and nothing is saved', async () => {
     rpcMock.handlers['settings.get'] = () => settings({ lastRoute: '', showDashboard: false });
     await boot('/', 'sources page');

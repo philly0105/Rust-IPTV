@@ -130,6 +130,7 @@
   "qualityShowAll": "Alle kwaliteiten tonen",
   "qualityShowUntagged": "Kanalen zonder aanduiding tonen",
   "qualityMayHide": "Het kwaliteitsfilter van Live tv verbergt mogelijk kanalen.",
+  "qualityNote": "Alleen {{quality}}-kanalen",
   "openSources": "Open bronnen",
   "noGuideFor": "Geen gidsgegevens voor {{name}}",
   "noGuideHint": "Koppel dit kanaal aan een gidskanaal, of voeg een XMLTV-adres toe in de EPG-instellingen.",

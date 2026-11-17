@@ -76,7 +76,7 @@ import { EpgRibbon, ribbonPlayback } from './EpgRibbon';
 import { HiddenChannelsButton } from './HiddenChannelsButton';
 import { LiveStageColumn } from './LiveStageColumn';
 import { ManageCategoriesDialog } from './ManageCategoriesDialog';
-import { QualityEmptyState, QualityFilterButton, useLiveQuality } from './QualityFilterButton';
+import { QualityEmptyState, QualityFilterBar, QualityFilterButton, useLiveQuality } from './QualityFilterButton';
 import { StageIdle } from './StageIdle';
 
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
@@ -1012,6 +1012,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   );
 
   const listEmpty = paged.total === 0;
+  /** The list's own empty state already says the quality filter emptied it. */
+  let qualityEmpty = false;
   let listBody;
   if (paged.error) {
     listBody = <ErrorState error={paged.error} onRetry={paged.retry} />;
@@ -1054,6 +1056,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       />
     );
   } else if (listEmpty && qualityFiltering && (liveView || categoryId || sourceCount > 0)) {
+    qualityEmpty = true;
     listBody = <QualityEmptyState quality={quality} />;
   } else if (listEmpty && liveView) {
     listBody = (
@@ -1196,6 +1199,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             {t('regionNotApplied', { region })}
           </p>
         ) : null}
+        {qualityFiltering && !qualityEmpty ? <QualityFilterBar quality={quality} /> : null}
         {numberHit && searchNumber && !paged.error ? (
           <button
             type="button"

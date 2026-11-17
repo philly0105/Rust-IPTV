@@ -130,6 +130,7 @@
   "qualityShowAll": "Show all qualities",
   "qualityShowUntagged": "Show untagged channels",
   "qualityMayHide": "The Live TV quality filter may be hiding channels.",
+  "qualityNote": "Only {{quality}} channels",
   "openSources": "Open sources",
   "noGuideFor": "No guide data for {{name}}",
   "noGuideHint": "Match this channel to a guide channel, or add an XMLTV address in EPG settings.",

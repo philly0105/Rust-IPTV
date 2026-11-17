@@ -130,6 +130,7 @@
   "qualityShowAll": "Minden minőség megjelenítése",
   "qualityShowUntagged": "Jelölés nélküli csatornák megjelenítése",
   "qualityMayHide": "Lehet, hogy az élő tévéadás minőségszűrője csatornákat rejt el.",
+  "qualityNote": "Csak {{quality}} csatornák",
   "openSources": "Források megnyitása",
   "noGuideFor": "Nincsenek műsoradatok: {{name}}",
   "noGuideHint": "Párosítsa ezt a csatornát egy műsorújság-csatornával, vagy adjon meg XMLTV-címet az EPG-beállításokban.",

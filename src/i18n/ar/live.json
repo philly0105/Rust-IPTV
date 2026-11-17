@@ -154,6 +154,7 @@
   "qualityShowAll": "إظهار كل مستويات الجودة",
   "qualityShowUntagged": "إظهار القنوات التي لا تذكر الجودة",
   "qualityMayHide": "قد تكون تصفية الجودة في البث المباشر تخفي بعض القنوات.",
+  "qualityNote": "قنوات {{quality}} فقط",
   "openSources": "فتح المصادر",
   "noGuideFor": "لا توجد بيانات دليل لـ {{name}}",
   "noGuideHint": "طابِق هذه القناة مع قناة في الدليل، أو أضف عنوان XMLTV في إعدادات EPG.",

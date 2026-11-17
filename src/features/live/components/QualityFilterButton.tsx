@@ -14,7 +14,8 @@
  * a press outside it closes it too.
  *
  * No player imports here: the guide's route chunk reads QualityEmptyState from this file, and the
- * custom list, Favorites and Recently watched pages read QualityFilterNote.
+ * custom list, Favorites and Recently watched pages read QualityFilterNote. Live's list adds
+ * QualityFilterBar under its toolbar while a minimum is set.
  */
 
 import { useQueryClient, type Query } from '@tanstack/react-query';
@@ -27,7 +28,7 @@ import { useLocation } from 'react-router';
 import type { ChannelQuality, Settings } from '@/api/types';
 import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useSettingsValue } from '@/shell/useSettings';
-import { Button, buttonClass, cn, EmptyState, filterChipClass, focusableIn, RadioGroup, Toggle, Tooltip, usePresence, useScaledPx } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, filterChipClass, focusableIn, RadioGroup, TEXT_LINK, Toggle, Tooltip, TOUCH_TARGET, usePresence, useScaledPx } from '@/ui';
 import { GHOST_ICON } from '@/ui/Button';
 import { portalContainer } from '@/ui/portal';
 
@@ -321,6 +322,32 @@ export function QualityEmptyState({ quality }: { quality: LiveQuality }) {
       description={t(quality.hideUntagged ? 'qualityEmptyHintUntagged' : 'qualityEmptyHint')}
       action={<QualityActions quality={quality} />}
     />
+  );
+}
+
+/**
+ * The line under Live's toolbar while a minimum is set and the list still has channels
+ * (walkthrough-02): the filter is a setting every page and device shares, and a press of a chip on
+ * Sports could set it, so the list says it is filtered in words, with one press to show every
+ * channel again. An emptied list says so in QualityEmptyState instead.
+ */
+export function QualityFilterBar({ quality }: { quality: LiveQuality }) {
+  const { t } = useTranslation('live');
+  if (!quality.min) return null;
+  const short = CHOICES.find((c) => c.value === quality.min)?.short;
+  return (
+    <div className="flex items-center gap-2 border-b border-divider bg-surface-2 px-3 py-1.5 text-caption text-fg-muted" data-testid="live-quality-bar">
+      <SlidersHorizontal aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{t('qualityNote', { quality: short ? t(short) : quality.min.toUpperCase() })}</span>
+      <button
+        type="button"
+        className={cn(TEXT_LINK, TOUCH_TARGET, 'shrink-0')}
+        onClick={() => quality.loosen({ liveMinQuality: null })}
+        data-testid="live-quality-bar-show-all"
+      >
+        {t('qualityShowAll')}
+      </button>
+    </div>
   );
 }
 

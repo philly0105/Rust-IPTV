@@ -66,7 +66,7 @@
   "errorUnsupported": "Ta przeglądarka nie obsługuje tego typu strumienia. Otwórz go w zewnętrznym odtwarzaczu.",
   "errorGeneric": "Odtwarzanie zatrzymało się z powodu błędu. Spróbuj ponownie lub otwórz strumień w zewnętrznym odtwarzaczu.",
   "errorTsLive": "Surowych strumieni MPEG-TS nie można odtwarzać w aplikacji. Zmień Format strumienia na M3U8 w Ustawieniach lub otwórz go w zewnętrznym odtwarzaczu.",
-  "retry": "Ponów",
+  "retry": "Spróbuj ponownie",
   "openExternal": "Otwórz w zewnętrznym odtwarzaczu",
   "openInMpv": "Otwórz w MPV",
   "openInVlc": "Otwórz w VLC",

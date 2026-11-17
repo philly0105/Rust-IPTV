@@ -233,7 +233,7 @@ describe('Settings > Remote: phones on this network', () => {
     renderAt(settingsRoutes, '/settings/remote');
     const err = await screen.findByTestId('remote-lan-error');
     expect(err.textContent).toContain('no private network address found');
-    fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(err).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(rpcMock.callsOf('remote.start').length).toBe(1));
   });
 

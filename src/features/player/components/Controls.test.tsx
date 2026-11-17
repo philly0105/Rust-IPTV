@@ -476,7 +476,7 @@ describe('Controls live status', () => {
     expect(screen.getByTestId('live-dot').className).not.toMatch(/bg-live|animate/);
     expect(screen.queryByRole('button', { name: 'Play' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(commands.retry).toHaveBeenCalledTimes(1);
     expect(usePlayerStore.getState().status).toBe('loading');
     expect(usePlayerStore.getState().error).toBeUndefined();
@@ -498,7 +498,7 @@ describe('Controls live status', () => {
   it('a failed movie offers Retry in the play spot of the dock bar too', () => {
     act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 500' }));
     render(<Controls variant="dock" visible />);
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(commands.retry).toHaveBeenCalledTimes(1);
   });
 
@@ -509,7 +509,7 @@ describe('Controls live status', () => {
     });
     render(<Controls variant="overlay" visible />);
     // The panel has Retry; the bar has no second one, no volume for nothing, no "No signal" under "did not play".
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
     expect(screen.queryByRole('button', { name: /mute/i })).toBeNull();
     expect(screen.queryByTestId('live-badge')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();

@@ -180,7 +180,7 @@ export function ImageCacheRow({ update: tracked }: { update?: (patch: SettingsPa
               <span className="block text-danger">{t('imageCacheLoadFailed')}</span>
               <span className="block text-fg-muted">{errorDescription(stats.error)}</span>
             </span>
-            <Button size="sm" variant="secondary" onClick={() => void stats.refetch()}>
+            <Button size="sm" variant="secondary" loading={stats.isFetching} onClick={() => void stats.refetch()}>
               {t('retry')}
             </Button>
           </div>

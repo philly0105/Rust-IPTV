@@ -82,7 +82,7 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
               <span className="block text-danger">{t('downloadsFolderLoadFailed')}</span>
               <span className="block text-fg-muted">{errorDescription(dir.error)}</span>
             </span>
-            <Button size="sm" variant="secondary" onClick={() => void dir.refetch()}>
+            <Button size="sm" variant="secondary" loading={dir.isFetching} onClick={() => void dir.refetch()}>
               {t('retry')}
             </Button>
           </div>

@@ -16,7 +16,8 @@ import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING } from '../components/ChannelRo
 import { EpgGridPage } from '../components/EpgGridPage';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { LivePage } from '../components/LivePage';
-import { installDomStubs, makeChannel, renderAt, settings } from './harness';
+import { HOUR, MINUTE } from '../lib/epgTime';
+import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -657,5 +658,20 @@ describe('Live list: density and UI scale', () => {
     act(() => setUiScaleState(1.25, 'comfortable'));
     await waitFor(() => expect(rowSlot(0)?.style.height).toBe(`${scaleRowPx(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, 1.25, 'comfortable')}px`));
     expect(groupSlot(0)?.style.height).toBe('45px');
+  });
+});
+
+describe('Up next in a gap in the guide (live3 follow-up)', () => {
+  it('does not list again the programme the Now card already shows as up next', async () => {
+    const now = Date.now();
+    // A gap past the timeline's end: the card rests on "Off Air", the list starts after it.
+    rpcMock.handlers['epg.programs'] = () => [program('Off Air', now + 6 * HOUR, now + 6 * HOUR + 10 * MINUTE), program('Classic Sitcom Marathon', now + 7 * HOUR, now + 8 * HOUR)];
+    renderAt('/', [
+      { path: '/', element: <EpgRibbon channel={makeChannel(1)} sourceKind="xtream" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} details /> },
+    ]);
+    const list = await screen.findByTestId('up-next', {}, { timeout: 10_000 });
+    expect(screen.getByTestId('ribbon-header').textContent).toContain('Off Air');
+    expect(within(list).getByText('Classic Sitcom Marathon')).toBeTruthy();
+    expect(within(list).queryByText('Off Air')).toBeNull();
   });
 });

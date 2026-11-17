@@ -877,7 +877,7 @@ function RegionSelect({ regions, value, onChange }: { regions: GroupRegion[]; va
       // The chips' height, as Live's picker takes its toolbar's, and as wide as the pick: sized to the
       // longest option ("EN · 25 categories") it took a third of a phone's row from the chips.
       // Where field-sizing is not supported the select keeps its own width, up to the cap.
-      className="h-8 w-fit max-w-40 ps-2 pe-7 field-sizing-content"
+      className="h-8 w-fit max-w-40 ps-2 pe-8 field-sizing-content"
       value={value ?? ''}
       onValueChange={(v) => onChange(v || null)}
       options={[

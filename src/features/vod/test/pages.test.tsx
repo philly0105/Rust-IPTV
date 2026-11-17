@@ -898,6 +898,9 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
         return { live: [], movies: all.filter((m) => !sourceId || m.ref.sourceId === sourceId).slice(0, limit), series: [] };
       };
       rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
+      // The guide answers with nothing: a failed guide search keeps a Programmes tab (with its
+      // error), which would open the page on Top results instead of the movies' own grid.
+      rpcMock.handlers['epg.search'] = () => [];
       renderAt('/search?q=movie', [{ path: '/search', element: <SearchPage /> }]);
       // Chips count from the one all-sources search (L2-perf-desktop-11): each source holds 30 of
       // its 60 capped rows, a lower bound, so "30+". No source is searched alone to count it.
@@ -922,7 +925,8 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
 
       // "Show more" steps the facet's own search, and its chip becomes exact.
       fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 200' }));
-      await screen.findByRole('tab', { name: /Movies\s*100$/ });
+      // A 200-row answer folds and renders slowly on a loaded machine: past the 1 s default here.
+      await screen.findByRole('tab', { name: /Movies\s*100$/ }, { timeout: 15000 });
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 201 });
       expect(within(screen.getByRole('group', { name: 'Filter by source' })).getByRole('button', { name: /Beta Portal\s*100$/ })).toBeTruthy();
     });

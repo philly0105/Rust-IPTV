@@ -233,7 +233,7 @@ export function HeroIcon({ caption, labelled, children }: { caption: string; lab
       <span
         aria-hidden
         className={cn(
-          'line-clamp-2 max-w-full text-center text-caption leading-tight break-words text-fg-muted hyphens-auto sm:max-w-20',
+          'line-clamp-2 max-w-full text-center text-caption leading-tight break-words text-fg-muted hyphens-auto sm:max-w-20 sm:break-normal',
           labelled && 'sm:hidden',
         )}
       >

@@ -12,6 +12,7 @@ import { Link } from 'react-router';
 
 import { Button, IconButton, Skeleton, cn, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+import { useMediaQuery } from '../deps';
 import { useLists } from '../hooks/useLists';
 import { listPath } from '../paths';
 import { openCreateList, openManageLists } from '../store';
@@ -27,6 +28,8 @@ export interface ListsSidebarSectionProps {
 const FOLD_KEY = 'lists.sidebarFolded';
 const ROW = 36;
 const ROW_SPACING = 17;
+/** A row's slot on a touch screen: 44 px, as the group rows under it in Live's drawer. */
+const TOUCH_ROW = 44;
 
 const linkClass = (active: boolean) =>
   `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${
@@ -46,7 +49,8 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
   const { t, i18n } = useTranslation('lists');
   const { t: tc } = useTranslation('common');
   const lists = useLists();
-  const rowHeight = useRowHeight(ROW, ROW_SPACING);
+  const coarse = useMediaQuery('(pointer: coarse)', false);
+  const rowHeight = useRowHeight(coarse ? TOUCH_ROW : ROW, coarse ? ROW_SPACING + TOUCH_ROW - ROW : ROW_SPACING);
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const headingId = useId();
   const bodyId = useId();
@@ -182,7 +186,7 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
               aria-expanded={!folded}
               aria-controls={bodyId}
               onClick={toggleFold}
-              className="-ms-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
+              className="-ms-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none pointer-coarse:min-h-[calc(44rem/15)] hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
             >
               <ChevronDown className={cn('size-3.5 text-fg-subtle motion-safe:transition-transform', folded && '-rotate-90 rtl:rotate-90')} aria-hidden />
               {t('title')}

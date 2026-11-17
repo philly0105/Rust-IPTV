@@ -443,7 +443,9 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
         ? { id: panelId, role: 'tabpanel', 'aria-roledescription': t('heroSlide'), 'aria-label': t('heroSlideOf', { index: index + 1, total: count }), 'data-testid': 'hero-slide' }
         : { 'aria-hidden': true, inert: true })}
       data-hero-slide={s.key}
-      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, !active && 'invisible')}
+      // HERO_BODY keeps room under a phone's buttons for the slide dots; one slide draws none, and
+      // the empty band was twice the gap between rails.
+      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, count < 2 && 'max-sm:pb-6', !active && 'invisible')}
     >
       {/* The copy column grows with wide heroes, so a title is not wrapped into a corner of an empty frame. */}
       <div className={cn('flex w-full min-w-0 max-w-[36rem] flex-col gap-3 text-on-glass min-[1440px]:max-w-[42rem]', active && 'motion-safe:animate-hero-copy')}>

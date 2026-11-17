@@ -203,7 +203,7 @@ describe('Speed details dialog', () => {
     expect(sources[0]!.textContent).toContain(`${formatBytes(200 * MB, 'en')} this run`);
     // Each source's limit, as the account reports it, as a test learned it, or unknown.
     expect(sources[0]!.textContent).toContain('Account allows 2');
-    expect(sources[1]!.textContent).toContain('Tested: 3 allowed');
+    expect(sources[1]!.textContent).toContain('Test found 3 allowed');
     expect(sources[1]!.textContent).toContain('Identical copy');
     expect(sources[2]!.textContent).toContain('Limit unknown');
     expect(sources[2]!.textContent).toContain(t('detailsIdleSpeed'));
@@ -223,7 +223,7 @@ describe('Speed details dialog', () => {
 
     // Recent notes, newest first, in a quiet tone.
     const notes = within(dialog).getByTestId('details-notes');
-    expect(within(notes).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Also downloading from Backup portal', 'Backup portal allows 3 connections']);
+    expect(within(notes).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Also downloading from Backup portal', 'A test found 3 connections work on Backup portal']);
     expect(notes.className).not.toMatch(/danger|error/);
   });
 

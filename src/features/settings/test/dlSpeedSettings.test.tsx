@@ -64,17 +64,28 @@ describe('Settings > General > Downloads: faster downloads', () => {
     await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadMaxConnections: 0 } }));
   });
 
-  it('turns mirrors off and equivalent copies on, each on its own', async () => {
+  it('turns equivalent copies on and mirrors off, each with its own patch', async () => {
     renderAt(settingsRoutes, '/settings/general');
     const mirrors = await screen.findByTestId('toggle-downloadUseMirrors');
     const equivalent = screen.getByTestId('toggle-downloadAllowEquivalent');
     // Defaults: mirrors on, equivalent copies off.
     expect(mirrors.getAttribute('aria-checked')).toBe('true');
     expect(equivalent.getAttribute('aria-checked')).toBe('false');
-    fireEvent.click(mirrors);
-    await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadUseMirrors: false } }));
     fireEvent.click(equivalent);
     await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadAllowEquivalent: true } }));
+    fireEvent.click(mirrors);
+    await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadUseMirrors: false } }));
+  });
+
+  it('turns equivalent copies off while other sources are not used', async () => {
+    current = settings({ downloadUseMirrors: false, downloadAllowEquivalent: true });
+    renderAt(settingsRoutes, '/settings/general');
+    const equivalent = (await screen.findByTestId('toggle-downloadAllowEquivalent')) as HTMLButtonElement;
+    expect(equivalent.disabled).toBe(true);
+    expect(screen.getByText(/lets a season or queue spread across your accounts/)).toBeTruthy();
+    fireEvent.click(screen.getByTestId('toggle-downloadUseMirrors'));
+    await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadUseMirrors: true } }));
+    await waitFor(() => expect((screen.getByTestId('toggle-downloadAllowEquivalent') as HTMLButtonElement).disabled).toBe(false));
   });
 
   it('warns that an equivalent copy may be a different file', async () => {
@@ -90,13 +101,14 @@ describe('Settings > General > Downloads: faster downloads', () => {
 
   it('lists a connection test switch for each Xtream or Stalker source with what it learned', async () => {
     limits = [
-      { sourceId: 'x1', reported: 1, learned: 3, mode: 'accept', probedAt: '2026-11-10T12:00:00Z', probing: false, disabled: false },
+      // The usual result: the panel took 3 and refused the 4th, so the mode is refuse with 3 learned.
+      { sourceId: 'x1', reported: 1, learned: 3, mode: 'refuse', probedAt: '2026-11-10T12:00:00Z', probing: false, disabled: false },
       { sourceId: 's1', reported: 2, mode: 'refuse', probedAt: '2026-11-11T12:00:00Z', probing: false, disabled: false },
     ];
     renderAt(settingsRoutes, '/settings/general');
     const northwind = await screen.findByTestId('probe-row-x1');
     expect(screen.queryByTestId('probe-row-m1')).toBeNull();
-    await waitFor(() => expect(document.body.textContent).toContain('Test found 3 allowed'));
+    await waitFor(() => expect(within(northwind.closest('[data-settings-row]') ?? document.body).queryByText(/Test found 3 allowed/)).toBeTruthy());
     expect(document.body.textContent).toContain('Account reports 1');
     expect(document.body.textContent).toContain('Test found extra connections refused');
 
@@ -105,7 +117,7 @@ describe('Settings > General > Downloads: faster downloads', () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadProbeDisabled: ['x1'] } }));
 
-    fireEvent.click(within(screen.getByTestId('probe-row-s1')).getByRole('button', { name: 'Test Harbor again' }));
+    fireEvent.click(within(screen.getByTestId('probe-row-s1')).getByRole('button', { name: 'Forget the test result for Harbor' }));
     await waitFor(() => expect(rpcMock.callsOf('downloads.resetConnectionLimit')).toEqual([{ sourceId: 's1' }]));
   });
 

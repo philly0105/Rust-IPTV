@@ -107,7 +107,7 @@ export function SpeedSparkline({ className }: { className?: string }) {
           data-testid="downloads-sparkline-line"
         />
       </svg>
-      <span className="min-w-[7ch] text-end font-medium tabular-nums text-fg" data-testid="downloads-sparkline-total">
+      <span className="min-w-[9.5ch] text-end font-medium tabular-nums text-fg" data-testid="downloads-sparkline-total">
         {speed}
       </span>
     </div>

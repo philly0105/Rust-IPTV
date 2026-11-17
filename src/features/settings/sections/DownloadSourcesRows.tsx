@@ -36,7 +36,9 @@ export function probeStatus(t: TFunction<'settings'>, { limit, off, single, lang
     parts.push(t('downloadProbeOff'));
   } else if (limit?.probing) {
     parts.push(t('downloadProbeRunning'));
-  } else if (limit?.mode === 'accept' && limit.learned !== undefined) {
+  } else if (limit?.learned !== undefined && (limit.mode === 'accept' || limit.reported === undefined || limit.learned > limit.reported)) {
+    // A panel that took N and refused N + 1 records `refuse` with N learned (ruling A8): the
+    // count it found is the news, whatever the mode.
     parts.push(t('downloadProbeLearnedAccept', { count: limit.learned }));
   } else if (limit?.mode === 'refuse') {
     parts.push(t('downloadProbeLearnedRefuse'));
@@ -54,8 +56,8 @@ export function probeStatus(t: TFunction<'settings'>, { limit, off, single, lang
 
 /**
  * downloads: per Xtream or Stalker source, whether a large download may test for more connections
- * than the account reports, what the last test found, and Test again (which forgets it, so the
- * next eligible download tests anew). A source with speed-up Off never splits, so it never tests.
+ * than the account reports, what the last test found, and Forget result (the next eligible
+ * download then tests anew). A source with speed-up Off never splits, so it never tests.
  */
 export function DownloadSourcesRows({ settings, update }: { settings: Settings; update: (patch: SettingsPatch) => Promise<boolean> }) {
   const { t, i18n } = useTranslation('settings');
@@ -96,13 +98,13 @@ export function DownloadSourcesRows({ settings, update }: { settings: Settings; 
                   size="sm"
                   variant="ghost"
                   icon={<RotateCcw size={14} aria-hidden />}
-                  aria-label={t('downloadProbeTestAgainAria', { name: s.name })}
+                  aria-label={t('downloadProbeForgetAria', { name: s.name })}
                   disabled={one || off || !tested || limit?.probing === true || reset.isPending}
                   loading={resetting}
                   onClick={() => reset.mutate({ sourceId: s.id })}
                   data-testid={`probe-reset-${s.id}`}
                 >
-                  {t('downloadProbeTestAgain')}
+                  {t('downloadProbeForget')}
                 </Button>
                 <Switch
                   id={id}

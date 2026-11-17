@@ -82,17 +82,19 @@ export function DownloadMaxConnectionsRow({ settings, update }: { settings: Sett
 
 /**
  * downloads: other sources. Mirrors add bytes from identical copies of the same file (checked
- * first, so the file is the one picked). Equivalent copies let a queued download start on another
- * source with a close copy, which can be a different file, so it is off by default and says so.
+ * first, so the file is the one picked), and the same switch lets a season or queue spread across
+ * accounts. Equivalent copies let a queued download start on another source with a close copy,
+ * which can be a different file, so it is off by default, says so, and needs the first switch on.
  */
 export function DownloadMirrorRows({ settings, update }: { settings: Settings; update: (patch: SettingsPatch) => Promise<boolean> }) {
   const { t } = useTranslation('settings');
+  const mirrors = settings.downloadUseMirrors !== false;
   return (
     <>
       <SwitchRow
         label={t('downloadUseMirrors')}
         description={t('downloadUseMirrorsHint')}
-        checked={settings.downloadUseMirrors !== false}
+        checked={mirrors}
         onChange={(downloadUseMirrors) => void update({ downloadUseMirrors })}
         testId="toggle-downloadUseMirrors"
       />
@@ -109,6 +111,7 @@ export function DownloadMirrorRows({ settings, update }: { settings: Settings; u
         }
         checked={settings.downloadAllowEquivalent === true}
         onChange={(downloadAllowEquivalent) => void update({ downloadAllowEquivalent })}
+        disabled={!mirrors}
         testId="toggle-downloadAllowEquivalent"
       />
     </>

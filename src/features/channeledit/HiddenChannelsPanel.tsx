@@ -9,7 +9,7 @@ import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, SkeletonLis
 import { intlLocale } from '@/lib/intl';
 
 import { isGoneAnswer, reportUnhideMany, resetEdits, unhideChannel, unhideMany } from './actions';
-import { ITEM_STALE_MS, useDisplayName, useHiddenEdits, useSourceEdits } from './edits';
+import { ITEM_STALE_MS, useDisplayName, useHiddenEdits, useSourceEdits, useToastName } from './edits';
 
 export interface HiddenChannelsPanelProps {
   sourceId: string;
@@ -38,6 +38,7 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
   const { t, i18n } = useTranslation('channels');
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const display = useDisplayName();
+  const toastName = useToastName();
   const hidden = useHiddenEdits(sourceId);
   // Renames too: Reset all edits shows whenever the source has any edit.
   const allEdits = useSourceEdits(sourceId);
@@ -125,7 +126,7 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
     // The row leaves the cached list at once: its neighbour takes its place, and the focus.
     setActive(index);
     setFocusTick((n) => n + 1);
-    void unhideChannel({ ref: row.edit.ref, name: row.name }, t);
+    void unhideChannel({ ref: row.edit.ref, name: toastName(row.edit.name ?? row.edit.originalName) }, t);
   };
 
   const unhideShown = async () => {

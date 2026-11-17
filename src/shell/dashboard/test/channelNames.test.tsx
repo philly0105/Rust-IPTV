@@ -92,7 +92,12 @@ describe("Home's channel cards name a channel as Live TV does", () => {
       </>,
     );
     const espn = screen.getByRole('button', { name: 'Play ESPN' });
-    await waitFor(() => expect(espn.querySelector('[title="US| ESPN HD"]')!.textContent).toBe('ESPN HD'));
+    // As drawn: "HD" stands apart as the feed's quality, with the screen readers' copy beside it.
+    const drawnName = () => {
+      const el = espn.querySelector('[title="US| ESPN HD"]')!;
+      return (el.querySelector('[aria-hidden]') ?? el).textContent;
+    };
+    await waitFor(() => expect(drawnName()).toBe('ESPN HD'));
     expect(espn.querySelector('[data-testid=channel-name-tag]')).toBeNull();
     const card = screen.getByRole('button', { name: 'Play CBS' });
     expect(card.querySelector('[data-testid=channel-name-tag]')).toBeNull();

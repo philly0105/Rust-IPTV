@@ -332,15 +332,19 @@ describe('list logos start through the image fetch gate (L3-live-ch-x3)', () => 
     resetImageGate();
   });
 
-  it('a logo that mounts mid-scroll shows the plate and starts once the scroll rests; one showing stays', async () => {
+  it('a logo that mounts mid-scroll shows the monogram and starts once the scroll rests; one showing stays', async () => {
     scroll();
     const { container, rerender } = render(<ChannelLogo src="https://x/a.png" name="Alpha" />);
     const img = container.querySelector('img')!;
     expect(img.getAttribute('src')).toBeNull();
-    // The plate alone: no letters flashing before the logo.
-    expect(container.textContent).toBe('');
+    // While it waits, the monogram on its tint (never an empty plate); the logo is hidden under it.
+    expect(container.querySelector('[data-monogram]')?.textContent).toBe('AL');
+    expect(img.className).toContain('opacity-0');
     await waitFor(() => expect(img.getAttribute('src')).toBe(url('https://x/a.png')));
     act(() => void img.dispatchEvent(new Event('load')));
+    // Loaded: the logo shows and the letters go.
+    expect(container.querySelector('[data-monogram]')).toBeNull();
+    expect(img.className).not.toContain('opacity-0');
 
     // Scrolling again: the logo on screen keeps its picture, on the same element.
     scroll();

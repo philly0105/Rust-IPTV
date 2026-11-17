@@ -7,7 +7,7 @@ import type { ContentType } from '@/api/types';
 
 import { Button, Checkbox, Dialog, ErrorState, SearchInput, Select, Skeleton, useListVirtualizer, useToast, errorDescription } from '@/ui';
 import { intlLocale } from '@/lib/intl';
-import { groupRegion, groupRegions } from '../lib/groupRegion';
+import { groupRegion, groupRegions, regionLabel } from '../lib/groupRegion';
 import { foldForFilter } from './CategorySidebar';
 
 const ROW = 36;
@@ -132,7 +132,7 @@ export function ManageCategoriesDialog({
             onValueChange={setRegion}
             options={[
               { value: '', label: t('allRegions') },
-              ...regions.map((r) => ({ value: r.tag, label: t('regionOption', { region: r.tag, count: r.groups }) })),
+              ...regions.map((r) => ({ value: r.tag, label: t('regionOption', { region: regionLabel(r.tag, intlLocale(i18n.language)), count: r.groups }) })),
             ]}
             data-testid="manage-groups-region"
           />

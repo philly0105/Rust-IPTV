@@ -287,6 +287,8 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             <ChannelName
               name={channel.name}
               strip={props.stripPrefix}
+              // In its own group, a "PRIME: " the header already names is left out.
+              group={inOpenGroup ? channel.categoryName : undefined}
               // The provider's whole name when the column cuts it (event channels differ at the end).
               title={channel.name}
               // A step up on touch, held at arm's length: the desktop's dense 13.5 px name and 12 px

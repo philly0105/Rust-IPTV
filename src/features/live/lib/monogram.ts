@@ -23,6 +23,26 @@ const SLOT_TAG = /^[A-Z]{2,5}\s*[|:-]?\s*\d{1,3}\s*[:|-]\s*/;
 const MATCHUP = /\s+(?:vs\.?|v\.?|versus|at|@|x)\s+/i;
 /** A slot number, a kickoff time or its zone ("03", "1pm", "8:20", "PM", "ET"), never a team's initial. */
 const NOT_A_NAME = /^(?:\d+(?::\d+)?(?:am|pm)?|am|pm|et|pt|ct|mt|est|edt|pst|pdt|cst|cdt|gmt|utc)$/i;
+/** Emoji, flags and symbols before a name ("⚽ ESPNU", "🇬🇧 ANTENA 3"): decoration, never an initial. */
+const LEADING_SYMBOLS = /^[\p{Extended_Pictographic}\p{S}\p{M}\u200D\s]+/u;
+/**
+ * What a provider puts before the name: a country tag, with its language ("UK: ", "CA EN: ") or an
+ * event slot ("US (ESPN+ 002) | "), or a longer capital word before a colon or pipe, an event's
+ * state or a service ("NEXT | ", "PRIME: "). Taken from the name, they gave whole groups the same
+ * letters: "CE" on every Canadian row, "PP", "PF", "PB" down a 1,001-row group.
+ */
+const LEAD_TAG = /^(?:[A-Z]{2,3}(?: [A-Z]{2})?\s*(?:\([^)]*\))?\s*[:|-]|[A-Z][A-Z0-9+]{3,7}\s*[:|])\s*/;
+
+/**
+ * An empty event slot ("- NO EVENT STREAMING - | 8K EXCLUSIVE | US: ESPN+ PPV 2", ":NCAAB  01",
+ * "MLB 05 :"): its number ('' when it has none), or null for a channel. Its tile shows the number
+ * on a neutral plate: letters of "NO EVENT" on every empty slot named nothing.
+ */
+export function slotNumber(name: string): string | null {
+  const trimmed = name.trim();
+  if (!/^[-\s]*NO EVENT\b/i.test(trimmed) && !/^:\s*[A-Z]{2,6}\s+\d{1,3}$|^[A-Z]{2,6}\s+\d{1,3}\s*:$/.test(trimmed)) return null;
+  return /(\d{1,3})\s*:?$/.exec(trimmed)?.[1] ?? '';
+}
 
 /** The first letter of the first word of a matchup side that names something, past markers ("HD", "4K"). */
 function sideInitial(side: string): string | undefined {
@@ -32,12 +52,20 @@ function sideInitial(side: string): string | undefined {
 
 /**
  * Two letters ("UK: BBC One HD" -> "BO", "US| ESPN ᴴᴰ" -> "ES", "US| CBS (Backup)" -> "CB"): no
- * country tag, no quality or copy markers, and whole code points, so an emoji or astral-plane letter
- * never splits into half a surrogate pair. A per-game channel takes one letter of each team ("NFL 03:
- * Cleveland Browns vs Tennessee Titans" -> "CT"), so a provider's slots don't all read "N0".
+ * country tag or other lead (`LEAD_TAG`), no leading emoji, no quality or copy markers, and whole
+ * code points, so an astral-plane letter never splits into half a surrogate pair. A per-game channel
+ * takes one letter of each team ("NFL 03: Cleveland Browns vs Tennessee Titans" -> "CT"), so a
+ * provider's slots don't all read "N0"; an empty slot shows its number (`slotNumber`).
  */
 export function monogramText(name: string): string {
-  const untagged = name.trim().replace(/^[A-Z]{2,3}\s*[:|-]\s*/, '');
+  const slot = slotNumber(name);
+  if (slot !== null) return slot || '–';
+  let untagged = name.trim();
+  for (let i = 0; i < 3; i++) {
+    const next = untagged.replace(LEADING_SYMBOLS, '').replace(LEAD_TAG, '');
+    if (next === untagged) break;
+    untagged = next;
+  }
   const game = untagged.replace(SLOT_TAG, '');
   // The first separator splits the teams; a later one ("@ 1:00 PM ET") belongs to the second side.
   const split = MATCHUP.exec(game);

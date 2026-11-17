@@ -2,8 +2,8 @@ import { memo, useCallback, useEffect, useState, type ReactNode, type SyntheticE
 
 import { TINT_THEME, cn, gateImage, tintVars, useImageChain } from '@/ui';
 
-import { splitPlaceTag, stripCountryPrefix } from '../lib/channelName';
-import { monogramHue, monogramText } from '../lib/monogram';
+import { channelNameParts } from '../lib/channelName';
+import { monogramHue, monogramText, slotNumber } from '../lib/monogram';
 
 export type LogoPlate = 'light' | 'dark';
 
@@ -83,6 +83,13 @@ export function measureLogo(img: HTMLImageElement): LogoReading {
   }
 }
 
+/** A monogram tile's look: the name's two letters on its tint. */
+const MONOGRAM = 'inline-flex shrink-0 items-center justify-center font-display leading-none font-semibold tracking-tight';
+
+function monogramStyle(name: string, size: number) {
+  return { ...tintVars(name), fontSize: Math.max(9, Math.round(size * 0.36)) };
+}
+
 /**
  * Channel logo on a plate that stays the same in every theme, with a coloured monogram when there
  * is no logo (LG-14), in the channel's tint (src/ui/tint.ts): pale in the light theme, like a light
@@ -99,8 +106,10 @@ export function measureLogo(img: HTMLImageElement): LogoReading {
  * Cache-route logos start through the fetch gate (src/ui/imageGate.ts, L3-live-ch-x3), as posters do: at
  * most `maxActive()` at once (4 in server mode, 6 on desktop), the ones in view first, none while the page
  * scrolls unless one has stayed in view, and a logo whose row goes is dropped. Rows flung past never ask; a
- * waiting logo shows the plate alone (no letters flashing before it), and a logo already showing stays,
- * since its <img> is kept while the address is the same.
+ * waiting logo shows the monogram, and the logo fades in over it once it loads (an empty plate sat there
+ * for seconds while a dead logo went through every attempt, and in light it was a dark square on the pale
+ * list). A logo already showing stays, since its <img> is kept while the address is the same, and one
+ * this session has loaded before shows at once.
  *
  * Memoized (P2-LIVE-3): a channel row renders again when the guide's now/next lands, and its logo
  * rendered again with it.
@@ -134,7 +143,10 @@ export const ChannelLogo = memo(function ChannelLogo({
   // One <img> per address (key below), so this runs once per attempt; React renders no `src`, the gate sets it.
   const imgRef = useCallback((el: HTMLImageElement | null) => (el && url ? gateImage(el, url) : undefined), [url]);
   const [, setMeasured] = useState(0);
+  const [loadedUrl, setLoadedUrl] = useState<string>();
   const plate = url ? readings.get(url)?.plate : undefined;
+  // Not loaded yet, here or by another tile this session: the monogram shows under the hidden <img>.
+  const waiting = url !== undefined && loadedUrl !== url && !readings.has(url);
   const onLoad = (e: SyntheticEvent<HTMLImageElement>) => {
     if (!url) return;
     let reading = readings.get(url);
@@ -142,9 +154,10 @@ export const ChannelLogo = memo(function ChannelLogo({
       reading = measureLogo(e.currentTarget);
       readings.set(url, reading);
     }
+    if (waiting) setLoadedUrl(url);
     // Also when another tile of this address measured it after this one rendered: memoized, this
     // tile gets no parent render to pick up the plate (P2-LIVE-6).
-    if (reading.plate !== (plate ?? null)) setMeasured((n) => n + 1);
+    else if (reading.plate !== (plate ?? null)) setMeasured((n) => n + 1);
     onHue?.(reading.hue);
   };
   // The monogram's hue is known from the name; a logo's once it has loaded (onLoad, or an
@@ -157,13 +170,23 @@ export const ChannelLogo = memo(function ChannelLogo({
   const style = { width: size, height: size };
   if (!url) {
     if (fallback !== undefined) return fallback;
+    const slot = slotNumber(name);
+    if (slot !== null) {
+      // An empty event slot: its number on a neutral plate, not letters in a colour of its own.
+      return (
+        <span
+          aria-hidden
+          data-monogram=""
+          data-slot=""
+          style={{ ...style, fontSize: Math.max(9, Math.round(size * 0.36)) }}
+          className={cn('inline-flex shrink-0 items-center justify-center bg-surface-2 font-numeric leading-none text-fg-subtle ring-1 ring-edge ring-inset', radius, className)}
+        >
+          {slot || '–'}
+        </span>
+      );
+    }
     return (
-      <span
-        aria-hidden
-        data-monogram=""
-        style={{ ...style, ...tintVars(name), fontSize: Math.max(9, Math.round(size * 0.36)) }}
-        className={cn('inline-flex shrink-0 items-center justify-center font-display leading-none font-semibold tracking-tight', TINT_THEME, radius, className)}
-      >
+      <span aria-hidden data-monogram="" style={{ ...style, ...monogramStyle(name, size) }} className={cn(MONOGRAM, TINT_THEME, radius, className)}>
         {monogramText(name)}
       </span>
     );
@@ -174,13 +197,19 @@ export const ChannelLogo = memo(function ChannelLogo({
       style={style}
       data-plate={plate ?? 'dark'}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center overflow-hidden ring-1 ring-inset',
+        'relative inline-flex shrink-0 items-center justify-center overflow-hidden ring-1 ring-inset',
         // Plates chosen by the logo's own colours, not the theme (tokens.css --color-logo-plate*).
         plate === 'light' ? 'bg-(--color-logo-plate) ring-black/5' : 'bg-(--color-logo-plate-dark) ring-white/6',
         radius,
         className,
       )}
     >
+      {/* With a `fallback` (a name instead of letters), the tint alone. */}
+      {waiting ? (
+        <span data-monogram={fallback === undefined ? '' : undefined} style={monogramStyle(name, size)} className={cn('absolute inset-0', MONOGRAM, TINT_THEME)}>
+          {fallback === undefined ? monogramText(name) : null}
+        </span>
+      ) : null}
       <img
         key={url}
         ref={imgRef}
@@ -194,7 +223,10 @@ export const ChannelLogo = memo(function ChannelLogo({
         onLoad={onLoad}
         // Waiting (no src yet), the box fills the plate, so the gate sees a row half past the list's
         // edge as in view; otherwise only the plate's centre counts and that row never asks.
-        className="max-h-full max-w-full object-contain p-[8%] [&:not([src])]:size-full"
+        className={cn(
+          'max-h-full max-w-full object-contain p-[8%] [&:not([src])]:size-full motion-safe:transition-opacity motion-safe:duration-150',
+          waiting && 'opacity-0',
+        )}
       />
     </span>
   );
@@ -213,6 +245,11 @@ export interface ChannelNameProps {
   name: string | null | undefined;
   /** `settings.stripCountryPrefix`: the tag is left out altogether. */
   strip?: boolean | undefined;
+  /**
+   * The group the list is open on: a leading "PRIME: " the group's name also has is left out
+   * (`channelNameParts`). Only where the header names the group.
+   */
+  group?: string | undefined;
   /** The name's span: size, weight, colour and `truncate`, as the plain text had them. */
   className?: string | undefined;
   /** The tag's tone where the theme's quiet text does not apply (glass on the dark stage). */
@@ -230,40 +267,69 @@ export interface ChannelNameProps {
  * the caption size and the subtle tone, the tag is what a narrow column drops first, whole and
  * without an ellipsis, so an ellipsis always means the name itself is cut.
  *
+ * A feed's quality and copy words at the end ("HD (BACKUP 2)", "ᴿᴬᵂ ⁶⁰ᶠᵖˢ") stay whole too, and the
+ * station's name is cut before them: providers list one station as several feeds that differ only
+ * there, and cutting the end drew them as identical rows.
+ *
  * Only a place's code moves (`splitPlaceTag`): "NBA: Lakers vs Celtics" and "Sky Sports | Main
  * Event" are drawn as the provider wrote them. Screen readers get the provider's name as it is (the
  * drawn parts are hidden), which matches the row's accessible name, search and menus. With the
- * strip setting on, the tag is gone as before. Callers truncate through `className`: this span has
- * `dir="auto"`, which puts an RTL name's ellipsis at its own end.
+ * strip setting on, the tag is gone as before. Callers truncate through `className`. The station's
+ * name has `dir="auto"`, which puts an RTL name's ellipsis at its own end, while the parts keep the
+ * page's order, so an Arabic name's tag sits where every other row has it.
  */
-export function ChannelName({ name, strip, className, tagClassName, title, testId, twoLines }: ChannelNameProps) {
-  const raw = name ?? '';
-  const split = strip ? undefined : splitPlaceTag(raw);
-  if (!split?.tag) {
+/**
+ * The feed's quality words: whole, after the station's name in the page's direction. They lead with
+ * the space between them and the name, kept (`whitespace-pre`), so the gap sits on their side
+ * whatever the name's own direction, and the drawn text reads as the name did.
+ */
+const VARIANT = 'shrink-0 whitespace-pre';
+
+export function ChannelName({ name, strip, group, className, tagClassName, title, testId, twoLines }: ChannelNameProps) {
+  const parts = channelNameParts(name, strip, group);
+  if (!parts.tag && !parts.variant && parts.name === parts.full) {
     return (
       <span dir="auto" className={cn(className, twoLines && 'line-clamp-2 break-words')} title={title} data-testid={testId}>
-        {strip ? stripCountryPrefix(raw) : raw}
+        {parts.full}
       </span>
     );
   }
   return (
-    <span dir="auto" className={className} title={title} data-testid={testId}>
+    <span className={className} title={title} data-testid={testId}>
       {/* One line tall: a tag that does not fit beside the name wraps to a second line, out of
           sight, so it goes whole (a clipped "U" read as part of the name). The name never shrinks
           below its own width (up to the whole line), so its ellipsis means it is cut; shrinking
           the tag first by flex-shrink weights also took a fraction of a pixel from the name, and
-          that was enough to draw an ellipsis on a complete one. */}
-      {/* Two lines: the name wraps onto the second, and a tag that no longer fits goes the same way. */}
+          that was enough to draw an ellipsis on a complete one. Within the name, the station's
+          words give way and the feed's quality words stay. */}
+      {/* Two lines: the name wraps onto the second, and a tag that no longer fits goes the same
+          way. With quality words, the station takes the first line and they start the second. */}
       <span aria-hidden className={cn('flex min-w-0 flex-wrap items-baseline overflow-hidden', twoLines ? 'max-h-[2lh]' : 'h-[1lh]')}>
-        <span className={cn('max-w-full shrink-0', twoLines ? 'line-clamp-2 break-words' : 'truncate')}>{split.name}</span>
-        <span
-          className={cn('ms-1.5 whitespace-nowrap text-caption font-medium tracking-wide text-fg-subtle', tagClassName)}
-          data-testid="channel-name-tag"
-        >
-          {split.tag}
-        </span>
+        {twoLines ? (
+          <>
+            <span dir="auto" className={cn('max-w-full shrink-0', parts.variant ? 'truncate' : 'line-clamp-2 break-words')}>
+              {parts.name}
+            </span>
+            {parts.variant ? <span className={VARIANT}>{` ${parts.variant}`}</span> : null}
+          </>
+        ) : (
+          <span className="flex max-w-full min-w-0 shrink-0">
+            <span dir="auto" className="min-w-0 truncate">
+              {parts.name}
+            </span>
+            {parts.variant ? <span className={VARIANT}>{` ${parts.variant}`}</span> : null}
+          </span>
+        )}
+        {parts.tag ? (
+          <span
+            className={cn('ms-1.5 whitespace-nowrap text-caption font-medium tracking-wide text-fg-subtle', tagClassName)}
+            data-testid="channel-name-tag"
+          >
+            {parts.tag}
+          </span>
+        ) : null}
       </span>
-      <span className="sr-only">{raw}</span>
+      <span className="sr-only">{parts.full}</span>
     </span>
   );
 }

@@ -86,8 +86,13 @@ describe('the country tag after the name (review round 4)', () => {
     render(<ChannelName name="US| MLB Network HD" className="truncate" />);
     const tag = screen.getByTestId('channel-name-tag');
     const name = tag.previousElementSibling as HTMLElement;
-    // The name holds its own width up to the whole line.
-    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full', 'truncate']));
+    // The name holds its own width up to the whole line; inside it the station gives way and the
+    // feed's quality words ("HD") stay whole.
+    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full']));
+    expect((name.firstChild as HTMLElement).className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+    expect(name.firstChild?.textContent).toBe('MLB Network');
+    expect((name.lastChild as HTMLElement).textContent).toBe(' HD');
+    expect((name.lastChild as HTMLElement).className).toContain('shrink-0');
     // A tag without room wraps to a second line that the one-line box hides; it never gets an ellipsis.
     expect(tag.parentElement!.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'h-[1lh]', 'overflow-hidden']));
     expect(tag.className).toContain('whitespace-nowrap');
@@ -97,7 +102,9 @@ describe('the country tag after the name (review round 4)', () => {
   it('moves only a place code: event and content prefixes and names with a pipe stay as written', () => {
     for (const n of ['NBA: Lakers vs Celtics', 'PPV: UFC 300', 'Sky Sports | Main Event', 'beIN SPORTS 1 | HD', 'ESPN HD | Backup']) {
       render(<ChannelName name={n} testId="n" />);
-      expect(screen.getByTestId('n').textContent).toBe(n);
+      // As drawn ("HD" may stand apart as the feed's quality, with the screen readers' copy beside it).
+      const el = screen.getByTestId('n');
+      expect((el.querySelector('[aria-hidden]') ?? el).textContent).toBe(n);
       expect(screen.queryByTestId('channel-name-tag')).toBeNull();
       cleanup();
     }
@@ -148,8 +155,11 @@ describe('the idle stage names its channel in its own direction (review round 4)
     idle('US| ESPN HD');
     const tag = screen.getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
+    // The parts keep the page's order (an RTL name no longer puts its tag first); the station's
+    // name takes its own direction.
     const outer = tag.parentElement!.parentElement!;
-    expect(outer.getAttribute('dir')).toBe('auto');
+    expect(outer.getAttribute('dir')).toBeNull();
     expect(outer.className).toContain('truncate');
+    expect(screen.getByText('ESPN').getAttribute('dir')).toBe('auto');
   });
 });

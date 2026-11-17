@@ -46,6 +46,7 @@ import {
   buttonClass,
   cn,
   displayChannelName,
+  plainChannelName,
   errorDescription,
   useDisplayPrefs,
   useMediaQuery,
@@ -127,7 +128,7 @@ export function ListPage() {
     (channel: Channel, nn?: EpgNowNext) => {
       const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
       playFromList(channel, listId, nn?.now?.title, name).catch((err: unknown) =>
-        toast({ title: tl('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
+        toast({ title: tl('playFailed', { name: plainChannelName(channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err), variant: 'error' }),
       );
     },
     [listId, prefs.stripCountryPrefix, tl, toast],
@@ -214,7 +215,7 @@ export function ListPage() {
       if (favInFlight.current.has(key)) return;
       favInFlight.current.add(key);
       setOverride(key, !wasFavorite);
-      const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+      const name = plainChannelName(channel.name, prefs.stripCountryPrefix);
       try {
         const res = await rpc('favorites.toggle', {
           ref: channel.ref,

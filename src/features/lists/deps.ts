@@ -52,7 +52,7 @@ export { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 export { buildLocks, locksShown, type ParentalLocks } from '@/features/live/hooks/useParentalLocks';
 export { useNow } from '@/features/live/hooks/useNow';
-export { displayChannelName } from '@/features/live/lib/channelName';
+export { displayChannelName, plainChannelName } from '@/features/live/lib/channelName';
 export { playChannel } from '@/features/live/lib/playback';
 export { useParentalStatus } from '@/features/parental/status';
 export { PlayerStage, usePlayerStore } from '@/features/player';

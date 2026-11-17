@@ -4,7 +4,7 @@ import type { Channel } from '@/api/types';
 import { useShortcut } from '@/shell/shortcuts';
 
 import { hideChannel } from './actions';
-import { isEditable, prefetchSourceEdits, useDisplayName } from './edits';
+import { isEditable, prefetchSourceEdits, useToastName } from './edits';
 import { HIDE_COMBO, RENAME_COMBO } from './menu';
 import { openRenameDialog } from './store';
 
@@ -25,7 +25,7 @@ import { openRenameDialog } from './store';
 export function useChannelEditShortcuts(focused: Channel | undefined | (() => Channel | undefined)): void {
   const { t } = useTranslation('channels');
   const { t: tLive } = useTranslation('live');
-  const display = useDisplayName();
+  const display = useToastName();
   const resolve = typeof focused === 'function' ? focused : () => focused;
   const enabled = typeof focused === 'function' || (!!focused && isEditable(focused.ref));
   const area = tLive('shortcutArea');

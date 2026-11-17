@@ -77,6 +77,7 @@
   "guideSource": "ソース",
   "guideTime": "番組表の時刻",
   "guideLoadFailed": "番組表の一部を読み込めませんでした。",
+  "guideWindowLoadFailed": "この時間帯の番組表を読み込めませんでした",
   "portalGuideUnavailable": "ポータルの番組表が応答していません。自動的に再試行しています。",
   "guideNotAnswering": "番組表が応答していません",
   "guideNoData": "これらのチャンネルの番組表データはまだありません。番組表の設定で番組表を追加するか、登録済みの番組表を更新してください。",

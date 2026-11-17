@@ -97,6 +97,7 @@
   "guideSource": "المصدر",
   "guideTime": "وقت الدليل",
   "guideLoadFailed": "لم يُحمَّل جزء من الدليل.",
+  "guideWindowLoadFailed": "لم يُحمَّل الدليل لهذا الوقت",
   "portalGuideUnavailable": "دليل البوابة لا يستجيب. تجري إعادة المحاولة تلقائيًا.",
   "guideNotAnswering": "الدليل لا يستجيب",
   "guideNoData": "لا توجد بيانات دليل لهذه القنوات بعد. أضف دليلًا أو حدّث أدلتك في إعدادات الدليل.",

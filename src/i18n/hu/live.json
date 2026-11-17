@@ -77,6 +77,7 @@
   "guideSource": "Forrás",
   "guideTime": "Műsoridő",
   "guideLoadFailed": "A műsorújság egy része nem töltődött be.",
+  "guideWindowLoadFailed": "A műsorújság erre az időre nem töltődött be",
   "portalGuideUnavailable": "A portál műsorújsága nem válaszol. Automatikus újrapróbálkozás folyamatban.",
   "guideNotAnswering": "A műsorújság nem válaszol",
   "guideNoData": "Ezekhez a csatornákhoz még nincsenek műsoradatok. Adjon hozzá műsorújságot, vagy frissítse a meglévőket a műsorújság-beállításokban.",

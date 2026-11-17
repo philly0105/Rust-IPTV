@@ -77,6 +77,7 @@
   "guideSource": "Quelle",
   "guideTime": "Programmzeit",
   "guideLoadFailed": "Ein Teil des Programmführers wurde nicht geladen.",
+  "guideWindowLoadFailed": "Der Programmführer für diese Zeit wurde nicht geladen",
   "portalGuideUnavailable": "Der Programmführer des Portals antwortet nicht. Es wird automatisch erneut versucht.",
   "guideNotAnswering": "Programmführer antwortet nicht",
   "guideNoData": "Noch keine Programmdaten für diese Sender. Fügen Sie in den Programmführer-Einstellungen einen Programmführer hinzu oder aktualisieren Sie die vorhandenen.",

@@ -428,6 +428,24 @@ describe('rows waiting for guide data (L4-live-3)', () => {
     expect(lines.querySelectorAll('.skeleton-surface').length).toBe(2);
     expect(screen.queryByTestId('no-guide-label')).toBeNull();
   });
+
+  it('a window whose guide failed shows the error state over quiet rows, not skeletons that never end (v-guide-06)', async () => {
+    rpc.handlers['epg.grid'] = () => Promise.reject(new Error('boom'));
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const failed = await screen.findByTestId('guide-window-failed');
+    expect(within(failed).getByRole('heading', { name: 'The guide for this time did not load' })).toBeTruthy();
+    expect(screen.queryAllByTestId('row-guide-pending')).toHaveLength(0);
+    expect(screen.getAllByTestId('no-guide-band')).toHaveLength(CHANNELS.length);
+    // The slim "Part of the guide" line is for a partial failure only.
+    expect(screen.queryByTestId('guide-part-failed')).toBeNull();
+    // Try again asks again and, answered, draws the programmes.
+    const asked = rpc.of('epg.grid').length;
+    rpc.handlers['epg.grid'] = hourly(defaultStart(Date.now()));
+    fireEvent.click(within(failed).getByRole('button', { name: 'Try again' }));
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    expect(rpc.of('epg.grid').length).toBeGreaterThan(asked);
+    expect(screen.queryByTestId('guide-window-failed')).toBeNull();
+  });
 });
 
 describe('time ruler (L4-live-4)', () => {

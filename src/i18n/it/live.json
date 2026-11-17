@@ -82,6 +82,7 @@
   "guideSource": "Sorgente",
   "guideTime": "Orario della guida",
   "guideLoadFailed": "Una parte della guida non è stata caricata.",
+  "guideWindowLoadFailed": "La guida per questo orario non è stata caricata",
   "portalGuideUnavailable": "La guida del portale non risponde. Nuovo tentativo automatico in corso.",
   "guideNotAnswering": "La guida non risponde",
   "guideNoData": "Ancora nessun dato della guida per questi canali. Aggiungi una guida o aggiorna quelle che hai nelle impostazioni della guida.",

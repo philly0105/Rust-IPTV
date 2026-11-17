@@ -17,6 +17,7 @@ import {
   PanelTopOpen,
   Play,
   Radio,
+  RotateCw,
   Tv,
   X,
   ZoomIn,
@@ -1024,6 +1025,16 @@ export function EpgGridPage() {
     return out;
   };
   const gridError = gridA.error ?? gridB.error;
+  /**
+   * A row's programmes for drawing. Once the guide's request failed, a row with nothing else to
+   * show (no provider table on its way) is an empty row, not a skeleton that never resolves.
+   */
+  const rowPrograms = (ch: Channel | undefined): EpgProgram[] | undefined =>
+    programsFor(ch) ?? (gridError && ch && (!xtreamOn || xtreamFor(ch.ref) !== undefined) ? NO_PROGRAMS : undefined);
+  const retryGrid = () => {
+    if (gridA.error) void gridA.refetch();
+    if (gridB.error) void gridB.refetch();
+  };
   // Guides hold programmes, yet none of these channels matched one: the way out is matching a
   // channel to its guide channel, not adding another XMLTV address.
   const guides = useRpcQuery('epg.sources', undefined, { staleTime: 60_000 });
@@ -2178,6 +2189,9 @@ export function EpgGridPage() {
   const lang = i18n.language;
   // The band describes the hovered cell, else the open popover's, else the keyboard cursor's.
   const previewSubject = hovered ?? (selection ? { channel: selection.channel, program: selection.program } : null) ?? (paged.getChannel(cursor.row) && cursorProg ? { channel: paged.getChannel(cursor.row)!, program: cursorProg } : null);
+  // The guide failed and not one row on screen has a programme to show.
+  const windowFailed = !!gridError && pageMeasured && vItems.length > 0 && vItems.every((v) => rowPrograms(paged.getChannel(v.index))?.length === 0);
+  const gridRetrying = (!!gridA.error && gridA.isFetching) || (!!gridB.error && gridB.isFetching);
 
   return (
     // data-guide-search-bounds (SEARCH_BOUNDS_ATTR): the search panel stays inside the page, clear of the rail.
@@ -2230,12 +2244,14 @@ export function EpgGridPage() {
       ) : null}
       <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={jumpOpen ? shownTime[0] : jumpIdleStart} now={now} guideEnd={jumpOpen ? guideEnd : undefined} onJump={goTo} onNow={toNow} />
 
-      {gridError ? (
-        <div role="alert" className="border-b border-divider bg-surface-2 px-3 py-2 text-sm text-danger">
-          {t('guideLoadFailed')}{' '}
-          <button type="button" className="rounded-sm font-medium underline underline-offset-2 hover:decoration-2 active:opacity-80" onClick={() => void (gridA.error ? gridA.refetch() : gridB.refetch())}>
+      {gridError && !windowFailed ? (
+        // Part of the window failed while other rows drew: one quiet line, the rows stay readable.
+        // A window with nothing to show gets the error state over the grid instead (v-guide-06).
+        <div role="alert" data-testid="guide-part-failed" className="flex items-center gap-2 border-b border-divider bg-surface-2 px-3 py-1 text-sm text-danger">
+          <span className="min-w-0">{t('guideLoadFailed')}</span>
+          <Button size="sm" variant="ghost" icon={<RotateCw className="size-4" />} loading={gridRetrying} onClick={retryGrid} className="shrink-0">
             {t('retry')}
-          </button>
+          </Button>
         </div>
       ) : plainPortal.unavailable || archivePortal.unavailable ? (
         <GuideUnavailableNotice
@@ -2366,7 +2382,7 @@ export function EpgGridPage() {
                   forced layout and again at the width it found (P2-GUIDE-2). */}
               {pageMeasured && vItems.map((v) => {
                 const ch = paged.getChannel(v.index);
-                const programs = programsFor(ch);
+                const programs = rowPrograms(ch);
                 const k = ch ? itemKey(ch.ref) : null;
                 const playing = k !== null && playingKey === k;
                 const playingProgramStart = playing
@@ -2406,7 +2422,14 @@ export function EpgGridPage() {
               })}
             </div>
           </div>
-          {noEpgAnywhere && nowInViewport && !guidesLoaded ? (
+          {windowFailed ? (
+            // The guide for this window failed and no row has anything to show.
+            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-bg/60 p-4 pt-12">
+              <div data-testid="guide-window-failed" className="pointer-events-auto w-full max-w-md rounded-xl border border-edge bg-surface shadow-3 motion-safe:animate-pop-in">
+                <ErrorState size="inline" error={gridError} title={t('guideWindowLoadFailed')} onRetry={retryGrid} retrying={gridRetrying} />
+              </div>
+            </div>
+          ) : noEpgAnywhere && nowInViewport && !guidesLoaded ? (
             // LG-10: no guide at all. A proper empty state over the (quiet, flat) rows, not a pill
             // cut short at the foot of a wall of empty cells; the channels stay under it.
             <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-bg/60 p-4 pt-12">

@@ -77,6 +77,7 @@
   "guideSource": "播放來源",
   "guideTime": "節目表時間",
   "guideLoadFailed": "部分節目表未能載入。",
+  "guideWindowLoadFailed": "此時段的節目表未能載入",
   "portalGuideUnavailable": "入口網站的節目表沒有回應，正在自動重試。",
   "guideNotAnswering": "節目表沒有回應",
   "guideNoData": "這些頻道尚無節目表資料。請在節目表設定中新增節目表，或重新整理現有的節目表。",

@@ -82,6 +82,7 @@
   "guideSource": "Fuente",
   "guideTime": "Hora de la guía",
   "guideLoadFailed": "Parte de la guía no se cargó.",
+  "guideWindowLoadFailed": "La guía de esta franja no se cargó",
   "portalGuideUnavailable": "La guía del portal no responde. Reintentando automáticamente.",
   "guideNotAnswering": "La guía no responde",
   "guideNoData": "Aún no hay datos de guía para estos canales. Añade una guía o actualiza las que tienes en los ajustes de la guía.",

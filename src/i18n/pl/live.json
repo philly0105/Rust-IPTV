@@ -87,6 +87,7 @@
   "guideSource": "Źródło",
   "guideTime": "Czas przewodnika",
   "guideLoadFailed": "Nie udało się załadować części przewodnika.",
+  "guideWindowLoadFailed": "Nie udało się załadować przewodnika na ten czas",
   "portalGuideUnavailable": "Przewodnik portalu nie odpowiada. Trwa automatyczne ponawianie.",
   "guideNotAnswering": "Przewodnik nie odpowiada",
   "guideNoData": "Brak danych przewodnika dla tych kanałów. Dodaj przewodnik lub odśwież posiadane w ustawieniach przewodnika.",

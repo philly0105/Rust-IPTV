@@ -77,6 +77,7 @@
   "guideSource": "Source",
   "guideTime": "Guide time",
   "guideLoadFailed": "Part of the guide did not load.",
+  "guideWindowLoadFailed": "The guide for this time did not load",
   "portalGuideUnavailable": "The portal's guide isn't answering. Retrying automatically.",
   "guideNotAnswering": "Guide not answering",
   "guideNoData": "No guide data for these channels yet. Add a guide, or refresh the ones you have, in Guide settings.",

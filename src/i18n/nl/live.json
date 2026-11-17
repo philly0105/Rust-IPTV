@@ -77,6 +77,7 @@
   "guideSource": "Bron",
   "guideTime": "Gidstijd",
   "guideLoadFailed": "Een deel van de gids is niet geladen.",
+  "guideWindowLoadFailed": "De gids voor deze tijd is niet geladen",
   "portalGuideUnavailable": "De gids van het portaal reageert niet. Er wordt automatisch opnieuw geprobeerd.",
   "guideNotAnswering": "Gids reageert niet",
   "guideNoData": "Nog geen gidsgegevens voor deze kanalen. Voeg een gids toe of vernieuw je gidsen in de gidsinstellingen.",

@@ -82,6 +82,7 @@
   "guideSource": "Source",
   "guideTime": "Heure du guide",
   "guideLoadFailed": "Une partie du guide n'a pas pu être chargée.",
+  "guideWindowLoadFailed": "Le guide de cette période n'a pas pu être chargé",
   "portalGuideUnavailable": "Le guide du portail ne répond pas. Nouvelle tentative automatique en cours.",
   "guideNotAnswering": "Le guide ne répond pas",
   "guideNoData": "Aucune donnée de guide pour ces chaînes pour l'instant. Ajoutez un guide, ou actualisez ceux que vous avez, dans les paramètres du guide.",

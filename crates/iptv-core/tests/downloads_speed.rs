@@ -601,13 +601,27 @@ async fn two_copies(
     (lab, [a, b], [sa, sb])
 }
 
-/// SC3a: a copy of the same size whose bytes differ fails verification and
-/// serves nothing past its fingerprint.
+/// SC3a: copies whose bytes differ fail verification and serve nothing past
+/// their fingerprint. Per amendment A6 the verdict is Equivalent when the
+/// copy passes `mirrors::equivalent` against the item (same quality and
+/// container, size within 15%), which only queue spreading reads, and
+/// Differs otherwise: here one differing copy in the item's container and
+/// one in another.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn sc3_differing_mirror_is_never_used() {
     const SIZE: u64 = 32 * MIB;
     const KBPS: u64 = 8 * 1024;
     let (lab, [a, b], [sa, sb]) = two_copies("sc3a", SIZE, KBPS, Variant::Differs).await;
+    // The same differing bytes in another container: not equivalent.
+    let c = Panel::spawn(302).await;
+    c.set_reported(1);
+    c.set_enforced(1);
+    c.file_variant(1, SIZE, KBPS, Variant::Differs);
+    let sc = lab.source("sc3a-c", &c).await;
+    add_movie(&lab.state, &sc, 1, "Two Copies (2022)", Some(2022), "mkv").await;
+    let all = vec![sa.clone(), sb.clone(), sc.clone()];
+    lab.settings(|s| s.download_probe_disabled = all).await;
+
     let run = lab
         .run_movie(&sa, 1, "Two Copies", &a.movie_url(1), SIZE)
         .await;
@@ -615,36 +629,46 @@ async fn sc3_differing_mirror_is_never_used() {
         "SC3a",
         mbps(KBPS * 1024, 1.0),
         run.mbps(),
-        "before: one connection's cap; the differing copy adds nothing",
+        "before: one connection's cap; the differing copies add nothing",
     );
 
     assert_exact(1, SIZE, &run);
-    let mirror: Vec<_> = b.log().into_iter().filter(|l| l.file == 1).collect();
-    assert!(
-        mirror.len() <= 3,
-        "the differing copy got {} requests: {mirror:?}",
-        mirror.len()
-    );
-    for l in &mirror {
-        let len = l.range.and_then(|(a, b)| Some(b? + 1 - a));
-        assert_eq!(
-            len,
-            Some(shared::SAMPLE_LEN as u64),
-            "not a fingerprint request: {l:?}"
+    let notes = lab.notes(run.download.id);
+    for (panel, source) in [(&b, &sb), (&c, &sc)] {
+        let mirror: Vec<_> = panel.log().into_iter().filter(|l| l.file == 1).collect();
+        assert!(
+            mirror.len() <= 3,
+            "the differing copy on {source} got {} requests: {mirror:?}",
+            mirror.len()
         );
+        for l in &mirror {
+            let len = l.range.and_then(|(a, b)| Some(b? + 1 - a));
+            assert_eq!(
+                len,
+                Some(shared::SAMPLE_LEN as u64),
+                "not a fingerprint request on {source}: {l:?}"
+            );
+        }
+        assert!(
+            !notes.iter().any(
+                |n| matches!(n, TransferNote::MirrorAdded { source_id } if source_id == source)
+            ),
+            "the differing copy on {source} was added as a mirror"
+        );
+        assert!(panel.peak() <= 1);
     }
-    assert!(
-        !lab.notes(run.download.id)
-            .iter()
-            .any(|n| matches!(n, TransferNote::MirrorAdded { source_id } if *source_id == sb)),
-        "the differing copy was added as a mirror"
+    let own = movie_copy(&sa, 1);
+    assert_eq!(
+        lab.verdict(&own, &sb).await,
+        Some(Verdict::Equivalent),
+        "the same-container differing copy is not Equivalent under the authority's record"
     );
     assert_eq!(
-        lab.verdict(&movie_copy(&sa, 1), &sb).await,
+        lab.verdict(&own, &sc).await,
         Some(Verdict::Differs),
-        "no differs verdict stored under the authority's record"
+        "the other-container copy is not Differs under the authority's record"
     );
-    assert!(a.peak() <= 1 && b.peak() <= 1);
+    assert!(a.peak() <= 1);
 }
 
 /// SC3b: a copy that matches the fingerprint windows but differs everywhere

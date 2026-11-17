@@ -1269,6 +1269,7 @@ fn no_holes(ctl: &TaskCtl, rep: &mut Representation) {
         });
     }
     rep.one_connection = true;
+    ctl.set_one_connection(true);
 }
 
 /// The mirrors a transfer may draw on: with "Use identical copies" on, a

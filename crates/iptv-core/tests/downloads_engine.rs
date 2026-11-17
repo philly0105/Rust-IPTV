@@ -870,3 +870,74 @@ async fn the_mirror_search_runs_again_while_no_mirror_serves() {
     }
     c.ok("downloads.cancel", json!({"id": d.id})).await;
 }
+
+/// Breakdowns of `id` over `d` that ran `n` connections.
+async fn breakdowns_at(c: &Ctx, id: i64, n: usize, d: Duration) -> Vec<Value> {
+    c.collect("downloads.stats", id, d)
+        .await
+        .into_iter()
+        .filter(|s| s["connections"].as_array().map(Vec::len) == Some(n))
+        .collect()
+}
+
+/// Three accounts that allow one connection each serve one file: every
+/// source is at its allowance, and what holds the speed back is each
+/// connection's speed, not the row's own account.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn connections_on_several_accounts_are_limited_per_connection() {
+    let c = xctx().await;
+    let size = 64 * MIB;
+    let panels = [
+        Panel::spawn(56).await,
+        Panel::spawn(57).await,
+        Panel::spawn(58).await,
+    ];
+    let mut sources = Vec::new();
+    for (i, p) in panels.iter().enumerate() {
+        p.set_reported(1);
+        p.set_enforced(1);
+        p.file(1, size, 1024);
+        let s = add_xtream_source(&c.state, &format!("each-{i}"), p).await;
+        add_movie(&c.state, &s, 1, "Each Its Own (2020)", Some(2020), "mp4").await;
+        sources.push(s);
+    }
+    c.state.settings.write().download_probe_disabled = sources.clone();
+    iptv_core::downloads::manager::manager(&c.state)
+        .set_ramp_timing(Duration::from_millis(500), Duration::from_millis(500));
+    let d = c.start_movie(&sources[0], 1, &panels[0].movie_url(1)).await;
+    let deadline = Instant::now() + WAIT;
+    let full = loop {
+        assert!(Instant::now() < deadline, "never three connections");
+        let got = breakdowns_at(&c, d.id, 3, Duration::from_millis(1500)).await;
+        if !got.is_empty() {
+            break got;
+        }
+    };
+    let more = breakdowns_at(&c, d.id, 3, Duration::from_secs(2)).await;
+    for s in full.iter().chain(&more) {
+        assert_eq!(s["limiting"]["kind"], "perConnection", "{s}");
+    }
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+}
+
+/// One account allows three connections, so a download gets two: its
+/// account limit is what holds it back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_account_at_its_allowance_is_limited_by_the_account() {
+    let c = ctx().await;
+    c.limit(3).await;
+    let panel = Panel::spawn(59).await;
+    let size = 48 * MIB;
+    panel.file(1, size, 1024);
+    iptv_core::downloads::manager::manager(&c.state)
+        .set_ramp_timing(Duration::from_millis(500), Duration::from_millis(500));
+    let d = c.start(&panel.url(1)).await;
+    until("split", || panel.log().len() >= 2).await;
+    let full = breakdowns_at(&c, d.id, 2, Duration::from_secs(3)).await;
+    assert!(!full.is_empty(), "no breakdown with two connections");
+    for s in &full {
+        assert_eq!(s["limiting"]["kind"], "accountLimit", "{s}");
+        assert_eq!(s["limiting"]["limit"], 3, "{s}");
+    }
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+}

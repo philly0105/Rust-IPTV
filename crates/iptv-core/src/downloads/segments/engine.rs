@@ -745,6 +745,7 @@ pub async fn run(
                                     reason: OneConnectionReason::Refused,
                                 });
                             }
+                            ctl.set_one_connection(true);
                             refused = true;
                             let mut p = plan.lock();
                             let gone = p.ranges.segments[seg];
@@ -902,6 +903,7 @@ pub async fn run(
         ctl.push_note(TransferNote::OneConnection {
             reason: OneConnectionReason::Changed,
         });
+        ctl.set_one_connection(true);
         let _ = tokio::task::spawn_blocking(move || {
             // The sidecar goes only once the `.part` is empty.
             std::fs::OpenOptions::new()
@@ -1376,7 +1378,12 @@ fn breakdown(
             bytes_per_second: bps,
         });
     }
-    if found.is_empty() && !running.is_empty() && running.len() >= want.room {
+    // Every usable source is at its allowance. With connections on several
+    // sources no one account explains the speed: each connection's speed
+    // does, ahead of the accounts' limits. On one source its account limit
+    // stays the answer.
+    let several = running.iter().any(|r| r.src != running[0].src);
+    if (found.is_empty() || several) && !running.is_empty() && running.len() >= want.room {
         let speeds: Vec<i64> = running.iter().map(|r| r.meter.speed()).collect();
         found.push(Limiting::PerConnection {
             bytes_per_second: stats::median(&speeds),

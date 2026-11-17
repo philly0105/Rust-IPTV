@@ -94,12 +94,20 @@ const airing = (title: string): EpgNowNext => ({
 });
 
 describe('the second line of a row', () => {
-  it('leads with the group in a search across groups, and names it to screen readers (live-02)', () => {
-    const channels = [{ ...makeChannel(0), name: 'ESPN HD', categoryName: 'US| PRIME ᴿᴬᵂ' }];
-    list(channels, { showGroup: true, paged: pagedOf(channels, () => airing('SportsCenter')) });
-    expect(screen.getByTestId('row-group').textContent).toBe('US| PRIME ᴿᴬᵂ');
-    expect(screen.getByTestId('row-now-title').textContent).toBe('SportsCenter');
-    expect(row(0)!.getAttribute('aria-label')).toContain('US| PRIME ᴿᴬᵂ');
+  it('names the group once over each run of a search across groups, and to screen readers on each row (live-02, v-live-02)', () => {
+    const channels = [
+      { ...makeChannel(0), name: 'US| ESPN HD', categoryName: 'US| PRIME ᴿᴬᵂ' },
+      { ...makeChannel(1), name: 'ESPN2 HD', categoryName: 'US| PRIME ᴿᴬᵂ' },
+      { ...makeChannel(2), name: 'ESPNU', categoryName: 'Sports' },
+    ];
+    list(channels, { showGroup: true, paged: pagedOf(channels, (i) => (i < 2 ? airing('SportsCenter') : undefined)) });
+    expect(screen.getAllByTestId('group-caption').map((c) => c.textContent)).toEqual(['US| PRIME ᴿᴬᵂ', 'Sports']);
+    // The programme has the line to itself; a row without one says so instead of naming its group again.
+    expect(screen.queryByTestId('row-group')).toBeNull();
+    expect(screen.getAllByTestId('row-now-title')[0]!.textContent).toBe('SportsCenter');
+    expect(within(row(2)!).getByTestId('row-no-guide')).toBeTruthy();
+    // Read as drawn: the place after the name (v-live-12).
+    expect(row(0)!.getAttribute('aria-label')).toBe('1, ESPN HD (US), PRIME ᴿᴬᵂ (US), now: SportsCenter');
   });
 
   it('leaves the group out when the list is not a search across groups', () => {
@@ -155,6 +163,12 @@ describe('provider heading rows (live-04)', () => {
 describe('the number column (live-05)', () => {
   it('is as wide as the longest number the list holds', () => {
     list([{ ...makeChannel(0), number: 57012 }, makeChannel(1)]);
+    expect(screen.getByTestId('channel-list').style.getPropertyValue('--num-w')).toBe('5ch');
+  });
+
+  it("starts as wide as the list's count, before the high numbers load (v-live-09)", () => {
+    const channels = [makeChannel(0), makeChannel(1)];
+    list(channels, { paged: { ...pagedOf(channels), total: 30132 } });
     expect(screen.getByTestId('channel-list').style.getPropertyValue('--num-w')).toBe('5ch');
   });
 

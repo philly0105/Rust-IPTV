@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { EllipsisVertical, Heart, History, Lock } from 'lucide-react';
-import { memo, type MouseEvent, type ReactElement } from 'react';
+import { memo, type HTMLAttributes, type MouseEvent, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
@@ -9,7 +9,7 @@ import { IconButton } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName, isSeparatorName, separatorLabel } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, plainChannelName, separatorLabel } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
 import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
@@ -54,8 +54,9 @@ export interface ChannelRowProps {
   /** Parental Ask mode: the channel asks for the PIN, so the row carries a lock and keeps its programmes back. */
   locked?: boolean;
   /**
-   * The list mixes groups (a search across All channels): the programme line leads with the
-   * channel's group, which is what tells a dozen "ESPN HD" feeds apart.
+   * The list mixes groups (a search across All channels): ChannelList captions each run of rows
+   * from one group, which is what tells a dozen "ESPN HD" feeds apart; the row names its group to
+   * screen readers and, without a programme, says there is no guide rather than repeat the group.
    */
   showGroup?: boolean;
   /**
@@ -190,6 +191,29 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
 });
 
 /**
+ * A quiet caption on the names' line, the number and logo columns kept empty: a provider's heading
+ * row, and the group over a run of search results (v-live-02).
+ */
+export function RowCaption({
+  label,
+  compact,
+  station,
+  className,
+  ...rest
+}: { label: string; compact?: boolean; station?: boolean; className?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'children'>) {
+  return (
+    <div className={cn('flex items-end gap-3 ps-2.5 pe-3', className)} {...rest}>
+      {/* In the number's font: its width is in ch, so another font set the caption off the names (v-live-08). */}
+      <span aria-hidden className={cn('shrink-0 font-numeric text-sm', NUMBER_WIDTH)} />
+      {compact ? null : <span aria-hidden className="shrink-0" style={{ width: station ? 44 : 40 }} />}
+      <span dir="auto" title={label} className="min-w-0 truncate text-caption font-semibold tracking-wide text-fg-subtle uppercase">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/**
  * A row of ChannelList. The list hands it `t` and the separator (P2-LIVE-3): `useTranslation` per
  * row subscribed each of a screen of rows to i18next and copied the i18next instance for each.
  */
@@ -205,20 +229,15 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
     // heads, in the row's slot so the list keeps one height. Not playable and passed by the arrows;
     // a right click or a long press still reaches its menu (Hide).
     return (
-      <div
-        className="flex h-full touch-manipulation items-end gap-3 ps-2.5 pe-3 pb-2 select-none [-webkit-touch-callout:none]"
+      <RowCaption
+        label={separatorLabel(channel.name)}
+        compact={compact}
+        station={props.station}
+        className="h-full touch-manipulation pb-2 select-none [-webkit-touch-callout:none]"
         onContextMenu={(e) => props.onContextMenu(e, channel, index)}
         data-testid="row-separator"
         {...longPress}
-      >
-        {/* On the names' line: the number and logo columns stay, empty. */}
-        {/* In the number's font: its width is in ch, so another font set the caption off the names (v-live-08). */}
-        <span aria-hidden className={cn('shrink-0 font-numeric text-sm', NUMBER_WIDTH)} />
-        {compact ? null : <span aria-hidden className="shrink-0" style={{ width: props.station ? 44 : 40 }} />}
-        <span dir="auto" className="min-w-0 truncate text-caption font-semibold tracking-wide text-fg-subtle uppercase">
-          {separatorLabel(channel.name)}
-        </span>
-      </div>
+      />
     );
   }
 
@@ -232,6 +251,8 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
   const name = displayChannelName(channel.name, props.stripPrefix);
   const left = cur ? minutesLeft(cur, now) : 0;
   const text = rowText(t);
+  // A search across groups names each run's group once, over its first row (ChannelList): the row
+  // keeps it for screen readers only, and without a programme says there is no guide.
   const group = props.showGroup ? channel.categoryName : '';
   // In its own group a row without a programme says so; elsewhere its group tells it apart.
   const inOpenGroup = !!props.groupId && channel.categoryId === props.groupId;
@@ -255,10 +276,12 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         data-row-index={index}
         tabIndex={active ? 0 : -1}
         aria-current={playing ? 'true' : undefined}
+        // Named as the row draws it, the place after the name ("ESPN HD (US)"), not "US pipe ESPN HD"
+        // (v-live-12, w-a11y-03); the tooltip keeps the provider's name.
         aria-label={[
           channel.number !== undefined ? `${channel.number}` : '',
-          name,
-          group,
+          plainChannelName(channel.name, props.stripPrefix),
+          group ? plainChannelName(group, false) : '',
           favorite ? text.favorite : '',
           locked ? text.locked : '',
           cur ? t('nowShowing', { title: cur.title }) : '',
@@ -320,17 +343,6 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
                   compact "38m" form, so narrow lists keep the title readable (and RTL titles put the
                   ellipsis at their own end, not before the clock). */}
               <span className="flex min-w-0 items-baseline gap-2 text-caption text-fg-muted pointer-coarse:text-body-sm" data-testid="row-now">
-                {group ? (
-                  // Quiet, and it gives way before the title does.
-                  <>
-                    <span dir="auto" className="max-w-[45%] min-w-0 shrink-0 truncate text-fg-subtle" title={group} data-testid="row-group">
-                      {group}
-                    </span>
-                    <span aria-hidden className="shrink-0 text-fg-subtle">
-                      ·
-                    </span>
-                  </>
-                ) : null}
                 <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" data-testid="row-now-title" title={cur.title}>
                   {cur.title}
                 </span>
@@ -365,7 +377,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             <span className="truncate text-caption text-fg-subtle" data-testid="row-guide-unavailable">
               {text.guideNotAnswering}
             </span>
-          ) : inOpenGroup ? (
+          ) : inOpenGroup || group ? (
             <span className="truncate text-caption text-fg-subtle" data-testid="row-no-guide">
               {locked ? text.locked : text.noGuide}
             </span>

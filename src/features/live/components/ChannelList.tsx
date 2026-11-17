@@ -11,7 +11,7 @@ import type { ParentalLocks } from '../hooks/useParentalLocks';
 import { isSeparatorName } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow, RowCaption } from './ChannelRow';
 
 export interface ChannelListProps {
   paged: PagedChannels;
@@ -61,6 +61,9 @@ interface ListPlace {
 /** Cursor and scroll offset per list key, kept for the session (bounded, oldest dropped first). */
 const listMemory = new Map<string, ListPlace>();
 const LIST_MEMORY_LIMIT = 64;
+/** The band over a run of search results from one group, at 100 %: a caption line and its air. */
+const GROUP_CAPTION_HEIGHT = 26;
+const GROUP_CAPTION_SPACING = 8;
 /** The cursor has to rest this long before the parent (guide ribbon) follows it. */
 export const ACTIVE_SETTLE_MS = 200;
 
@@ -146,10 +149,23 @@ export function ChannelList(props: ChannelListProps) {
 
   // Rows follow the UI scale, and compact density tightens their padding and gaps.
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
+  // A search across groups names the group once over each run of its results, in a caption band
+  // above the run's first row (v-live-02): on every row it left a few letters of group and title.
+  const captionHeight = useRowHeight(GROUP_CAPTION_HEIGHT, GROUP_CAPTION_SPACING);
+  const groupCaption = (i: number): string | undefined => {
+    const { paged: p, showGroup } = propsRef.current;
+    if (!showGroup) return undefined;
+    const ch = p.getChannel(i);
+    if (!ch?.categoryName || isSeparatorName(ch.name)) return undefined;
+    if (i === 0) return ch.categoryName;
+    const prev = p.getChannel(i - 1);
+    // Not loaded yet: no band until it is known, then the sizes are measured again.
+    return prev && prev.categoryName !== ch.categoryName ? ch.categoryName : undefined;
+  };
   const virtualizer = useListVirtualizer({
     count,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => rowHeight,
+    estimateSize: (i) => rowHeight + (groupCaption(i) ? captionHeight : 0),
     overscan: 10,
     // Without a hint, the window's size (P2-LIVE-1): the list's own comes after the first layout,
     // and an 800 px guess rendered the rows again before a taller window's first paint.
@@ -164,6 +180,14 @@ export function ChannelList(props: ChannelListProps) {
     measuredHeight.current = rowHeight;
     virtualizer.measure();
   }, [rowHeight, virtualizer]);
+  // New results in a search across groups: their caption bands change the sizes.
+  const captionsFor = props.showGroup ? paged.loaded : null;
+  const captionsMeasured = useRef(captionsFor);
+  useLayoutEffect(() => {
+    if (captionsMeasured.current === captionsFor) return;
+    captionsMeasured.current = captionsFor;
+    virtualizer.measure();
+  }, [captionsFor, virtualizer]);
   const items = virtualizer.getVirtualItems();
   const first = items[0]?.index ?? 0;
   const last = items[items.length - 1]?.index ?? 0;
@@ -294,8 +318,11 @@ export function ChannelList(props: ChannelListProps) {
 
   // The number column takes the widest number this list has shown (ChannelRow): it only grows
   // while the list stays, so scrolling back to low numbers does not move every logo again.
+  // It starts as wide as the list's count: channels are numbered 1 to N, so All channels with
+  // 30,132 takes 5ch from the first frame instead of moving every name past 9,999 (v-live-09).
   const widest = useRef({ key: resetKey, digits: 0 });
   if (widest.current.key !== resetKey) widest.current = { key: resetKey, digits: 0 };
+  if (count >= 1000) widest.current.digits = Math.max(widest.current.digits, String(count).length);
   for (const l of paged.loaded) {
     const n = l.channel.number;
     if (n !== undefined && n >= 1000) widest.current.digits = Math.max(widest.current.digits, String(n).length);
@@ -502,6 +529,7 @@ export function ChannelList(props: ChannelListProps) {
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
           {items.map((v) => {
             const ch = paged.getChannel(v.index);
+            const caption = v.size > rowHeight ? groupCaption(v.index) : undefined;
             return (
               <div
                 key={v.key}
@@ -509,8 +537,14 @@ export function ChannelList(props: ChannelListProps) {
                 aria-setsize={count}
                 aria-posinset={v.index + 1}
                 data-index={v.index}
-                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}
+                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, paddingTop: caption ? v.size - rowHeight : undefined, transform: `translateY(${v.start}px)` }}
               >
+                {/* Above the run's first row, in the room its item has over a row; the row keeps its
+                    place in the tree, so focus stays when the band arrives. The row's own name
+                    carries the group for screen readers. */}
+                {caption ? (
+                  <RowCaption aria-hidden label={caption} compact={props.compact} station={props.station} className="absolute inset-x-0 top-0 pb-1" style={{ height: v.size - rowHeight }} data-testid="group-caption" />
+                ) : null}
                 <ListChannelRow
                   t={t}
                   separator={separator}

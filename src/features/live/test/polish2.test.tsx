@@ -345,7 +345,7 @@ describe('groups sidebar', () => {
     renderIn('/', [{ path: '/', element: withScope() }]);
     const picker = screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement;
     // Most groups first; a tag on one group only (DE) is not offered.
-    expect([...picker.options].map((o) => o.textContent)).toEqual(['All regions', 'US · United States · 3 groups', 'UK · United Kingdom · 2 groups']);
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['All', 'US · United States · 3 groups', 'UK · United Kingdom · 2 groups']);
     fireEvent.change(picker, { target: { value: 'UK' } });
     expect(names()).toEqual(['UK| SPORT', 'UK| NEWS']);
     expect(localStorage.getItem('tsrust.liveRegion:src1:live')).toBe('UK');

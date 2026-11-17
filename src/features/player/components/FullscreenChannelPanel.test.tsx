@@ -139,6 +139,15 @@ describe('fullscreen channel panel keyboard (L3-player-6)', () => {
     expect(pagesAsked()).not.toContain(1);
   });
 
+  it('is opaque glass, so the title and the bar under it never print through (v-player-01)', async () => {
+    play(250);
+    mount();
+    await waitFor(() => expect(focusedName()).toContain('Channel 250'));
+    const panel = screen.getByRole('complementary');
+    expect(panel.className.split(' ')).toEqual(expect.arrayContaining(['player-glass-strong', 'player-sheet']));
+    expect(panel.className).not.toContain('glass-blur');
+  });
+
   it('arrows, Page Up/Down, Home and End walk the rows; Up from the top goes to the search field and Down comes back', async () => {
     play(5);
     mount();

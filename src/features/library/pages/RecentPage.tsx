@@ -82,6 +82,9 @@ export function RecentPage() {
   const [menuUsed, setMenuUsed] = useState(false);
   if (menu && !menuUsed) setMenuUsed(true);
   const closeMenu = useCallback(() => setMenu(null), []);
+  // A movie or series row's own menu, opened from the keyboard at the row (w-a11y-10).
+  const [rowMenu, setRowMenu] = useState<{ key: string; pos: { x: number; y: number } } | null>(null);
+  const closeRowMenu = useCallback(() => setRowMenu(null), []);
   // An empty history may be the Live TV quality filter's doing: it leaves out the channels it hides.
   const quality = useLiveQuality();
 
@@ -306,6 +309,8 @@ export function RecentPage() {
         onOpen={() => activate(e)}
         onRemove={() => remove(e)}
         onChannelMenu={isChannel(e) ? (pos) => openChannelMenu(e, pos) : undefined}
+        menuAt={rowMenu?.key === row.key ? rowMenu.pos : null}
+        onMenuClose={closeRowMenu}
       />
     );
   };
@@ -361,10 +366,12 @@ export function RecentPage() {
           } else if (ev.key === 'Delete') {
             ev.preventDefault();
             remove(r.entry);
-          } else if (isChannel(r.entry) && isMenuKey(ev)) {
+          } else if (isMenuKey(ev)) {
             ev.preventDefault();
             const box = (ev.target as HTMLElement).getBoundingClientRect();
-            openChannelMenu(r.entry, { x: box.left + 16, y: box.bottom - 8 });
+            const pos = { x: box.left + 16, y: box.bottom - 8 };
+            if (isChannel(r.entry)) openChannelMenu(r.entry, pos);
+            else setRowMenu({ key: r.key, pos });
           } else if (isChannel(r.entry) && isAddToListKey(ev)) {
             ev.preventDefault();
             addEntryToList(r.entry.ref, r.entry.snapshot);

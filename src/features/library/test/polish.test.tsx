@@ -287,10 +287,11 @@ describe('library removals can be undone', () => {
     fireEvent.keyDown(row, { key: 'Enter' });
     await waitFor(() => expect(fakePlayer.items).toHaveLength(1));
     expect(fakePlayer.items[0]).toMatchObject({ ref: p1.ref, isLive: false });
-    // The strip's menu is a Tab stop inside the row (its buttons are not), so the keyboard gets to it.
+    // The strip's menu stays out of the Tab order like its siblings (w-a11y-10); Shift+F10 on the
+    // row opens the row's own menu, which holds the same items.
     const trigger = within(screen.getAllByTestId('entry-actions')[0]!).getByRole('button', { name: 'Actions for Continue p1' });
-    expect(trigger.tabIndex).toBe(0);
-    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(trigger.tabIndex).toBe(-1);
+    fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear progress' }));
     await waitFor(() => expect(rpc.callsOf('positions.remove')).toHaveLength(1));
     expect((rpc.callsOf('positions.remove')[0] as { ref: { itemId: string } }).ref.itemId).toBe('p1');

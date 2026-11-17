@@ -183,6 +183,9 @@ export function FavoritesPage() {
     });
   };
   const closeMenu = useCallback(() => setMenu(null), []);
+  // A movie or series row's own menu, opened from the keyboard at the row (w-a11y-10).
+  const [rowMenu, setRowMenu] = useState<{ key: string; pos: { x: number; y: number } } | null>(null);
+  const closeRowMenu = useCallback(() => setRowMenu(null), []);
 
   const moveFocused = (delta: -1 | 1) => {
     const key = focusedRowKey();
@@ -253,6 +256,8 @@ export function FavoritesPage() {
           onOpen={() => open(e)}
           onRemove={() => remove(e)}
           onChannelMenu={e.ref.contentType === 'live' || e.ref.contentType === 'radio' ? (pos) => openChannelMenu(row, pos) : undefined}
+          menuAt={rowMenu?.key === row.key ? rowMenu.pos : null}
+          onMenuClose={closeRowMenu}
           reorder={
             search
               ? undefined
@@ -336,10 +341,12 @@ export function FavoritesPage() {
           } else if (e.key === 'Delete') {
             e.preventDefault();
             remove(r.entry);
-          } else if (channel && isMenuKey(e)) {
+          } else if (isMenuKey(e)) {
             e.preventDefault();
             const box = (e.target as HTMLElement).getBoundingClientRect();
-            openChannelMenu(r, { x: box.left + 16, y: box.bottom - 8 });
+            const pos = { x: box.left + 16, y: box.bottom - 8 };
+            if (channel) openChannelMenu(r, pos);
+            else setRowMenu({ key: r.key, pos });
           } else if (channel && isAddToListKey(e)) {
             e.preventDefault();
             addEntryToList(r.entry.ref, r.entry.snapshot);

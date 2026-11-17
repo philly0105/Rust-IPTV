@@ -247,6 +247,41 @@ describe('removing the last row hands focus to the empty state (w-a11y-09)', () 
   });
 });
 
+describe("Shift+F10 opens a movie or series row's own menu (w-a11y-10)", () => {
+  it('Favorites: the menu key on a movie row opens its menu, and Remove works from it', async () => {
+    let stored = [makeFavorite('movie', 'm1', 0)];
+    rpc.handlers['favorites.list'] = () => stored;
+    rpc.handlers['favorites.remove'] = () => {
+      stored = [];
+    };
+    renderAt('/favorites', favoritesRoute);
+    const row = (await screen.findByRole('button', { name: 'Remove movie m1 from favorites' })).closest<HTMLElement>('[role="listitem"]')!;
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
+    const menu = await screen.findByRole('menu', { name: 'Actions for movie m1' });
+    expect(within(menu).getByRole('menuitem', { name: 'Open' })).toBe(document.activeElement);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Remove/ }));
+    await waitFor(() => expect(rpc.callsOf('favorites.remove')).toHaveLength(1));
+  });
+
+  it("Recently watched: the Menu key opens a resumable row's menu, and the strip's menu button is out of the Tab order", async () => {
+    const movie = makePosition('m1', 300, 1800);
+    rpc.handlers['recent.list'] = () => [{ ref: movie.ref, viewedAt: new Date().toISOString(), snapshot: movie.snapshot! }];
+    rpc.handlers['positions.continueWatching'] = () => [movie];
+    renderAt('/recent', recentRoute);
+    const strip = (await screen.findAllByRole('button', { name: 'Actions for Continue m1' }))[0]!;
+    expect(strip.tabIndex).toBe(-1);
+    const row = strip.closest<HTMLElement>('[role="listitem"]')!;
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: 'ContextMenu' });
+    const menu = await screen.findByRole('menu', { name: 'Actions for Continue m1' });
+    expect(within(menu).getByRole('menuitem', { name: 'Clear progress' })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(document.activeElement).toBe(row);
+  });
+});
+
 describe('MyVideoDetailPage follows the series when its URL episode is removed (D5)', () => {
   it('stays on the series instead of showing not found', async () => {
     const ep2 = makeEpisode('s1', 'Severance', 'S01E02 Half Loop', { id: 2, completedAt: '2026-10-03T00:00:00Z' });

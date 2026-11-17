@@ -19,12 +19,14 @@
 
 import { k } from '../lib/keys';
 import { ArrowDown, ArrowUp, EllipsisVertical, GripVertical, Info, Play, Trash2, X } from 'lucide-react';
-import { memo, useRef, type DragEvent } from 'react';
+import { memo, useRef, useState, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
 // Straight from live, as useCoverColumn takes useMediaQuery: deps.ts hands over ChannelLogo only.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
+// Already in the Library pages' first load (Live's rows share it), so the keyboard's row menu adds no chunk.
+import { ContextMenu } from '@/features/live/components/ContextMenu';
 import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
@@ -69,6 +71,12 @@ export interface EntryRowProps {
    * (EntryChannelMenu) at `pos`: a right click, the touch ⋮, or the strip's ⋮ ask for it.
    */
   onChannelMenu?: ((pos: { x: number; y: number }) => void) | undefined;
+  /**
+   * A movie or series row's own menu (the touch menu's items) drawn at `menuAt`: Shift+F10 or the
+   * Menu key on the row ask for it, as they open a channel row's menu. `onMenuClose` clears it.
+   */
+  menuAt?: { x: number; y: number } | null | undefined;
+  onMenuClose?: (() => void) | undefined;
   /** Reorder affordances (favorites only). */
   reorder?: {
     canUp: boolean;
@@ -126,7 +134,7 @@ const HOVER_ACTIONS =
 const HIDE_UNDER_ACTIONS =
   'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible not-pointer-coarse:group-has-[[aria-expanded=true]]:invisible';
 
-function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, spokenTitle, menuRemoveLabel, busy, now, resume, onOpen, onRemove, onChannelMenu, reorder }: EntryRowProps) {
+function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, spokenTitle, menuRemoveLabel, busy, now, resume, onOpen, onRemove, onChannelMenu, menuAt, onMenuClose, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
   const playable = type === 'live' || type === 'radio';
@@ -139,6 +147,8 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
   const openLabel = resume ? resume.label : playable ? t('playTitle', { title: spoken }) : t('openTitle', { title: spoken });
   const rowRef = useRef<HTMLDivElement>(null);
+  // The strip's ⋮ on a resumable row: its menu holds what the strip has no button for.
+  const [stripMenuAt, setStripMenuAt] = useState<{ x: number; y: number } | null>(null);
   // What a resumable row adds to its menu: on a fine pointer these are the strip's own menu, beside
   // its Resume and remove buttons; on touch they join the one menu at the row's end.
   const resumeItems: MenuItem[] = resume
@@ -170,6 +180,11 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
     { id: 'sep', type: 'separator' as const },
     { id: 'remove', label: menuRemoveLabel, icon: <Trash2 size={16} aria-hidden />, danger: true, disabled: !!busy, onSelect: onRemove },
   ];
+  const menuHeader = {
+    media: playable ? <ChannelLogo src={snapshot.posterUrl ?? undefined} name={title} size={28} sourceId={entryRef.sourceId} /> : undefined,
+    title: playable ? <ChannelName name={title} className="truncate text-match-parent" /> : title,
+    subtitle: now ? now.title : resume?.episode ?? t(k('type', type)),
+  };
   return (
     <div
       ref={rowRef}
@@ -365,7 +380,17 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           data-action="open"
         />
         {resume && (
-          <Menu items={resumeItems} label={t('entryMenu', { title: spoken })} align="end" triggerIcon={<EllipsisVertical size={14} aria-hidden />} triggerClassName="h-8 w-8" />
+          // Out of the Tab order like its siblings: the row is the keyboard stop, and Shift+F10 on it
+          // opens the row's own menu, which holds these items too (w-a11y-10).
+          <IconButton
+            size="sm"
+            tabIndex={-1}
+            label={t('entryMenu', { title: spoken })}
+            aria-haspopup="menu"
+            aria-expanded={stripMenuAt !== null}
+            icon={<EllipsisVertical size={14} aria-hidden />}
+            onClick={(e) => setStripMenuAt(menuAnchor(e.currentTarget))}
+          />
         )}
         {onChannelMenu && (
           <IconButton
@@ -420,14 +445,12 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           align="end"
           triggerIcon={<EllipsisVertical aria-hidden size={18} />}
           triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"
-          sheetHeader={{
-            media: playable ? (
-              <ChannelLogo src={snapshot.posterUrl ?? undefined} name={title} size={28} sourceId={entryRef.sourceId} />
-            ) : undefined,
-            title: playable ? <ChannelName name={title} className="truncate text-match-parent" /> : title,
-            subtitle: now ? now.title : resume?.episode ?? t(k('type', type)),
-          }}
+          sheetHeader={menuHeader}
         />
+      )}
+      {menuAt && onMenuClose && <ContextMenu pos={menuAt} items={menuItems} label={t('entryMenu', { title: spoken })} header={menuHeader} onClose={onMenuClose} />}
+      {stripMenuAt && (
+        <ContextMenu pos={stripMenuAt} items={resumeItems} label={t('entryMenu', { title: spoken })} header={menuHeader} onClose={() => setStripMenuAt(null)} />
       )}
     </div>
   );

@@ -18,6 +18,7 @@
   "localDataHint": "Las listas las guarda la app. Inténtalo de nuevo o reinicia la app si sigue fallando.",
   "emptyTitle": "Aún no hay listas",
   "emptyHint": "Agrupa canales de cualquier fuente, como Deportes o Infantil.",
+  "emptyNoSources": "Añade primero una fuente. Después agrupa sus canales en listas, como Deportes o Infantil.",
   "sidebarEmpty": "Agrupa canales de cualquier fuente.",
   "channelCount_one": "{{formatted}} canal",
   "channelCount_many": "{{formatted}} canales",

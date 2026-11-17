@@ -18,6 +18,7 @@
   "localDataHint": "清單由應用程式儲存。請再試一次；如果持續失敗，請重新啟動應用程式。",
   "emptyTitle": "還沒有清單",
   "emptyHint": "將任何播放來源的頻道歸在一起，例如體育或兒童。",
+  "emptyNoSources": "請先新增播放來源。之後可以將它的頻道歸入清單，例如體育或兒童。",
   "sidebarEmpty": "將任何播放來源的頻道歸在一起。",
   "channelCount_other": "{{formatted}} 個頻道",
   "listsUsed": "已使用 {{used}}/{{max}} 個清單",

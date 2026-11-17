@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "没有预约",
   "scheduledEmptyBody": "打开电视指南，在节目上选择提醒我、录制或录制系列。",
   "scheduledEmptyBodyNoRecord": "打开电视指南，在节目上选择“提醒我”。",
+  "scheduledNoSourcesBody": "请先添加播放源。之后你在电视指南里预约的节目会显示在这里。",
   "scheduledOpenGuide": "打开电视指南",
   "scheduledNow": "正在录制",
   "scheduledUpcoming": "即将进行",

@@ -87,6 +87,7 @@ describe('empty Scheduled page has one empty state (L3-visual-11)', () => {
   beforeEach(() => {
     rpc.handlers['reminders.list'] = () => [];
     rpc.handlers['recordings.list'] = () => [];
+    rpc.handlers['sources.list'] = () => [{ id: 'src', kind: 'm3u', name: 'Main' }];
   });
 
   it('leaves out the empty series panel and its second guide button, and names Record series instead', async () => {

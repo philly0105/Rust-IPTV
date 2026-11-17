@@ -254,6 +254,7 @@
   "scheduledEmptyTitle": "Nada agendado",
   "scheduledEmptyBody": "Abra o guia de TV e escolha Lembrar-me, Gravar ou Gravar série em um programa.",
   "scheduledEmptyBodyNoRecord": "Abra o guia de TV e escolha Lembrar-me em um programa.",
+  "scheduledNoSourcesBody": "Adicione primeiro uma fonte. Os programas que você agendar no guia de TV dela aparecem aqui.",
   "scheduledOpenGuide": "Abrir guia de TV",
   "scheduledNow": "Gravando agora",
   "scheduledUpcoming": "A seguir",

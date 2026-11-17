@@ -18,6 +18,7 @@
   "localDataHint": "Lists are stored by the app. Try again, or restart the app if it keeps failing.",
   "emptyTitle": "No lists yet",
   "emptyHint": "Group channels from any source, like Sports or Kids.",
+  "emptyNoSources": "Add a source first. Then group its channels into lists, like Sports or Kids.",
   "sidebarEmpty": "Group channels from any source.",
   "channelCount_one": "{{formatted}} channel",
   "channelCount_other": "{{formatted}} channels",

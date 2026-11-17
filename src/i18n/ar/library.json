@@ -305,6 +305,7 @@
   "scheduledEmptyTitle": "لا شيء مجدول",
   "scheduledEmptyBody": "افتح دليل البرامج واختر ذكّرني أو تسجيل أو تسجيل المسلسل لأحد البرامج.",
   "scheduledEmptyBodyNoRecord": "افتح دليل البرامج واختر ذكّرني لأحد البرامج.",
+  "scheduledNoSourcesBody": "أضف مصدرًا أولًا. تظهر هنا بعد ذلك البرامج التي تجدولها من دليل برامجه.",
   "scheduledOpenGuide": "فتح دليل البرامج",
   "scheduledNow": "جارٍ التسجيل الآن",
   "scheduledUpcoming": "القادم",

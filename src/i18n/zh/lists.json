@@ -18,6 +18,7 @@
   "localDataHint": "列表由应用保存。请重试；如果一直失败，请重启应用。",
   "emptyTitle": "还没有列表",
   "emptyHint": "把任意播放源的频道归在一起，比如体育或少儿。",
+  "emptyNoSources": "请先添加播放源。之后可以把它的频道归入列表，比如体育或少儿。",
   "sidebarEmpty": "把任意播放源的频道归在一起。",
   "channelCount_other": "{{formatted}} 个频道",
   "listsUsed": "已用 {{used}}/{{max}} 个列表",

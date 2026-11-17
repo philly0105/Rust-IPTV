@@ -572,6 +572,17 @@ describe('/lists', () => {
     fireEvent.click(within(create).getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(h.location.current).toBe('/lists/new1'));
   });
+
+  it('with no source, asks for one first instead of offering an empty list (v-vod-13)', async () => {
+    h.installCore(rpc, []);
+    rpc.handlers['sources.list'] = () => [];
+    stubLiveExtras();
+    h.renderAt('/lists', routes, <ListsDialogHost />);
+    expect(await screen.findByTestId('lists-no-sources')).toBeTruthy();
+    expect(screen.getByText(/Add a source first/)).toBeTruthy();
+    expect(screen.getByTestId('no-sources-add')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Create list' })).toBeNull();
+  });
 });
 
 describe('Home rails', () => {

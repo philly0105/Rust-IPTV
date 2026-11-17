@@ -25,6 +25,7 @@ import {
   EmptyState,
   ErrorState,
   IconButton,
+  NoSourcesActions,
   Page,
   ProgressBar,
   RecordingRulesPanel,
@@ -44,6 +45,7 @@ import {
   stoppedEarly,
   upcoming,
   useCancelPending,
+  useNoSourcesAdding,
   useRecordingCapabilities,
   useRecordingProgress,
   useRecordings,
@@ -56,6 +58,7 @@ import {
 } from '../deps';
 import { PageTitle } from '../components/bits';
 import { usePlayRecording } from '../components/RecordingsPanel';
+import { useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { k } from '../lib/keys';
 import { formatBytes } from '../lib/format';
@@ -111,6 +114,12 @@ export function ScheduledPage() {
   const recordings = useRecordings();
   const caps = useRecordingCapabilities();
   const rules = useRecordingRules();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  // With no source there is no guide to schedule from: the page says what every Library page says
+  // then, and keeps saying it while its add dialog is open (the new source is listed before its
+  // import runs).
+  const adding = useNoSourcesAdding();
+  const noSources = sources.size === 0 || adding;
   // Only the day headings read the page's clock ("today", "tomorrow"); the rows recording now
   // run their own second clock (VD-7), so the page does not rebuild every row each second.
   const now = useClock(60_000);
@@ -131,7 +140,7 @@ export function ScheduledPage() {
   usePageHeader(title, subtitle);
 
   // Rules count toward loading, so the lists appear with the panel already in its place.
-  const loading = reminders.isLoading || recordings.isLoading || rules.isLoading;
+  const loading = reminders.isLoading || recordings.isLoading || rules.isLoading || sourcesLoading;
   const error = reminders.error ?? recordings.error;
   // Run 2 C5: series rules ("Record series" in the guide). Above Upcoming when there are any,
   // since Upcoming and Finished grow with every airing; otherwise last (also while loading, so the
@@ -164,12 +173,16 @@ export function ScheduledPage() {
         icon={<AlarmClock size={28} aria-hidden />}
         title={t('scheduledEmptyTitle')}
         // Without recording support the guide offers Remind me only; the hint names just that.
-        description={t(caps.data?.supported === false ? 'scheduledEmptyBodyNoRecord' : 'scheduledEmptyBody')}
+        description={t(noSources ? 'scheduledNoSourcesBody' : caps.data?.supported === false ? 'scheduledEmptyBodyNoRecord' : 'scheduledEmptyBody')}
         action={
-          <Link to="/epg" className={buttonClass('primary', 'md')}>
-            <CalendarRange size={16} aria-hidden />
-            {t('scheduledOpenGuide')}
-          </Link>
+          noSources ? (
+            <NoSourcesActions testId="scheduled-add-source" />
+          ) : (
+            <Link to="/epg" className={buttonClass('primary', 'md')}>
+              <CalendarRange size={16} aria-hidden />
+              {t('scheduledOpenGuide')}
+            </Link>
+          )
         }
       />
     );
@@ -228,20 +241,24 @@ export function ScheduledPage() {
   return (
     <Page width="default" className="flex min-w-0 flex-col gap-6 pb-8">
       <PageTitle>{title}</PageTitle>
-      {/* The page's first line, as Downloads keeps its My videos link: where recordings end up. */}
-      <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2">
+      {/* The page's first line, as Downloads keeps its My videos link: where recordings end up. On a
+          phone the note and the link stack, both at the start, the link's icon under the note's. */}
+      <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2 max-sm:flex-col">
         {caps.data && !caps.data.supported ? (
           // One quiet line with an info mark, not a page-wide card: it explains why Record is missing
           // and needs no action, so it should not outweigh the reminders and the empty state below.
-          <p role="note" className="flex min-w-0 flex-1 basis-64 items-start gap-2 self-center text-body-sm text-fg-muted" data-testid="scheduled-no-recording">
+          <p role="note" className="flex min-w-0 flex-1 basis-64 items-start gap-2 self-center text-body-sm text-fg-muted max-sm:basis-auto max-sm:self-stretch" data-testid="scheduled-no-recording">
             <Info size={16} aria-hidden className="mt-0.5 shrink-0 text-fg-subtle" />
             <span className="min-w-0">{t('scheduledServerNoMpv')}</span>
           </p>
         ) : null}
-        <Link to="/my-videos?filter=recordings" className={buttonClass('ghost', 'sm', 'ms-auto shrink-0')} data-testid="scheduled-recordings-link">
-          <Library size={16} aria-hidden />
-          {t('scheduledRecordingsLink')}
-        </Link>
+        {/* Only once something was recorded or set to record: before that it opens an empty page. */}
+        {recordings.data && recordings.data.length > 0 ? (
+          <Link to="/my-videos?filter=recordings" className={buttonClass('ghost', 'sm', 'ms-auto shrink-0 max-sm:-ms-3')} data-testid="scheduled-recordings-link">
+            <Library size={16} aria-hidden />
+            {t('scheduledRecordingsLink')}
+          </Link>
+        ) : null}
       </div>
       {body}
       {rulesAboveUpcoming || !showRules ? null : rulesPanel}

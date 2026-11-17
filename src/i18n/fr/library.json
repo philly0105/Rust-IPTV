@@ -254,6 +254,7 @@
   "scheduledEmptyTitle": "Rien de programmé",
   "scheduledEmptyBody": "Ouvrez le guide TV et choisissez Me rappeler, Enregistrer ou Enregistrer la série sur un programme.",
   "scheduledEmptyBodyNoRecord": "Ouvrez le guide TV et choisissez Me rappeler sur un programme.",
+  "scheduledNoSourcesBody": "Ajoutez d’abord une source. Les programmes que vous planifiez depuis son guide TV apparaîtront ici.",
   "scheduledOpenGuide": "Ouvrir le guide TV",
   "scheduledNow": "Enregistrement en cours",
   "scheduledUpcoming": "À venir",

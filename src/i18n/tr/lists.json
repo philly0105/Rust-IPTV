@@ -18,6 +18,7 @@
   "localDataHint": "Listeler uygulama tarafından saklanır. Yeniden deneyin veya sorun sürerse uygulamayı yeniden başlatın.",
   "emptyTitle": "Henüz liste yok",
   "emptyHint": "Spor veya Çocuk gibi, herhangi bir kaynaktaki kanalları gruplayın.",
+  "emptyNoSources": "Önce bir kaynak ekleyin. Ardından kanallarını Spor veya Çocuk gibi listelerde gruplayın.",
   "sidebarEmpty": "Herhangi bir kaynaktaki kanalları gruplayın.",
   "channelCount_one": "{{formatted}} kanal",
   "channelCount_other": "{{formatted}} kanal",

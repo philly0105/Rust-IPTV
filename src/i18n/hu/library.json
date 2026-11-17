@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "Nincs semmi ütemezve",
   "scheduledEmptyBody": "Nyisd meg a műsorújságot, és egy műsornál válaszd az Emlékeztess, a Felvétel vagy a Sorozatfelvétel lehetőséget.",
   "scheduledEmptyBodyNoRecord": "Nyisd meg a műsorújságot, és egy műsornál válaszd az Emlékeztess lehetőséget.",
+  "scheduledNoSourcesBody": "Először adj hozzá egy forrást. Utána a műsorújságjában ütemezett műsorok itt jelennek meg.",
   "scheduledOpenGuide": "Műsorújság megnyitása",
   "scheduledNow": "Felvétel folyamatban",
   "scheduledUpcoming": "Hamarosan",

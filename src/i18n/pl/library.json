@@ -271,6 +271,7 @@
   "scheduledEmptyTitle": "Nic nie zaplanowano",
   "scheduledEmptyBody": "Otwórz przewodnik TV i wybierz Przypomnij mi, Nagraj lub Nagrywaj serial przy programie.",
   "scheduledEmptyBodyNoRecord": "Otwórz przewodnik TV i wybierz Przypomnij mi przy programie.",
+  "scheduledNoSourcesBody": "Najpierw dodaj źródło. Programy zaplanowane w jego przewodniku TV pojawią się tutaj.",
   "scheduledOpenGuide": "Otwórz przewodnik TV",
   "scheduledNow": "Trwa nagrywanie",
   "scheduledUpcoming": "Wkrótce",

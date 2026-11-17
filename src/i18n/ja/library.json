@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "予定はありません",
   "scheduledEmptyBody": "番組表を開き、番組で「リマインド」「録画」または「シリーズ録画」を選んでください。",
   "scheduledEmptyBodyNoRecord": "番組表を開き、番組で「リマインド」を選んでください。",
+  "scheduledNoSourcesBody": "まずソースを追加してください。番組表で予約した番組がここに表示されます。",
   "scheduledOpenGuide": "番組表を開く",
   "scheduledNow": "録画中",
   "scheduledUpcoming": "今後の予定",

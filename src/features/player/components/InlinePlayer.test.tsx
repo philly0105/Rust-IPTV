@@ -11,6 +11,11 @@ vi.mock('@/api/transport', () => ({
 // The parental gate has its own tests (parentalHook.test.ts); here everything may play.
 vi.mock('../parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
+const failoverOrigin = vi.hoisted(() => ({ title: undefined as string | undefined }));
+vi.mock('../failover', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../failover')>()),
+  failoverOriginTitle: () => failoverOrigin.title,
+}));
 
 const { usePlayerStore, __resetPlayerForTests, SEEK_SETTLE_MS } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
@@ -84,6 +89,24 @@ describe('stream error overlay', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     // With the title bar hidden, the panel names what failed.
     expect(screen.getByTestId('error-item').textContent).toBe('Movie');
+  });
+
+  it('names both channels when the copy failover switched to fails too, without blaming a source (w-walkthrough-15)', () => {
+    failoverOrigin.title = 'FOX HD (US)';
+    try {
+      const backup = { ...placeholder, title: 'US| FOX (Backup)', isLive: true };
+      const { unmount } = render(<InlinePlayer short />);
+      act(() => usePlayerStore.setState({ source: backup, mode: 'inline', status: 'error', error: 'decode' }));
+      expect(screen.getByTestId('error-failover').textContent).toBe('FOX HD (US) and FOX (Backup) (US) did not play here.');
+      // The line names the copy that failed: no second line with its name.
+      expect(screen.queryByTestId('error-item')).toBeNull();
+      unmount();
+      render(<InlinePlayer />);
+      act(() => usePlayerStore.setState({ source: backup, mode: 'inline', status: 'error', error: 'decode' }));
+      expect(screen.getByTestId('error-failover').textContent).not.toContain('source');
+    } finally {
+      failoverOrigin.title = undefined;
+    }
   });
 
   it('uses the RPC error code when the message says nothing useful', () => {

@@ -1196,6 +1196,18 @@ describe('tile panels', () => {
     expect(name.className.split(/\s+/)).toEqual(expect.arrayContaining(['truncate', 'text-match-parent']));
     expect(name.className.split(/\s+/)).not.toContain('text-start');
   });
+
+  it("draws a tagged name as Live TV does, the place tag after it, and keeps the provider's name in the tooltip", async () => {
+    const tile = { ...input(1, 'm3u1'), title: 'US| ESPN HD', key: 'k1' };
+    useMultiviewStore.setState({ tiles: [tile], layout: '2x2', audioKey: 'k1' });
+    renderPage();
+    const tag = await waitFor(() => within(tileEl(1)).getByTestId('channel-name-tag'));
+    expect(tag.textContent).toBe('US');
+    const drawn = tag.closest('[title]')!;
+    expect(drawn.getAttribute('title')).toBe('US| ESPN HD');
+    expect(drawn.textContent).toContain('ESPN HD');
+    expect(drawn.textContent).not.toContain('US|');
+  });
 });
 
 // ---------------------------------------------------------------------------

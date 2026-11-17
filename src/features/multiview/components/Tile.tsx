@@ -18,6 +18,8 @@ import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 
 import { useTranslation } from 'react-i18next';
 
 import type { ParentalMode } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { plainChannelName } from '@/lib/channelName';
 import { glassButton } from '@/features/player/components/glassButton';
 import { GLASS_FOCUS } from '@/ui/focus';
@@ -203,8 +205,9 @@ export const Tile = memo(function Tile({
   const [dropTarget, setDropTarget] = useState(false);
   const number = slot + 1;
   const name = tile.title;
-  // Heard as toasts word it: "ESPN HD (US)", not the provider's "US| ESPN HD" (w-a11y-03).
-  const spoken = plainChannelName(name, false);
+  const { stripCountryPrefix } = useDisplayPrefs();
+  // Heard and written as toasts word it: "ESPN HD (US)", not the provider's "US| ESPN HD" (w-a11y-03).
+  const spoken = plainChannelName(name, stripCountryPrefix);
   const errorClass = !blocked && phase === 'error' && fault ? classifyTileFault(fault, overLimit) : null;
   useRetryWhenOnline(errorClass !== null && retriesWhenOnline(errorClass), retry);
 
@@ -498,13 +501,13 @@ export const Tile = memo(function Tile({
                 {tile.caption}
               </span>
             ) : null}
-            {/* text-match-parent: with dir="auto" a Latin name in an RTL UI keeps to the parent's start edge. */}
+            {/* Drawn as Live TV draws it, "ESPN HD US": the place's tag after the name, quiet. The
+                tooltip keeps the provider's name. */}
             <span
-              dir="auto"
-              className={cn('truncate text-match-parent', tile.caption ? cn('hidden text-xs @[18rem]/tile:block', ON_GLASS_MUTED) : 'text-sm font-medium')}
+              className={cn('min-w-0 items-baseline', tile.caption ? cn('hidden text-xs @[18rem]/tile:flex', ON_GLASS_MUTED) : 'flex text-sm font-medium')}
             >
-              {tile.number !== undefined ? <span className="me-1.5 font-numeric tabular-nums opacity-80">{tile.number}</span> : null}
-              {name}
+              {tile.number !== undefined ? <span className="me-1.5 shrink-0 font-numeric tabular-nums opacity-80">{tile.number}</span> : null}
+              <ChannelName name={name} strip={stripCountryPrefix} title={name} className="min-w-0 truncate text-match-parent" tagClassName={ON_GLASS_MUTED} />
             </span>
             {programme && !tile.caption ? (
               <span dir="auto" className={cn('hidden truncate text-match-parent text-xs @[18rem]/tile:block', ON_GLASS_MUTED)}>
@@ -608,8 +611,8 @@ export const Tile = memo(function Tile({
               align="end"
               // On a phone the menu is a sheet over the lower half of the wall: it names the tile.
               sheetHeader={{
-                title: tile.caption ?? name,
-                subtitle: [t('tileSheetSubtitle', { slot: number }), tile.caption ? name : programme].filter(Boolean).join(' · '),
+                title: tile.caption ?? spoken,
+                subtitle: [t('tileSheetSubtitle', { slot: number }), tile.caption ? spoken : programme].filter(Boolean).join(' · '),
                 media: <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} tint="theme" className="size-9 rounded-md" />,
               }}
               items={[

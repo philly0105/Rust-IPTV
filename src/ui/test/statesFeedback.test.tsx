@@ -76,6 +76,21 @@ describe('toasts with an action (states-feedback-03)', () => {
     act(() => vi.advanceTimersByTime(4500));
     expect(useToastStore.getState().toasts).toHaveLength(0);
   });
+
+  it('reads a description that ends a sentence with one period before the hint, not "source.. Press"', () => {
+    render(<ToastViewport />);
+    act(
+      () =>
+        void toast({
+          title: 'Switched to FOX (Backup) (US)',
+          description: 'FOX HD (US) stopped working on its source.',
+          action: { label: 'Undo', onClick: () => undefined },
+        }),
+    );
+    expect(document.querySelector('[data-toast-live="polite"]')?.textContent).toBe(
+      'Switched to FOX (Backup) (US). FOX HD (US) stopped working on its source. Press F8 to reach Undo.',
+    );
+  });
 });
 
 describe('ErrorState in the browser (states-feedback-09)', () => {

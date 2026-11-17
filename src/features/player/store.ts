@@ -503,6 +503,23 @@ const isPositionsKey = (key: readonly unknown[]) => typeof key[0] === 'string' &
 /** The latest `positions.set` sent (settled once the core has it, or the send failed). */
 let lastSave: Promise<void> = Promise.resolve();
 
+/** The source whose replay was checked for a watched mark to clear (`unwatchReplay`), once per playback. */
+let replayCheckedFor: PlayerSource | undefined;
+
+/**
+ * A watched movie played again past its resume point (5 %, `isWatchedReplay`) is being rewatched:
+ * its watched mark goes, so Home's Continue watching offers it and the movie page stops showing
+ * Watched beside Resume. The core keeps the flag on a partial save of a movie, so after the save
+ * has landed the row is removed and written again, unwatched. Asked once per playback, when a save
+ * first gets past 5 %: a start over reads nothing up front, and a peek does not unmark the film.
+ */
+async function unwatchReplay(source: PlayerSource & { ref: ItemRef }, args: Parameters<typeof rpc<'positions.set'>>[1]): Promise<void> {
+  if (!(await savedPosition(source))?.watched) return;
+  await rpc('positions.remove', { ref: source.ref });
+  await rpc('positions.set', args);
+  void invalidateWatched();
+}
+
 /** Sends the VOD position; the promise settles when the core has it (or the send failed). */
 function savePosition(): Promise<void> {
   const { source, positionSeconds, durationSeconds } = usePlayerStore.getState();
@@ -520,8 +537,14 @@ function savePosition(): Promise<void> {
   if (dur && Number.isFinite(dur)) args.durationSeconds = Math.floor(dur);
   const snap = snapshotOf(source);
   if (snap) args.snapshot = snap;
+  const checksReplay =
+    replayCheckedFor !== source &&
+    source.ref.contentType === 'movie' &&
+    !source.episodeId &&
+    isWatchedReplay({ positionSeconds: pos, durationSeconds: args.durationSeconds, watched: true });
+  if (checksReplay) replayCheckedFor = source;
   return (lastSave = rpc('positions.set', args).then(
-    () => {
+    async () => {
       // A start over has its own resume point now: a recovery resumes from it.
       if (startOverKey === playKey(source.ref, source.episodeId)) startOverKey = null;
       // C4 caches `positions.` for 15 s and no event follows a save: mark it stale so Continue
@@ -536,9 +559,15 @@ function savePosition(): Promise<void> {
         finishedSavedFor = source;
         void invalidateWatched();
       }
+      if (checksReplay) {
+        await unwatchReplay(source, args).catch(() => {
+          replayCheckedFor = undefined; // ask again on the next save
+        });
+      }
     },
     () => {
       lastSavedPosition = -1; // retry on next tick
+      if (checksReplay) replayCheckedFor = undefined;
     },
   ));
 }
@@ -910,7 +939,7 @@ export function handleEnded(): void {
   if (s.durationSeconds && Number.isFinite(s.durationSeconds)) patch.positionSeconds = s.durationSeconds;
   usePlayerStore.setState(patch);
   // Mark as finished: at >= 95 % the core keeps a movie as a watched row at position = duration
-  // (since Run 2; a partial replay of a watched movie keeps the flag too) and an episode as a
+  // (since Run 2; a replay of a watched movie past 5 % clears the flag, `unwatchReplay`) and an episode as a
   // watched row at its end (C13); `withSavedPosition` never resumes from a finished row. The save's
   // success refreshes the watched queries (see `savePosition`).
   if (tracksPosition(s.source) && s.durationSeconds) void savePosition();
@@ -1477,8 +1506,9 @@ const REPLAY_RESUME_RATIO = 0.05;
 /**
  * A watched movie replayed part-way (Run 2): the core keeps its watched flag on a partial save of
  * an item-level row and stores the replay position. That position is a resume point when the
- * duration is known and it lies between 5 % and 95 % of it; the watched tick stays. Episodes
- * lose the flag on a partial save instead, so a watched episode row is always finished.
+ * duration is known and it lies between 5 % and 95 % of it. The player clears the flag once a
+ * replay gets there (`unwatchReplay`); a row saved before that, or whose clearing failed, still
+ * resumes. Episodes lose the flag on a partial save instead, so a watched episode row is always finished.
  */
 export function isWatchedReplay(
   pos: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched' | 'episodeId' | 'ref'>>,
@@ -2553,6 +2583,7 @@ export function __resetPlayerForTests(): void {
   lastSavedPosition = -1;
   lastSave = Promise.resolve();
   finishedSavedFor = undefined;
+  replayCheckedFor = undefined;
   failedResolve = null;
   allowedRefKey = null;
   startOverKey = null;

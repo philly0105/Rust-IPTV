@@ -48,12 +48,13 @@ import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlay
 import { useSourcePin } from '../hooks/useSourcePin';
 import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { formatClock, isResumable, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
 import { ALL_CATEGORIES, effectiveMinRating } from '../lib/paging';
 import { detailHref, isCachedStalkerSeries } from '../lib/search';
-import { Badge, Button, ErrorState, IconButton, Menu, Page, SectionHeader, Skeleton, errorDescription, useToast, type MenuItem } from '@/ui';
+import { Button, ErrorState, IconButton, Menu, Page, SectionHeader, Skeleton, errorDescription, useToast, type MenuItem } from '@/ui';
 
 export function MovieDetailPage() {
   const { t, i18n } = useTranslation('vod');
@@ -314,7 +315,7 @@ export function MovieDetailPage() {
       <HeroIcon caption={t('captionFavorite')}>
         <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
       </HeroIcon>
-      <HeroIcon caption={t('watched')}>
+      <HeroIcon caption={t('captionWatched')}>
         <WatchedButton itemRef={ref} watched={watched} round />
       </HeroIcon>
       {playback.canDownload && (
@@ -404,14 +405,9 @@ export function MovieDetailPage() {
           sourceId={sourceId}
           castLinks={tmdbOn}
           // The container format is a file fact, in About; the meta line keeps what a viewer acts on (vod-detail-17).
-          chips={[
-            watched && <WatchedFact key="watched" />,
-            offline && (
-              <Badge key="offline" variant="success" data-testid="vod-offline-chip">
-                {t('downloaded')}
-              </Badge>
-            ),
-          ]}
+          // A finished download is said once, quietly: by the download button and the note under the
+          // actions, not by a green pill beside Watched's (v-vod-04).
+          chips={[watched && <WatchedFact key="watched" />]}
           // Play takes the finished download when its file is there (VL-offline-play), and says so.
           note={offline ? t('playsDownloaded') : pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
@@ -442,7 +438,7 @@ export function MovieDetailPage() {
         )}
         {item.categoryId && source.data && (
           <CatalogRail
-            title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
+            title={categoryName ? t('moreInCategory', { category: sectionlessCategoryName(categoryName, 'movie') }) : t('moreFromSource', { source: sourceName })}
             seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/movies/c/${encodeURIComponent(item.categoryId || ALL_CATEGORIES)}` }}
             input={{
               sourceKind: source.data.kind,

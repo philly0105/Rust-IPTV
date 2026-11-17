@@ -227,7 +227,9 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     rpcMock.handlers['downloads.list'] = () => [d];
     rpcMock.handlers['myvideos.playSource'] = () => ({ url: 'http://local/files/42', title: 'Dune: Part Two', isLive: false });
     renderAt('/s/src1/movie/m7', route);
-    expect(await screen.findByTestId('vod-offline-chip')).toBeTruthy();
+    expect(await screen.findByText('Plays the downloaded copy')).toBeTruthy();
+    // Said once, quietly: no green "Downloaded" pill in the meta line beside Watched's (v-vod-04).
+    expect(screen.queryByTestId('vod-offline-chip')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'Resume from 12:34' }));
     await waitFor(() => expect(callsOf('myvideos.playSource')).toEqual([{ id: 42 }]));
     await waitFor(() => expect(played.sources).toHaveLength(1));
@@ -240,11 +242,15 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     expect(downloaded.getAttribute('href')).toBe('/my-videos/42');
     expect(downloaded.querySelector('svg')!.getAttribute('class')).toContain('hard-drive-download');
     expect(downloaded.querySelector('.text-success')).toBeNull();
+    // The phone tile's caption is the state in a word that fits, not "Download…" (v-phone-06).
+    expect(downloaded.closest('[data-testid=vod-hero-icons] > div')!.textContent).toBe('Saved');
     expect(within(await openHeroMenu()).getByRole('menuitem', { name: 'Stream instead' })).toBeTruthy();
   });
 
   it('shows "More in <category>" from the catalog, without the title itself', async () => {
     vi.stubGlobal('IntersectionObserver', EagerObserver);
+    // The rail names the category as the grid it opens does, without the section word (v-vod-05).
+    rpcMock.handlers['catalog.categories'] = () => [cat('c1', 'Movies | Action', 12)];
     rpcMock.handlers['catalog.movies'] = (a) => {
       const q = (a as { query: PageQuery }).query;
       return { items: [{ ...movie(7), ref: mref, title: 'Dune: Part Two' }, movie(8)], total: 2, offset: q.offset, limit: q.limit };

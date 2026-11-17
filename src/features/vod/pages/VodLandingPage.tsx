@@ -16,7 +16,7 @@ import { CategoryIndex, FROM_LANDING, categoryEntries, type CategoryEntry } from
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { sectionlessCategoryName } from '../lib/categoryName';
-import { itemLanguage } from '../lib/language';
+import { itemLanguage, languageName } from '../lib/language';
 import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import type { PrefetchTarget } from '../hooks/prefetch';
@@ -866,10 +866,17 @@ const ContinueSectionRail = memo(function ContinueSectionRail({
 
 /**
  * The language picker of the chip row and the category index: Live's region picker (CategorySidebar)
- * for VOD categories. The list reads "FR · 12 categories"; closed, the pick reads "FR" alone.
+ * for VOD categories. The list reads "FR · French · 12 categories"; closed, the pick reads "FR" alone.
  */
 function RegionSelect({ regions, value, onChange }: { regions: GroupRegion[]; value: string | null; onChange: (tag: string | null) => void }) {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
+  // The tag's language in the app's, as the posters name it ("SE · Swedish"); a tag no name
+  // resolves for stays as the provider wrote it (w-realdata-11).
+  const named = (tag: string) => {
+    const lang = itemLanguage('', `${tag} |`);
+    const name = lang ? languageName(lang, i18n.language, (g) => t(`languageGroup_${g}`)) : tag;
+    return name === tag ? tag : `${tag} · ${name}`;
+  };
   return (
     <Select
       aria-label={t('detailLanguage')}
@@ -882,7 +889,7 @@ function RegionSelect({ regions, value, onChange }: { regions: GroupRegion[]; va
       onValueChange={(v) => onChange(v || null)}
       options={[
         { value: '', label: t('allLanguages') },
-        ...regions.map((r) => ({ value: r.tag, label: r.tag === value ? r.tag : `${r.tag} · ${t('categoryCount', { count: r.groups })}` })),
+        ...regions.map((r) => ({ value: r.tag, label: r.tag === value ? r.tag : `${named(r.tag)} · ${t('categoryCount', { count: r.groups })}` })),
       ]}
       data-testid="vod-category-region"
     />

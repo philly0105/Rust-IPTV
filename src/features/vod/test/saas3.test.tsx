@@ -122,7 +122,7 @@ describe('offline play resumes where the title says', () => {
     rpcMock.handlers['positions.get'] = (): PlaybackPosition => ({ ref: mref, positionSeconds: 1800, durationSeconds: 7200, updatedAt: '2026-10-12T00:00:00Z', watched: false });
     rpcMock.handlers['downloads.list'] = () => [download({ positionSeconds: 0 })];
     renderAt('/s/src1/movie/m7', route);
-    expect(await screen.findByTestId('vod-offline-chip')).toBeTruthy();
+    expect(await screen.findByText('Plays the downloaded copy')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: 'Resume from 30:00' }));
     await waitFor(() => expect(played.sources).toHaveLength(1));
     expect(played.sources[0]).toMatchObject({ url: 'http://local/files/42', resumeSeconds: 1800 });
@@ -138,7 +138,7 @@ describe('offline play resumes where the title says', () => {
     rpcMock.handlers['positions.get'] = (): PlaybackPosition => ({ ref: mref, positionSeconds: 7150, durationSeconds: 7200, updatedAt: '2026-10-12T00:00:00Z', watched: true });
     rpcMock.handlers['downloads.list'] = () => [download({ positionSeconds: 900 })];
     renderAt('/s/src1/movie/m7', route);
-    expect(await screen.findByTestId('vod-offline-chip')).toBeTruthy();
+    expect(await screen.findByText('Plays the downloaded copy')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: 'Play' }));
     await waitFor(() => expect(played.sources).toHaveLength(1));
     expect(played.sources[0]).toMatchObject({ resumeSeconds: 0 });

@@ -36,13 +36,23 @@ export function CategoryPickerDialog({ open, onClose, kind, categories, currentI
   const [filter, setFilter] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
+  const shown = useMemo(() => (categories ?? []).filter((c) => !c.hidden), [categories]);
   const entries = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const list = (categories ?? [])
-      .filter((c) => !c.hidden && (!q || c.name.toLowerCase().includes(q)))
+    const list = shown
+      .filter((c) => !q || c.name.toLowerCase().includes(q))
       .map((c) => ({ id: c.id, name: c.name, label: sectionlessCategoryName(c.name, kind), count: c.itemCount }));
-    return q ? list : [{ id: ALL_CATEGORIES, name: '', label: kind === 'movie' ? t('allMovies') : t('allSeries'), count: 0 }, ...list];
-  }, [categories, filter, kind, t]);
+    if (q) return list;
+    // All titles, counted as the grid's header and the landing's index count them (v-vod-11).
+    const all = shown.reduce((n, c) => n + Math.max(0, c.itemCount), 0);
+    return [{ id: ALL_CATEGORIES, name: '', label: kind === 'movie' ? t('allMovies') : t('allSeries'), count: all }, ...list];
+  }, [shown, filter, kind, t]);
+  // Sized to the whole list up to the cap, not to what the filter leaves, so the field holds still
+  // while typing (the phone sheet is anchored at the bottom).
+  const listHeight = Math.min((shown.length + 1) * ROW_H, 480);
+  // On touch the filter would raise the keyboard over the list the user came to tap (v-vod-06):
+  // focus goes to the list there, and the filter is one tap away.
+  const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
   const v = useListVirtualizer({ count: entries.length, getScrollElement: () => scrollRef.current, estimateSize: () => ROW_H, overscan: 8 });
   const close = () => {
     setFilter('');
@@ -52,12 +62,15 @@ export function CategoryPickerDialog({ open, onClose, kind, categories, currentI
   return (
     <Dialog open={open} onClose={close} size="md" title={t('categories')}>
       <div className="flex flex-col gap-3">
-        <SearchInput value={filter} onChange={setFilter} placeholder={t('filterCategories')} size="sm" data-autofocus />
+        <SearchInput value={filter} onChange={setFilter} placeholder={t('filterCategories')} size="sm" data-autofocus={coarse ? undefined : ''} />
         <div
           ref={scrollRef}
           role="list"
           aria-label={t('categories')}
-          className="h-[min(55vh,480px)] overflow-y-auto"
+          tabIndex={coarse ? -1 : undefined}
+          data-autofocus={coarse ? '' : undefined}
+          className="max-h-[55vh] overflow-y-auto outline-none"
+          style={{ height: listHeight }}
           onKeyDown={(e) => handleGridKeyDown(e, { count: entries.length })}
         >
           <div style={{ height: v.getTotalSize(), position: 'relative' }}>

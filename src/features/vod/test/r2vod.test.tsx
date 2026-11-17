@@ -90,7 +90,8 @@ describe('realdata-14: the landing picks a language for its categories', () => {
     // One picker by the chips and one by the index's filter.
     const pickers = screen.getAllByRole('combobox', { name: 'Language' });
     expect(pickers).toHaveLength(2);
-    expect([...(pickers[0] as HTMLSelectElement).options].map((o) => o.text)).toEqual(['All languages', 'EN · 3 categories', 'FR · 2 categories']);
+    // Each tag names its language, as the posters do (w-realdata-11).
+    expect([...(pickers[0] as HTMLSelectElement).options].map((o) => o.text)).toEqual(['All languages', 'EN · English · 3 categories', 'FR · French · 2 categories']);
 
     fireEvent.change(pickers[0]!, { target: { value: 'FR' } });
     await waitFor(() => expect(chipNames()).toEqual(['FR | CINÉMA', 'FR | ACTION', 'NETFLIX MOVIES']));

@@ -267,11 +267,15 @@ describe('the toolbar at narrow widths', () => {
     await waitFor(() => expect(localStorage.getItem('guide.genreFilter')).toBeNull());
   });
 
-  it("a phone's time scale is one header action that switches between the widest view and the default (guide-14)", async () => {
+  it("a phone's time scale is one button in the ruler's corner that switches between the widest view and the default (guide-14, v-themes-locales-04)", async () => {
     localStorage.removeItem('tsrust.guideZoom');
     pageWidth(318);
     await openGuide();
-    const actions = await screen.findByTestId('header-actions');
+    // Not a header action: a third icon there cut the longer locales' page title. Nor on the
+    // toolbar, where it sent the time controls to a second row.
+    expect(within(await screen.findByTestId('header-actions')).queryByRole('button', { name: /^Zoom/ })).toBeNull();
+    expect(within(screen.getByTestId('guide-time')).queryByRole('button', { name: /^Zoom/ })).toBeNull();
+    const actions = screen.getAllByRole('columnheader')[0]!;
     fireEvent.click(within(actions).getByRole('button', { name: 'Zoom out' }));
     await waitFor(() => expect(localStorage.getItem('tsrust.guideZoom')).toBe('0'));
     fireEvent.click(within(actions).getByRole('button', { name: 'Zoom in' }));

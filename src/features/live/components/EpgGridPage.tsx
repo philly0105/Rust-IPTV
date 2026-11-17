@@ -2122,8 +2122,8 @@ export function EpgGridPage() {
   const goToPlayingStable = useStable(() => goToPlaying?.());
   const canGoToPlaying = !!goToPlaying;
   const phoneActions = useMemo(
-    () => (bar === 'phone' ? <GuidePhoneActions genre={genreFilter} onGenre={setGenreFilter} zoom={zoom} onZoom={zoomBy} onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined} /> : undefined),
-    [bar, genreFilter, setGenreFilter, zoom, zoomBy, canGoToPlaying, goToPlayingStable],
+    () => (bar === 'phone' ? <GuidePhoneActions genre={genreFilter} onGenre={setGenreFilter} onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined} /> : undefined),
+    [bar, genreFilter, setGenreFilter, canGoToPlaying, goToPlayingStable],
   );
 
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
@@ -2340,6 +2340,8 @@ export function EpgGridPage() {
                 nowLabel={nowLabel}
                 nowX={nowX}
                 rtl={rtl}
+                zoom={bar === 'phone' ? zoom : undefined}
+                onZoom={zoomBy}
                 trackTitles={trackTitles}
                 pin={pinCell}
               />
@@ -2582,6 +2584,8 @@ export function rulerLabelCoverRange(nowX: number, pill: string, label: string, 
   return [nowX - half - width, nowX + half];
 }
 
+const CORNER_ZOOM = 'absolute inset-0 h-full w-full rounded-none pointer-coarse:min-h-0 pointer-coarse:min-w-0';
+
 /** The time header: the channel column's corner and a label per 30-minute slot. */
 const GuideHeader = memo(function GuideHeader({
   height,
@@ -2597,6 +2601,8 @@ const GuideHeader = memo(function GuideHeader({
   rtl,
   trackTitles,
   pin,
+  zoom,
+  onZoom,
 }: {
   height: number;
   slots: readonly number[];
@@ -2616,8 +2622,12 @@ const GuideHeader = memo(function GuideHeader({
   trackTitles(row: HTMLElement): () => void;
   /** The row handlers' pin: the corner stays over the channel column. */
   pin(cell: HTMLElement): () => void;
+  /** A phone's time scale step: the corner holds its one zoom button. */
+  zoom?: number | undefined;
+  onZoom(delta: number): void;
 }) {
   const { t } = useTranslation('live');
+  const { t: tg } = useTranslation('guide');
   const scale = useUiScale();
   const ruler = useRef<HTMLDivElement>(null);
   const corner = useRef<HTMLDivElement>(null);
@@ -2641,6 +2651,16 @@ const GuideHeader = memo(function GuideHeader({
       ) : null}
       <div ref={corner} role="columnheader" className="relative start-0 z-10 flex h-full items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle in-data-[guide-moving]:sticky" style={{ width: channelCol }}>
         <span className={compact ? 'sr-only' : undefined}>{t('channels')}</span>
+        {/* A phone's time scale: one button that switches between the widest view (about two
+            hours on screen) and the default (about one), in the corner the column leaves empty
+            beside the times it scales. A third header icon cut the longer locales' page title
+            ("Οδηγός προγρά…"), and on the toolbar it pushed the time controls onto a second row. */}
+        {/* The whole corner is the press target: the 36 px ruler has no room for 44 px, the column's width does. */}
+        {zoom === undefined ? null : zoom > 0 ? (
+          <IconButton size="sm" label={tg('zoomOut')} icon={<ZoomOut className="size-4" />} onClick={() => onZoom(-zoom)} className={CORNER_ZOOM} data-testid="guide-zoom-out" />
+        ) : (
+          <IconButton size="sm" label={tg('zoomIn')} icon={<ZoomIn className="size-4" />} onClick={() => onZoom(GUIDE_ZOOM_DEFAULT)} className={CORNER_ZOOM} data-testid="guide-zoom-in" />
+        )}
       </div>
       {/* Slot keys keep nearby ruler labels stable as the visible time changes. */}
       {slots.map((slot, i) => {
@@ -2880,7 +2900,7 @@ const GuideToolbar = memo(function GuideToolbar({
           ) : null}
           {/* The time scale (Ctrl+scroll over the grid too): one − / + control at the chips' end,
               so the time controls fit one row beside the group picker on a touch tablet. A phone's
-              is a header action. */}
+              is one button in the ruler's corner. */}
           <div role="group" aria-label={tg('zoom')} className="flex shrink-0 items-center rounded-md border border-edge bg-surface-2 p-0.5">
             <IconButton size="sm" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} label={tg('zoomOut')} data-testid="guide-zoom-out" className="h-7 w-7" />
             <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" className="h-7 w-7" />
@@ -3014,15 +3034,10 @@ const GuideWindowDay = memo(function GuideWindowDay({
 const GuidePhoneActions = memo(function GuidePhoneActions({
   genre,
   onGenre,
-  zoom,
-  onZoom,
   onGoToPlaying,
 }: {
   genre: Genre | null;
   onGenre(genre: Genre | null): void;
-  /** The time scale's step: one button switches between the widest view and the default. */
-  zoom: number;
-  onZoom(delta: number): void;
   onGoToPlaying?: () => void;
 }) {
   const { t: tg } = useTranslation('guide');
@@ -3039,12 +3054,6 @@ const GuidePhoneActions = memo(function GuidePhoneActions({
   return (
     <>
       {onGoToPlaying ? <IconButton label={tg('goToPlaying')} icon={<LocateFixed size={18} />} onClick={onGoToPlaying} className="shrink-0" data-testid="guide-go-to-playing" /> : null}
-      {/* A phone shows about an hour at the default scale: zoomed out it shows two. */}
-      {zoom > 0 ? (
-        <IconButton label={tg('zoomOut')} icon={<ZoomOut size={18} />} onClick={() => onZoom(-zoom)} className="shrink-0" data-testid="guide-zoom-out" />
-      ) : (
-        <IconButton label={tg('zoomIn')} icon={<ZoomIn size={18} />} onClick={() => onZoom(GUIDE_ZOOM_DEFAULT)} className="shrink-0" data-testid="guide-zoom-in" />
-      )}
       <ScopePicker
         label={tg('genreFilter')}
         value={genre ?? ''}

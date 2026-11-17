@@ -101,6 +101,13 @@ describe('live failover', () => {
     expect(toast?.action).toBeDefined();
   });
 
+  it('names the channel the user picked while a copy it switched to plays, for the error screen', async () => {
+    expect(failover.failoverOriginTitle(usePlayerStore.getState().source)).toBeUndefined();
+    reportStatus('error', 'HTTP 404');
+    await vi.waitFor(() => expect(sourceIdNow()).toBe('s2'));
+    expect(failover.failoverOriginTitle(usePlayerStore.getState().source)).toBe('Sky Sports 1');
+  });
+
   it('names the channels in the toast with a place tag after the name, or none with the strip setting', async () => {
     const t = vi.spyOn(i18next, 't');
     handlers['live.alternates'] = () => ({ key: 'sky sports 1', quality: 'hd', alternates: [alt('s2', '20', 'UK| Sky Sports 1 HD')] });

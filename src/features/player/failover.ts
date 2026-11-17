@@ -291,6 +291,15 @@ function playOrigin(origin: PlayerSource & { ref: ItemRef }): void {
     });
 }
 
+/**
+ * The name of the channel the user picked, while `src` is a copy live failover switched to in its
+ * place (the error screen says the first one failed too), else undefined.
+ */
+export function failoverOriginTitle(src: PlayerSource | undefined): string | undefined {
+  if (!chain || !src?.ref || itemKey(src.ref) !== chain.current || chain.current === itemKey(chain.origin.ref)) return undefined;
+  return toastName(chain.origin.title);
+}
+
 /** True while `src` is a copy this chain just switched to and that has not played yet. */
 export function isUntriedSwitch(src: PlayerSource | undefined): boolean {
   return !!chain && !!src?.ref && itemKey(src.ref) === chain.current && !chain.played;

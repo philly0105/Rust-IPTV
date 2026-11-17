@@ -588,11 +588,18 @@ describe('Controls for fullscreen live TV', () => {
     expect(screen.getByRole('button', { name: 'Open channel list' })).toBeTruthy();
   });
 
-  it('not outside fullscreen, nor for a movie: the page has its list beside the stage', () => {
+  it("a page's stage keeps channel up and down but not the channel list (the page has it beside the stage)", () => {
     act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: false, durationSeconds: undefined }));
-    const { unmount } = render(<Controls variant="overlay" visible />);
-    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByRole('button', { name: 'Previous channel' }).getAttribute('aria-keyshortcuts')).toBe('PageUp');
+    expect(screen.getByRole('button', { name: 'Next channel' }).getAttribute('aria-keyshortcuts')).toBe('PageDown');
     expect(screen.queryByRole('button', { name: 'Open channel list' })).toBeNull();
+  });
+
+  it('not for a movie, nor in the mini player', () => {
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: false, durationSeconds: undefined }));
+    const { unmount } = render(<Controls variant="overlay" visible compact />);
+    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
     unmount();
     act(() => usePlayerStore.setState({ source: { url: 'http://v/movie.mp4', kind: 'direct', title: 'Movie', isLive: false, isRadio: false }, isFullscreen: true }));
     render(<Controls variant="overlay" visible />);
@@ -636,6 +643,16 @@ describe('Controls in a narrow player', () => {
     openMenu();
     const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
     expect(names.slice(0, 2)).toEqual(['Previous channel', 'Next channel']);
+  });
+
+  it("a narrow stage bar drops channel up and down first, and leaves them out of the menu", () => {
+    const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: false, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
+    openMenu();
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    expect(names).not.toContain('Next channel');
   });
 
   it("a narrow fullscreen bar's channel list steps aside while the volume slider is out, from right of the volume", () => {

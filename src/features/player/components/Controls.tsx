@@ -1668,11 +1668,11 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const big = scale === 'big';
   // The 10 s skips (PL-BAR-HIERARCHY): VOD with a known length, outside the mini player.
   const canJump = isVod && !!duration && !compact && !ended && !failed;
-  // Fullscreen live TV (C5): channel up and down on the bar, and the channel list's button (it
-  // replaced a lone disc at the screen's edge), so changing channel needs no keyboard. Over a
-  // failed stream too: zapping away is often the way out. Elsewhere the page's own list is beside
-  // the stage.
-  const canZapHere = variant === 'overlay' && big && source.zappable;
+  // Live TV (C5): channel up and down on the bar, so changing channel needs no keyboard. Over a
+  // failed stream too: zapping away is often the way out. Fullscreen also has the channel list's
+  // button (it replaced a lone disc at the screen's edge); a page's stage has its list beside it,
+  // and there the pair is the first thing a narrow row gives up, and the menu does not take it.
+  const canZapHere = variant === 'overlay' && !compact && source.zappable;
 
   const store = usePlayerStore.getState();
   // Overlay: controls laid on an edge-to-edge scrim over the picture, no pane. Dock: a strong glass
@@ -1683,11 +1683,12 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const kept = narrow
     ? keepSpares<Spare>(
         [
-          ['zap', canZapHere ? 2 : 0],
+          ['zap', canZapHere && big ? 2 : 0],
           ['jump', canJump ? 2 : 0],
           ['captions', tracks.text.length > 0 ? 1 : 0],
           ['pip', showPip && !windowPip ? 1 : 0],
           ['skip', (prev ? 1 : 0) + (next ? 1 : 0)],
+          ['zap', canZapHere && !big ? 2 : 0],
         ],
         spareRoom.slots,
       )
@@ -1748,7 +1749,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
       done();
       run();
     };
-  const movedZap = canZapHere && !inRow('zap');
+  const movedZap = canZapHere && big && !inRow('zap');
   const movedJump = canJump && !inRow('jump');
   const movedPip = showPip && !windowPip && !inRow('pip');
   const movedSkip = (prev || next) && !inRow('skip');

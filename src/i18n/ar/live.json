@@ -55,6 +55,7 @@
   "filterGroups": "تصفية المجموعات",
   "region": "المنطقة",
   "allRegions": "كل المناطق",
+  "allRegionsShort": "الكل",
   "regionOption_zero": "{{region}} · {{count, number}} مجموعة",
   "regionOption_one": "{{region}} · مجموعة واحدة",
   "regionOption_two": "{{region}} · مجموعتان",

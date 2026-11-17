@@ -60,6 +60,11 @@ export interface CategorySidebarProps {
   regionScope?: string;
   /** Told when the user picks a region (the page reads the pick again from storage). */
   onRegionChange?(): void;
+  /**
+   * In the groups drawer, whose title already says "Groups": the section heading is for screen
+   * readers only, and the region select takes the row, so "All regions" reads in full in every locale.
+   */
+  inDrawer?: boolean;
 }
 
 export function linkClass(active: boolean): string {
@@ -259,13 +264,13 @@ export function CategorySidebar(props: CategorySidebarProps) {
   return (
     <nav ref={navRef} aria-label={t('groups')} className="flex h-full min-h-0 flex-col" onKeyDown={onListKey} data-testid="group-nav">
       <div className="flex items-center gap-1 px-3 pt-3 pb-2">
-        <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>
+        <h2 className={props.inDrawer ? 'sr-only' : 'flex-1 text-sm font-semibold text-fg'}>{t('groups')}</h2>
         {regions.length > 0 && !lone ? (
           <Select
             aria-label={t('region')}
             title={t('region')}
             // The toolbar's one height: 30 px, as the Manage button beside it.
-            className="h-8 w-auto max-w-28 ps-2 pe-7"
+            className={cn('h-8 ps-2 pe-7', props.inDrawer ? 'min-w-0 flex-1' : 'w-auto max-w-28')}
             value={region ?? ''}
             onValueChange={(v) => {
               const next = v || null;
@@ -275,7 +280,9 @@ export function CategorySidebar(props: CategorySidebarProps) {
               props.onRegionChange?.();
             }}
             options={[
-              { value: '', label: t('allRegions') },
+              // In the column's narrow header the closed select says "All" ("Todas las regiones"
+              // did not fit 105 px); the drawer has the room for the full words.
+              { value: '', label: t(!region && !props.inDrawer ? 'allRegionsShort' : 'allRegions') },
               // "UK · United Kingdom · 3 groups" in the list (a bare 3 read as a count of channels);
               // the picked one reads "UK" alone, which is what the closed select shows in its narrow header.
               ...regions.map((r) => ({
@@ -286,7 +293,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
             data-testid="group-region"
           />
         ) : null}
-        <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} />
+        <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} className="ms-auto" />
       </div>
       {lone ? null : (
         <div className="px-3 pb-2">

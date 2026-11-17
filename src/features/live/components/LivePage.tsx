@@ -1026,6 +1026,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           hideLoneGroup={isRadio}
           regionScope={regionScope}
           onRegionChange={onRegionChange}
+          inDrawer={!wide}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
           afterPinned={hiddenChannelsRow}

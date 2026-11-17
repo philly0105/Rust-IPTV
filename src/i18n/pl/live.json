@@ -49,6 +49,7 @@
   "filterGroups": "Filtruj grupy",
   "region": "Region",
   "allRegions": "Wszystkie regiony",
+  "allRegionsShort": "Wszystkie",
   "regionOption_one": "{{region}} · {{count, number}} grupa",
   "regionOption_few": "{{region}} · {{count, number}} grupy",
   "regionOption_many": "{{region}} · {{count, number}} grup",

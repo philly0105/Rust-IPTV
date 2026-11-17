@@ -49,6 +49,7 @@
   "filterGroups": "Фільтр груп",
   "region": "Рэгіён",
   "allRegions": "Усе рэгіёны",
+  "allRegionsShort": "Усе",
   "regionOption_one": "{{region}} · {{count, number}} група",
   "regionOption_few": "{{region}} · {{count, number}} групы",
   "regionOption_many": "{{region}} · {{count, number}} груп",

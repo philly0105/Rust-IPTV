@@ -43,6 +43,7 @@
   "filterGroups": "Φιλτράρισμα ομάδων",
   "region": "Περιοχή",
   "allRegions": "Όλες οι περιοχές",
+  "allRegionsShort": "Όλες",
   "regionOption_one": "{{region}} · {{count, number}} ομάδα",
   "regionOption_other": "{{region}} · {{count, number}} ομάδες",
   "regionNotApplied": "Όλα τα κανάλια και η αναζήτηση καλύπτουν κάθε περιοχή, όχι μόνο {{region}}.",

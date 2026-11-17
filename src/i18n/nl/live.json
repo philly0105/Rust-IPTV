@@ -43,6 +43,7 @@
   "filterGroups": "Groepen filteren",
   "region": "Regio",
   "allRegions": "Alle regio's",
+  "allRegionsShort": "Alle",
   "regionOption_one": "{{region}} · {{count, number}} groep",
   "regionOption_other": "{{region}} · {{count, number}} groepen",
   "regionNotApplied": "Alle kanalen en het zoeken omvatten elke regio, niet alleen {{region}}.",

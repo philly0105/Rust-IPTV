@@ -181,9 +181,10 @@ const groups: Category[] = [
   { id: 'g4', name: 'US| SPORTS', itemCount: 6 },
 ] as Category[];
 
-function sidebar(activeId?: string) {
+function sidebar(activeId?: string, inDrawer?: boolean) {
   return (
     <CategorySidebar
+      inDrawer={inDrawer}
       categories={groups}
       hiddenCount={0}
       isLoading={false}
@@ -216,9 +217,19 @@ describe('the group column', () => {
   it('names its region options by groups, and is as tall as the button beside it (live-15, live-03)', () => {
     wrap(sidebar());
     const select = screen.getByTestId('group-region') as HTMLSelectElement;
-    expect([...select.options].map((o) => o.text)).toEqual(['All regions', 'UK · United Kingdom · 2 groups', 'US · United States · 2 groups']);
+    // Closed in the column's narrow header, "All" (v-themes-locales-08).
+    expect([...select.options].map((o) => o.text)).toEqual(['All', 'UK · United Kingdom · 2 groups', 'US · United States · 2 groups']);
     expect(select.className).toContain('h-8');
     expect(select.className).not.toContain('text-xs');
+  });
+
+  it('in the drawer says "Groups" once, for screen readers, and gives the region select the row in full words (v-phone-01, v-phone-12)', () => {
+    wrap(sidebar(undefined, true));
+    expect(screen.getByRole('heading', { name: 'Groups' }).className).toBe('sr-only');
+    const select = screen.getByTestId('group-region') as HTMLSelectElement;
+    expect(select.options[0]!.text).toBe('All regions');
+    expect(select.className).toContain('flex-1');
+    expect(select.className).not.toContain('max-w-28');
   });
 });
 

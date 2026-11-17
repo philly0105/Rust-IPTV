@@ -46,6 +46,7 @@
   "filterGroups": "Filtra gruppi",
   "region": "Regione",
   "allRegions": "Tutte le regioni",
+  "allRegionsShort": "Tutte",
   "regionOption_one": "{{region}} · {{count, number}} gruppo",
   "regionOption_many": "{{region}} · {{count, number}} gruppi",
   "regionOption_other": "{{region}} · {{count, number}} gruppi",

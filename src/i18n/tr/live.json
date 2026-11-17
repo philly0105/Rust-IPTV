@@ -43,6 +43,7 @@
   "filterGroups": "Grupları filtrele",
   "region": "Bölge",
   "allRegions": "Tüm bölgeler",
+  "allRegionsShort": "Tümü",
   "regionOption_one": "{{region}} · {{count, number}} grup",
   "regionOption_other": "{{region}} · {{count, number}} grup",
   "regionNotApplied": "Tüm kanallar ve arama yalnızca {{region}} değil, her bölgeyi kapsar.",

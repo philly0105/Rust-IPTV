@@ -43,6 +43,7 @@
   "filterGroups": "筛选分组",
   "region": "地区",
   "allRegions": "所有地区",
+  "allRegionsShort": "全部",
   "regionOption_one": "{{region}} · {{count, number}} 个分组",
   "regionOption_other": "{{region}} · {{count, number}} 个分组",
   "regionNotApplied": "全部频道和搜索涵盖所有地区，而不仅是 {{region}}。",

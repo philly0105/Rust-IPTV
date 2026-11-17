@@ -43,6 +43,7 @@
   "filterGroups": "Csoportok szűrése",
   "region": "Régió",
   "allRegions": "Minden régió",
+  "allRegionsShort": "Mind",
   "regionOption_one": "{{region}} · {{count, number}} csoport",
   "regionOption_other": "{{region}} · {{count, number}} csoport",
   "regionNotApplied": "Az összes csatorna és a keresés minden régióra kiterjed, nem csak erre: {{region}}.",

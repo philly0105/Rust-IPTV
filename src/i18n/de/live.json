@@ -43,6 +43,7 @@
   "filterGroups": "Gruppen filtern",
   "region": "Region",
   "allRegions": "Alle Regionen",
+  "allRegionsShort": "Alle",
   "regionOption_one": "{{region}} · {{count, number}} Gruppe",
   "regionOption_other": "{{region}} · {{count, number}} Gruppen",
   "regionNotApplied": "Alle Sender und die Suche umfassen jede Region, nicht nur {{region}}.",

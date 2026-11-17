@@ -55,6 +55,7 @@
   "filterGroups": "فلتر المجموعات",
   "region": "المنطقة",
   "allRegions": "كاع المناطق",
+  "allRegionsShort": "كلشي",
   "regionOption_zero": "{{region}} · {{count, number}} مجموعة",
   "regionOption_one": "{{region}} · مجموعة وحدة",
   "regionOption_two": "{{region}} · جوج مجموعات",

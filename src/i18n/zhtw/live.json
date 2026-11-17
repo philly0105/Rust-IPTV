@@ -43,6 +43,7 @@
   "filterGroups": "篩選群組",
   "region": "地區",
   "allRegions": "所有地區",
+  "allRegionsShort": "全部",
   "regionOption_one": "{{region}} · {{count, number}} 個群組",
   "regionOption_other": "{{region}} · {{count, number}} 個群組",
   "regionNotApplied": "全部頻道和搜尋涵蓋所有地區，不僅是 {{region}}。",

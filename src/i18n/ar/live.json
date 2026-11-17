@@ -83,6 +83,7 @@
   "noGroupsMatch": "لا توجد مجموعات تطابق «{{query}}»",
   "loadingChannels": "جارٍ تحميل القنوات",
   "loadingGroups": "جارٍ تحميل المجموعات",
+  "groupsLoadFailed": "لم يتم تحميل المجموعات",
   "loadingGuide": "جارٍ تحميل الدليل",
   "guide": "دليل البرامج",
   "openGuide": "دليل البرامج",

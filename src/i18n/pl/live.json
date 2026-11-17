@@ -73,6 +73,7 @@
   "noGroupsMatch": "Brak grup pasujących do „{{query}}”",
   "loadingChannels": "Ładowanie kanałów",
   "loadingGroups": "Ładowanie grup",
+  "groupsLoadFailed": "Nie udało się załadować grup",
   "loadingGuide": "Ładowanie przewodnika",
   "guide": "Przewodnik TV",
   "openGuide": "Przewodnik TV",

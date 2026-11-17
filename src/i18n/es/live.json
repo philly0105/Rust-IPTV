@@ -68,6 +68,7 @@
   "noGroupsMatch": "Ningún grupo coincide con «{{query}}»",
   "loadingChannels": "Cargando canales",
   "loadingGroups": "Cargando grupos",
+  "groupsLoadFailed": "No se cargaron los grupos",
   "loadingGuide": "Cargando guía",
   "guide": "Guía de TV",
   "openGuide": "Guía de TV",

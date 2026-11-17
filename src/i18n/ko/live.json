@@ -63,6 +63,7 @@
   "noGroupsMatch": "\"{{query}}\"와(과) 일치하는 그룹이 없습니다",
   "loadingChannels": "채널 불러오는 중",
   "loadingGroups": "그룹 불러오는 중",
+  "groupsLoadFailed": "그룹을 불러오지 못했습니다",
   "loadingGuide": "가이드 불러오는 중",
   "guide": "TV 가이드",
   "openGuide": "TV 가이드",

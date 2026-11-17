@@ -63,6 +63,7 @@
   "noGroupsMatch": "Καμία ομάδα δεν ταιριάζει με «{{query}}»",
   "loadingChannels": "Φόρτωση καναλιών",
   "loadingGroups": "Φόρτωση ομάδων",
+  "groupsLoadFailed": "Οι ομάδες δεν φορτώθηκαν",
   "loadingGuide": "Φόρτωση οδηγού",
   "guide": "Οδηγός προγράμματος",
   "openGuide": "Οδηγός προγράμματος",

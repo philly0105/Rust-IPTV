@@ -63,6 +63,7 @@
   "noGroupsMatch": "No groups match \"{{query}}\"",
   "loadingChannels": "Loading channels",
   "loadingGroups": "Loading groups",
+  "groupsLoadFailed": "Groups didn't load",
   "loadingGuide": "Loading guide",
   "guide": "TV guide",
   "openGuide": "TV guide",

@@ -73,6 +73,7 @@
   "noGroupsMatch": "Няма груп, якія адпавядаюць «{{query}}»",
   "loadingChannels": "Загрузка каналаў",
   "loadingGroups": "Загрузка груп",
+  "groupsLoadFailed": "Групы не загрузіліся",
   "loadingGuide": "Загрузка праграмы перадач",
   "guide": "Праграма перадач",
   "openGuide": "Праграма перадач",

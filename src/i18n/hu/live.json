@@ -63,6 +63,7 @@
   "noGroupsMatch": "Nincs egyező csoport: „{{query}}”",
   "loadingChannels": "Csatornák betöltése",
   "loadingGroups": "Csoportok betöltése",
+  "groupsLoadFailed": "A csoportok nem töltődtek be",
   "loadingGuide": "Műsorújság betöltése",
   "guide": "Műsorújság",
   "openGuide": "Műsorújság",

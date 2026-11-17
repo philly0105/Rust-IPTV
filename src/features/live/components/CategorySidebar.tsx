@@ -349,7 +349,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
       </div>
 
       {props.error ? (
-        <ErrorState error={props.error} onRetry={props.onRetry} />
+        // Sized for the 14 px rows of this column, and says what failed (the channel list still works).
+        <ErrorState size="inline" title={t('groupsLoadFailed')} error={props.error} onRetry={props.onRetry} />
       ) : props.isLoading ? (
         <div className="flex flex-col px-2 pt-0.5" aria-busy="true" aria-label={t('loadingGroups')}>
           {Array.from({ length: 10 }, (_, i) => (

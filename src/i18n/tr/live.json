@@ -63,6 +63,7 @@
   "noGroupsMatch": "\"{{query}}\" ile eşleşen grup yok",
   "loadingChannels": "Kanallar yükleniyor",
   "loadingGroups": "Gruplar yükleniyor",
+  "groupsLoadFailed": "Gruplar yüklenemedi",
   "loadingGuide": "Rehber yükleniyor",
   "guide": "TV rehberi",
   "openGuide": "TV rehberi",

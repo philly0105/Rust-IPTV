@@ -73,6 +73,7 @@
   "noGroupsMatch": "Нет групп по запросу «{{query}}»",
   "loadingChannels": "Загрузка каналов",
   "loadingGroups": "Загрузка групп",
+  "groupsLoadFailed": "Группы не загрузились",
   "loadingGuide": "Загрузка телегида",
   "guide": "Телегид",
   "openGuide": "Телегид",

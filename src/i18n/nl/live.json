@@ -63,6 +63,7 @@
   "noGroupsMatch": "Geen groepen komen overeen met \"{{query}}\"",
   "loadingChannels": "Kanalen laden",
   "loadingGroups": "Groepen laden",
+  "groupsLoadFailed": "Groepen zijn niet geladen",
   "loadingGuide": "Gids laden",
   "guide": "Programmagids",
   "openGuide": "Programmagids",

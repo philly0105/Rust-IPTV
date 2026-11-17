@@ -13,6 +13,7 @@ import { invalidate } from '@/api/query';
 import type { Channel, EpgProgram, Source } from '@/api/types';
 import { errorDescription, toast } from '@/ui';
 import { copyText } from '@/lib/clipboard';
+import { downloadToastId } from '@/features/library/lib/queue';
 import { canShareSource } from '@/features/player/shareable';
 
 import { displayChannelName } from '../lib/channelName';
@@ -82,9 +83,11 @@ export function useProgrammeActions(
           now, displayName: name, subtitle, notFileMessage: t('downloadNotFile', { ns: 'vod' }),
         });
         if (!args) return;
-        await rpc('downloads.start', args);
+        const queued = await rpc('downloads.start', args);
         void invalidate('downloads.');
         toast({
+          // The download's own id: its Downloaded (or failed) toast replaces this one in place.
+          id: downloadToastId(queued.id),
           title: t('downloadQueued', { ns: 'vod' }),
           description: `${name}  ${programme.title}`,
           variant: 'success',

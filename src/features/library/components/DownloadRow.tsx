@@ -373,10 +373,10 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
 
 export const DownloadRow = memo(DownloadRowImpl);
 
-/** A finished row's height: a transfer's from sm (the artwork sets it), and a line shorter on a phone, with no bar. */
-export function finishedRowHeight(d: Pick<Download, 'title' | 'subtitle' | 'episodeId'>, wide: boolean): number {
+/** A finished row's height: a transfer's from sm (the artwork sets it); on a phone a line per name, file name and detail, with no bar. */
+export function finishedRowHeight(d: Pick<Download, 'title' | 'subtitle' | 'episodeId' | 'fileName'>, wide: boolean): number {
   if (wide) return DOWNLOAD_ROW_HEIGHT;
-  return downloadNames(d).subtitle ? 84 : 72;
+  return (downloadNames(d).subtitle ? 84 : 72) + (d.fileName ? 16 : 0);
 }
 
 export interface FinishedRowProps {
@@ -406,6 +406,7 @@ function FinishedRowImpl({ download: d, busy, tabbable = false, onPlay, onRedown
   ]
     .filter(Boolean)
     .join(' · ');
+  const file = d.fileName ? <FileName name={d.fileName} path={d.filePath} /> : null;
   const tabIndex = tabbable ? 0 : -1;
 
   return (
@@ -436,9 +437,20 @@ function FinishedRowImpl({ download: d, busy, tabbable = false, onPlay, onRedown
             {names.subtitle}
           </span>
         )}
+        {/* The file to look for (walkthrough-13): on a phone on a line of its own, from sm before the
+            size and date, where it gives way first. The full path is in the tooltip. */}
+        {file && !wide && <span className="flex min-w-0 text-caption text-fg-muted">{file}</span>}
         <div className="flex min-w-0 items-center gap-2 text-caption text-fg-muted">
           {missing && <Badge variant="warning">{t('fileMissing')}</Badge>}
-          <span className="min-w-0 truncate tabular-nums">{detail}</span>
+          <span className="flex min-w-0 tabular-nums">
+            {file && wide && (
+              <>
+                {file}
+                <span className="shrink-0 whitespace-pre">{' · '}</span>
+              </>
+            )}
+            <span className={file && wide ? 'shrink-0' : 'min-w-0 truncate'}>{detail}</span>
+          </span>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1" data-testid="finished-actions">
@@ -482,6 +494,18 @@ function FinishedRowImpl({ download: d, busy, tabbable = false, onPlay, onRedown
         )}
       </div>
     </div>
+  );
+}
+
+/** A file name on one line, cut before its extension when it does not fit ("Ember Protoc….mkv"). */
+function FileName({ name, path }: { name: string; path: string | undefined }) {
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 && name.length - dot <= 6 ? name.slice(dot) : '';
+  return (
+    <span dir="auto" className="flex min-w-0" title={path ?? name} data-testid="finished-file">
+      <span className="min-w-0 truncate">{ext ? name.slice(0, dot) : name}</span>
+      {ext && <span className="shrink-0">{ext}</span>}
+    </span>
   );
 }
 

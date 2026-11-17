@@ -193,6 +193,8 @@ describe('EpgGridPage short-EPG fallback', () => {
     const pop = await screen.findByTestId('program-popover');
     fireEvent.click(within(pop).getByTestId('program-download'));
     await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'downloads.start')).toHaveLength(1));
+    // Under the download's own id, so its Downloaded toast replaces this one instead of stacking.
+    await waitFor(() => expect(useToastStore.getState().toasts.map((x) => x.id)).toContain('download-42'));
 
     // The clipboard takes the link at once when it can.
     const writeText = vi.fn(async () => undefined);

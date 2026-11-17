@@ -443,7 +443,6 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           items={menuItems}
           label={t('entryMenu', { title: spoken })}
           align="end"
-          triggerIcon={<EllipsisVertical aria-hidden size={18} />}
           triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"
           sheetHeader={menuHeader}
         />

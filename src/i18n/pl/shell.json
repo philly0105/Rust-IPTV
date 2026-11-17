@@ -198,6 +198,7 @@
   "scNextItem": "Odtwórz następny odcinek z kolejki",
   "scChannelFavorite": "Dodaj wybrany kanał do ulubionych lub go z nich usuń",
   "scItemMenu": "Otwórz menu wybranego kanału",
+  "scRowMenu": "Otwórz menu wybranego elementu",
   "scListsDialogMoveUp": "Przenieś zaznaczoną listę lub kanał wyżej (Zarządzaj listami, Edytuj kanały)",
   "scListsDialogMoveDown": "Przenieś zaznaczoną listę lub kanał niżej (Zarządzaj listami, Edytuj kanały)",
   "scListJump": "Przejdź do pierwszego lub ostatniego elementu",

@@ -82,6 +82,15 @@ describe('shortcut overlay accuracy', () => {
     }
   });
 
+  it('says "item", not "channel", for the row menu on pages that list movies too (library3 follow-up)', () => {
+    const shell = JSON.parse(read('src/i18n/en/shell.json')) as Record<string, string>;
+    for (const area of ['Favorites', 'Recently watched']) {
+      const rows = DOCUMENTED_SHORTCUTS.filter((d) => d.area === area && (d.combo === 'shift+f10' || d.combo === 'contextmenu'));
+      expect(rows, area).toHaveLength(2);
+      for (const d of rows) expect(shell[d.descKey], area).toBe('Open the menu for the focused item');
+    }
+  });
+
   it('every documented description key exists in English', () => {
     for (const d of DOCUMENTED_SHORTCUTS) {
       const [ns, key] = d.descKey.includes(':') ? d.descKey.split(':') : ['shell', d.descKey];

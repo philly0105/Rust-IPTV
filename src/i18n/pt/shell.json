@@ -193,6 +193,7 @@
   "scNextItem": "Reproduzir o próximo episódio da fila",
   "scChannelFavorite": "Adicionar ou remover dos favoritos o canal em foco",
   "scItemMenu": "Abrir o menu do canal em foco",
+  "scRowMenu": "Abrir o menu do item em foco",
   "scListsDialogMoveUp": "Mover a lista ou o canal selecionado para cima (Gerenciar listas, Editar canais)",
   "scListsDialogMoveDown": "Mover a lista ou o canal selecionado para baixo (Gerenciar listas, Editar canais)",
   "scListJump": "Ir para o primeiro ou o último item",

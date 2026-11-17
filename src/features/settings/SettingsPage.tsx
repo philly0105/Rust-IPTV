@@ -167,7 +167,7 @@ export function SettingsNav({ current, variant = 'sidebar' }: { current?: Sectio
                     )}
                   >
                     <Icon aria-hidden size={16} className={clsx('shrink-0', active && 'text-accent')} />
-                    <span className="min-w-0 truncate">{t(label)}</span>
+                    <span className="line-clamp-2 min-w-0">{t(label)}</span>
                   </NavLink>
                 </li>
               );
@@ -364,7 +364,7 @@ export function SettingsPage() {
       <div className="flex items-start gap-8 lg:gap-12">
         {phone ? null : (
           // Sticky inside the shell's scrolling main, so the nav stays put down a long section.
-          <aside className="sticky top-6 w-48 shrink-0 lg:w-52" data-testid="settings-sidebar">
+          <aside className="sticky top-6 w-48 shrink-0 lg:w-52 xl:w-60" data-testid="settings-sidebar">
             <SettingsNav current={current} />
           </aside>
         )}

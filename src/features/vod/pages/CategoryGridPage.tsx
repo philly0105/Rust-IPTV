@@ -741,6 +741,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         {/* Right clicks bubble here from the grid's options; so do focus changes (React's focusin/focusout). */}
         <div
           ref={gridWrapRef}
+          // The shell's skip link lands on the grid, past the toolbar and its filters.
+          data-skip-target=""
           aria-busy={refreshing || undefined}
           data-refreshing={refreshing || undefined}
           className={cn(

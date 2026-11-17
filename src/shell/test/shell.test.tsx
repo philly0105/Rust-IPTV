@@ -529,6 +529,25 @@ describe('route announcements and the skip link', () => {
       children: [
         { path: 'favorites', element: <Titled title="Favorites">favorites page</Titled> },
         {
+          path: 'settings',
+          element: (
+            <Titled title="Settings">
+              <a href="/settings/player">section nav</a>
+              <div data-skip-target="first">
+                <label>
+                  Language
+                  <select defaultValue="en">
+                    <option value="en">English</option>
+                  </select>
+                </label>
+                <button type="button" tabIndex={0}>
+                  later segment
+                </button>
+              </div>
+            </Titled>
+          ),
+        },
+        {
           path: 'recent',
           element: (
             <Titled title="Recently watched">
@@ -570,6 +589,13 @@ describe('route announcements and the skip link', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'current row' }));
     expect(router.state.location.hash).toBe('');
+  });
+
+  it('a region of plain controls hands the skip link its first control', async () => {
+    renderRoutes(titledRoutes(), '/settings');
+    await screen.findByText('later segment');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Language' }));
   });
 
   it('without a marked target the skip link focuses main', async () => {

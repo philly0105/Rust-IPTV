@@ -276,14 +276,19 @@ function GlobalShortcuts() {
   return null;
 }
 
+/** The first control a `data-skip-target="first"` region hands focus to. */
+const FIRST_CONTROL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]';
+
 /**
- * The skip link's target: the page's `[data-skip-target]` (its main list or grid), at the item in
- * it that takes Tab (the roving row or cell), else `main#main` itself. Exported for tests.
+ * The skip link's target: the page's first `[data-skip-target]` (its main list, grid or rail), at
+ * the item in it that takes Tab (the roving row, cell or card), else `main#main` itself. A region
+ * of plain controls (a settings section) says `data-skip-target="first"`: its first control.
+ * Exported for tests.
  */
 export function skipToContent(): void {
   const main = document.getElementById('main');
   const target = main?.querySelector<HTMLElement>('[data-skip-target]');
-  const into = target?.querySelector<HTMLElement>('[tabindex="0"]') ?? target;
+  const into = target?.querySelector<HTMLElement>(target.dataset['skipTarget'] === 'first' ? FIRST_CONTROL : '[tabindex="0"]') ?? target;
   into?.focus();
   if (!into || document.activeElement !== into) main?.focus();
 }

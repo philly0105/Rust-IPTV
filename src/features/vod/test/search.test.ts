@@ -39,7 +39,7 @@ describe('groupSearchResults', () => {
     ]);
     const live = groups[1]!.hits[0]!;
     expect(live.href).toBeUndefined();
-    expect(live.meta).toBe('101  Movies');
+    expect(live.meta).toBeUndefined();
     expect(live.sourceKind).toBe('xtream');
   });
 

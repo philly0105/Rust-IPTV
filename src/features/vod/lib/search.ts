@@ -89,7 +89,7 @@ export interface SearchHit {
   group: SearchGroupKind;
   ref: ItemRef;
   title: string;
-  /** Year for VOD, channel number and category for live. */
+  /** Year for VOD (a channel's card reads its number and group from the channel). */
   meta?: string;
   imageUrl?: string;
   sourceId: string;
@@ -216,10 +216,7 @@ export function groupSearchResults(input: GroupInput): SearchGroup[] {
     push('series', s, compact({ title: s.title, meta: s.year?.toString(), imageUrl: s.posterUrl, href: detailHref(s.ref) }));
   }
   for (const c of input.result?.live ?? []) {
-    const meta = [c.number !== undefined ? String(c.number) : undefined, c.categoryName || undefined]
-      .filter(Boolean)
-      .join('  ');
-    push('live', c, compact({ title: c.name, meta: meta || undefined, imageUrl: c.logoUrl }));
+    push('live', c, compact({ title: c.name, imageUrl: c.logoUrl }));
   }
 
   return SEARCH_GROUP_ORDER.map((kind) => ({ kind, hits: groups[kind] })).filter((g) => g.hits.length > 0);

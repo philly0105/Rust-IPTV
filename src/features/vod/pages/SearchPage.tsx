@@ -1437,12 +1437,18 @@ function ChannelHitButton({
             {now}
           </p>
         )}
-        {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
-        <div className="flex min-w-0 gap-1.5 text-caption text-fg-subtle">
-          {h.meta && <span className="tabular shrink-0">{h.meta}</span>}
-          {showBadges && h.meta && <span aria-hidden>·</span>}
+        {/* Number, group and source as quiet text (no outlined chip). A provider's group name runs to
+            90 characters: it truncates first, and the source keeps its own share of the line. */}
+        <div className="flex min-w-0 gap-1.5 overflow-hidden text-caption text-fg-subtle" data-testid="search-channel-meta">
+          {c.number !== undefined && <span className="tabular shrink-0">{c.number}</span>}
+          {c.categoryName && (
+            <span dir="auto" title={c.categoryName} className="min-w-0 truncate">
+              {c.categoryName}
+            </span>
+          )}
+          {showBadges && (c.number !== undefined || !!c.categoryName) && <span aria-hidden className="shrink-0">·</span>}
           {showBadges && (
-            <span dir="auto" title={h.sourceName} className="min-w-0 truncate" data-testid="search-channel-source">
+            <span dir="auto" title={h.sourceName} className="max-w-[60%] shrink-0 truncate" data-testid="search-channel-source">
               {h.sourceName}
             </span>
           )}

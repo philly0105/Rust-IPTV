@@ -578,13 +578,17 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const groupName = liveView === 'favorites' ? t('favoritesGroup') : liveView === 'recent' ? recentLabel : category?.name;
   // The phone's groups button names the group being browsed, All channels included.
   const groupLabel = groupName ?? (isRadio ? t('allStations') : t('allChannels'));
+  // The group in plain text (the header, the search field's placeholder, the empty search), as the
+  // groups column draws it: "SPORTS (US)" for "US| SPORTS".
+  const groupText = category ? plainChannelName(category.name, false) : undefined;
   // The count always says what it counts ("106 channels"); All channels is the page with no group,
   // so it shows the count alone rather than "All channels · 106 channels". An empty list says so in
   // its own empty state, so "0 stations" over "No radio stations in this source" is left out.
   const countText = paged.total ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
   // The scope under the section, once: the source (with several), the group and the count. The
   // list no longer repeats them over its rows.
-  const scope = groupName && countText ? t('groupWithCount', { group: groupName, count: countText }) : groupName || countText;
+  const scopeName = category && groupName === category.name ? groupText : groupName;
+  const scope = scopeName && countText ? t('groupWithCount', { group: scopeName, count: countText }) : scopeName || countText;
   const headerSubtitle = sourceName && scope ? t('groupWithCount', { group: sourceName, count: scope }) : sourceName || scope;
   // A source without radio (normal, not broken: the rail leaves Radio out for it) opened at its
   // Radio address: one page-level empty state instead of three columns that contradict each other.
@@ -983,7 +987,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             groupOnToolbar
               ? t('common:search')
               : category
-                ? t('searchInGroup', { group: category.name })
+                ? t('searchInGroup', { group: groupText })
                 : t(isRadio ? 'searchStations' : 'searchChannels')
           }
           label={t(isRadio ? 'searchStations' : 'searchChannels')}
@@ -1006,7 +1010,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       </div>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- searchRef and focusListPending are refs
-    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, isRadio, quality.min, quality.hideUntagged, quality.update, toolbarGuideHref, t],
+    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, groupText, isRadio, quality.min, quality.hideUntagged, quality.update, toolbarGuideHref, t],
   );
 
   // ---- render -------------------------------------------------------------
@@ -1095,7 +1099,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       <EmptyState
         icon={<Search className="size-6" />}
         title={t(isRadio ? 'noStationSearchResults' : 'noSearchResults', { query: debouncedSearch })}
-        description={category ? t('noSearchResultsInGroup', { group: category.name }) : undefined}
+        description={category ? t('noSearchResultsInGroup', { group: groupText }) : undefined}
         action={
           category ? (
             // The channel is usually in another of the many groups: one press takes the query there.
@@ -1348,7 +1352,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         label={plainChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
         onClose={closeMenu}
       />
-      <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu?.category.name ?? ''} onClose={closeGroupMenu} />
+      <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu ? plainChannelName(groupMenu.category.name, false) : ''} onClose={closeGroupMenu} />
       {manageUsed ? <MemoManageDialog open={manageOpen} onClose={closeManage} sourceId={sourceId} contentType={contentType} /> : null}
       {mappingUsed ? <MemoMappingDialog channel={mapping} onClose={closeMapping} /> : null}
     </div>

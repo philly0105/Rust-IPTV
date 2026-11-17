@@ -476,7 +476,7 @@ describe('groups drawer below 1024 px', () => {
     await screen.findByText('Channel 0');
     expect(screen.getByRole('button', { name: 'Show groups' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Groups:/ })).toBeNull();
-    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in US| SPORTS');
+    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in SPORTS (US)');
     tablet.mockRestore();
   });
 });

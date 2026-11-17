@@ -31,6 +31,8 @@
   "showAllStreams_many": "Mostrar as {{count}} transmissões",
   "showAllStreams_other": "Mostrar as {{count}} transmissões",
   "showFewer": "Mostrar menos",
+  "best": "Melhor",
+  "bestHint": "A correspondência mais segura na melhor qualidade encontrada",
   "reasonGuide": "No guia",
   "reasonEvent": "Canal de evento",
   "reasonNetwork": "Emissora",

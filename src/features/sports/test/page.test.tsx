@@ -794,6 +794,16 @@ describe('sports page', () => {
     const rows = within(list).getAllByTestId('sports-stream');
     expect(rows.map((r) => within(r).getByTestId('sports-stream-name').textContent)).toEqual(['ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ', 'ESPN HD', 'TSN 1 ⁽ᴮᴷ⁾ ᴿᴬᵂ', 'BOSTON CELTICS SD']);
     expect(rows.map((r) => within(r).queryByTestId('sports-stream-quality')?.textContent ?? null)).toEqual(['4K', '720p', null, 'SD']);
+    // The first of several says it is the best, in words after its quality.
+    expect(rows.map((r) => within(r).queryByTestId('sports-best')?.textContent ?? null)).toEqual(['Best', null, null, null]);
+    const tag = within(rows[0]!).getByTestId('sports-stream-quality');
+    expect(tag.compareDocumentPosition(within(rows[0]!).getByTestId('sports-best')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    cleanup();
+
+    // A lone stream is not "best" of anything.
+    setStreams(g, [h.match(ESPN)]);
+    await openReady();
+    expect(within(card(g)).queryByTestId('sports-best')).toBeNull();
   });
 
   it('lists matched streams with their reason, the best one first', async () => {

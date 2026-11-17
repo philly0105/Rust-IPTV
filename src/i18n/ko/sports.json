@@ -30,6 +30,8 @@
   "showAllStreams_one": "{{count}}개 모두 보기",
   "showAllStreams_other": "{{count}}개 모두 보기",
   "showFewer": "간단히 보기",
+  "best": "추천",
+  "bestHint": "가장 확실하게 일치하고 찾은 것 중 화질이 가장 좋은 스트림",
   "reasonGuide": "TV 가이드",
   "reasonEvent": "이벤트 채널",
   "reasonNetwork": "방송사",

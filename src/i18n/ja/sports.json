@@ -30,6 +30,8 @@
   "showAllStreams_one": "{{count}} 件すべて表示",
   "showAllStreams_other": "{{count}} 件すべて表示",
   "showFewer": "表示を減らす",
+  "best": "おすすめ",
+  "bestHint": "最も確実に一致し、見つかった中で最高画質の配信",
   "reasonGuide": "番組表",
   "reasonEvent": "イベントチャンネル",
   "reasonNetwork": "放送局",

@@ -30,6 +30,8 @@
   "showAllStreams_one": "{{count}} közvetítés megjelenítése",
   "showAllStreams_other": "Mind a(z) {{count}} közvetítés megjelenítése",
   "showFewer": "Kevesebb",
+  "best": "Legjobb",
+  "bestHint": "A legbiztosabb találat a legjobb talált minőségben",
   "reasonGuide": "A műsorújságban",
   "reasonEvent": "Eseménycsatorna",
   "reasonNetwork": "Csatorna",

@@ -31,6 +31,8 @@
   "showAllStreams_many": "Mostra tutti i {{count}} stream",
   "showAllStreams_other": "Mostra tutti i {{count}} stream",
   "showFewer": "Mostra meno",
+  "best": "Migliore",
+  "bestHint": "La corrispondenza più sicura nella migliore qualità trovata",
   "reasonGuide": "Nella guida",
   "reasonEvent": "Canale evento",
   "reasonNetwork": "Rete",

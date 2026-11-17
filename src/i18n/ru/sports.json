@@ -32,6 +32,8 @@
   "showAllStreams_many": "Показать все {{count}} трансляций",
   "showAllStreams_other": "Показать все {{count}} трансляции",
   "showFewer": "Показать меньше",
+  "best": "Лучший",
+  "bestHint": "Самое надёжное совпадение в лучшем найденном качестве",
   "reasonGuide": "В телегиде",
   "reasonEvent": "Канал события",
   "reasonNetwork": "Телеканал",

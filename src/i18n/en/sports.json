@@ -30,6 +30,8 @@
   "showAllStreams_one": "Show all {{count}} streams",
   "showAllStreams_other": "Show all {{count}} streams",
   "showFewer": "Show fewer",
+  "best": "Best",
+  "bestHint": "The surest match in the best quality found",
   "reasonGuide": "In guide",
   "reasonEvent": "Event channel",
   "reasonNetwork": "Network",

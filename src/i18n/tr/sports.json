@@ -30,6 +30,8 @@
   "showAllStreams_one": "{{count}} yayını göster",
   "showAllStreams_other": "{{count}} yayının tümünü göster",
   "showFewer": "Daha az göster",
+  "best": "En iyi",
+  "bestHint": "Bulunan en iyi kalitedeki en güvenilir eşleşme",
   "reasonGuide": "Rehberde",
   "reasonEvent": "Etkinlik kanalı",
   "reasonNetwork": "Kanal",

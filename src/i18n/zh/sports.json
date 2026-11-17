@@ -30,6 +30,8 @@
   "showAllStreams_one": "显示全部 {{count}} 个",
   "showAllStreams_other": "显示全部 {{count}} 个",
   "showFewer": "收起",
+  "best": "最佳",
+  "bestHint": "最可靠的匹配，且画质为找到的最高",
   "reasonGuide": "节目指南",
   "reasonEvent": "赛事频道",
   "reasonNetwork": "电视网",

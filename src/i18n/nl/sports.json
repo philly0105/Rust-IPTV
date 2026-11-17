@@ -30,6 +30,8 @@
   "showAllStreams_one": "{{count}} stream tonen",
   "showAllStreams_other": "Alle {{count}} streams tonen",
   "showFewer": "Minder tonen",
+  "best": "Beste",
+  "bestHint": "De zekerste match in de beste gevonden kwaliteit",
   "reasonGuide": "In de gids",
   "reasonEvent": "Evenementkanaal",
   "reasonNetwork": "Zender",

@@ -34,6 +34,8 @@
   "showAllStreams_many": "عرض الكل ({{count}})",
   "showAllStreams_other": "عرض الكل ({{count}})",
   "showFewer": "عرض أقل",
+  "best": "الأفضل",
+  "bestHint": "أوثق تطابق بأفضل جودة متاحة",
   "reasonGuide": "في دليل البرامج",
   "reasonEvent": "قناة حدث",
   "reasonNetwork": "شبكة",

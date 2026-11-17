@@ -32,6 +32,8 @@
   "showAllStreams_many": "Паказаць усе {{count}} трансляцый",
   "showAllStreams_other": "Паказаць усе {{count}} трансляцыі",
   "showFewer": "Паказаць менш",
+  "best": "Лепшы",
+  "bestHint": "Найбольш дакладнае супадзенне ў найлепшай знойдзенай якасці",
   "reasonGuide": "У праграме перадач",
   "reasonEvent": "Канал падзеі",
   "reasonNetwork": "Тэлеканал",

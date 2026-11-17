@@ -30,6 +30,8 @@
   "showAllStreams_one": "{{count}} Stream anzeigen",
   "showAllStreams_other": "Alle {{count}} Streams anzeigen",
   "showFewer": "Weniger anzeigen",
+  "best": "Beste",
+  "bestHint": "Der sicherste Treffer in der besten gefundenen Qualität",
   "reasonGuide": "Im Programmführer",
   "reasonEvent": "Event-Sender",
   "reasonNetwork": "Sender",

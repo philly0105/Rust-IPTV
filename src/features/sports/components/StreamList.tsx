@@ -262,6 +262,7 @@ function StreamRow({
   title,
   ctx,
   first,
+  best,
   toggle,
 }: {
   game: Game;
@@ -269,6 +270,8 @@ function StreamRow({
   title: string;
   ctx: StreamContext;
   first: boolean;
+  /** The first of several rows: the stream the order puts first says it is the best one. */
+  best: boolean;
   /** The first row's Show all toggle, at the end of its metadata. */
   toggle?: ReactNode;
 }) {
@@ -399,6 +402,12 @@ function StreamRow({
               // First, so the rows' qualities line up down the list; the name's own marker is often cut
               // off or a superscript ("ᴴᴰ").
               quality ? <QualityTag key="quality" quality={quality} /> : null,
+              // After the quality, which stays lined up down the list. Quiet words, not another badge: the order already puts the surest, sharpest stream first.
+              best ? (
+                <span key="best" className="font-medium text-fg-muted" title={t('bestHint')} data-testid="sports-best">
+                  {t('best')}
+                </span>
+              ) : null,
               // The regional warning, since it may be the wrong game: warning-toned text, not a filled
               // badge, as on an NFL Sunday nearly every card carries it. Before the reason, so where the
               // line runs short the warning is never what truncates.
@@ -524,6 +533,7 @@ export function StreamList({
           title={title}
           ctx={ctx}
           first={i === 0}
+          best={i === 0 && list.length > 1}
           {...(i === 0 ? { toggle } : {})}
         />
       ))}

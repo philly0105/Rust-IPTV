@@ -31,6 +31,8 @@
   "showAllStreams_many": "Afficher les {{count}} flux",
   "showAllStreams_other": "Afficher les {{count}} flux",
   "showFewer": "Afficher moins",
+  "best": "Meilleur",
+  "bestHint": "La correspondance la plus sûre, dans la meilleure qualité trouvée",
   "reasonGuide": "Dans le guide",
   "reasonEvent": "Chaîne événement",
   "reasonNetwork": "Chaîne",

@@ -30,6 +30,8 @@
   "showAllStreams_one": "Εμφάνιση {{count}} μετάδοσης",
   "showAllStreams_other": "Εμφάνιση και των {{count}} μεταδόσεων",
   "showFewer": "Εμφάνιση λιγότερων",
+  "best": "Καλύτερη",
+  "bestHint": "Η πιο σίγουρη αντιστοίχιση στην καλύτερη ποιότητα που βρέθηκε",
   "reasonGuide": "Στον οδηγό",
   "reasonEvent": "Κανάλι αγώνα",
   "reasonNetwork": "Δίκτυο",

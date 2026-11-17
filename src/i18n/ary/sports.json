@@ -34,6 +34,8 @@
   "showAllStreams_many": "وري الكل ({{count}})",
   "showAllStreams_other": "وري الكل ({{count}})",
   "showFewer": "وري قل",
+  "best": "الأحسن",
+  "bestHint": "أضمن تطابق بأحسن جودة لقينا",
   "reasonGuide": "فدليل البرامج",
   "reasonEvent": "قناة ديال الحدث",
   "reasonNetwork": "شبكة",

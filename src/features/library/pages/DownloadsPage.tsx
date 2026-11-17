@@ -243,7 +243,7 @@ export function DownloadsPage() {
       />
     );
   } else if (rows.length === 0) {
-    // Nothing queued and nothing saved (a finished download is listed): the catalogue, where a download starts.
+    // Nothing queued and nothing saved (a finished one would be listed): the catalogue, where a download starts.
     body = (
       <EmptyState
         icon={<DownloadIcon size={28} aria-hidden />}

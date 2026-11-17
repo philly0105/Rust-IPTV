@@ -21,6 +21,13 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 - The web UI shows Home sooner on a cold load: the command palette, the shortcut overlay and Home's card menus load on first use, and the settings and sources are requested while the app's code downloads.
 - Typing in search stays responsive while results narrow, and Live's group list, the guide toolbar and Sports cards no longer redraw when nothing in them changed.
 - Release builds compile the core and its parsing, compression and image code for speed; the server binary grows from about 18.4 MB to 21.1 MB.
+- A UI and UX pass over every screen (November 2026 audit, three rounds of fixes) covering desktop, touch tablets and phones, light and dark themes and all 19 languages:
+  - Channel names read one way across the app: the name first and the provider's place tag after it, quiet ("ESPN HD US"), in Live TV, the guide, Home, Search, Sports, the player, Multi-view and the library. Screen readers hear "ESPN HD (US)" instead of spelling out "US| ESPN HD"; tooltips keep the provider's name. Group names in pickers follow the same rule, and a provider's "##### ALL CHANNELS #####" heading rows show as quiet captions you cannot play.
+  - The TV guide wraps long channel names onto two lines, adds Live TV's region picker to its group menu, puts the phone zoom button in the ruler's corner and announces the time window only after a jump, not on every scroll.
+  - The player's options and right-click menus fit the window at every size, focus lands in the player when a movie starts, and Tab stays inside its controls in Fill window.
+  - Home, Search, Movies and Series: clearer category picker with counts, decade chips that move to their own row instead of being cut, readable language names, shorter tile captions in long languages, and "Open in TV guide" on Home's channel menus.
+  - Settings, sources, favorites, lists and downloads: keyboard menus on library rows (Shift+F10), focus that moves somewhere sensible after removing the last item or a failed retry, a settings navigation that fits long language names, and one spelling of "Cancelled".
+  - Smaller downloads before first render on most pages (Home about 13 kB less).
 
 ### Fixed
 

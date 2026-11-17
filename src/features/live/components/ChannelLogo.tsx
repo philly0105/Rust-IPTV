@@ -298,6 +298,7 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
     <span
       className={cn(!twoLines && 'ms-1.5 whitespace-nowrap', 'text-caption font-medium tracking-wide text-fg-subtle', tagClassName)}
       data-testid="channel-name-tag"
+      dir={twoLines ? 'auto' : undefined}
     >
       {parts.tag}
     </span>
@@ -309,13 +310,14 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
             cut on the first, and its quality words and tag follow it, kept together so neither is
             left alone on a line. The space before them is an ordinary one, so a wrapped tail
             starts flush. Balanced, so "SKY SPORTS / ACTION HD US" rather than a full first line
-            and a short tail. */}
+            and a short tail. Each part is isolated, so they keep the page's order, as the one-line
+            form's flex row does ("US HD" to the left of an Arabic page's name). */}
         <span aria-hidden className="line-clamp-2 break-words text-balance">
           <span dir="auto">{parts.name}</span>
           {parts.variant || tag ? ' ' : null}
           {parts.variant || tag ? (
             <span className="whitespace-nowrap">
-              {parts.variant}
+              {parts.variant ? <bdi>{parts.variant}</bdi> : null}
               {parts.variant && tag ? ' ' : null}
               {tag}
             </span>

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { proxiedUrl, isDesktop, rpc } from '@/api/transport';
 import { itemKey, type PlayerSource } from '@/api/types';
 import { redactText } from '@/features/sources/lib/redact';
+import { plainChannelName } from '@/lib/channelName';
 
 import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { useToast } from '@/ui/Toast';
@@ -628,10 +629,12 @@ function ErrorOverlay({
   // Raw TS only fails for lack of MSE when mpegts.js could not run at all.
   const isRawTs = !!source && looksLikeMpegTs(source) && !mseSupported();
   const hint = isRawTs ? t(rawTsHintKey(source, settings, view.external, view.others)) : view.hint;
-  // Live failover moved here from the channel the user picked: that one failed first. Read as the
-  // error shows; the switch was made before this copy failed.
+  // Live failover moved here from the channel the user picked, and this copy failed too: name both,
+  // without blaming either source (the cause may be this browser). Read as the error shows; the
+  // switch was made before this copy failed.
   const [switchedFrom] = useState(() => failoverOriginTitle(source));
-  const switchedText = switchedFrom && t('liveFailoverSwitchedDetail', { channel: switchedFrom });
+  const switchedText =
+    switchedFrom && source && t('liveFailoverBothFailed', { channel: switchedFrom, backup: plainChannelName(source.title, false) });
   const switchedLine = switchedText && (
     <p
       dir="auto"
@@ -718,9 +721,9 @@ function ErrorOverlay({
         {tight ? (
           <>
             {switchedLine}
-            {/* A short player hides its title bar over an error: name what failed here, which
-                matters most after an automatic switch to another copy. */}
-            {source?.title && (
+            {/* A short player hides its title bar over an error: name what failed here (the line
+                above already names it after an automatic switch to another copy). */}
+            {source?.title && !switchedLine && (
               source.isLive || source.catchupProgramStart ? (
                 <PlayerChannelName testId="error-item" title={source.title} glass className="-mb-1 max-w-full text-caption text-on-glass-muted" />
               ) : (

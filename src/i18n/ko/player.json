@@ -231,6 +231,7 @@
   "switchingSource": "다른 소스를 시도하는 중",
   "liveFailoverSwitched": "{{source}}의 {{channel}}(으)로 전환했습니다",
   "liveFailoverSwitchedDetail": "{{channel}}이(가) 원래 소스에서 재생되지 않습니다.",
+  "liveFailoverBothFailed": "{{channel}}과(와) {{backup}}을(를) 여기서 재생하지 못했습니다.",
   "livePinnedSwitched": "선호 소스 {{source}}에서 {{channel}} 재생 중",
   "alternateSources": "다른 소스",
   "alternateSourcesNone": "이 채널을 제공하는 다른 소스가 없습니다.",

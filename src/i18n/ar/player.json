@@ -231,6 +231,7 @@
   "switchingSource": "جارٍ تجربة مصدر آخر",
   "liveFailoverSwitched": "تم التبديل إلى {{channel}} على {{source}}",
   "liveFailoverSwitchedDetail": "توقفت {{channel}} عن العمل على مصدرها.",
+  "liveFailoverBothFailed": "لم تُشغَّل {{channel}} ولا {{backup}} هنا.",
   "livePinnedSwitched": "تشغيل {{channel}} على {{source}}، مصدرك المفضل",
   "alternateSources": "مصادر بديلة",
   "alternateSourcesNone": "لا يوجد مصدر آخر يبث هذه القناة.",

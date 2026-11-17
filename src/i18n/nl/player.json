@@ -231,6 +231,7 @@
   "switchingSource": "Andere bron proberen",
   "liveFailoverSwitched": "Overgeschakeld naar {{channel}} op {{source}}",
   "liveFailoverSwitchedDetail": "{{channel}} werkt niet meer op zijn bron.",
+  "liveFailoverBothFailed": "{{channel}} en {{backup}} speelden hier niet af.",
   "livePinnedSwitched": "{{channel}} speelt op {{source}}, je voorkeursbron",
   "alternateSources": "Andere bronnen",
   "alternateSourcesNone": "Geen andere bron heeft deze zender.",

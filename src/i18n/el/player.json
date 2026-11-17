@@ -231,6 +231,7 @@
   "switchingSource": "Δοκιμή άλλης πηγής",
   "liveFailoverSwitched": "Έγινε αλλαγή σε {{channel}} στην πηγή {{source}}",
   "liveFailoverSwitchedDetail": "Το {{channel}} σταμάτησε να λειτουργεί στην πηγή του.",
+  "liveFailoverBothFailed": "Τα {{channel}} και {{backup}} δεν παίχτηκαν εδώ.",
   "livePinnedSwitched": "Αναπαραγωγή {{channel}} από {{source}}, την προτιμώμενη πηγή σας",
   "alternateSources": "Εναλλακτικές πηγές",
   "alternateSourcesNone": "Καμία άλλη πηγή δεν έχει αυτό το κανάλι.",

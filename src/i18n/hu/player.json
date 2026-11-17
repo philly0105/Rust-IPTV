@@ -231,6 +231,7 @@
   "switchingSource": "Másik forrás kipróbálása",
   "liveFailoverSwitched": "Átváltva erre: {{channel}} ({{source}})",
   "liveFailoverSwitchedDetail": "A(z) {{channel}} nem működik a saját forrásán.",
+  "liveFailoverBothFailed": "A(z) {{channel}} és a(z) {{backup}} itt nem játszható le.",
   "livePinnedSwitched": "{{channel}} lejátszása innen: {{source}}, a kedvelt forrásod",
   "alternateSources": "Más források",
   "alternateSourcesNone": "Egyik másik forrás sem kínálja ezt a csatornát.",

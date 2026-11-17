@@ -231,6 +231,7 @@
   "switchingSource": "別のソースを試しています",
   "liveFailoverSwitched": "{{source}} の {{channel}} に切り替えました",
   "liveFailoverSwitchedDetail": "{{channel}} は元のソースで再生できなくなりました。",
+  "liveFailoverBothFailed": "{{channel}} と {{backup}} はここで再生できませんでした。",
   "livePinnedSwitched": "優先ソース {{source}} で {{channel}} を再生中",
   "alternateSources": "別のソース",
   "alternateSourcesNone": "このチャンネルを配信している別のソースはありません。",

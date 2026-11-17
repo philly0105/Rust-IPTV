@@ -231,6 +231,7 @@
   "switchingSource": "كنجربو مصدر آخر",
   "liveFailoverSwitched": "تبدلات ل {{channel}} على {{source}}",
   "liveFailoverSwitchedDetail": "{{channel}} وقفات ما بقاتش خدامة فالمصدر ديالها.",
+  "liveFailoverBothFailed": "{{channel}} و{{backup}} ما خدموش هنا.",
   "livePinnedSwitched": "كتشوف {{channel}} على {{source}}، المصدر اللي كتفضل",
   "alternateSources": "مصادر أخرى",
   "alternateSourcesNone": "حتى مصدر آخر ما فيه هاد القناة.",

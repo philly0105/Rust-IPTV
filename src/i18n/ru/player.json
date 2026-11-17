@@ -231,6 +231,7 @@
   "switchingSource": "Пробуем другой источник",
   "liveFailoverSwitched": "Переключено на {{channel}} в {{source}}",
   "liveFailoverSwitchedDetail": "{{channel}} перестал работать в своём источнике.",
+  "liveFailoverBothFailed": "{{channel}} и {{backup}} здесь не воспроизвелись.",
   "livePinnedSwitched": "{{channel}} в {{source}}, вашем предпочтительном источнике",
   "alternateSources": "Другие источники",
   "alternateSourcesNone": "Ни один другой источник не транслирует этот канал.",

@@ -231,6 +231,7 @@
   "switchingSource": "Trying another source",
   "liveFailoverSwitched": "Switched to {{channel}} on {{source}}",
   "liveFailoverSwitchedDetail": "{{channel}} stopped working on its source.",
+  "liveFailoverBothFailed": "{{channel}} and {{backup}} did not play here.",
   "livePinnedSwitched": "Playing {{channel}} on {{source}}, your preferred source",
   "alternateSources": "Alternate sources",
   "alternateSourcesNone": "No other source carries this channel.",

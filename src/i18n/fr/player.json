@@ -231,6 +231,7 @@
   "switchingSource": "Essai d’une autre source",
   "liveFailoverSwitched": "Passage à {{channel}} sur {{source}}",
   "liveFailoverSwitchedDetail": "{{channel}} ne fonctionne plus sur sa source.",
+  "liveFailoverBothFailed": "{{channel}} et {{backup}} n’ont pas pu être lus ici.",
   "livePinnedSwitched": "Lecture de {{channel}} sur {{source}}, votre source préférée",
   "alternateSources": "Autres sources",
   "alternateSourcesNone": "Aucune autre source ne propose cette chaîne.",

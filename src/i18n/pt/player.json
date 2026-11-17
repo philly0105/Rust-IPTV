@@ -231,6 +231,7 @@
   "switchingSource": "Tentando outra fonte",
   "liveFailoverSwitched": "Mudou para {{channel}} em {{source}}",
   "liveFailoverSwitchedDetail": "{{channel}} parou de funcionar na sua fonte.",
+  "liveFailoverBothFailed": "{{channel}} e {{backup}} não foram reproduzidos aqui.",
   "livePinnedSwitched": "Reproduzindo {{channel}} em {{source}}, sua fonte preferida",
   "alternateSources": "Fontes alternativas",
   "alternateSourcesNone": "Nenhuma outra fonte tem este canal.",

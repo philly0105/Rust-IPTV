@@ -231,6 +231,7 @@
   "switchingSource": "正在嘗試其他來源",
   "liveFailoverSwitched": "已切換到 {{source}} 上的 {{channel}}",
   "liveFailoverSwitchedDetail": "{{channel}} 在原來源上無法播放。",
+  "liveFailoverBothFailed": "{{channel}} 和 {{backup}} 都無法在此播放。",
   "livePinnedSwitched": "正在偏好來源 {{source}} 上播放 {{channel}}",
   "alternateSources": "其他來源",
   "alternateSourcesNone": "沒有其他來源提供此頻道。",

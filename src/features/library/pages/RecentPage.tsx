@@ -17,7 +17,7 @@ import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, usePlayerStore, useToast, errorDescription } from '../deps';
-import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
+import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading, useFocusWhenEmptied } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton, type EntryResume } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -309,6 +309,8 @@ export function RecentPage() {
       />
     );
   };
+
+  useFocusWhenEmptied(query.isSuccess && count === 0);
 
   let body;
   if (query.isLoading) body = <EntryRowsSkeleton />;

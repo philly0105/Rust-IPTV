@@ -218,6 +218,35 @@ describe('focus stays in the list after a row is removed (D4)', () => {
   });
 });
 
+describe('removing the last row hands focus to the empty state (w-a11y-09)', () => {
+  it('Recently watched: Delete on the only row focuses Browse channels', async () => {
+    let stored = [makeRecent('a', new Date().toISOString())];
+    rpc.handlers['recent.list'] = () => stored;
+    rpc.handlers['positions.continueWatching'] = () => [];
+    rpc.handlers['recent.remove'] = () => {
+      stored = [];
+    };
+    renderAt('/recent', recentRoute);
+    const row = (await screen.findByRole('button', { name: 'Remove Watched a from history' })).closest<HTMLElement>('[role="listitem"]')!;
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: 'Delete' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('library-empty-browse')));
+  });
+
+  it("Favorites: the only row's remove button hands focus to Browse channels", async () => {
+    let stored = [makeFavorite('movie', 'm1', 0)];
+    rpc.handlers['favorites.list'] = () => stored;
+    rpc.handlers['favorites.remove'] = () => {
+      stored = [];
+    };
+    renderAt('/favorites', favoritesRoute);
+    const remove = await screen.findByRole('button', { name: 'Remove movie m1 from favorites' });
+    act(() => remove.focus());
+    fireEvent.click(remove);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('library-empty-browse')));
+  });
+});
+
 describe('MyVideoDetailPage follows the series when its URL episode is removed (D5)', () => {
   it('stays on the series instead of showing not found', async () => {
     const ep2 = makeEpisode('s1', 'Severance', 'S01E02 Half Loop', { id: 2, completedAt: '2026-10-03T00:00:00Z' });

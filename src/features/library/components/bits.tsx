@@ -2,7 +2,7 @@
 
 import { k } from '../lib/keys';
 import { Clapperboard, Film, Pause, Radio, Tv } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -163,6 +163,24 @@ export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string
     );
   }
   return <NoSourcesActions testId="library-empty-add-source" />;
+}
+
+/**
+ * Removing the last row of Favorites or Recently watched (Delete, the row's remove button) swaps the
+ * list for the empty state, and focus, which sat in a row, would drop to <body>. When that happens
+ * focus moves to the empty state's {@link BrowseAction}, else to the page (#main).
+ */
+export function useFocusWhenEmptied(empty: boolean): void {
+  const was = useRef(empty);
+  useEffect(() => {
+    const before = was.current;
+    was.current = empty;
+    if (!empty || before) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active.isConnected) return;
+    const action = document.querySelector<HTMLElement>('[data-testid="library-empty-browse"], [data-testid="library-empty-add-source"]');
+    (action ?? document.getElementById('main'))?.focus();
+  }, [empty]);
 }
 
 /**

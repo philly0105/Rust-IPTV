@@ -16,7 +16,7 @@ import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types'
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, TEXT_LINK, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
-import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
+import { BrowseAction, PageTitle, SectionHeading, useFocusWhenEmptied } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -272,6 +272,8 @@ export function FavoritesPage() {
       </div>
     );
   };
+
+  useFocusWhenEmptied(query.isSuccess && entries.length === 0);
 
   let body;
   if (query.isLoading) body = <EntryRowsSkeleton />;

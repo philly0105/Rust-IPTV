@@ -83,6 +83,13 @@ export function measureLogo(img: HTMLImageElement): LogoReading {
   }
 }
 
+/** A monogram tile's look: the name's two letters on its tint. */
+const MONOGRAM = 'inline-flex shrink-0 items-center justify-center font-display leading-none font-semibold tracking-tight';
+
+function monogramStyle(name: string, size: number) {
+  return { ...tintVars(name), fontSize: Math.max(9, Math.round(size * 0.36)) };
+}
+
 /**
  * Channel logo on a plate that stays the same in every theme, with a coloured monogram when there
  * is no logo (LG-14), in the channel's tint (src/ui/tint.ts): pale in the light theme, like a light
@@ -107,12 +114,6 @@ export function measureLogo(img: HTMLImageElement): LogoReading {
  * Memoized (P2-LIVE-3): a channel row renders again when the guide's now/next lands, and its logo
  * rendered again with it.
  */
-const MONOGRAM = 'inline-flex shrink-0 items-center justify-center font-display leading-none font-semibold tracking-tight';
-
-function monogramStyle(name: string, size: number) {
-  return { ...tintVars(name), fontSize: Math.max(9, Math.round(size * 0.36)) };
-}
-
 export const ChannelLogo = memo(function ChannelLogo({
   src,
   name,

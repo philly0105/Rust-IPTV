@@ -835,6 +835,8 @@ export interface OnNowCardProps {
   /** The programme's own picture (XMLTV icon), when the guide has one. */
   programmeArt?: string;
   channelName: string;
+  /** The channel's source, named after the channel when Home shows more than one source. */
+  sourceName?: string | undefined;
   logoUrl?: string;
   /** "12 minutes left". */
   left?: string;
@@ -873,8 +875,6 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, sourceNa
                 <span aria-hidden className="absolute top-2 start-2 flex h-7 w-11 items-center justify-center rounded-sm border border-glass-border bg-glass-strong p-1">
                   <Poster src={logoUrl} sourceId={sourceId} width={44} alt="" label={channelName} aspect="wide" fit="contain" kind="live" className="h-full bg-transparent after:hidden [&_img]:p-0" rounded="sm" />
                 </span>
-  /** The channel's source, named after the channel when Home shows more than one source. */
-  sourceName?: string | undefined;
               )}
             </>
           ) : (

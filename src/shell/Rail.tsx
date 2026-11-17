@@ -748,8 +748,20 @@ const ONBOARDING_ROUTES = new Set(['/dashboard', '/sources']);
  * Memoized (performance audit SH-1): it follows the location itself, so the shell's own re-renders pass it by.
  * `autoCollapsed`: below 1100 px (RAIL_DOCK_QUERY), where the rail docks as icons and Expand opens it over the page
  * (`peek`, the shell store's railPeek) without moving the page: a 72 px column stays in its place.
+ * `aside`: the page took the whole window (header.stepAside) and the docked column went with it;
+ * the rail shows only while open over the page, and no column is kept for it.
  */
-export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false }: { collapsed: boolean; autoCollapsed: boolean; peek?: boolean }) {
+export const Rail = memo(function Rail({
+  collapsed,
+  autoCollapsed,
+  peek = false,
+  aside = false,
+}: {
+  collapsed: boolean;
+  autoCollapsed: boolean;
+  peek?: boolean;
+  aside?: boolean;
+}) {
   const { t } = useTranslation('shell');
   const setRailPeek = useShellStore((s) => s.setRailPeek);
   const sources = useVisibleSources();
@@ -811,6 +823,11 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
     const nav = navRef.current;
     const shell = nav?.parentElement;
     if (!peek || !nav || !shell) return;
+    // Opened from the floating Expand sidebar (aside), which went as the rail came: focus takes
+    // the rail's own toggle, where it stays when the docked rail opens.
+    if (aside && (!document.activeElement || document.activeElement === document.body)) {
+      nav.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
+    }
     const made: HTMLElement[] = [];
     for (const el of Array.from(shell.children)) {
       // The scrim stays live: a press on it closes the rail.
@@ -821,7 +838,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
     return () => {
       for (const el of made) el.removeAttribute('inert');
     };
-  }, [peek]);
+  }, [peek, aside]);
   const trapTab = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key !== 'Tab' || e.defaultPrevented) return;
     const items = focusableIn(e.currentTarget);
@@ -920,7 +937,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
   return (
     <>
       {/* Open over the page: the docked column keeps its place, and a press beside the rail closes it. */}
-      {peek && <div aria-hidden className="h-full w-(--rail-width-collapsed) shrink-0 border-e border-divider bg-surface" />}
+      {peek && !aside && <div aria-hidden className="h-full w-(--rail-width-collapsed) shrink-0 border-e border-divider bg-surface" />}
       {peek && (
         <div
           aria-hidden

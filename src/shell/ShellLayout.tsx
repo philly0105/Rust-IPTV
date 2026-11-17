@@ -1,3 +1,4 @@
+import { PanelLeftOpen } from 'lucide-react';
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate, useNavigationType } from 'react-router';
@@ -10,7 +11,7 @@ import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import '@/i18n';
-import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
+import { cn, focusToasts, IconButton, Skeleton, ToastViewport } from '@/ui';
 import { isTypingTarget } from '@/ui/focus';
 
 import { ConnectionBanner, ConnectionWatcher } from './connection';
@@ -513,6 +514,41 @@ export function ShellSkeleton({
 }
 
 /**
+ * The way back to the rail while a page has the whole window (railAside): Expand sidebar, floating
+ * on glass in the top-start corner. It takes focus back when the rail it opened closes (Escape, the
+ * scrim, Collapse), since the rail's own button goes with the rail.
+ */
+function RailAsideButton() {
+  const { t } = useTranslation('shell');
+  const setRailPeek = useShellStore((s) => s.setRailPeek);
+  const ref = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    // Only when focus went with the rail: a link in it may have opened a page that took it.
+    if (railAsideOpened && (!document.activeElement || document.activeElement === document.body)) ref.current?.focus();
+    railAsideOpened = false;
+  }, []);
+  return (
+    <IconButton
+      ref={ref}
+      label={t('expandRail')}
+      tooltipSide="inline-end"
+      tooltipTone="glass"
+      icon={<PanelLeftOpen aria-hidden size={18} className="rtl:-scale-x-100" />}
+      aria-expanded={false}
+      onClick={() => {
+        railAsideOpened = true;
+        setRailPeek(true);
+      }}
+      data-rail-peek=""
+      data-testid="rail-aside"
+      className="fixed start-[calc(env(safe-area-inset-left,0px)+0.5rem)] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] z-30 bg-glass-strong text-on-glass shadow-1 hover:bg-glass-strong hover:text-on-glass"
+    />
+  );
+}
+/** Set when the floating Expand sidebar opens the rail, so the button that comes back takes focus. */
+let railAsideOpened = false;
+
+/**
  * While the phone tab bar shows, --shell-bottom-inset on <html> holds its height (safe area
  * included), so overlays fixed to the bottom of the window (the mini player, toasts) can lift
  * above it; 0px otherwise. On <html>, not the shell's root, because those overlays portal to
@@ -548,6 +584,9 @@ export function ShellLayout() {
   const railPeekPref = useShellStore((s) => s.railPeek);
   const railPeek = railPeekPref && narrow && !phone && !railHidden;
   const collapsed = !railPeek && (railPref || narrow);
+  // A page that takes the whole window (header.stepAside: Multi-view on a phone held sideways)
+  // takes the docked icon rail's column too; a floating Expand sidebar opens it over the page.
+  const railAside = useShellStore((s) => !!s.header?.stepAside) && narrow && !phone && !railHidden;
   // A window widened past the narrow range (or narrowed to a phone) leaves no peek to come back to.
   useEffect(() => {
     if (railPeekPref && !railPeek) useShellStore.getState().setRailPeek(false);
@@ -611,7 +650,8 @@ export function ShellLayout() {
           {t('skipToContent')}
         </a>
         <GlobalShortcuts />
-        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} peek={railPeek} />}
+        {!railHidden && !phone && (!railAside || railPeek) && <Rail collapsed={collapsed} autoCollapsed={narrow} peek={railPeek} aside={railAside} />}
+        {railAside && !railPeek && <RailAsideButton />}
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <Header panelInline={wide} railHidden={railHidden} phone={phone} />
           <ConnectionBanner />

@@ -301,6 +301,28 @@ describe('a page can ask the header to step aside', () => {
     await screen.findByText('aside page');
     expect(within(screen.getByTestId('shell-header')).getByTestId('rail-show')).toBeTruthy();
   });
+
+  it('takes the docked icon rail with it, leaving a floating Expand sidebar that opens it and gets focus back (v-player-07)', async () => {
+    media('(max-width: 1099px)');
+    useShellStore.setState({ railPeek: false });
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(screen.queryByTestId('shell-rail')).toBeNull();
+    const expand = screen.getByTestId('rail-aside');
+    expect(expand.getAttribute('aria-label')).toBe('Expand sidebar');
+    fireEvent.click(expand);
+    const rail = await screen.findByTestId('shell-rail');
+    expect(rail.hasAttribute('data-peek')).toBe(true);
+    // The opener went with the rail's arrival: focus is on the rail's own toggle.
+    expect(rail.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape', code: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('shell-rail')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByTestId('rail-aside'));
+    // Back in, the docked rail returns.
+    fireEvent.click(screen.getByRole('button', { name: 'back in' }));
+    expect(await screen.findByTestId('shell-rail')).toBeTruthy();
+    expect(screen.queryByTestId('rail-aside')).toBeNull();
+  });
 });
 
 describe('the header search slot', () => {

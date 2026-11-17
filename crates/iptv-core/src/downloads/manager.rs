@@ -11,18 +11,32 @@
 //! needs a connection a download holds, the newest download from that source
 //! yields: it stops like a pause, keeps its `.part`, and waits at the front
 //! of the queue until the connection is free again.
+//!
+//! A transfer may hold connections on several sources (mirrors): every
+//! source's budget counts what every transfer holds there
+//! ([`TaskCtl::holdings`]), plus short holds for fingerprints
+//! ([`DownloadManager::try_hold`]) and probe connections. A probe that
+//! learned a limit above the account's reported one ([`super::probe`])
+//! raises the budget to [`learned_download_budget`]. A queued row whose
+//! source is full may start on another source with an identical copy
+//! (queue spreading, `spread.rs`).
 
-use super::shared::Endpoint;
+mod spread;
+
+use super::segments::MAX_CONNECTIONS;
+use super::shared::{limit_key, read_record, Endpoint, LimitRecord};
 use super::store;
 use super::transfer::{self, Outcome};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    CopyRef, DownloadStatus, DownloadWait, LimitKind, Limiting, TransferNote, TransferStats,
-    WaitReason,
+    CopyRef, DownloadStatus, DownloadWait, LimitKind, Limiting, Settings, SourceKind, TransferNote,
+    TransferStats, WaitReason,
 };
 use crate::state::AppState;
 use parking_lot::Mutex;
+use rusqlite::OptionalExtension;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
@@ -65,6 +79,12 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 pub const CLAIM_ATTEMPTS: u32 = 3;
 /// How long an id whose claims all failed waits before it is queued again.
 const CLAIM_RETRY: Duration = Duration::from_secs(30);
+/// How long a source gives no mirror connections after refusing one
+/// ([`DownloadManager::mirror_refused`]).
+pub const MIRROR_COOLDOWN: Duration = Duration::from_secs(120);
+/// How long an endpoint resolved ahead for the next row stays usable
+/// ([`DownloadManager::take_preresolved`]).
+pub const PRERESOLVE_TTL: Duration = Duration::from_secs(60);
 
 /// Why a running transfer was asked to stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +140,12 @@ const MAX_NOTES: usize = 5;
 
 impl TaskCtl {
     fn new(seq: u64, source: String) -> Self {
+        Self::placed(seq, source.clone(), source, None)
+    }
+
+    /// A run on `source` of a row whose own source is `row_source`,
+    /// downloading `copy` (`None`: the row's own ref and episode).
+    fn placed(seq: u64, source: String, row_source: String, copy: Option<CopyRef>) -> Self {
         Self {
             token: CancellationToken::new(),
             reason: Mutex::new(None),
@@ -127,8 +153,8 @@ impl TaskCtl {
             rate_limit: AtomicU64::new(u64::MAX),
             done: tokio::sync::watch::channel(false).0,
             seq,
-            row_source: source.clone(),
-            copy: None,
+            row_source,
+            copy,
             holdings: Mutex::new(vec![(source.clone(), 1)]),
             drops: Mutex::new(Vec::new()),
             notes: Mutex::new(VecDeque::new()),
@@ -262,6 +288,81 @@ impl TaskCtl {
     }
 }
 
+/// Connections `c` holds on `source`. On its authority this is also every
+/// connection its holdings do not place elsewhere: an engine that counts its
+/// connections only in `connections` keeps them all on the authority.
+fn held_on(c: &TaskCtl, source: &str) -> usize {
+    let holdings = c.holdings.lock();
+    let here = holdings
+        .iter()
+        .find(|(s, _)| s == source)
+        .map_or(0, |(_, n)| *n);
+    if c.source != source {
+        return here;
+    }
+    let elsewhere: usize = holdings
+        .iter()
+        .filter(|(s, _)| s != source)
+        .map(|(_, n)| n)
+        .sum();
+    here.max(c.connections().saturating_sub(elsewhere))
+}
+
+/// The settings the runtime decides with, copied out of the settings lock
+/// so no decision holds it.
+#[derive(Debug, Clone)]
+pub(super) struct Policy {
+    /// `download_probe_disabled`: never probed, learned limits ignored.
+    probe_disabled: Vec<String>,
+    /// `download_use_mirrors`.
+    use_mirrors: bool,
+    /// `download_allow_equivalent`.
+    allow_equivalent: bool,
+    /// `download_single_connection`.
+    single: Vec<String>,
+}
+
+impl Policy {
+    pub(super) fn of(s: &Settings) -> Self {
+        Self {
+            probe_disabled: s.download_probe_disabled.clone(),
+            use_mirrors: s.download_use_mirrors,
+            allow_equivalent: s.download_allow_equivalent,
+            single: s.download_single_connection.clone(),
+        }
+    }
+
+    /// Whether probes may run on `source` and what they learned counts.
+    pub(super) fn learns(&self, source: &str) -> bool {
+        !self.probe_disabled.iter().any(|s| s == source)
+    }
+
+    fn single(&self, source: &str) -> bool {
+        self.single.iter().any(|s| s == source)
+    }
+}
+
+/// What the runtime knows of a source beyond its account's limit.
+#[derive(Debug, Clone)]
+enum Info {
+    /// Being read; meanwhile the source is never probed and its learned
+    /// limit does not count yet.
+    Loading,
+    Known {
+        /// A sources row of a kind probes apply to (Xtream, Stalker).
+        probeable: bool,
+        /// What probes learned ([`super::shared::limit_key`]).
+        record: Option<LimitRecord>,
+    },
+}
+
+/// A source whose limit or [`Info`] a background read fills in.
+struct Load {
+    source: String,
+    limit: bool,
+    info: bool,
+}
+
 #[derive(Default)]
 struct Inner {
     queue: VecDeque<i64>,
@@ -292,6 +393,26 @@ struct Inner {
     streaks: HashMap<String, u32>,
     /// When the armed wake-up fires.
     wake_at: Option<Instant>,
+    /// Per source: whether probes apply, and what they learned.
+    info: HashMap<String, Info>,
+    /// Sources that refused a mirror connection, until they give mirror
+    /// connections again ([`MIRROR_COOLDOWN`]).
+    cooldown: HashMap<String, Instant>,
+    /// Connections held outside any transfer ([`DownloadManager::try_hold`]):
+    /// the source, and a token alive as long as the hold.
+    holds: Vec<(String, Weak<()>)>,
+    /// Probe rounds running, per source: the count of their open
+    /// connections, alive as long as the round.
+    probes: HashMap<String, Weak<AtomicUsize>>,
+    /// Rows known to hold an equivalent copy's bytes (`origin_json`): they
+    /// run on that copy or on copies identical to it, never their own.
+    origins: HashMap<i64, CopyRef>,
+    /// Where each queued row could start besides its own source.
+    plans: HashMap<i64, spread::PlanState>,
+    /// Rows a fingerprint batch already covered.
+    batched: HashSet<i64>,
+    /// Endpoints resolved ahead, per row.
+    preresolved: HashMap<i64, spread::Pre>,
 }
 
 /// A source's connection limit as the runtime knows it.
@@ -366,8 +487,7 @@ pub fn download_budget(limit: Option<i64>, playing: usize, recording: usize) -> 
 
 /// [`download_budget`] for a source whose probe learned a limit above the
 /// reported one: everything playback and recordings leave, with no
-/// connection kept free (yield hands playback its connection back). Not
-/// wired into the runtime yet.
+/// connection kept free (yield hands playback its connection back).
 pub fn learned_download_budget(learned: i64, playing: usize, recording: usize) -> usize {
     usize::try_from(learned)
         .unwrap_or(0)
@@ -402,34 +522,266 @@ impl Inner {
         self.recordings.get(source).copied().unwrap_or(0) + self.ended.count(source, now)
     }
 
-    /// `None` while the source's limit is still being read.
-    fn budget(&self, source: &str, now: Instant) -> Option<usize> {
-        match self.limits.get(source)? {
-            Limit::Loading => None,
-            Limit::Known(limit) => Some(download_budget(
-                *limit,
-                self.playing(source, now),
-                self.recording(source, now),
-            )),
-        }
+    /// The limit downloads from `source` follow, and where it comes from: a
+    /// learned limit above the reported one (probing on for the source),
+    /// else the reported one. `None` while the reported limit is being read.
+    fn effective(&self, source: &str, policy: &Policy) -> Option<(Option<i64>, LimitKind)> {
+        let Limit::Known(reported) = *self.limits.get(source)? else {
+            return None;
+        };
+        let learned = match self.info.get(source) {
+            Some(Info::Known {
+                record: Some(r), ..
+            }) if policy.learns(source) => Some(r.limit),
+            _ => None,
+        };
+        Some(match (learned, reported) {
+            (Some(l), r) if l > r.unwrap_or(0) => (Some(l), LimitKind::Learned),
+            (_, Some(r)) => (Some(r), LimitKind::Reported),
+            (_, None) => (None, LimitKind::Unknown),
+        })
     }
 
-    /// Connections the source's transfers hold, including ones winding down.
-    fn used(&self, source: &str) -> usize {
+    /// The budget with `playing` and `recording` taken: a learned limit
+    /// keeps no connection free ([`learned_download_budget`]), a reported
+    /// one does ([`download_budget`]).
+    fn budget_with(
+        &self,
+        source: &str,
+        playing: usize,
+        recording: usize,
+        policy: &Policy,
+    ) -> Option<usize> {
+        Some(match self.effective(source, policy)? {
+            (Some(learned), LimitKind::Learned) => {
+                learned_download_budget(learned, playing, recording)
+            }
+            (limit, _) => download_budget(limit, playing, recording),
+        })
+    }
+
+    /// `None` while the source's limit is still being read.
+    fn budget(&self, source: &str, now: Instant, policy: &Policy) -> Option<usize> {
+        self.budget_with(
+            source,
+            self.playing(source, now),
+            self.recording(source, now),
+            policy,
+        )
+    }
+
+    /// Connections transfers hold on `source`, wherever they download from,
+    /// including ones winding down; `except` is left out.
+    fn transfers_on(&self, source: &str, except: Option<&TaskCtl>) -> usize {
         self.active
             .values()
-            .filter(|c| c.source == source)
-            .map(|c| c.connections())
+            .filter(|c| except.is_none_or(|e| !std::ptr::eq(Arc::as_ptr(c), e)))
+            .map(|c| held_on(c, source))
             .sum()
     }
 
+    /// Connections held on `source` through [`DownloadManager::try_hold`].
+    fn holds_on(&self, source: &str) -> usize {
+        self.holds
+            .iter()
+            .filter(|(s, t)| s == source && t.strong_count() > 0)
+            .count()
+    }
+
+    /// Connections a probe round holds open on `source`.
+    fn probing_on(&self, source: &str) -> usize {
+        self.probes
+            .get(source)
+            .and_then(Weak::upgrade)
+            .map_or(0, |n| n.load(Ordering::Relaxed))
+    }
+
+    fn probing(&self, source: &str) -> bool {
+        self.probes
+            .get(source)
+            .is_some_and(|w| w.strong_count() > 0)
+    }
+
+    /// Everything the app holds on `source` besides playback and
+    /// recordings: transfers (mirror connections included), holds, probes.
+    fn used(&self, source: &str) -> usize {
+        self.transfers_on(source, None) + self.holds_on(source) + self.probing_on(source)
+    }
+
+    fn blocked_now(&self, source: &str, now: Instant) -> bool {
+        self.blocked.get(source).is_some_and(|b| b.until > now)
+    }
+
+    fn cooled(&self, source: &str, now: Instant) -> bool {
+        self.cooldown.get(source).is_some_and(|t| *t > now)
+    }
+
+    /// The source row `id` waits for: its origin's, else its own.
+    fn home(&self, id: i64) -> Option<&str> {
+        match self.origins.get(&id) {
+            Some(o) => Some(o.source_id()),
+            None => self.queued_from.get(&id).map(String::as_str),
+        }
+    }
+
+    /// True when a queued row could start on `source`: it is the row's own
+    /// (or origin's) source, or its spread plan lists a copy there that the
+    /// source would take now. Such a row gets the connection before a
+    /// transfer adds one.
+    fn queue_wants(&self, source: &str, now: Instant, policy: &Policy) -> bool {
+        let spreads_here =
+            policy.use_mirrors && !self.cooled(source, now) && !self.blocked_now(source, now);
+        self.queue.iter().any(|id| {
+            self.home(*id) == Some(source)
+                || spreads_here
+                    && matches!(
+                        self.plans.get(id),
+                        Some(spread::PlanState::Ready(p))
+                            if p.targets(source, policy, self.origins.contains_key(id))
+                    )
+        })
+    }
+
+    /// [`DownloadManager::connection_allowance`] with the lock held.
+    fn authority_allowance(&self, ctl: &TaskCtl, now: Instant, policy: &Policy) -> usize {
+        let source = ctl.source.as_str();
+        // A file splits only into connections the account is known to have
+        // spare: an M3U playlist or a Stalker portal that reports no limit
+        // often allows one (Stalker: one per MAC).
+        if !matches!(self.effective(source, policy), Some((Some(_), _))) {
+            return 1;
+        }
+        if self.playing(source, now) > 0 || self.queue_wants(source, now, policy) {
+            return 1;
+        }
+        let Some(budget) = self.budget(source, now, policy) else {
+            return 1;
+        };
+        // A probe round's connections are left out: they are the probing
+        // transfer's own, and close before the round returns.
+        let others = self.transfers_on(source, Some(ctl)) + self.holds_on(source);
+        budget.saturating_sub(others).max(1)
+    }
+
+    /// Connections `ctl` may hold on `source`, a source other than its
+    /// authority: none while the limit loads, anything plays or records
+    /// there, the source is blocked or cooling down after a refused mirror
+    /// connection, or a queued row could start there.
+    /// `ctl` is `None` for a holder that holds nothing there yet.
+    fn mirror_allowance(
+        &self,
+        ctl: Option<&TaskCtl>,
+        source: &str,
+        now: Instant,
+        policy: &Policy,
+    ) -> usize {
+        let Some((limit, _)) = self.effective(source, policy) else {
+            return 0;
+        };
+        if self.playing(source, now) + self.recording(source, now) > 0
+            || self.blocked_now(source, now)
+            || self.cooled(source, now)
+            || self.queue_wants(source, now, policy)
+        {
+            return 0;
+        }
+        let others =
+            self.transfers_on(source, ctl) + self.holds_on(source) + self.probing_on(source);
+        match limit {
+            None => usize::from(others == 0),
+            Some(_) => self
+                .budget(source, now, policy)
+                .unwrap_or(0)
+                .saturating_sub(others),
+        }
+    }
+
+    /// Whether a queued row may start on `source` now.
+    fn has_room(&self, source: &str, now: Instant, policy: &Policy) -> bool {
+        !self.blocked.contains_key(source)
+            && self
+                .budget(source, now, policy)
+                .is_some_and(|b| self.used(source) < b)
+    }
+
+    /// Where queued row `id` could start besides its home, when its home
+    /// has no room: a source with room and an identical copy (of its origin,
+    /// when it has one), else, for a fresh row with equivalent copies
+    /// allowed, a source with room and an equivalent copy (`adopt`: the copy
+    /// becomes the row's origin). A missing or stale plan is listed for a
+    /// read.
+    fn spread_pick(
+        &mut self,
+        id: i64,
+        home: &str,
+        now: Instant,
+        policy: &Policy,
+        loads: &mut Vec<Load>,
+        plan_loads: &mut Vec<i64>,
+    ) -> Option<(String, Option<CopyRef>, bool)> {
+        let plan = match self.plans.get(&id) {
+            Some(spread::PlanState::Loading) => return None,
+            Some(spread::PlanState::Ready(p)) if p.at.elapsed() < spread::PLAN_TTL => p.clone(),
+            _ => {
+                self.plans.insert(id, spread::PlanState::Loading);
+                plan_loads.push(id);
+                return None;
+            }
+        };
+        let has_origin = self.origins.contains_key(&id);
+        let equivalent: &[CopyRef] = if policy.allow_equivalent && plan.fresh && !has_origin {
+            &plan.equivalent
+        } else {
+            &[]
+        };
+        let tries = plan
+            .identical
+            .iter()
+            .map(|c| (c, false))
+            .chain(equivalent.iter().map(|c| (c, true)));
+        for (copy, adopt) in tries {
+            let source = copy.source_id();
+            if source == home {
+                continue;
+            }
+            self.request_load(source, loads);
+            if !self.cooled(source, now) && self.has_room(source, now, policy) {
+                return Some((source.to_string(), Some(copy.clone()), adopt));
+            }
+        }
+        None
+    }
+
+    /// Marks what is not known yet about `source` as loading and lists it
+    /// for a background read.
+    fn request_load(&mut self, source: &str, loads: &mut Vec<Load>) {
+        let limit = !self.limits.contains_key(source);
+        let info = !self.info.contains_key(source);
+        if limit {
+            self.limits.insert(source.to_string(), Limit::Loading);
+        }
+        if info {
+            self.info.insert(source.to_string(), Info::Loading);
+        }
+        if limit || info {
+            loads.push(Load {
+                source: source.to_string(),
+                limit,
+                info,
+            });
+        }
+    }
+
     /// Asks the newest transfers of every source over its budget to yield
-    /// until the rest fit. Returns their done signals.
-    fn preempt(&self, now: Instant) -> Vec<tokio::sync::watch::Receiver<bool>> {
+    /// until the rest fit. Returns their done signals. Only whole transfers
+    /// downloading from a source count here: mirror connections on it give
+    /// way on their own within a tick ([`DownloadManager::allowance_on`]
+    /// drops to 0 while anything plays there), and probes abort.
+    fn preempt(&self, now: Instant, policy: &Policy) -> Vec<tokio::sync::watch::Receiver<bool>> {
         let mut done = Vec::new();
         let sources: HashSet<&str> = self.active.values().map(|c| c.source.as_str()).collect();
         for source in sources {
-            let Some(budget) = self.budget(source, now) else {
+            let Some(budget) = self.budget(source, now, policy) else {
                 continue;
             };
             let mut running: Vec<&Arc<TaskCtl>> = self
@@ -462,6 +814,9 @@ impl Inner {
         self.released.expire(now);
         self.ended.expire(now);
         self.blocked.retain(|_, b| b.until > now);
+        self.cooldown.retain(|_, t| *t > now);
+        self.holds.retain(|(_, t)| t.strong_count() > 0);
+        self.probes.retain(|_, n| n.strong_count() > 0);
     }
 
     /// The next time a budget can grow while something waits, when no
@@ -478,6 +833,7 @@ impl Inner {
             .chain(self.released.ends())
             .chain(self.ended.ends())
             .chain(self.blocked.values().map(|b| b.until))
+            .chain(self.cooldown.values().copied())
             .filter(|t| *t > now)
             .min()?;
         if self.wake_at.is_some_and(|w| w > now && w <= next) {
@@ -485,6 +841,14 @@ impl Inner {
         }
         self.wake_at = Some(next);
         Some(next)
+    }
+
+    /// Drops what the runtime keeps about a row only while it is tracked.
+    fn forget(&mut self, id: i64) {
+        self.origins.remove(&id);
+        self.plans.remove(&id);
+        self.batched.remove(&id);
+        self.preresolved.remove(&id);
     }
 
     /// Running ids in start order, then the queue: the order `init` restores.
@@ -600,15 +964,30 @@ pub struct ConnHold {
     pub source: String,
     pub purpose: HoldPurpose,
     state: Option<Weak<AppState>>,
+    /// Alive as long as the hold; the runtime counts the connection until
+    /// it is gone.
+    token: Option<Arc<()>>,
 }
 
 impl Drop for ConnHold {
     fn drop(&mut self) {
+        // Given back before the pump, so the pump sees the connection free.
+        self.token.take();
         if let Some(state) = self.state.as_ref().and_then(Weak::upgrade) {
             let mgr = manager(&state);
             pump_if_running(&state, &mgr);
         }
     }
+}
+
+/// A probe round in progress ([`DownloadManager::begin_probe`]).
+pub(super) struct ProbeRound {
+    /// Probe connections open now; the runtime counts them against the
+    /// source while this lives.
+    pub(super) open: Arc<AtomicUsize>,
+    /// Connections the app held on the source when the round began (the
+    /// probing transfer's included).
+    pub(super) base: usize,
 }
 
 /// What a stop request found.
@@ -689,10 +1068,15 @@ impl DownloadManager {
 
     /// Why a queued id waits, when it is more than its turn: playback or
     /// other transfers hold its source's connections, or the source is
-    /// blocked after a refusal.
+    /// blocked after a refusal. The source is the row's home: its origin's
+    /// when it holds an equivalent copy's bytes, else its own.
     pub fn waiting(&self, id: i64) -> Option<DownloadWait> {
+        let policy = self.policy();
         let inner = self.inner.lock();
-        let source = inner.queued_from.get(&id)?;
+        if !inner.queued_from.contains_key(&id) {
+            return None;
+        }
+        let source = inner.home(id)?;
         let now = Instant::now();
         if let Some(b) = inner.blocked.get(source).filter(|b| b.until > now) {
             return Some(DownloadWait {
@@ -703,14 +1087,15 @@ impl DownloadManager {
                 ),
             });
         }
-        let Some(Limit::Known(Some(limit))) = inner.limits.get(source).copied() else {
+        let (Some(_), _) = inner.effective(source, &policy)? else {
             return None;
         };
         let used = inner.used(source);
-        if used < inner.budget(source, now)? {
+        if used < inner.budget(source, now, &policy)? {
             return None;
         }
-        let without_playback = download_budget(Some(limit), 0, inner.recording(source, now));
+        let without_playback =
+            inner.budget_with(source, 0, inner.recording(source, now), &policy)?;
         let reason = if without_playback > used {
             WaitReason::Playback
         } else {
@@ -732,83 +1117,327 @@ impl DownloadManager {
             .filter(|n| *n > 1)
     }
 
-    /// How many connections the transfer `ctl` may hold now (at least 1):
-    /// what its source's budget leaves after the source's other transfers,
-    /// and 1 while anything plays from the source, another download of it
-    /// waits in the queue (that one gets the connection first), or its
-    /// account reports no limit.
+    /// How many connections the transfer `ctl` may hold on its own source
+    /// now (at least 1): what the source's budget leaves after its other
+    /// holders (transfers, mirror connections, holds), and 1 while anything
+    /// plays from the source, a queued download could start there (that one
+    /// gets the connection first), or its limit is unknown.
     pub fn connection_allowance(&self, ctl: &TaskCtl) -> usize {
+        let policy = self.policy();
         let now = Instant::now();
-        let inner = self.inner.lock();
-        let source = ctl.source.as_str();
-        // A file splits only into connections the account is known to have
-        // spare: an M3U playlist or a Stalker portal that reports no limit
-        // often allows one (Stalker: one per MAC).
-        if !matches!(inner.limits.get(source), Some(Limit::Known(Some(_)))) {
-            return 1;
-        }
-        if inner.playing(source, now) > 0 {
-            return 1;
-        }
-        let queued = inner
-            .queue
-            .iter()
-            .any(|id| inner.queued_from.get(id).is_some_and(|s| s == source));
-        if queued {
-            return 1;
-        }
-        let Some(budget) = inner.budget(source, now) else {
-            return 1;
-        };
-        let others = inner.used(source).saturating_sub(ctl.connections());
-        budget.saturating_sub(others).max(1)
+        self.inner.lock().authority_allowance(ctl, now, &policy)
     }
 
     /// Connections `ctl` may hold on `source` now, counting the ones it
-    /// already holds there. On its own source this is
-    /// [`connection_allowance`](Self::connection_allowance); mirrors get
-    /// none yet.
+    /// already holds there, never more than [`MAX_CONNECTIONS`]. On its own
+    /// source this is [`connection_allowance`](Self::connection_allowance).
+    /// On a mirror it is what the budget leaves after every other holder
+    /// there, and 0 while the limit loads (the read starts), anything plays
+    /// or records there, a queued row could start there, or the source
+    /// refused a mirror connection less than [`MIRROR_COOLDOWN`] ago. An
+    /// unknown limit gives 1 while no one else uses the source.
     pub fn allowance_on(&self, ctl: &TaskCtl, source: &str) -> usize {
         if source == ctl.source {
-            self.connection_allowance(ctl)
-        } else {
-            0
+            return self.connection_allowance(ctl).min(MAX_CONNECTIONS);
         }
+        self.mirror_spare(Some(ctl), source)
+    }
+
+    /// Connections a new holder could take on `source` now for a transfer
+    /// whose own source is `item_source`: [`allowance_on`](Self::allowance_on)
+    /// for a mirror it holds nothing on yet. 0 on `item_source` itself (a
+    /// transfer's own source is not a mirror of it).
+    pub fn spare_on(&self, item_source: &str, source: &str) -> usize {
+        if source == item_source {
+            return 0;
+        }
+        self.mirror_spare(None, source)
+    }
+
+    /// Active transfers holding at least one connection on `source`, their
+    /// own or a mirror.
+    pub fn holders(&self, source: &str) -> usize {
+        self.inner
+            .lock()
+            .active
+            .values()
+            .filter(|c| held_on(c, source) > 0)
+            .count()
+    }
+
+    fn mirror_spare(&self, ctl: Option<&TaskCtl>, source: &str) -> usize {
+        self.ensure_loaded(source);
+        let policy = self.policy();
+        let cap = if policy.single(source) {
+            1
+        } else {
+            MAX_CONNECTIONS
+        };
+        let now = Instant::now();
+        self.inner
+            .lock()
+            .mirror_allowance(ctl, source, now, &policy)
+            .min(cap)
     }
 
     /// A short hold on one connection of `source` outside any transfer's
     /// plan (fingerprints, verification). `None` when the source has no
-    /// spare connection; for now every request gets one.
+    /// spare connection: something plays or records there, a queued row
+    /// could start there, it is blocked or cooling down, or its budget is
+    /// spent (with an unknown or loading limit: anyone else uses it).
     pub fn try_hold(&self, source: &str, purpose: HoldPurpose) -> Option<ConnHold> {
+        self.ensure_loaded(source);
+        let policy = self.policy();
+        let now = Instant::now();
+        let mut inner = self.inner.lock();
+        if inner.playing(source, now) + inner.recording(source, now) > 0
+            || inner.blocked_now(source, now)
+            || inner.cooled(source, now)
+            || inner.queue_wants(source, now, &policy)
+        {
+            return None;
+        }
+        let used = inner.used(source);
+        let spare = match inner.effective(source, &policy) {
+            Some((Some(_), _)) => inner.budget(source, now, &policy).is_some_and(|b| used < b),
+            _ => used == 0,
+        };
+        if !spare {
+            return None;
+        }
+        let token = Arc::new(());
+        inner
+            .holds
+            .push((source.to_string(), Arc::downgrade(&token)));
         Some(ConnHold {
             source: source.to_string(),
             purpose,
             state: self.state.get().cloned(),
+            token: Some(token),
         })
     }
 
-    /// A mirror connection to `source` was refused. Mirrors are not used
-    /// yet, so nothing changes.
-    pub fn mirror_refused(&self, _source: &str) {}
-
-    /// The runtime's reason `ctl` may not hold more connections on `source`
-    /// (playback, other downloads, the account limit, a refusal). None yet.
-    pub fn limit_reason(&self, _ctl: &TaskCtl, _source: &str) -> Option<Limiting> {
-        None
+    /// A mirror connection to `source` was refused: for [`MIRROR_COOLDOWN`]
+    /// the source gives no mirror connections, holds or spread starts. Its
+    /// own downloads, their waits and its backoff are untouched.
+    pub fn mirror_refused(&self, source: &str) {
+        self.inner
+            .lock()
+            .cooldown
+            .insert(source.to_string(), Instant::now() + MIRROR_COOLDOWN);
     }
 
-    /// `source`'s connection limit for the transfer breakdown: the
-    /// account's reported limit, once known.
-    pub fn effective_limit(&self, source: &str) -> (Option<i64>, LimitKind) {
-        match self.inner.lock().limits.get(source) {
-            Some(Limit::Known(Some(limit))) => (Some(*limit), LimitKind::Reported),
-            _ => (None, LimitKind::Unknown),
+    /// The runtime's reason `ctl` may not hold more connections on `source`:
+    /// playback or a recording there, other downloads (running there, or
+    /// queued to start there), a refusal (a backoff or a mirror cooldown),
+    /// else the account's limit once one is known.
+    pub fn limit_reason(&self, ctl: &TaskCtl, source: &str) -> Option<Limiting> {
+        let policy = self.policy();
+        let now = Instant::now();
+        let inner = self.inner.lock();
+        let source_id = source.to_string();
+        if inner.playing(source, now) + inner.recording(source, now) > 0 {
+            return Some(Limiting::Playback { source_id });
+        }
+        let others = inner.transfers_on(source, Some(ctl)) + inner.holds_on(source);
+        if others > 0 || inner.queue_wants(source, now, &policy) {
+            return Some(Limiting::OtherDownloads { source_id });
+        }
+        if inner.blocked_now(source, now) || inner.cooled(source, now) {
+            return Some(Limiting::Refused { source_id });
+        }
+        match inner.effective(source, &policy) {
+            Some((Some(limit), _)) => Some(Limiting::AccountLimit { source_id, limit }),
+            _ => None,
         }
     }
 
-    /// An endpoint resolved ahead for row `id`. None yet.
-    pub fn take_preresolved(&self, _id: i64) -> Option<Endpoint> {
-        None
+    /// `source`'s connection limit for the transfer breakdown: a learned
+    /// limit above the reported one, else the reported one, once known.
+    pub fn effective_limit(&self, source: &str) -> (Option<i64>, LimitKind) {
+        self.ensure_loaded(source);
+        let policy = self.policy();
+        self.inner
+            .lock()
+            .effective(source, &policy)
+            .unwrap_or((None, LimitKind::Unknown))
+    }
+
+    /// The endpoint resolved ahead for running row `id`, when it is younger
+    /// than [`PRERESOLVE_TTL`] and is the copy the run downloads. Taken
+    /// once.
+    pub fn take_preresolved(&self, id: i64) -> Option<Endpoint> {
+        let mut inner = self.inner.lock();
+        let spread::Pre::Ready { at, ep, own } = inner.preresolved.remove(&id)? else {
+            return None;
+        };
+        if at.elapsed() > PRERESOLVE_TTL {
+            return None;
+        }
+        let ctl = inner.active.get(&id)?;
+        let matches = match &ctl.copy {
+            Some(copy) => ep.copy == *copy,
+            None => own,
+        };
+        matches.then_some(ep)
+    }
+
+    /// The settings decisions follow now; the defaults for a runtime no
+    /// state is bound to (unit tests).
+    fn policy(&self) -> Policy {
+        match self.state.get().and_then(Weak::upgrade) {
+            Some(state) => Policy::of(&state.settings.read()),
+            None => Policy::of(&Settings::default()),
+        }
+    }
+
+    /// Starts reading what is not known yet about `source` (its limit, its
+    /// probe record), when a state is bound and a runtime runs.
+    fn ensure_loaded(&self, source: &str) {
+        let Some(state) = self.state.get().and_then(Weak::upgrade) else {
+            return;
+        };
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+        let mut loads = Vec::new();
+        self.inner.lock().request_load(source, &mut loads);
+        if !loads.is_empty() {
+            let mgr = manager(&state);
+            for load in loads {
+                tokio::spawn(load_source(state.clone(), mgr.clone(), load));
+            }
+        }
+    }
+
+    /// Reads what is not known yet about `source` and waits for it (at
+    /// most a few seconds), for a probe that needs the record now.
+    pub(super) async fn load_now(&self, state: &Arc<AppState>, source: &str) {
+        let mgr = manager(state);
+        for _ in 0..200 {
+            let mut loads = Vec::new();
+            let known = {
+                let mut inner = self.inner.lock();
+                inner.request_load(source, &mut loads);
+                matches!(inner.limits.get(source), Some(Limit::Known(_)))
+                    && matches!(inner.info.get(source), Some(Info::Known { .. }))
+            };
+            if known {
+                return;
+            }
+            for load in loads {
+                load_source(state.clone(), mgr.clone(), load).await;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// [`super::probe::probe_due`] with the settings read.
+    pub(super) fn probe_due_with(&self, ctl: &TaskCtl, source: &str, policy: &Policy) -> bool {
+        if !policy.learns(source) || ctl.token.is_cancelled() {
+            return false;
+        }
+        self.ensure_loaded(source);
+        let now = Instant::now();
+        {
+            let inner = self.inner.lock();
+            let Some(Info::Known {
+                probeable: true,
+                record,
+            }) = inner.info.get(source)
+            else {
+                return false;
+            };
+            let due = record.as_ref().is_none_or(|r| {
+                chrono::DateTime::parse_from_rfc3339(&r.next_probe_at)
+                    .map_or(true, |at| at <= chrono::Utc::now())
+            });
+            if !due
+                || inner.playing(source, now) + inner.recording(source, now) > 0
+                || inner.probing(source)
+                || inner.blocked_now(source, now)
+            {
+                return false;
+            }
+            let Some((limit, _)) = inner.effective(source, policy) else {
+                return false;
+            };
+            let cap = i64::try_from(MAX_CONNECTIONS).unwrap_or(i64::MAX);
+            if limit.is_some_and(|l| l > cap) {
+                return false;
+            }
+        }
+        held_on(ctl, source) >= self.allowance_on(ctl, source)
+    }
+
+    /// Starts a probe round on `source` for `ctl`: `None` when one already
+    /// runs there. The round counts as using the connections it opens until
+    /// the returned value is dropped.
+    pub(super) fn begin_probe(&self, ctl: &TaskCtl, source: &str) -> Option<ProbeRound> {
+        let mut inner = self.inner.lock();
+        if inner.probing(source) {
+            return None;
+        }
+        let open = Arc::new(AtomicUsize::new(0));
+        inner
+            .probes
+            .insert(source.to_string(), Arc::downgrade(&open));
+        let base =
+            inner.transfers_on(source, Some(ctl)) + held_on(ctl, source) + inner.holds_on(source);
+        Some(ProbeRound { open, base })
+    }
+
+    /// True when a probe on `source` for `ctl` must stop: the transfer is
+    /// stopping, or playback or a recording started there.
+    pub(super) fn probe_interrupted(&self, ctl: &TaskCtl, source: &str) -> bool {
+        if ctl.token.is_cancelled() {
+            return true;
+        }
+        let now = Instant::now();
+        let inner = self.inner.lock();
+        inner.playing(source, now) + inner.recording(source, now) > 0
+    }
+
+    /// The account's reported limit of `source`, once read.
+    pub(super) fn reported_limit(&self, source: &str) -> Option<i64> {
+        match self.inner.lock().limits.get(source) {
+            Some(Limit::Known(limit)) => *limit,
+            _ => None,
+        }
+    }
+
+    /// The probe record of `source` as the runtime knows it.
+    pub(super) fn record(&self, source: &str) -> Option<LimitRecord> {
+        match self.inner.lock().info.get(source) {
+            Some(Info::Known { record, .. }) => record.clone(),
+            _ => None,
+        }
+    }
+
+    /// Replaces the probe record of `source` after a write (`None`: reset).
+    /// A read in flight is dropped, so the next use reads the new one.
+    pub(super) fn set_record(&self, source: &str, record: Option<LimitRecord>) {
+        let mut inner = self.inner.lock();
+        match inner.info.get_mut(source) {
+            Some(Info::Known { record: r, .. }) => *r = record,
+            Some(Info::Loading) => {
+                inner.info.remove(source);
+            }
+            None => {}
+        }
+    }
+
+    /// True while a probe round runs on `source`.
+    pub(super) fn is_probing(&self, source: &str) -> bool {
+        self.inner.lock().probing(source)
+    }
+
+    /// Pumps the queue of the bound state, when a runtime runs.
+    pub(super) fn repump(&self) {
+        if let Some(state) = self.state.get().and_then(Weak::upgrade) {
+            let mgr = manager(&state);
+            pump_if_running(&state, &mgr);
+        }
     }
 
     fn active(&self, id: i64) -> Option<Arc<TaskCtl>> {
@@ -870,19 +1499,19 @@ impl DownloadManager {
         }
     }
 
-    /// True while a transfer from `source` holds more connections than it
-    /// may now.
+    /// True while a transfer holds more connections on `source` than it may
+    /// now, whether `source` is its own or a mirror.
     fn over_allowance(&self, source: &str) -> bool {
         let ctls: Vec<Arc<TaskCtl>> = self
             .inner
             .lock()
             .active
             .values()
-            .filter(|c| c.source == source && !c.token.is_cancelled())
+            .filter(|c| !c.token.is_cancelled() && held_on(c, source) > 0)
             .cloned()
             .collect();
         ctls.iter()
-            .any(|c| c.connections() > self.connection_allowance(c))
+            .any(|c| held_on(c, source) > self.allowance_on(c, source))
     }
 
     /// Shortens the waits after a refusal or outage (the backoff base and
@@ -1065,6 +1694,7 @@ impl DownloadManager {
             inner.queue.remove(pos);
             inner.queued_from.remove(&id);
             inner.waiting_since.remove(&id);
+            inner.forget(id);
             self.publish(&inner);
             return Stopped::Dequeued;
         }
@@ -1170,52 +1800,94 @@ pub fn enqueue_front(state: &Arc<AppState>, id: i64, source: &str) {
     pump(state, &mgr);
 }
 
-/// Starts every queued id whose source has a free connection (in queue
-/// order, so one source at its limit never holds up another), asks
-/// transfers over their source's budget to yield, and arms a wake-up for
-/// the next time a budget can grow. Returns the done signals of the
-/// transfers asked to yield.
+/// How a run was placed, for its claim ([`claim`]).
+struct Start {
+    /// The row's origin as the runtime knew it when it placed the run.
+    origin: Option<CopyRef>,
+    /// The run downloads an equivalent copy that becomes the row's origin.
+    adopt: bool,
+    /// Fingerprint the home source's other queued rows first
+    /// ([`spread::fingerprint_batch`]).
+    batch: bool,
+}
+
+/// Starts every queued id whose home source has a free connection (in
+/// queue order, so one source at its limit never holds up another), or,
+/// when it has none, a source with room and an identical copy (queue
+/// spreading). Asks transfers over their source's budget to yield, and arms
+/// a wake-up for the next time a budget can grow. Returns the done signals
+/// of the transfers asked to yield.
+///
+/// The cap is per source: a source with an unknown limit runs at most
+/// [`MAX_CONCURRENT`] files, one with a known limit what its budget gives,
+/// and the queue as a whole as many as its sources have room for.
 fn pump(
     state: &Arc<AppState>,
     mgr: &Arc<DownloadManager>,
 ) -> Vec<tokio::sync::watch::Receiver<bool>> {
     let now = Instant::now();
+    let policy = Policy::of(&state.settings.read());
     let mut starts = Vec::new();
     let mut loads = Vec::new();
+    let mut plan_loads = Vec::new();
     let (yielding, wake) = {
         let mut inner = mgr.inner.lock();
         inner.expire(now);
         let mut i = 0;
         while i < inner.queue.len() {
             let id = inner.queue[i];
-            let source = inner.queued_from.get(&id).cloned().unwrap_or_default();
-            if !inner.limits.contains_key(&source) {
-                inner.limits.insert(source.clone(), Limit::Loading);
-                loads.push(source.clone());
-            }
-            let room = !inner.blocked.contains_key(&source)
-                && inner
-                    .budget(&source, now)
-                    .is_some_and(|b| inner.used(&source) < b);
-            if !room {
+            let own = inner.queued_from.get(&id).cloned().unwrap_or_default();
+            let origin = inner.origins.get(&id).cloned();
+            let home = origin
+                .as_ref()
+                .map_or_else(|| own.clone(), |o| o.source_id().to_string());
+            inner.request_load(&home, &mut loads);
+            let place = if inner.has_room(&home, now, &policy) {
+                Some((home.clone(), origin.clone(), false))
+            } else if policy.use_mirrors {
+                inner.spread_pick(id, &home, now, &policy, &mut loads, &mut plan_loads)
+            } else {
+                None
+            };
+            let Some((source, copy, adopt)) = place else {
                 i += 1;
                 continue;
-            }
+            };
             inner.queue.remove(i);
             inner.queued_from.remove(&id);
-            let ctl = Arc::new(TaskCtl::new(inner.started, source));
+            inner.plans.remove(&id);
+            let batch = policy.use_mirrors
+                && source == home
+                && origin.is_none()
+                && !inner.batched.contains(&id)
+                && inner
+                    .queue
+                    .iter()
+                    .any(|q| inner.home(*q) == Some(home.as_str()));
+            let ctl = Arc::new(TaskCtl::placed(inner.started, source, own, copy));
             inner.started += 1;
             inner.active.insert(id, ctl.clone());
-            starts.push((id, ctl));
+            starts.push((
+                id,
+                ctl,
+                Start {
+                    origin,
+                    adopt,
+                    batch,
+                },
+            ));
         }
         mgr.publish(&inner);
-        (inner.preempt(now), inner.arm_wake(now))
+        (inner.preempt(now, &policy), inner.arm_wake(now))
     };
-    for (id, ctl) in starts {
-        tokio::spawn(run_task(state.clone(), mgr.clone(), id, ctl));
+    for (id, ctl, start) in starts {
+        tokio::spawn(run_task(state.clone(), mgr.clone(), id, ctl, start));
     }
-    for source in loads {
-        tokio::spawn(load_limit(state.clone(), mgr.clone(), source));
+    for load in loads {
+        tokio::spawn(load_source(state.clone(), mgr.clone(), load));
+    }
+    if !plan_loads.is_empty() {
+        tokio::spawn(spread::load_plans(state.clone(), mgr.clone(), plan_loads));
     }
     if let Some(at) = wake {
         let state = Arc::downgrade(state);
@@ -1232,20 +1904,70 @@ fn pump(
     yielding
 }
 
-/// Reads `source`'s connection limit from its cached account status (every
-/// Xtream sync and account check refreshes it), then pumps.
-async fn load_limit(state: Arc<AppState>, mgr: Arc<DownloadManager>, source: String) {
+/// Reads what `load` lists about its source: the connection limit from
+/// its cached account status (every Xtream sync and account check
+/// refreshes it), and whether probes apply to it and what they learned.
+/// Fills only what is still loading (a status stored meanwhile by
+/// [`account_changed`], or a record a probe wrote, is newer), then pumps.
+/// A read that fails counts as no limit and no record, as a missing status
+/// does.
+async fn load_source(state: Arc<AppState>, mgr: Arc<DownloadManager>, load: Load) {
+    let Load {
+        source,
+        limit: want_limit,
+        info: want_info,
+    } = load;
     let sid = source.clone();
-    let limit = state
-        .db_call(move |c| crate::account::load(c, &sid))
-        .await
-        .ok()
-        .flatten()
-        .and_then(|s| s.max_connections)
-        .filter(|m| *m > 0);
-    // A status stored meanwhile ([`account_changed`]) is newer than this read.
-    if let Some(entry @ Limit::Loading) = mgr.inner.lock().limits.get_mut(&source) {
-        *entry = Limit::Known(limit);
+    let read = state
+        .db_call(move |c| {
+            let limit = if want_limit {
+                crate::account::load(c, &sid)?
+                    .and_then(|s| s.max_connections)
+                    .filter(|m| *m > 0)
+            } else {
+                None
+            };
+            let info = if want_info {
+                let kind: Option<String> = c
+                    .query_row("SELECT kind FROM sources WHERE id = ?1", [&sid], |r| {
+                        r.get(0)
+                    })
+                    .optional()?;
+                let probeable = matches!(
+                    kind.as_deref().map(SourceKind::from_str),
+                    Some(Ok(SourceKind::Xtream | SourceKind::Stalker))
+                );
+                let record = if probeable {
+                    read_record::<LimitRecord>(c, &limit_key(&sid))?
+                } else {
+                    None
+                };
+                Some((probeable, record))
+            } else {
+                None
+            };
+            Ok((limit, info))
+        })
+        .await;
+    let (limit, info) = match read {
+        Ok(read) => read,
+        Err(err) => {
+            tracing::warn!(source, error = %err, "could not read the source's connection limit");
+            (None, Some((false, None)))
+        }
+    };
+    {
+        let mut inner = mgr.inner.lock();
+        if want_limit {
+            if let Some(entry @ Limit::Loading) = inner.limits.get_mut(&source) {
+                *entry = Limit::Known(limit);
+            }
+        }
+        if let (true, Some((probeable, record))) = (want_info, info) {
+            if let Some(entry @ Info::Loading) = inner.info.get_mut(&source) {
+                *entry = Info::Known { probeable, record };
+            }
+        }
     }
     pump(&state, &mgr);
 }
@@ -1262,9 +1984,10 @@ pub fn account_changed(state: &AppState, status: &crate::account::AccountStatus)
     kick(state);
 }
 
-/// Waits (up to [`MAKE_ROOM_WAIT`]) for transfers asked to yield to let go
-/// and for split transfers from `source` to give back the connections they
-/// may no longer hold, plus [`YIELD_GRACE`] when anything had to.
+/// Waits (up to [`MAKE_ROOM_WAIT`]) for transfers asked to yield to let go,
+/// for transfers holding connections on `source` (their own or a mirror) to
+/// give back the ones they may no longer hold, and for a probe round there
+/// to close, plus [`YIELD_GRACE`] when anything had to.
 async fn wait_yielded(
     mgr: &DownloadManager,
     source: Option<&str>,
@@ -1277,7 +2000,9 @@ async fn wait_yielded(
     }));
     let _ = tokio::time::timeout_at(deadline, all).await;
     if let Some(source) = source {
-        while mgr.over_allowance(source) && tokio::time::Instant::now() < deadline {
+        while (mgr.over_allowance(source) || mgr.is_probing(source))
+            && tokio::time::Instant::now() < deadline
+        {
             waited = true;
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -1481,14 +2206,35 @@ fn take_one(n: &AtomicU32) -> bool {
     false
 }
 
+/// What a claim found.
+enum Claim {
+    /// The row is `downloading` now; this run owns it.
+    Claimed,
+    /// The row is no longer queued (paused, canceled or removed meanwhile).
+    NotQueued,
+    /// The row's origin is not the one the run was placed for (a restart
+    /// left one, or a reset cleared it): it goes back to the queue with the
+    /// stored one.
+    Misplaced(Option<CopyRef>),
+    /// The run would adopt an equivalent copy, but the row has bytes of its
+    /// own by now.
+    Stale,
+    /// The run stopped before its claim (a stop request during the
+    /// fingerprint batch).
+    Interrupted,
+}
+
 /// The conditional `queued -> downloading` claim, retried with backoff a
-/// few times when the database is busy or briefly unavailable.
+/// few times when the database is busy or briefly unavailable. In the same
+/// write it checks the row's origin against the run's placement and, for a
+/// run that adopts an equivalent copy, stores that copy as the origin.
 async fn claim(
     state: &Arc<AppState>,
     mgr: &DownloadManager,
     id: i64,
     ctl: &Arc<TaskCtl>,
-) -> CoreResult<bool> {
+    start: &Start,
+) -> CoreResult<Claim> {
     let mut attempt = 0;
     loop {
         let simulated = take_one(&mgr.failing_claims);
@@ -1496,16 +2242,35 @@ async fn claim(
             Err(CoreError::Timeout("simulated claim failure".into()))
         } else {
             let claim_ctl = ctl.clone();
+            let (origin, adopt) = (start.origin.clone(), start.adopt);
             state
                 .db_write(move |c| {
-                    claim_ctl.set_rate_limit(store::get(c, id)?.download.rate_limit_bps);
-                    store::transition(
-                        c,
+                    let d = store::get(c, id)?.download;
+                    claim_ctl.set_rate_limit(d.rate_limit_bps);
+                    if d.status != DownloadStatus::Queued {
+                        return Ok(Claim::NotQueued);
+                    }
+                    if d.origin != origin {
+                        return Ok(Claim::Misplaced(d.origin));
+                    }
+                    if adopt && !spread::is_fresh(&d) {
+                        return Ok(Claim::Stale);
+                    }
+                    let tx = c.transaction()?;
+                    if !store::transition(
+                        &tx,
                         id,
                         &[DownloadStatus::Queued],
                         DownloadStatus::Downloading,
                         None,
-                    )
+                    )? {
+                        return Ok(Claim::NotQueued);
+                    }
+                    if adopt {
+                        store::set_origin(&tx, id, claim_ctl.copy.as_ref())?;
+                    }
+                    tx.commit()?;
+                    Ok(Claim::Claimed)
                 })
                 .await
         };
@@ -1520,14 +2285,38 @@ async fn claim(
     }
 }
 
-async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl: Arc<TaskCtl>) {
+async fn run_task(
+    state: Arc<AppState>,
+    mgr: Arc<DownloadManager>,
+    id: i64,
+    ctl: Arc<TaskCtl>,
+    start: Start,
+) {
+    if start.batch {
+        spread::fingerprint_batch(&state, &mgr, id, &ctl).await;
+    }
     let mut retry_later = false;
+    // A run that never started goes straight back to the front of the
+    // queue, unless the user stopped it meanwhile.
+    let mut again = false;
     // Bytes and `.part` of a run that goes back to the queue, and whether
     // it waits for its source (else it yielded).
     let mut back: Option<(i64, Option<std::path::PathBuf>, bool)> = None;
-    match claim(&state, &mgr, id, &ctl).await {
-        Ok(true) => {
+    let claimed = if ctl.token.is_cancelled() {
+        Ok(Claim::Interrupted)
+    } else {
+        claim(&state, &mgr, id, &ctl, &start).await
+    };
+    let unstopped = || matches!(*ctl.reason.lock(), None | Some(StopReason::Yield));
+    match claimed {
+        Ok(Claim::Claimed) => {
+            if start.adopt {
+                if let Some(copy) = &ctl.copy {
+                    mgr.inner.lock().origins.insert(id, copy.clone());
+                }
+            }
             state.emit("downloads.update", serde_json::json!({}));
+            spread::preresolve_next(&state, &mgr);
             // A panic in the transfer must still free the concurrency slot
             // and leave the row in a final state.
             let mut outcome = match futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
@@ -1564,7 +2353,23 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
             };
             persist_outcome(&state, id, outcome).await;
         }
-        Ok(false) => tracing::debug!(id, "download no longer queued; skipping"),
+        Ok(Claim::NotQueued) => tracing::debug!(id, "download no longer queued; skipping"),
+        Ok(Claim::Interrupted) => again = unstopped(),
+        Ok(Claim::Misplaced(origin)) => {
+            tracing::debug!(id, "download placed for another origin; queueing it again");
+            let mut inner = mgr.inner.lock();
+            match origin {
+                Some(o) => inner.origins.insert(id, o),
+                None => inner.origins.remove(&id),
+            };
+            inner.plans.remove(&id);
+            drop(inner);
+            again = unstopped();
+        }
+        Ok(Claim::Stale) => {
+            mgr.inner.lock().plans.remove(&id);
+            again = unstopped();
+        }
         Err(err) => {
             // The row is still `queued` in the database: dropping the id
             // would leave it waiting with no task until the next launch. A
@@ -1572,36 +2377,51 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
             // does, and the RPC that asked for it saves it.
             let delay = mgr.claim_retry();
             tracing::error!(id, error = %err, ?delay, "could not claim download; queueing it again later");
-            retry_later = matches!(*ctl.reason.lock(), None | Some(StopReason::Yield));
+            retry_later = unstopped();
         }
     }
     // A row that yielded goes back to the front of the queue, and one that
-    // waits for its source behind the source's other queued rows: a file
-    // that keeps failing (one broken file answering 5xx) must not take the
+    // waits for its source behind its home's other queued rows: a file that
+    // keeps failing (one broken file answering 5xx) must not take the
     // source's connection first each time the wait ends while good files
     // wait behind it. Unless the user stopped it meanwhile: their pause,
-    // cancel or remove wins, and is saved before they hear back.
+    // cancel or remove wins, and is saved before they hear back. A run
+    // spread to another source goes back as a row of its own source.
     let mut overruled = None;
     {
         let mut inner = mgr.inner.lock();
         inner.active.remove(&id);
+        let mut queued = false;
         if let Some((bytes, part, waits)) = back.take() {
             match *ctl.reason.lock() {
                 Some(r) if r != StopReason::Yield => overruled = Some((r, (bytes, part))),
                 _ => {
                     let at = if waits {
+                        let home = inner
+                            .origins
+                            .get(&id)
+                            .map_or(ctl.row_source.as_str(), CopyRef::source_id)
+                            .to_string();
                         inner
                             .queue
                             .iter()
-                            .rposition(|q| inner.queued_from.get(q) == Some(&ctl.source))
+                            .rposition(|q| inner.home(*q) == Some(home.as_str()))
                             .map_or(0, |i| i + 1)
                     } else {
                         0
                     };
                     inner.queue.insert(at, id);
-                    inner.queued_from.insert(id, ctl.source.clone());
+                    queued = true;
                 }
             }
+        } else if again {
+            inner.queue.push_front(id);
+            queued = true;
+        }
+        if queued {
+            inner.queued_from.insert(id, ctl.row_source.clone());
+        } else if !retry_later {
+            inner.forget(id);
         }
         mgr.publish(&inner);
     }
@@ -1622,7 +2442,7 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
     ctl.done.send_replace(true);
     state.emit("downloads.update", serde_json::json!({}));
     if retry_later {
-        let (state, delay, source) = (state.clone(), mgr.claim_retry(), ctl.source.clone());
+        let (state, delay, source) = (state.clone(), mgr.claim_retry(), ctl.row_source.clone());
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             enqueue_front(&state, id, &source);
@@ -1833,29 +2653,244 @@ mod tests {
         assert_eq!(mgr.served_by(9), None);
     }
 
+    fn record(limit: i64) -> LimitRecord {
+        LimitRecord {
+            version: 1,
+            limit,
+            reported: Some(1),
+            mode: crate::model::ConnectionLimitMode::Refuse,
+            probed_at: "2026-11-17T00:00:00Z".into(),
+            next_probe_at: "2099-01-01T00:00:00Z".into(),
+            history: Vec::new(),
+        }
+    }
+
+    fn known(mgr: &DownloadManager, source: &str, limit: Option<i64>, learned: Option<i64>) {
+        let mut inner = mgr.inner.lock();
+        inner.limits.insert(source.into(), Limit::Known(limit));
+        inner.info.insert(
+            source.into(),
+            Info::Known {
+                probeable: true,
+                record: learned.map(record),
+            },
+        );
+    }
+
     #[test]
-    fn stubs_keep_todays_behaviour() {
+    fn mirror_allowance_gives_way_to_playback_queue_and_refusals() {
         let mgr = DownloadManager::default();
+        known(&mgr, "a", Some(1), None);
+        known(&mgr, "b", Some(3), None);
         let ctl = TaskCtl::detached("a");
-        assert_eq!(mgr.allowance_on(&ctl, "b"), 0);
+        mgr.inner.lock().active.insert(1, ctl.clone());
         assert_eq!(mgr.allowance_on(&ctl, "a"), mgr.connection_allowance(&ctl));
-        assert_eq!(mgr.limit_reason(&ctl, "a"), None);
-        assert!(mgr.take_preresolved(1).is_none());
-        mgr.mirror_refused("a");
-        let hold = mgr.try_hold("a", HoldPurpose::Verify).unwrap();
+        // Reported 3 keeps one free: 2 for downloads.
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 2);
+        assert_eq!(
+            mgr.limit_reason(&ctl, "b"),
+            Some(Limiting::AccountLimit {
+                source_id: "b".into(),
+                limit: 3,
+            })
+        );
+        // Its own holding there counts; another transfer's leaves less.
+        ctl.set_held("b", 2);
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 2);
+        let other = TaskCtl::detached("b");
+        mgr.inner.lock().active.insert(2, other.clone());
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 1);
+        assert_eq!(mgr.holders("b"), 2);
+        assert_eq!(
+            mgr.spare_on("a", "b"),
+            0,
+            "a new holder gets what is left after both"
+        );
+        assert_eq!(mgr.spare_on("b", "b"), 0);
+        mgr.inner.lock().active.remove(&2);
+        assert_eq!(mgr.spare_on("a", "b"), 0, "ctl still holds 2 there");
+        ctl.set_held("b", 0);
+        assert_eq!(mgr.spare_on("a", "b"), 2);
+        let now = Instant::now();
+        // Playback on the mirror: nothing.
+        mgr.inner.lock().leases.insert(
+            "player".into(),
+            Lease {
+                sources: vec!["b".into()],
+                until: now + Duration::from_secs(60),
+            },
+        );
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 0);
+        assert_eq!(
+            mgr.limit_reason(&ctl, "b"),
+            Some(Limiting::Playback {
+                source_id: "b".into()
+            })
+        );
+        mgr.inner.lock().leases.clear();
+        // A recording: nothing.
+        mgr.inner.lock().recordings.insert("b".into(), 1);
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 0);
+        mgr.inner.lock().recordings.clear();
+        // A row queued for that source starts there first.
+        {
+            let mut inner = mgr.inner.lock();
+            inner.queue.push_back(7);
+            inner.queued_from.insert(7, "b".into());
+        }
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 0);
+        assert_eq!(
+            mgr.limit_reason(&ctl, "b"),
+            Some(Limiting::OtherDownloads {
+                source_id: "b".into()
+            })
+        );
+        {
+            let mut inner = mgr.inner.lock();
+            inner.queue.clear();
+            inner.queued_from.clear();
+        }
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 2);
+        // A refused mirror connection: two minutes without.
+        mgr.mirror_refused("b");
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 0);
+        assert_eq!(
+            mgr.limit_reason(&ctl, "b"),
+            Some(Limiting::Refused {
+                source_id: "b".into()
+            })
+        );
+        assert!(mgr.try_hold("b", HoldPurpose::Verify).is_none());
+        mgr.inner.lock().cooldown.insert("b".into(), now);
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 2);
+        // A limit still loading: nothing; an unknown one: 1 while unused.
+        mgr.inner.lock().limits.insert("c".into(), Limit::Loading);
+        assert_eq!(mgr.allowance_on(&ctl, "c"), 0);
+        known(&mgr, "d", None, None);
+        assert_eq!(mgr.allowance_on(&ctl, "d"), 1);
+        let hold = mgr.try_hold("d", HoldPurpose::Fingerprint).unwrap();
+        assert_eq!(mgr.allowance_on(&ctl, "d"), 0);
+        drop(hold);
+        assert_eq!(mgr.allowance_on(&ctl, "d"), 1);
+    }
+
+    #[test]
+    fn holds_count_against_the_budget() {
+        let mgr = DownloadManager::default();
+        known(&mgr, "b", Some(2), None);
+        let hold = mgr.try_hold("b", HoldPurpose::Verify).unwrap();
         assert_eq!(
             (hold.source.as_str(), hold.purpose),
-            ("a", HoldPurpose::Verify)
+            ("b", HoldPurpose::Verify)
         );
+        assert!(mgr.try_hold("b", HoldPurpose::Verify).is_none(), "budget 1");
+        assert_eq!(mgr.inner.lock().used("b"), 1);
         drop(hold);
+        assert_eq!(mgr.inner.lock().used("b"), 0);
+        assert!(mgr.try_hold("b", HoldPurpose::Fingerprint).is_some());
+        // A transfer's mirror connections count on that account too.
+        let ctl = TaskCtl::detached("a");
+        ctl.set_held("b", 1);
+        mgr.inner.lock().active.insert(1, ctl.clone());
+        assert_eq!(mgr.inner.lock().used("b"), 1);
+        assert!(mgr.try_hold("b", HoldPurpose::Verify).is_none());
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 1);
+        assert!(!mgr.over_allowance("b"));
+        // Playback there wins over the mirror connection.
+        mgr.inner.lock().streams.insert("b".into(), 1);
+        assert_eq!(mgr.allowance_on(&ctl, "b"), 0);
+        assert!(mgr.over_allowance("b"));
+    }
+
+    #[test]
+    fn learned_limit_raises_the_budget_without_a_reserve() {
+        let mgr = DownloadManager::default();
         assert_eq!(mgr.effective_limit("a"), (None, LimitKind::Unknown));
+        mgr.inner.lock().limits.insert("b".into(), Limit::Loading);
+        assert_eq!(mgr.effective_limit("b"), (None, LimitKind::Unknown));
+        known(&mgr, "a", Some(1), None);
+        assert_eq!(mgr.effective_limit("a"), (Some(1), LimitKind::Reported));
+        let ctl = TaskCtl::detached("a");
+        mgr.inner.lock().active.insert(1, ctl.clone());
+        assert_eq!(mgr.connection_allowance(&ctl), 1);
+        known(&mgr, "a", Some(1), Some(3));
+        assert_eq!(mgr.effective_limit("a"), (Some(3), LimitKind::Learned));
+        assert_eq!(mgr.connection_allowance(&ctl), 3);
+        assert_eq!(mgr.allowance_on(&ctl, "a"), 3);
+        // A learned limit at or below the reported one changes nothing.
+        known(&mgr, "a", Some(4), Some(3));
+        assert_eq!(mgr.effective_limit("a"), (Some(4), LimitKind::Reported));
+        assert_eq!(mgr.connection_allowance(&ctl), 3, "4 keeps one free");
+    }
+
+    #[test]
+    fn preresolved_endpoints_are_taken_once_for_the_right_copy() {
+        let mgr = DownloadManager::default();
+        assert!(mgr.take_preresolved(1).is_none());
+        let own = CopyRef::new(
+            crate::model::ItemRef {
+                source_id: "a".into(),
+                content_type: crate::model::ContentType::Movie,
+                item_id: "1".into(),
+            },
+            None,
+        );
+        let ep = Endpoint {
+            copy: own.clone(),
+            kind: SourceKind::Xtream,
+            url: "http://127.0.0.1/movie/u/p/1.mp4".into(),
+            headers: Default::default(),
+        };
+        let ready = |at: Instant, own: bool| spread::Pre::Ready {
+            at,
+            ep: ep.clone(),
+            own,
+        };
+        mgr.inner.lock().active.insert(1, TaskCtl::detached("a"));
         mgr.inner
             .lock()
-            .limits
-            .insert("a".into(), Limit::Known(Some(2)));
-        mgr.inner.lock().limits.insert("b".into(), Limit::Loading);
-        assert_eq!(mgr.effective_limit("a"), (Some(2), LimitKind::Reported));
-        assert_eq!(mgr.effective_limit("b"), (None, LimitKind::Unknown));
+            .preresolved
+            .insert(1, ready(Instant::now(), true));
+        assert_eq!(mgr.take_preresolved(1).map(|e| e.copy), Some(own.clone()));
+        assert!(mgr.take_preresolved(1).is_none(), "taken once");
+        // Too old, or not the copy the run downloads.
+        let old = Instant::now() - PRERESOLVE_TTL - Duration::from_secs(1);
+        mgr.inner.lock().preresolved.insert(1, ready(old, true));
+        assert!(mgr.take_preresolved(1).is_none());
+        let spread = TaskCtl::placed(
+            1,
+            "b".into(),
+            "a".into(),
+            Some(CopyRef::new(
+                crate::model::ItemRef {
+                    source_id: "b".into(),
+                    content_type: crate::model::ContentType::Movie,
+                    item_id: "9".into(),
+                },
+                None,
+            )),
+        );
+        mgr.inner.lock().active.insert(1, Arc::new(spread));
+        mgr.inner
+            .lock()
+            .preresolved
+            .insert(1, ready(Instant::now(), true));
+        assert!(mgr.take_preresolved(1).is_none());
+    }
+
+    #[test]
+    fn a_stopped_queued_row_is_forgotten() {
+        let mgr = DownloadManager::default();
+        {
+            let mut inner = mgr.inner.lock();
+            inner.queue.push_back(3);
+            inner.queued_from.insert(3, "a".into());
+            inner.batched.insert(3);
+            inner.plans.insert(3, spread::PlanState::Loading);
+        }
+        assert!(matches!(mgr.stop(3, StopReason::Pause), Stopped::Dequeued));
+        let inner = mgr.inner.lock();
+        assert!(inner.plans.is_empty() && inner.batched.is_empty());
     }
 
     #[test]

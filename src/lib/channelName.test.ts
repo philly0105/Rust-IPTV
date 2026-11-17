@@ -121,6 +121,13 @@ describe('channelNameParts', () => {
     expect(channelNameParts('NCIS: LA', false, 'NCIS')).toMatchObject({ name: 'NCIS: LA' });
   });
 
+  it("keeps an event's time whole after its name, so a narrow row cuts the teams (w-realdata-02)", () => {
+    const name = 'NEXT | HAWKS VS ARSENAL | Tue 17 Nov 23:00 EDT (US) | 8K EXCLUSIVE | US: ESPN+ PPV 1';
+    expect(channelNameParts(name, false)).toEqual({ name: 'NEXT | HAWKS VS ARSENAL', variant: '| Tue 23:00 EDT', full: name });
+    expect(channelNameParts('ENDED | SPURS VS ROCKETS | Mon 16 Nov 05:00 EDT (US)', true)).toMatchObject({ name: 'SPURS VS ROCKETS', variant: '| Mon 05:00 EDT' });
+    expect(channelNameParts('- NO EVENT STREAMING - | 8K EXCLUSIVE | US: ESPN+ PPV 2', false)).toMatchObject({ name: '- NO EVENT STREAMING - | 8K EXCLUSIVE | US: ESPN+ PPV 2' });
+  });
+
   it('follows the strip setting', () => {
     expect(channelNameParts('US| ESPN HD', true)).toEqual({ name: 'ESPN', variant: 'HD', full: 'ESPN HD' });
   });

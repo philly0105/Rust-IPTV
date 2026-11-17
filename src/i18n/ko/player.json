@@ -24,6 +24,7 @@
   "quality": "화질",
   "qualityAuto": "자동",
   "audioTrack": "오디오 트랙",
+  "audioTrackOnlyOne": "하나뿐",
   "speed": "재생 속도",
   "speedValue": "{{speed}}x",
   "speedNormal": "보통",

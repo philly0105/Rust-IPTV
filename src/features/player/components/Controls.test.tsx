@@ -78,6 +78,31 @@ describe('Controls options menu', () => {
     expect(menu()).toBeNull();
   });
 
+  it('shows Audio track even with one track, disabled and saying so; with a choice it opens the list', () => {
+    render(<Controls variant="overlay" visible />);
+    openMenu();
+    const single = screen.getByRole('menuitem', { name: /audio track/i }) as HTMLButtonElement;
+    expect(single.disabled).toBe(true);
+    expect(single.textContent).toContain('Only one');
+    act(() => {
+      useMediaStore.setState({
+        tracks: {
+          ...useMediaStore.getState().tracks,
+          audio: [
+            { id: '0', label: 'English', selected: true },
+            { id: '1', label: 'Spanish', selected: false },
+          ],
+        },
+      });
+    });
+    const choice = screen.getByRole('menuitem', { name: /audio track/i }) as HTMLButtonElement;
+    expect(choice.disabled).toBe(false);
+    expect(choice.textContent).toContain('English');
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Spanish' }));
+    expect(commands.setAudio).toHaveBeenCalledWith('1');
+  });
+
   it.each(['dock', 'overlay'] as const)('%s: choosing a speed sets the rate and closes the menu', (variant) => {
     render(<Controls variant={variant} visible />);
     openMenu();

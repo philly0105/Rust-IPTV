@@ -24,6 +24,7 @@
   "quality": "Якасць",
   "qualityAuto": "Аўта",
   "audioTrack": "Аўдыядарожка",
+  "audioTrackOnlyOne": "Толькі адна",
   "speed": "Хуткасць прайгравання",
   "speedValue": "{{speed}}x",
   "speedNormal": "Звычайная",

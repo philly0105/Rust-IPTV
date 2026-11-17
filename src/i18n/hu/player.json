@@ -24,6 +24,7 @@
   "quality": "Minőség",
   "qualityAuto": "Automatikus",
   "audioTrack": "Hangsáv",
+  "audioTrackOnlyOne": "Csak egy",
   "speed": "Lejátszási sebesség",
   "speedValue": "{{speed}}x",
   "speedNormal": "Normál",

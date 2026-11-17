@@ -24,6 +24,7 @@
   "quality": "Kwaliteit",
   "qualityAuto": "Automatisch",
   "audioTrack": "Audiospoor",
+  "audioTrackOnlyOne": "Maar één",
   "speed": "Afspeelsnelheid",
   "speedValue": "{{speed}}x",
   "speedNormal": "Normaal",

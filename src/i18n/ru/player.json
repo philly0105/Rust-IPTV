@@ -24,6 +24,7 @@
   "quality": "Качество",
   "qualityAuto": "Авто",
   "audioTrack": "Звуковая дорожка",
+  "audioTrackOnlyOne": "Только одна",
   "speed": "Скорость воспроизведения",
   "speedValue": "{{speed}}×",
   "speedNormal": "Обычная",

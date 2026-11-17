@@ -465,14 +465,17 @@ type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'subStyle' | 'speed' | '
 export const MENU_ITEM =
   'flex w-full items-center rounded-md px-3 py-2 text-start text-body-sm text-on-glass hover:bg-white/10 active:bg-white/15 pointer-coarse:min-h-[calc(44rem/15)] disabled:opacity-50 disabled:hover:bg-transparent';
 
-/** A row that opens a submenu (shared with the video's context menu). */
-export function MenuRow({ label, value, onClick }: { label: string; value?: ReactNode; onClick(): void }) {
+/**
+ * A row that opens a submenu (shared with the video's context menu). `disabled`: nothing to choose
+ * from, so the row only states its value, without the submenu's chevron.
+ */
+export function MenuRow({ label, value, disabled, onClick }: { label: string; value?: ReactNode; disabled?: boolean; onClick(): void }) {
   return (
-    <button type="button" role="menuitem" onClick={onClick} className={cn(MENU_ITEM, 'justify-between gap-6')}>
+    <button type="button" role="menuitem" disabled={disabled} onClick={onClick} className={cn(MENU_ITEM, 'justify-between gap-6')}>
       <span>{label}</span>
       <span className="flex items-center gap-1 text-on-glass-muted">
         {value}
-        <ChevronRight className="size-4 rtl:rotate-180" aria-hidden />
+        {!disabled && <ChevronRight className="size-4 rtl:rotate-180" aria-hidden />}
       </span>
     </button>
   );
@@ -850,7 +853,9 @@ function OptionsMenu({
   }, [view]);
 
   const qualityValue = tracks.qualityAuto ? t('qualityAuto') : (tracks.qualities.find((q) => q.selected)?.label ?? t('qualityAuto'));
-  const audioValue = tracks.audio.find((a) => a.selected)?.label ?? t('trackDefault');
+  // The engines list audio tracks only when there is a choice: one track reads "Only one".
+  const audioChoice = tracks.audio.length > 1;
+  const audioValue = audioChoice ? (tracks.audio.find((a) => a.selected)?.label ?? t('trackDefault')) : t('audioTrackOnlyOne');
   const textValue = tracks.text.find((a) => a.selected)?.label ?? t('off');
 
   const pick = (run: () => void): void => {
@@ -931,9 +936,10 @@ function OptionsMenu({
         }
       }}
       data-sheet={fit.sheet ? '' : undefined}
-      style={menuFrameStyle(fit, '70vh, 420px')}
+      // 460 px: a live channel's whole root view (Audio track included) shows without scrolling.
+      style={menuFrameStyle(fit, '70vh, 460px')}
       onScroll={updateMore}
-      className={menuFrameClass(fit, 'max-h-[min(70vh,420px)] w-64 max-w-[calc(100vw-1.5rem)]')}
+      className={menuFrameClass(fit, 'max-h-[min(70vh,460px)] w-64 max-w-[calc(100vw-1.5rem)]')}
     >
       {view === 'root' && (
         <>
@@ -954,7 +960,8 @@ function OptionsMenu({
             </div>
           )}
           {tracks.qualities.length > 0 && <MenuRow label={t('quality')} value={qualityValue} onClick={() => setView('quality')} />}
-          {tracks.audio.length > 0 && <MenuRow label={t('audioTrack')} value={audioValue} onClick={() => setView('audio')} />}
+          {/* Always there, like Subtitles: a stream with one track says so instead of leaving no row. */}
+          <MenuRow label={t('audioTrack')} value={audioValue} disabled={!audioChoice} onClick={() => setView('audio')} />
           {/* Always there (C6): a file can be loaded into a stream without subtitles. */}
           <MenuRow label={t('subtitles')} value={textValue} onClick={() => setView('text')} />
           {isVod && (

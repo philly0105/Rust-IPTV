@@ -24,6 +24,7 @@
   "quality": "Qualité",
   "qualityAuto": "Auto",
   "audioTrack": "Piste audio",
+  "audioTrackOnlyOne": "Une seule",
   "speed": "Vitesse de lecture",
   "speedValue": "{{speed}}x",
   "speedNormal": "Normale",

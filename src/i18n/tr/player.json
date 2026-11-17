@@ -24,6 +24,7 @@
   "quality": "Kalite",
   "qualityAuto": "Otomatik",
   "audioTrack": "Ses parçası",
+  "audioTrackOnlyOne": "Yalnızca bir",
   "speed": "Oynatma hızı",
   "speedValue": "{{speed}}x",
   "speedNormal": "Normal hız",

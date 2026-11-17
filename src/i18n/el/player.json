@@ -24,6 +24,7 @@
   "quality": "Ποιότητα",
   "qualityAuto": "Αυτόματη",
   "audioTrack": "Κομμάτι ήχου",
+  "audioTrackOnlyOne": "Μόνο ένα",
   "speed": "Ταχύτητα αναπαραγωγής",
   "speedValue": "{{speed}}x",
   "speedNormal": "Κανονική",

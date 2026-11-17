@@ -2887,6 +2887,8 @@ const GuideToolbar = memo(function GuideToolbar({
           className={phone ? (sourcePicker ? 'h-9' : 'h-auto min-h-9 w-auto min-w-fit grow py-1') : pickerWidth}
           optionIcon={!oneRow}
           wrapLabel={oneRow}
+          // Live TV's region select over the groups, sharing its pick for this source.
+          regionScope={`${sourceId}:live`}
           testId="guide-group"
         />
       </div>

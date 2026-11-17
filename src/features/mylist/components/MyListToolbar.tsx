@@ -67,21 +67,6 @@ export function MyListToolbar({
       />
       {/* L4-vod-5: below sm, Hide watched and the sort menu share one row; the menu takes the rest of it. */}
       <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:gap-x-5 lg:ms-auto lg:w-auto">
-        {onView && (
-          <SegmentedControl<MyListView>
-            label={t('viewLabel')}
-            value={view}
-            onChange={onView}
-            // Before the sort on a phone, at the end of the toolbar from lg up.
-            className="shrink-0 lg:order-last"
-            itemClassName="px-2"
-            testId="mylist-view"
-            options={[
-              { value: 'grid', label: t('viewGrid'), content: <LayoutGrid aria-hidden size={16} /> },
-              { value: 'list', label: t('viewList'), content: <List aria-hidden size={16} /> },
-            ]}
-          />
-        )}
         {(watchedCount > 0 || hideWatched) && (
           <Toggle
             checked={hideWatched}
@@ -99,6 +84,22 @@ export function MyListToolbar({
           className="sm:min-w-[11rem]"
           data-testid="mylist-sort"
         />
+        {onView && (
+          <SegmentedControl<MyListView>
+            label={t('viewLabel')}
+            value={view}
+            onChange={onView}
+            // Last on the screen and in the Tab order at every width (an order class drew it after the
+            // sort from lg while Tab reached it first).
+            className="shrink-0"
+            itemClassName="px-2"
+            testId="mylist-view"
+            options={[
+              { value: 'grid', label: t('viewGrid'), content: <LayoutGrid aria-hidden size={16} /> },
+              { value: 'list', label: t('viewList'), content: <List aria-hidden size={16} /> },
+            ]}
+          />
+        )}
       </div>
     </div>
   );

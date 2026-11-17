@@ -2894,7 +2894,22 @@ const GuideToolbar = memo(function GuideToolbar({
       </div>
       {/* CB-GUIDE-GENRE: filter chips, one per bucket, with the bucket's stripe colour. One at a
           time, like Channels DVR's; a chosen chip is inverted, never amber. */}
-      {phone ? null : (
+      {phone ? (
+        // A phone picks the genre from a header action; the chosen one shows here as its pressed
+        // chip (a tap clears it), with the hint when nothing in view has it (v-guide-15).
+        genre ? (
+          <div className="flex w-full min-w-0 items-center gap-2" data-testid="guide-genre-active">
+            <FilterChip pressed dot={genreColor(genre)} count={<X aria-hidden className="size-3.5" />} onClick={() => onGenre(null)}>
+              {tg(`genre_${genre}`)}
+            </FilterChip>
+            {genreHint ? (
+              <span className="line-clamp-2 min-w-0 text-caption text-fg-muted" data-testid="guide-genre-hint">
+                {genreHint}
+              </span>
+            ) : null}
+          </div>
+        ) : null
+      ) : (
         <div className="flex w-full min-w-0 items-center gap-1.5" data-testid="guide-genres">
           {/* A row too narrow for every chip scrolls, its end fading out so a chip cut at the edge reads as more to come. */}
           <div
@@ -3057,8 +3072,8 @@ const GuideWindowDay = memo(function GuideWindowDay({
 });
 
 /**
- * A phone's header actions on the guide (round 4): the genre filter as a picker, inverted while a
- * genre is chosen as a chosen chip is, and Go to playing while the playing row is off screen. In
+ * A phone's header actions on the guide (round 4): the genre filter as a picker, filled with the
+ * genre's dot while one is chosen (the toolbar names it), and Go to playing while the playing row is off screen. In
  * the header they leave the toolbar a single row for the group and the time.
  */
 const GuidePhoneActions = memo(function GuidePhoneActions({
@@ -3089,9 +3104,16 @@ const GuidePhoneActions = memo(function GuidePhoneActions({
         value={genre ?? ''}
         sections={genreSections}
         onChange={(v) => onGenre((v || null) as Genre | null)}
-        triggerIcon={<ListFilter size={18} />}
-        // At rest it sits borderless among the header's icon buttons; a chosen genre inverts it.
-        className={genre ? undefined : 'border-transparent bg-transparent hover:bg-hover'}
+        triggerIcon={
+          <span className="relative flex">
+            <ListFilter size={18} />
+            {genre ? <span className="absolute -end-1 -top-1 size-2.5 rounded-full ring-2 ring-surface-3" style={{ background: genreColor(genre) }} /> : null}
+          </span>
+        }
+        // It sits borderless among the header's icon buttons. A chosen genre fills it quietly and
+        // puts the genre's dot on it; the toolbar's chip names the genre (inverted, it was the
+        // loudest thing on the screen and still did not say which genre).
+        className={genre ? 'border-transparent bg-surface-3 text-fg hover:bg-hover' : 'border-transparent bg-transparent hover:bg-hover'}
         testId="guide-genre-picker"
       />
     </>

@@ -19,10 +19,7 @@ import { toast } from '@/ui';
 
 import { errorDescription } from '../deps';
 import { playDownload } from '../lib/playDownload';
-import { downloadNames } from '../lib/queue';
-
-/** The toast of one download: a later change of the same download updates it in place. */
-export const downloadToastId = (id: number) => `download-${id}`;
+import { downloadNames, downloadToastId } from '../lib/queue';
 
 /** Downloads whose status moved to completed or failed since `before` (new rows that are already done count too). */
 export function downloadTransitions(before: ReadonlyMap<number, DownloadStatus>, after: readonly Download[]): { finished: Download[]; failed: Download[] } {

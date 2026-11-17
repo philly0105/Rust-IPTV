@@ -10,6 +10,12 @@ import type { Download, DownloadStatus } from '@/api/types';
 export type QueueAction = 'pause' | 'resume' | 'cancel' | 'retry' | 'remove' | 'reveal' | 'next';
 export type QueueSection = 'active' | 'attention' | 'finished';
 
+/**
+ * The toast of one download: a later change of the same download updates it in place, so the
+ * finished toast replaces the "Download queued" one a fast download would otherwise stack under.
+ */
+export const downloadToastId = (id: number) => `download-${id}`;
+
 export function sectionOf(status: DownloadStatus): QueueSection {
   if (status === 'downloading' || status === 'queued' || status === 'paused') return 'active';
   if (status === 'failed' || status === 'canceled') return 'attention';

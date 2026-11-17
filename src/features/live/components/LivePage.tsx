@@ -574,10 +574,16 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const noRadio = isRadio && !!source.data && (source.data.radioCount ?? 0) === 0 && paged.total === 0 && !debouncedSearch && !routeCategory;
   // The ribbon's (deferred) copy: the header's link moves with the ribbon, not in a zap's own commit.
   const headerGuideHref = noRadio ? '' : ribbon.guideHref;
+  // On a phone while a channel plays, the header's "Live TV" only repeats the tab bar under it: it
+  // steps aside for one more row of channels, and its TV guide button moves onto the list's toolbar.
+  const phone = useMediaQuery('(max-width: 639px)');
+  const headerAside = phone && stageBusy && !isRadio;
+  const toolbarGuideHref = headerAside ? headerGuideHref : '';
   useEffect(() => {
     shell.setHeader({
       title,
       ...(headerSubtitle ? { subtitle: headerSubtitle } : {}),
+      stepAside: headerAside,
       actions: !headerGuideHref ? undefined : (
         <Link
           to={headerGuideHref}
@@ -597,7 +603,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         </Link>
       ),
     });
-  }, [title, headerSubtitle, headerGuideHref, i18n.language]);
+  }, [title, headerSubtitle, headerGuideHref, headerAside, i18n.language]);
   useEffect(() => () => shell.setHeader({ title: '' }), []);
 
   // ---- remote control -----------------------------------------------------
@@ -946,10 +952,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         />
         {/* Radio has no picture: its stations are never filtered by quality. */}
         {isRadio ? null : <QualityFilterButton min={quality.min} hideUntagged={quality.hideUntagged} onChange={quality.update} />}
+        {/* The header's TV guide button, while the header steps aside for a playing channel on a phone. */}
+        {toolbarGuideHref ? (
+          <Link
+            to={toolbarGuideHref}
+            aria-label={t('openGuide')}
+            className={buttonClass('ghost', 'sm', 'w-8 shrink-0 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)]')}
+            data-testid="live-toolbar-guide"
+          >
+            <CalendarClock className="size-4" aria-hidden />
+          </Link>
+        ) : null}
       </div>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- searchRef and focusListPending are refs
-    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, isRadio, quality.min, quality.hideUntagged, quality.update, t],
+    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, isRadio, quality.min, quality.hideUntagged, quality.update, toolbarGuideHref, t],
   );
 
   // ---- render -------------------------------------------------------------

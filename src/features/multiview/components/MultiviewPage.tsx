@@ -147,7 +147,10 @@ export function MultiviewPage() {
   // The header's subtitle is the page's scope, a count with its noun ("0 of 4 on the wall"); the
   // toolbar (or a phone's first frame) says how the wall works.
   const subtitle = t('subtitle', { n: count, max: MAX_TILES });
-  useShellHeader({ title, subtitle }, [title, subtitle]);
+  // On a very short window (a phone on its side) the toolbar floats over the wall and says the
+  // same: the shell's header steps aside, and the wall gets its height.
+  const headerAside = shortStage && count > 0;
+  useShellHeader({ title, subtitle, stepAside: headerAside }, [title, subtitle, headerAside]);
 
   // A swap whose tile went away (closed, cleared, replaced from elsewhere) ends.
   useEffect(() => {

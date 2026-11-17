@@ -125,6 +125,23 @@ function GuideLikePage() {
   return <Page>guide page</Page>;
 }
 
+/** A page that asks the header to step aside while `aside` is set (Multi-view on a short window). */
+function AsidePage() {
+  const [aside, setAside] = useState(true);
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Multi-view', stepAside: aside });
+  }, [shell, aside]);
+  return (
+    <Page>
+      aside page
+      <button type="button" onClick={() => setAside(false)}>
+        back in
+      </button>
+    </Page>
+  );
+}
+
 const onBack = vi.fn();
 
 function routes() {
@@ -142,6 +159,7 @@ function routes() {
         { path: 'page-search', element: <PageSearchPage /> },
         { path: 'search', element: <Page>search page</Page> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
+        { path: 'aside', element: <AsidePage /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
       ],
@@ -263,6 +281,25 @@ describe('detail pages: Back in the header, the title once its h1 scrolls away',
     renderRoutes(routes(), '/detail');
     await screen.findByRole('heading', { level: 1, name: 'The Copper Meridian' });
     expect(screen.getByTestId('page-title').textContent).toBe('Movies');
+  });
+});
+
+describe('a page can ask the header to step aside', () => {
+  it('draws no header bar while the page asks, keeps the window title, and comes back after', async () => {
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(screen.queryByTestId('shell-header')).toBeNull();
+    expect(document.title).toBe('Multi-view · Tsrust IPTV');
+    fireEvent.click(screen.getByRole('button', { name: 'back in' }));
+    expect(await screen.findByTestId('shell-header')).toBeTruthy();
+  });
+
+  it('stays while the rail is hidden, whose Show button is in the header', async () => {
+    media('(max-width: 1023px)');
+    useShellStore.setState({ railHidden: true });
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(within(screen.getByTestId('shell-header')).getByTestId('rail-show')).toBeTruthy();
   });
 });
 

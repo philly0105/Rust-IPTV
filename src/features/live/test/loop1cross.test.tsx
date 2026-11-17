@@ -130,4 +130,24 @@ describe('Live header guide link', () => {
     for (const c of buttonClass('ghost', 'sm').split(' ')) expect(link.classList.contains(c), c).toBe(true);
     expect(link.className).toContain('max-sm:pointer-coarse:min-w-[calc(44rem/15)]');
   });
+
+  it('on a phone while a channel plays, the header steps aside and its guide link moves onto the toolbar', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ ...original(query), matches: query === '(max-width: 639px)' })) as typeof window.matchMedia;
+    try {
+      renderAt('/s/src1/live', LIVE);
+      await screen.findByText('Channel 0');
+      expect(fakes.lastHeader()?.stepAside).toBe(false);
+      expect(screen.queryByTestId('live-toolbar-guide')).toBeNull();
+      fakes.usePlayerStore.setState({
+        source: { url: 'http://x/c0.ts', kind: 'direct', title: 'Channel 0', ref: { sourceId: 'src1', contentType: 'live', itemId: 'c0' }, isLive: true, isRadio: false },
+      } as never);
+      await waitFor(() => expect(fakes.lastHeader()?.stepAside).toBe(true));
+      const link = await screen.findByTestId('live-toolbar-guide');
+      expect(link.getAttribute('aria-label')).toBe('TV guide');
+      expect(link.getAttribute('href')).toBe((fakes.lastHeader()!.actions as { props: { to: string } }).props.to);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
 });

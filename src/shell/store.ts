@@ -61,6 +61,15 @@ export interface HeaderState {
    * (or `documentTitle`) throughout.
    */
   section?: string;
+  /**
+   * The page asks the header to step aside: the shell draws no header bar while it is set, and the
+   * page gets its height. For a page whose own toolbar already says where the user is and holds
+   * every action the header would carry (Multi-view's floating toolbar on a very short window,
+   * Live TV on a phone while a channel plays, whose title only repeats the tab bar). The page must
+   * keep `actions` reachable itself. Ignored while the rail is hidden: its Show button is in the
+   * header.
+   */
+  stepAside?: boolean;
 }
 
 export interface ShellStore {

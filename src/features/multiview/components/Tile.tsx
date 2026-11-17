@@ -1,7 +1,7 @@
 import {
   ArrowLeftRight,
   CircleSlash,
-  Ellipsis,
+  EllipsisVertical,
   LayoutPanelLeft,
   LoaderCircle,
   Lock,
@@ -600,7 +600,7 @@ export const Tile = memo(function Tile({
             <Menu
               label={t('tileMenuLabel', { name })}
               tooltip={t('tileMenuLabel', { name })}
-              trigger={<Ellipsis aria-hidden className="size-4" />}
+              trigger={<EllipsisVertical aria-hidden className="size-4" />}
               triggerClassName={TOOL_BUTTON}
               align="end"
               // On a phone the menu is a sheet over the lower half of the wall: it names the tile.

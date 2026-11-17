@@ -1,4 +1,4 @@
-import { Ellipsis } from 'lucide-react';
+import { EllipsisVertical } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -38,9 +38,9 @@ export interface MenuProps {
   items: MenuItem[];
   /** Accessible name of the trigger. Defaults to "More actions". */
   label?: string;
-  /** Trigger content; defaults to an ellipsis icon (an IconButton whose tooltip is `label`). */
+  /** Trigger content; defaults to the vertical ellipsis ⋮, the app's one 'more' glyph (an IconButton whose tooltip is `label`). */
   trigger?: ReactNode;
-  /** The default trigger's glyph instead of the horizontal ellipsis (a row's ⋮, as Live TV's rows draw it). */
+  /** The default trigger's glyph instead of the ⋮ at 18 px (a smaller ⋮ for a compact row). */
   triggerIcon?: ReactNode;
   triggerClassName?: string;
   /** Tooltip for a custom icon-only `trigger` (the default trigger already shows `label`). */
@@ -347,7 +347,7 @@ export function Menu({ items, label, trigger, triggerIcon, triggerClassName, too
         <IconButton
           ref={triggerRef}
           label={label ?? t('moreActions')}
-          icon={triggerIcon ?? <Ellipsis aria-hidden size={18} />}
+          icon={triggerIcon ?? <EllipsisVertical aria-hidden size={18} />}
           {...triggerProps}
           className={triggerClassName}
         />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { displayChannelName, plainChannelName, splitCountryTag, splitPlaceTag, stripCountryPrefix } from './channelName';
+import { channelNameParts, displayChannelName, plainChannelName, splitCountryTag, splitPlaceTag, stripCountryPrefix } from './channelName';
 
 describe('splitCountryTag', () => {
   it('splits a provider tag from the name by the strip rules', () => {
@@ -93,5 +93,35 @@ describe('plainChannelName', () => {
   it('leaves the tag out with the strip setting on', () => {
     expect(plainChannelName('US| ABC (Backup)', true)).toBe('ABC (Backup)');
     expect(plainChannelName('NBA: Lakers vs Celtics', true)).toBe('Lakers vs Celtics');
+  });
+});
+
+describe('channelNameParts', () => {
+  it('keeps a feed\'s quality and copy words apart from the station, so a narrow column cuts the station', () => {
+    expect(channelNameParts('CA EN: SKY SPORTS PREMIER LEAGUE ᴿᴬᵂ ⁶⁰ᶠᵖˢ', false)).toEqual({
+      name: 'SKY SPORTS PREMIER LEAGUE',
+      variant: 'ᴿᴬᵂ ⁶⁰ᶠᵖˢ',
+      tag: 'CA EN',
+      full: 'CA EN: SKY SPORTS PREMIER LEAGUE ᴿᴬᵂ ⁶⁰ᶠᵖˢ',
+    });
+    expect(channelNameParts('US: TENNIS CHANNEL HD (BACKUP 2)', false)).toMatchObject({ name: 'TENNIS CHANNEL', variant: 'HD (BACKUP 2)', tag: 'US' });
+    expect(channelNameParts('KR: ESPN HD BACKUP', false)).toMatchObject({ name: 'ESPN', variant: 'HD BACKUP' });
+    expect(channelNameParts('RAI 2 FHD ᴴᴰ/ᴿᴬᵂ', false)).toMatchObject({ name: 'RAI 2', variant: 'FHD ᴴᴰ/ᴿᴬᵂ' });
+    // A name's own words and numbers stay with it, and so does its first word.
+    expect(channelNameParts('SKY SPORTS F1', false)).toEqual({ name: 'SKY SPORTS F1', full: 'SKY SPORTS F1' });
+    expect(channelNameParts('BEIN SPORTS 2', false)).toEqual({ name: 'BEIN SPORTS 2', full: 'BEIN SPORTS 2' });
+    expect(channelNameParts('HD', false)).toEqual({ name: 'HD', full: 'HD' });
+    expect(channelNameParts('NEXT | HAWKS VS ARSENAL | US: ESPN+ PPV 1', false)).toMatchObject({ name: 'NEXT | HAWKS VS ARSENAL | US: ESPN+ PPV 1' });
+  });
+
+  it('leaves out a leading word the open group\'s name already has', () => {
+    expect(channelNameParts('PRIME: PBS HD', false, 'US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ')).toEqual({ name: 'PBS', variant: 'HD', full: 'PRIME: PBS HD' });
+    expect(channelNameParts('PRIME: PBS HD', false)).toMatchObject({ name: 'PRIME: PBS' });
+    expect(channelNameParts('PRIME: PBS HD', false, 'US| SPORTS')).toMatchObject({ name: 'PRIME: PBS' });
+    expect(channelNameParts('NCIS: LA', false, 'NCIS')).toMatchObject({ name: 'NCIS: LA' });
+  });
+
+  it('follows the strip setting', () => {
+    expect(channelNameParts('US| ESPN HD', true)).toEqual({ name: 'ESPN', variant: 'HD', full: 'ESPN HD' });
   });
 });

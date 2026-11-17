@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, Info, X } from 'lucide-react';
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,8 @@ import { announceFocusAfterCommit, isAnnouncedFocus } from './focus';
 import { ProgressBar } from './Misc';
 import { portalContainer } from './portal';
 
-export type ToastVariant = 'info' | 'success' | 'error';
+/** `warning`: it worked, but something will not (a multi-view tile past the account's stream limit). */
+export type ToastVariant = 'info' | 'success' | 'warning' | 'error';
 
 export interface ToastOptions {
   title: ReactNode;
@@ -256,7 +257,7 @@ function ToastItem({ t, paused, leaving = false, onLeft }: { t: ToastRecord; pau
     return pause;
   }, [t, duration, paused, leaving]);
 
-  const Icon = t.variant === 'success' ? CircleCheck : t.variant === 'error' ? CircleAlert : Info;
+  const Icon = t.variant === 'success' ? CircleCheck : t.variant === 'error' ? CircleAlert : t.variant === 'warning' ? TriangleAlert : Info;
   return (
     <li
       ref={liRef}
@@ -287,7 +288,7 @@ function ToastItem({ t, paused, leaving = false, onLeft }: { t: ToastRecord; pau
         aria-hidden
         className={cn(
           'absolute inset-y-0 start-0 w-1',
-          t.variant === 'success' ? 'bg-success' : t.variant === 'error' ? 'bg-danger' : 'bg-fg-subtle',
+          t.variant === 'success' ? 'bg-success' : t.variant === 'error' ? 'bg-danger' : t.variant === 'warning' ? 'bg-warning' : 'bg-fg-subtle',
         )}
       />
       <Icon
@@ -295,7 +296,7 @@ function ToastItem({ t, paused, leaving = false, onLeft }: { t: ToastRecord; pau
         size={18}
         className={cn(
           'mt-0.5 shrink-0',
-          t.variant === 'success' ? 'text-success' : t.variant === 'error' ? 'text-danger' : 'text-fg-muted',
+          t.variant === 'success' ? 'text-success' : t.variant === 'error' ? 'text-danger' : t.variant === 'warning' ? 'text-warning' : 'text-fg-muted',
         )}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1">

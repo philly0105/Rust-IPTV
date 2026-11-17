@@ -262,13 +262,14 @@ export function SportsPage() {
   const watchable =
     hasSources && !matching && !uncounted && streamsError === null ? [...sections.live, ...sections.upcoming, ...sections.final].filter(hasStream).length : undefined;
 
-  // A league that failed with no games kept has no count either; the others still have theirs.
+  // A league that failed with no games kept has no count either; the others still have theirs. While a
+  // team search is on, the tabs count the games it finds, as With streams does: one toolbar, one kind of number.
   const counts = useMemo(() => {
     if (uncounted) return undefined;
-    const all: Partial<Record<League, number>> = leagueCounts(allDay.games);
+    const all: Partial<Record<League, number>> = leagueCounts(filterGames(allDay.games, null, query));
     for (const l of failedLeagues) delete all[l];
     return all;
-  }, [uncounted, allDay.games, failedLeagues]);
+  }, [uncounted, allDay.games, failedLeagues, query]);
   const liveLeagues = useMemo(() => new Set<League>(allLive.games.map((g) => g.league)), [allLive.games]);
   const showLeague = league === null;
   const myTeamsCount = useMemo(

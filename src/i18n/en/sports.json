@@ -20,7 +20,7 @@
   "finalAfter": "Final/{{period}}",
   "tbd": "TBD",
   "postponed": "Postponed",
-  "canceled": "Canceled",
+  "canceled": "Cancelled",
   "suspended": "Suspended",
   "gamecast": "Gamecast",
   "streamsFor": "Streams for {{title}}",

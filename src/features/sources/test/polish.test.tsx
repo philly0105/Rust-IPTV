@@ -131,6 +131,26 @@ describe('inline validation in the add dialog', () => {
     expect(input(/^Server URL/).getAttribute('aria-invalid')).toBe('true');
   });
 
+  it('splits a full Xtream link when it is pasted or the field is left, never while it is typed (v-setup-12)', async () => {
+    const link = 'http://line.example.tv:8080/get.php?username=bob&password=secret&type=m3u_plus';
+    await openAdd('Xtream Codes');
+    // Typed key by key: the link is complete at "password=s" and must stay whole.
+    type(/^Server URL/, 'http://line.example.tv:8080/get.php?username=bob&password=s');
+    type(/^Server URL/, link);
+    expect(input(/^Server URL/).value).toBe(link);
+    expect(input(/^Password/).value).toBe('');
+    fireEvent.blur(input(/^Server URL/));
+    expect(input(/^Server URL/).value).toBe('http://line.example.tv:8080');
+    expect(input(/^Username/).value).toBe('bob');
+    expect(input(/^Password/).value).toBe('secret');
+    // A paste splits at once.
+    type(/^Server URL/, '');
+    fireEvent.paste(input(/^Server URL/));
+    type(/^Server URL/, 'http://other.example.tv/get.php?username=amy&password=pw2');
+    expect(input(/^Server URL/).value).toBe('http://other.example.tv');
+    expect(input(/^Username/).value).toBe('amy');
+  });
+
   it('flags an incomplete MAC on blur and clears it once completed', async () => {
     await openAdd('Stalker portal');
     type(/^MAC address/, '001a79');
@@ -140,6 +160,20 @@ describe('inline validation in the add dialog', () => {
     expect(within(dialog()).queryByText('Enter 12 hex digits, like 00:1A:79:12:34:56.')).toBeNull();
     fireEvent.blur(input(/^MAC address/));
     expect(input(/^MAC address/).getAttribute('aria-invalid')).toBeNull();
+  });
+});
+
+describe('add dialog opened by a link (v-setup-07)', () => {
+  it('Escape hands focus to the first kind tile when there are no sources, and to Add a source when there are', async () => {
+    await openAdd();
+    fireEvent.keyDown(dialog(), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement?.closest('[data-testid="sources-onboarding"]')).not.toBeNull());
+    cleanup();
+    rpcMock.handlers['sources.list'] = () => [xtream('x')];
+    renderAt(routes(), '/sources?add=1');
+    fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-testid')).toBe('sources-add'));
   });
 });
 
@@ -400,7 +434,7 @@ describe('edit save failure', () => {
 });
 
 describe('refresh failures', () => {
-  it('bad credentials point to the settings instead of a blind retry', async () => {
+  it("bad credentials say so once, in the card's words, with Try again on the toast and Check settings on the card (v-setup-02)", async () => {
     rpcMock.handlers['sources.list'] = () => [xtream('x')];
     rpcMock.handlers['sources.refresh'] = () => {
       throw new RpcError('auth', 'xt.example.com answered HTTP 401');
@@ -409,11 +443,10 @@ describe('refresh failures', () => {
     fireEvent.click(await screen.findByTestId('source-refresh'));
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     const toast = useToastStore.getState().toasts[0]!;
-    expect(toast.description).toBe("The server didn't accept the login. The provider turned down the sign-in. Check the username and password.");
-    expect(toast.action?.label).toBe('Check settings');
+    expect(toast.description).toBe('The provider turned down the sign-in. Check the username and password.');
+    expect(toast.action?.label).toBe('Try again');
     act(() => toast.action!.onClick());
-    expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(input(/^Username/).value).toBe('alice');
+    await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(2));
   });
 
   it('a timeout offers Try again, which refreshes once more', async () => {
@@ -425,7 +458,7 @@ describe('refresh failures', () => {
     fireEvent.click(await screen.findByTestId('source-refresh'));
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     const toast = useToastStore.getState().toasts[0]!;
-    expect(toast.description).toContain("The server didn't answer in time.");
+    expect(toast.description).toBe("xt.example.com didn't answer in time. Check that the server is online, then try again.");
     expect(toast.action?.label).toBe('Try again');
     act(() => toast.action!.onClick());
     await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(2));
@@ -480,7 +513,9 @@ describe('refresh failures', () => {
     const toasts = useToastStore.getState().toasts;
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.title).toBe("Couldn't refresh Old provider");
-    expect(toasts[0]!.action?.label).toBe('Check settings');
+    // One sentence, the one the card says, not a summary followed by a hint that repeats it.
+    expect(toasts[0]!.description).toBe("The address wasn't found on the server. Check the URL; the provider may have changed it.");
+    expect(toasts[0]!.action?.label).toBe('Try again');
   });
 
   it('a card refresh that finishes with an error shows its own toast', async () => {

@@ -62,7 +62,7 @@ describe('ExternalPlaybackFooter', () => {
       usePlayerStore.setState({ source: vodSource, mode: 'external', status: 'loading' });
     });
     render(<ExternalPlaybackFooter />);
-    expect(screen.getByText('Playing in MPV')).toBeTruthy();
+    expect(screen.getByText('Playing in mpv')).toBeTruthy();
     expect(screen.getByText('Movie')).toBeTruthy();
 
     act(() => {

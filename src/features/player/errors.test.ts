@@ -116,7 +116,7 @@ describe('copy that names only the ways out the screen offers (PL-ERROR-DEAD-END
       // A browser that can hand out the link names no external player either (walkthrough-12).
       expect(errorCopyKeys(cls, { message, external: 'link' }).hint).toBe(hint);
       expect(strings[hint], hint).toBeTruthy();
-      expect(strings[hint]).not.toMatch(/MPV|VLC|external player/);
+      expect(strings[hint]).not.toMatch(/mpv|VLC|external player/i);
       // The desktop app (MPV, VLC) keeps the hints that name them.
       expect(errorCopyKeys(cls, { message, external: 'app' }).hint).not.toBe(hint);
     }

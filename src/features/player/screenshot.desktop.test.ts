@@ -93,7 +93,7 @@ describe('takeScreenshot in the desktop app', () => {
     expect(toastMock).toHaveBeenCalledWith({
       title: 'Screenshot not saved',
       description:
-        "The stream's server does not allow its picture to be copied. Embedded MPV can capture it: choose it in Settings > Playback.",
+        "The stream's server does not allow its picture to be copied. Embedded mpv can capture it: choose it in Settings > Playback.",
       variant: 'error',
     });
   });

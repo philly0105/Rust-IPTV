@@ -111,7 +111,7 @@
   "ambientMode": "Ortam modu",
   "ambientModeHint": "Videonun çevresindeki alanı videonun renkleriyle boyar.",
   "fullscreenChannelPanel": "Tam ekranda kanal listesi",
-  "fullscreenChannelPanelHint": "Tam ekranda imleci hareket ettirdiğinizde kanal listesini yanda gösterir.",
+  "fullscreenChannelPanelHint": "Tam ekranda imleci kenara götürdüğünüzde veya kanal listesi düğmesine bastığınızda kanal listesini yanda gösterir.",
   "zapBanner": "Kanal değiştirirken kanal bilgisini göster",
   "zapBannerHint": "Her kanal değişiminden sonra birkaç saniye boyunca logoyu, numarayı, şimdiki ve sonraki programı gösterir.",
   "showCaptions": "Altyazıları göster",
@@ -377,7 +377,7 @@
   "resetDone": "Ayarlar varsayılana döndü",
   "resetFailed": "Ayarlar sıfırlanamadı",
   "streamReconnect": "Kopan yayınlara yeniden bağlan",
-  "streamReconnectHint": "Bir yayın koptuğunda veya takıldığında, hata göstermeden önce birkaç kez sessizce yeniden denenir. Filmler kaldıkları yerden devam eder.",
+  "streamReconnectHint": "Bir kanal, film veya bölüm koptuğunda ya da takıldığında, hata göstermeden önce birkaç kez sessizce yeniden denenir. Filmler ve bölümler kaldıkları yerden devam eder.",
   "liveFailover": "Canlı kanalları başka bir kaynağa geçir",
   "liveFailoverHint": "Canlı bir kanal çalışmayı bıraktığında aynı kanal başka bir kaynaktan oynatılır. Geçişi geri alabilirsin.",
 

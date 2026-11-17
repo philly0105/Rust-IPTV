@@ -400,7 +400,7 @@ describe('ShellLayout', () => {
     expect(useToastStore.getState().toasts.some((t) => t.id === 'import-claimed')).toBe(false);
     release();
     act(() => emit({ sourceId: 'claimed', phase: 'error', done: 0, message: 'HTTP 404 not found' }));
-    expect(useToastStore.getState().toasts.find((t) => t.id === 'import-claimed')?.description).toMatch(/^The server has no playlist at that address\./);
+    expect(useToastStore.getState().toasts.find((t) => t.id === 'import-claimed')?.description).toMatch(/^The address wasn't found on the server\./);
   });
 });
 

@@ -111,7 +111,7 @@
   "ambientMode": "Mode ambiant",
   "ambientModeHint": "Teinte l'espace autour de la vidéo avec ses couleurs.",
   "fullscreenChannelPanel": "Liste des chaînes en plein écran",
-  "fullscreenChannelPanelHint": "Affiche la liste des chaînes sur le côté lorsque vous bougez le pointeur en plein écran.",
+  "fullscreenChannelPanelHint": "Affiche la liste des chaînes sur le côté en plein écran lorsque vous amenez le pointeur au bord ou appuyez sur le bouton de la liste des chaînes.",
   "zapBanner": "Afficher les infos de la chaîne au changement de chaîne",
   "zapBannerHint": "Affiche le logo, le numéro et les programmes en cours et à suivre pendant quelques secondes après chaque changement de chaîne.",
   "showCaptions": "Afficher les sous-titres",
@@ -382,7 +382,7 @@
   "resetDone": "Réglages réinitialisés",
   "resetFailed": "Impossible de réinitialiser les réglages",
   "streamReconnect": "Reconnecter les flux interrompus",
-  "streamReconnectHint": "Quand un flux se coupe ou se bloque, il est relancé discrètement quelques fois avant d’afficher une erreur. Les films reprennent là où ils se sont arrêtés.",
+  "streamReconnectHint": "Quand une chaîne, un film ou un épisode se coupe ou se bloque, la lecture est relancée discrètement quelques fois avant d’afficher une erreur. Les films et les épisodes reprennent là où ils se sont arrêtés.",
   "liveFailover": "Basculer les chaînes en direct vers une autre source",
   "liveFailoverHint": "Quand une chaîne en direct ne fonctionne plus, la même chaîne est lue depuis une autre source. Vous pouvez annuler le changement.",
 

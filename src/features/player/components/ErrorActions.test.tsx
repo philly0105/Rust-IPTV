@@ -139,7 +139,7 @@ describe('the error overlay', () => {
     expect(alert.getAttribute('data-error-class')).toBe('unsupported');
     // Retry and the desktop app: what the screen offers, and nothing else.
     expect(alert.textContent).toContain(en.errorUnsupportedBrowserDesktop);
-    expect(alert.textContent).not.toMatch(/MPV|VLC|another source/);
+    expect(alert.textContent).not.toMatch(/mpv|VLC|another source/i);
     expect(Array.from(screen.getByTestId('error-actions').querySelectorAll('button')).map((b) => b.dataset['action'])).toEqual(['retry']);
     expect(screen.queryByRole('button', { name: 'Copy stream link' })).toBeNull();
   });

@@ -111,7 +111,7 @@
   "ambientMode": "Ambiens mód",
   "ambientModeHint": "A videó körüli területet a videó színeivel színezi.",
   "fullscreenChannelPanel": "Csatornalista teljes képernyőn",
-  "fullscreenChannelPanelHint": "Teljes képernyős módban oldalt megjeleníti a csatornalistát, ha megmozdítja az egérmutatót.",
+  "fullscreenChannelPanelHint": "Teljes képernyős módban oldalt megjeleníti a csatornalistát, ha az egérmutatót a szélére viszi, vagy megnyomja a csatornalista gombját.",
   "zapBanner": "Csatornainfó megjelenítése csatornaváltáskor",
   "zapBannerHint": "Minden csatornaváltás után néhány másodpercig mutatja a logót, a számot, valamint az aktuális és a következő műsort.",
   "showCaptions": "Feliratok megjelenítése",
@@ -120,7 +120,7 @@
   "doubleClickHint": "Egy kattintással kijelöli a csatornát, dupla kattintással lejátssza.",
 
   "playerPaths": "Lejátszók helye",
-  "mpvPath": "MPV elérési útvonala",
+  "mpvPath": "mpv elérési útvonala",
   "vlcPath": "VLC elérési útvonala",
   "playerPathHint": "A program teljes elérési útja, vagy hagyja üresen a PATH-ban való kereséshez.",
   "playerPathMissing": "Ezen az útvonalon már nincs semmi, és másik {{player}} sem található.",
@@ -133,7 +133,7 @@
   "detectFailed": "A keresés sikertelen.",
   "extraArgs": "További argumentumok",
   "extraArgsHint": "A lejátszó az adatfolyam URL-címe előtt kapja meg őket.",
-  "mpvArgs": "MPV-argumentumok",
+  "mpvArgs": "mpv-argumentumok",
   "vlcArgs": "VLC-argumentumok",
 
   "epgGlobalUrls": "Műsorújság-URL-címek",
@@ -377,7 +377,7 @@
   "resetDone": "Beállítások alapértékre állítva",
   "resetFailed": "Nem sikerült visszaállítani a beállításokat",
   "streamReconnect": "Megszakadt adások újracsatlakoztatása",
-  "streamReconnectHint": "Ha egy adás megszakad vagy elakad, néhányszor csendben újrapróbálja, mielőtt hibát mutatna. A filmek ott folytatódnak, ahol megálltak.",
+  "streamReconnectHint": "Ha egy csatorna, film vagy epizód megszakad vagy elakad, néhányszor csendben újrapróbálja, mielőtt hibát mutatna. A filmek és epizódok ott folytatódnak, ahol megálltak.",
   "liveFailover": "Élő csatornák átváltása másik forrásra",
   "liveFailoverHint": "Ha egy élő csatorna leáll, ugyanaz a csatorna szól egy másik forrásból. Az átváltás visszavonható.",
 

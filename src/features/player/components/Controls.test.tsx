@@ -199,7 +199,7 @@ describe('Controls options menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /^sync/i }));
     expect(screen.getByTestId('sync-sub')).toBeTruthy();
     expect(screen.queryByTestId('sync-audio')).toBeNull();
-    expect(screen.queryByText('Audio delay works only in the MPV player')).toBeNull();
+    expect(screen.queryByText('Audio delay works only in the mpv player')).toBeNull();
   });
 
   it('a view with nothing to focus keeps focus in the menu on Back, and Escape only leaves the view', async () => {

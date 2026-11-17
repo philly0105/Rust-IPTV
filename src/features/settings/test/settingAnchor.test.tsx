@@ -41,6 +41,21 @@ describe("a setting's link (the palette's single settings)", () => {
     expect(group.className).toContain('bg-selected');
   });
 
+  it("moves keyboard focus to the setting's control, or a group's first control (v-setup-04)", async () => {
+    Element.prototype.scrollIntoView = () => undefined;
+    renderAt(settingsRoutes, '/settings/playback#captions');
+    await screen.findByTestId('settings-playback');
+    await waitFor(() => expect(document.activeElement?.getAttribute('role')).toBe('switch'));
+    const label = document.querySelector(`label[for="${document.activeElement!.id}"]`);
+    expect(label?.textContent).toContain('Show captions');
+    cleanup();
+    renderAt(settingsRoutes, '/settings/playback#subtitles');
+    await screen.findByTestId('settings-playback');
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    const group = document.activeElement!.closest('[data-settings-group]');
+    expect(group?.textContent).toContain('Subtitles');
+  });
+
   it("finds every listed setting's label in its section", async () => {
     for (const target of SETTING_TARGETS.filter((s) => s.section !== 'players' && s.section !== 'remote')) {
       const scrolled: Element[] = [];

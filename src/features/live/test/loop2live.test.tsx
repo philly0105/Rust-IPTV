@@ -481,7 +481,7 @@ describe('Play in MPV from the list (L2-desktop-9)', () => {
     await screen.findByText('Channel 2');
     const row = document.querySelector<HTMLElement>('[data-testid="channel-list"] [data-row-index="2"]')!.parentElement!;
     fireEvent.contextMenu(row, { clientX: 40, clientY: 40 });
-    fireEvent.click(await screen.findByRole('menuitem', { name: /MPV/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /mpv/ }));
     await waitFor(() => expect(fakes.usePlayerStore.getState().mode).toBe('external'));
     expect(rpcMock.calls.some((c) => c.cmd === 'player.openExternal' && (c.args as { player: string }).player === 'mpv')).toBe(true);
     const state = fakes.usePlayerStore.getState();

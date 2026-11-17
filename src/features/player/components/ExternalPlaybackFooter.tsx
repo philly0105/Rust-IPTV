@@ -11,7 +11,7 @@ import { useMediaStore } from '../media';
 import { usePlayerStore } from '../store';
 import { usePlayerSettings } from '../useSettings';
 
-const PLAYER_NAMES = { mpv: 'MPV', vlc: 'VLC' } as const;
+const PLAYER_NAMES = { mpv: 'mpv', vlc: 'VLC' } as const;
 
 /**
  * A slim footer while MPV or VLC plays outside the app: what is playing and how to stop it.
@@ -37,7 +37,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
   const shown = latest ?? (mode === 'external' && pending && status !== 'error' ? { player: null, title: pending.title, startedAt: 0 } : undefined);
   if (settings?.showExternalBar === false) return null;
   if (!shown || (latest && dismissed === latest.startedAt)) return null;
-  const name = shown.player ? PLAYER_NAMES[shown.player] : 'MPV';
+  const name = shown.player ? PLAYER_NAMES[shown.player] : 'mpv';
 
   return (
     <div

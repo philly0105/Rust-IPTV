@@ -184,7 +184,7 @@ export function MpvSurface({ className }: { className?: string }) {
     if (missing) {
       toast({
         id: MPV_FALLBACK_TOAST,
-        title: t('settings:playerNotFound', { player: 'MPV' }),
+        title: t('settings:playerNotFound', { player: 'mpv' }),
         description: t('mpvUnavailable'),
         variant: 'info',
         ...(navigate && {

@@ -111,7 +111,7 @@
   "ambientMode": "Sfeermodus",
   "ambientModeHint": "Kleurt de ruimte rond de video met de kleuren van het beeld.",
   "fullscreenChannelPanel": "Zenderlijst in volledig scherm",
-  "fullscreenChannelPanelHint": "Toont de zenderlijst aan de zijkant als je in volledig scherm de muis beweegt.",
+  "fullscreenChannelPanelHint": "Toont de zenderlijst aan de zijkant in volledig scherm als je de muis naar de rand beweegt of op de knop voor de zenderlijst drukt.",
   "zapBanner": "Kanaalinfo tonen bij het zappen",
   "zapBannerHint": "Toont na elke kanaalwissel een paar seconden het logo, het nummer en wat er nu en straks op is.",
   "showCaptions": "Ondertiteling tonen",
@@ -377,7 +377,7 @@
   "resetDone": "Instellingen hersteld naar standaard",
   "resetFailed": "Kan instellingen niet herstellen",
   "streamReconnect": "Onderbroken streams opnieuw verbinden",
-  "streamReconnectHint": "Als een stream wegvalt of blijft hangen, wordt hij een paar keer stil opnieuw geprobeerd voordat er een fout verschijnt. Films gaan verder waar ze stopten.",
+  "streamReconnectHint": "Als een zender, film of aflevering wegvalt of blijft hangen, wordt het afspelen een paar keer stil opnieuw geprobeerd voordat er een fout verschijnt. Films en afleveringen gaan verder waar ze stopten.",
   "liveFailover": "Livezenders naar een andere bron overschakelen",
   "liveFailoverHint": "Als een livezender niet meer werkt, speelt dezelfde zender vanaf een andere bron. Je kunt het overschakelen ongedaan maken.",
 

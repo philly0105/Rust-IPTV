@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
@@ -40,11 +41,21 @@ export function XtreamForm({
     return key ? t(key) : null;
   };
 
-  /** Pasting a full `get.php?username=&password=` link fills all three fields. */
-  const onServerChange = (raw: string) => {
+  /**
+   * A full `get.php?username=&password=` link fills all three fields when it is pasted, or when the
+   * user leaves the field. Never per keystroke: a link typed key by key would split at the first
+   * letter of the password and the rest would land in the address (v-setup-12).
+   */
+  const pasted = useRef(false);
+  const splitLink = (raw: string) => {
     const link = parseXtreamLink(raw);
     if (link) onChange({ ...value, ...link });
-    else set({ serverUrl: raw });
+    return link !== null;
+  };
+  const onServerChange = (raw: string) => {
+    const paste = pasted.current;
+    pasted.current = false;
+    if (!(paste && splitLink(raw))) set({ serverUrl: raw });
   };
 
   return (
@@ -61,8 +72,14 @@ export function XtreamForm({
             placeholder="http://provider.example:8080"
             data-autofocus={autoFocusAddress ? '' : undefined}
             value={value.serverUrl}
+            onPaste={() => {
+              pasted.current = true;
+            }}
             onChange={(e) => onServerChange(e.target.value)}
-            onBlur={() => onFieldBlur?.('xtream.serverUrl')}
+            onBlur={() => {
+              splitLink(value.serverUrl);
+              onFieldBlur?.('xtream.serverUrl');
+            }}
           />
         )}
       </Field>

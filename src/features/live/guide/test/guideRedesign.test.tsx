@@ -488,11 +488,11 @@ describe('the ruler and the row menu (stage 2)', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
     expect(within(menu).getByRole('menuitem', { name: 'Match guide channel' })).toBeTruthy();
     // The desktop app offers the external players here too, as on Live.
-    expect(within(menu).getByRole('menuitem', { name: 'Play in MPV' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: 'Play in mpv' })).toBeTruthy();
     expect(within(menu).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
   });
 
-  it.each(['MPV', 'VLC'] as const)('opens a past programme’s timeshift URL in %s', async (player) => {
+  it.each(['mpv', 'VLC'] as const)('opens a past programme’s timeshift URL in %s', async (player) => {
     const start = Date.now() - 2 * HOUR;
     const past = program('Yesterday news', start, start + HOUR);
     rpc.handlers['sources.list'] = () => [{ id: 'src1', kind: 'xtream', name: 'Demo', channelCount: CHANNELS.length }];

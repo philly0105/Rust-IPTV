@@ -65,7 +65,7 @@ export function maskMac(mac: string): string {
 }
 
 /** Host of the source's own address, for error messages that do not name one. */
-function sourceHost(s: Source): string | undefined {
+export function sourceHost(s: Source): string | undefined {
   if (s.kind === 'm3u') return s.m3u?.origin === 'url' ? displayHost(s.m3u.url) : undefined;
   if (s.kind === 'xtream') return displayHost(s.xtream?.serverUrl);
   return displayHost(s.stalker?.portalUrl);

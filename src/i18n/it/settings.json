@@ -111,7 +111,7 @@
   "ambientMode": "Modalità ambiente",
   "ambientModeHint": "Colora lo spazio attorno al video con i suoi colori.",
   "fullscreenChannelPanel": "Elenco dei canali a schermo intero",
-  "fullscreenChannelPanelHint": "Mostra l'elenco dei canali di lato quando muovi il puntatore a schermo intero.",
+  "fullscreenChannelPanelHint": "Mostra l'elenco dei canali di lato a schermo intero quando porti il puntatore sul bordo o premi il pulsante dell'elenco dei canali.",
   "zapBanner": "Mostra le info del canale quando cambi canale",
   "zapBannerHint": "Dopo ogni cambio di canale mostra per qualche secondo il logo, il numero e il programma in onda e quello successivo.",
   "showCaptions": "Mostra sottotitoli",
@@ -382,7 +382,7 @@
   "resetDone": "Impostazioni ripristinate",
   "resetFailed": "Impossibile ripristinare le impostazioni",
   "streamReconnect": "Riconnetti i flussi interrotti",
-  "streamReconnectHint": "Quando un flusso si interrompe o si blocca, viene ritentato in silenzio alcune volte prima di mostrare un errore. I film riprendono da dove si erano fermati.",
+  "streamReconnectHint": "Quando un canale, un film o un episodio si interrompe o si blocca, la riproduzione viene ritentata in silenzio alcune volte prima di mostrare un errore. Film ed episodi riprendono da dove si erano fermati.",
   "liveFailover": "Passa i canali live a un’altra sorgente",
   "liveFailoverHint": "Quando un canale live smette di funzionare, lo stesso canale viene riprodotto da un’altra sorgente. Puoi annullare il passaggio.",
 

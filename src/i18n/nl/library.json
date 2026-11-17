@@ -333,7 +333,7 @@
   "rowResume": "Hervatten",
   "rowDetails": "Details openen",
   "minutesLeftShort": "{{count}} min",
-  "minutesLeftShortResume": "nog {{count}} min",
+  "minutesLeftShortResume": "Nog {{count}} min",
   "browseSeries": "Series bekijken",
   "speedUnlimited": "Onbeperkt",
   "speedDownloadTitle": "Downloadsnelheid: {{title}}",

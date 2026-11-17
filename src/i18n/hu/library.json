@@ -333,7 +333,7 @@
   "rowResume": "Folytatás",
   "rowDetails": "Részletek megnyitása",
   "minutesLeftShort": "{{count}} p",
-  "minutesLeftShortResume": "még {{count}} p",
+  "minutesLeftShortResume": "Még {{count}} p",
   "browseSeries": "Sorozatok böngészése",
   "speedUnlimited": "Korlátlan",
   "speedDownloadTitle": "Letöltési sebesség: {{title}}",

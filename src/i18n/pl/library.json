@@ -367,7 +367,7 @@
   "rowResume": "Wznów",
   "rowDetails": "Otwórz szczegóły",
   "minutesLeftShort": "{{count}} min",
-  "minutesLeftShortResume": "zostało {{count}} min",
+  "minutesLeftShortResume": "Zostało {{count}} min",
   "browseSeries": "Przeglądaj seriale",
   "speedUnlimited": "Bez limitu",
   "speedDownloadTitle": "Szybkość pobierania: {{title}}",

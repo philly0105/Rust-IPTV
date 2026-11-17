@@ -131,7 +131,8 @@ export function WallToolbar({
           data-testid="multiview-toolbar-hint"
           className="ms-auto hidden min-w-[14rem] flex-1 text-end text-caption text-balance text-fg-muted @[45rem]/stage:block"
         >
-          {t('emptyBody')}
+          <span className="pointer-coarse:hidden">{t('emptyBody')}</span>
+          <span className="hidden pointer-coarse:inline">{t('emptyBodyTouch')}</span>
         </p>
       ) : null}
       {count > 0 ? (
@@ -196,8 +197,9 @@ export function WallToolbar({
             </button>
           </Tooltip>
           {/* Full screen is for watching; a toolbar floating over a short window keeps Clear. */}
+          {/* Icon only on a phone, where it keeps the 44 px touch floor; the toast it raises has Undo. */}
           {!fullscreen ? (
-            <button type="button" className={toolButton(overlay)} onClick={onClear} data-testid="multiview-clear">
+            <button type="button" className={cn(toolButton(overlay), GLASS_TOUCH)} onClick={onClear} data-testid="multiview-clear">
               <Eraser aria-hidden className="size-4" />
               <span className="hidden sm:inline">{t('clearWall')}</span>
               <span className="sr-only sm:hidden">{t('clearWall')}</span>

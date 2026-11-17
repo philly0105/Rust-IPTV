@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "Pełny ekran nie jest tu dostępny",
   "clearWall": "Wyczyść ścianę",
   "emptyBody": "Wybierz od dwóch do czterech kanałów na żywo. Grają wszystkie kafelki; kliknięty ma dźwięk.",
+  "emptyBodyTouch": "Wybierz od dwóch do czterech kanałów na żywo. Grają wszystkie kafelki; dotknięty ma dźwięk.",
   "quickPicksTitle": "Ostatnie i ulubione kanały",
   "moreChannels": "Więcej kanałów…",
   "slotMoreLabel": "Więcej kanałów dla miejsca {{slot}}",

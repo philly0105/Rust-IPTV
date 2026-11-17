@@ -695,12 +695,18 @@ describe('empty wall', () => {
     await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
     // A fitted wall says how it works in the toolbar, where sound and clear go later, at any
     // window size; it is the first slot's description for screen readers.
+    const touch = 'Pick two to four live channels. Every tile plays; the one you tap has the sound.';
+    // A touch screen says "tap" for "click": the line swaps with the pointer.
+    const said = (el: HTMLElement) => [...el.children].map((c) => [c.textContent, c.className]);
     const line = screen.getByTestId('multiview-toolbar-hint');
-    expect(line.textContent).toBe(body);
+    expect(said(line)).toEqual([
+      [body, 'pointer-coarse:hidden'],
+      [touch, 'hidden pointer-coarse:inline'],
+    ]);
     expect(line.getAttribute('aria-hidden')).toBe('true');
     expect(line.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', '@[45rem]/stage:block']));
     const hint = screen.getByTestId('multiview-empty-hint');
-    expect(hint.textContent).toBe(body);
+    expect(said(hint)).toEqual(said(line));
     expect(hint.className.split(/\s+/)).toContain('@[45rem]/stage:sr-only');
     const slots = screen.getAllByTestId('multiview-empty-slot');
     expect(slots[0]!.getAttribute('aria-describedby')).toBe(hint.id);
@@ -749,10 +755,24 @@ describe('empty wall', () => {
     const [row] = await screen.findAllByTestId('multiview-picker-row');
     const tag = within(row!).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
-    // Drawn as the station and its quality words ("ESPN" + " HD"); screen readers hear the
-    // provider's name once, from the label.
-    expect(tag.previousElementSibling!.textContent).toBe('ESPN HD');
-    expect(row!.getAttribute('aria-label')).toBe('Add US| ESPN HD to the wall');
+    expect(tag.parentElement!.textContent).toBe('ESPN HDUS');
+    // Heard as toasts word it (w-a11y-03).
+    expect(row!.getAttribute('aria-label')).toBe('Add ESPN HD (US) to the wall');
+  });
+
+  it('draws a provider heading row as a quiet caption with nothing to add (w-realdata-01)', async () => {
+    handlers['catalog.channels'] = () => ({
+      items: [{ ...channel(1, 'm3u1'), name: '####### ESPN+ #######' }, channel(2, 'm3u1')],
+      total: 2,
+    });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('multiview-add'));
+    const caption = await screen.findByTestId('multiview-picker-separator');
+    expect(caption.textContent).toBe('ESPN+');
+    expect(within(caption).queryByRole('button')).toBeNull();
+    const rows = screen.getAllByTestId('multiview-picker-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute('aria-label')).toBe('Add Channel 2 to the wall');
   });
 
   it('adds nothing when the PIN prompt is cancelled', async () => {
@@ -821,11 +841,12 @@ describe('empty wall', () => {
     handlers['recent.list'] = () => [{ ref: channel(1, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'US| ABC HD', contentType: 'live' } }];
     renderPage();
     const list = await screen.findByTestId('multiview-quick-picks');
-    const pick = within(list).getByRole('button', { name: 'Add US| ABC HD to the wall' });
+    const pick = within(list).getByRole('button', { name: 'Add ABC HD (US) to the wall' });
     const tag = within(pick).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
-    // Drawn as the station and its quality words ("ABC" + " HD").
-    expect(tag.previousElementSibling!.textContent).toBe('ABC HD');
+    expect(tag.parentElement!.textContent).toBe('ABC HDUS');
+    // The tooltip keeps the provider's name.
+    expect(pick.getAttribute('title')).toBe('US| ABC HD');
   });
 
   it('leaves the tag out of the quick picks with the strip setting on', async () => {
@@ -1259,6 +1280,29 @@ describe('picker browsing (LG-19)', () => {
     expect(results.className).not.toContain('max-h-');
     expect(calls.some((c) => c.cmd === 'catalog.channels' && (c.args as { categoryId?: string }).categoryId === 'sport')).toBe(true);
     expect(await within(dialog).findByText('Cup final')).toBeTruthy();
+  });
+
+  it("narrows a source of country-tagged groups by Live TV's region pick (w-realdata-05)", async () => {
+    const group = (id: string, name: string, position: number) => ({ id, sourceId: 'm3u1', contentType: 'live', name, hidden: false, itemCount: 5, position });
+    handlers['catalog.categories'] = () => [
+      group('us1', 'US| SPORTS', 0),
+      group('us2', 'US| NEWS', 1),
+      group('uk1', 'UK| SPORTS', 2),
+      group('uk2', 'UK| NEWS', 3),
+      ...Array.from({ length: 6 }, (_, i) => group(`de${i}`, `DE| KANAL ${i}`, 4 + i)),
+    ];
+    handlers['lists.list'] = () => [];
+    localStorage.setItem('tsrust.liveRegion:m3u1:live', 'UK');
+    renderPage();
+    fireEvent.click(await screen.findByTestId('multiview-add'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add channels' });
+    fireEvent.change(within(dialog).getByLabelText('Source'), { target: { value: 'm3u1' } });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));
+    const region = (await screen.findByTestId('scope-region')) as HTMLSelectElement;
+    expect(region.value).toBe('UK');
+    expect(screen.queryByRole('option', { name: /US\| SPORTS/ })).toBeNull();
+    expect(screen.getByRole('option', { name: /UK\| SPORTS/ })).toBeTruthy();
+    localStorage.removeItem('tsrust.liveRegion:m3u1:live');
   });
 });
 

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { itemKey } from '@/api/types';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/features/live/lib/channelName';
+import { displayChannelName, plainChannelName } from '@/features/live/lib/channelName';
 
 import { Button, cn, TOUCH_TARGET } from '../deps';
 import type { QuickPick } from '../quickPicks';
@@ -93,7 +93,8 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, limite
   const hint = (shown: string) =>
     explains ? (
       <span id={hintId} data-testid="multiview-empty-hint" className={cn('max-w-[28rem] text-center text-sm font-normal text-pretty text-fg-muted', shown)}>
-        {t('emptyBody')}
+        <span className="pointer-coarse:hidden">{t('emptyBody')}</span>
+        <span className="hidden pointer-coarse:inline">{t('emptyBodyTouch')}</span>
       </span>
     ) : null;
 
@@ -208,12 +209,14 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, limite
                   const busy = pending === k;
                   // The name the picker and Live TV give the channel (settings.stripCountryPrefix).
                   const name = displayChannelName(p.title, stripCountryPrefix);
+                  // Heard as toasts word it ("ESPN HD (US)"); the tooltip keeps the provider's name.
+                  const spoken = plainChannelName(p.title, stripCountryPrefix);
                   const limited = limitedSources.has(p.ref.sourceId);
                   return (
                     <li key={k} className={ROW_ROOM[i]}>
                       <button
                         type="button"
-                        aria-label={limited ? `${t('pickerAddLabel', { name })}, ${t('errorLimitTitle')}` : t('pickerAddLabel', { name })}
+                        aria-label={limited ? `${t('pickerAddLabel', { name: spoken })}, ${t('errorLimitTitle')}` : t('pickerAddLabel', { name: spoken })}
                         title={limited ? `${name}: ${t('errorLimitTitle')}` : name}
                         aria-busy={busy || undefined}
                         disabled={disabled || (pending !== null && !busy)}

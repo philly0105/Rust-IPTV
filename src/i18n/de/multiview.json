@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "Vollbild ist hier nicht verfügbar",
   "clearWall": "Wand leeren",
   "emptyBody": "Wählen Sie zwei bis vier Live-Sender. Alle Kacheln laufen; die angeklickte hat den Ton.",
+  "emptyBodyTouch": "Wählen Sie zwei bis vier Live-Sender. Alle Kacheln laufen; die angetippte hat den Ton.",
   "quickPicksTitle": "Zuletzt gesehene und Lieblingssender",
   "moreChannels": "Weitere Sender…",
   "slotMoreLabel": "Weitere Sender für Platz {{slot}}",

@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "Full screen is not available here",
   "clearWall": "Clear wall",
   "emptyBody": "Pick two to four live channels. Every tile plays; the one you click has the sound.",
+  "emptyBodyTouch": "Pick two to four live channels. Every tile plays; the one you tap has the sound.",
   "quickPicksTitle": "Recent and favorite channels",
   "moreChannels": "More channels…",
   "slotMoreLabel": "More channels for slot {{slot}}",

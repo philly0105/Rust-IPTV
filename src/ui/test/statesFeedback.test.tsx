@@ -104,4 +104,18 @@ describe('Toggle on touch (round 1 follow-up)', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('gives a switch with no visible label a 44 px square around it that toggles on a tap', () => {
+    const onChange = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    try {
+      render(<Toggle checked onChange={onChange} hideLabel label="Record Match of the Day" />);
+      const row = screen.getByRole('switch', { name: 'Record Match of the Day' }).parentElement!;
+      expect(row.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+      fireEvent.click(row);
+      expect(onChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

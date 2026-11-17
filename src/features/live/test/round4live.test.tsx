@@ -64,12 +64,22 @@ describe('the country tag after the name (review round 4)', () => {
     expect(tag.textContent).toBe('US');
     expect(tag.className).toContain('text-fg-subtle');
     expect(tag.className).toContain('text-caption');
-    // The drawn name and tag are hidden from assistive tech; the raw name is there instead.
+    // The drawn name and tag are hidden from assistive tech; the cleaned name is there instead.
     const drawn = tag.parentElement!;
     expect(drawn.getAttribute('aria-hidden')).toBe('true');
     expect(drawn.textContent).toBe('ESPN HDUS');
     expect(drawn.firstChild?.textContent).toBe('ESPN HD');
-    expect(within(button).getByText('US| ESPN HD').className).toContain('sr-only');
+    expect(within(button).getByText('ESPN HD (US)').className).toContain('sr-only');
+  });
+
+  it('names "US| ESPN HD" "ESPN HD (US)" for a screen reader, once (w-a11y-03)', () => {
+    render(
+      <button type="button">
+        <ChannelName name="US| ESPN HD" />
+      </button>,
+    );
+    const button = screen.getByRole('button');
+    expect(screen.getByRole('button', { name: 'ESPN HD (US)' })).toBe(button);
   });
 
   it('leaves the tag out with the strip setting on, and draws a name without a tag as plain text', () => {

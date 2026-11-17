@@ -38,9 +38,9 @@ export interface MenuProps {
   items: MenuItem[];
   /** Accessible name of the trigger. Defaults to "More actions". */
   label?: string;
-  /** Trigger content; defaults to an ellipsis icon (an IconButton whose tooltip is `label`). */
+  /** Trigger content; defaults to the vertical ellipsis ⋮, the app's one 'more' glyph (an IconButton whose tooltip is `label`). */
   trigger?: ReactNode;
-  /** The default trigger's glyph instead of the horizontal ellipsis (a row's ⋮, as Live TV's rows draw it). */
+  /** The default trigger's glyph instead of the ⋮ at 18 px (a smaller ⋮ for a compact row). */
   triggerIcon?: ReactNode;
   triggerClassName?: string;
   /** Tooltip for a custom icon-only `trigger` (the default trigger already shows `label`). */
@@ -347,7 +347,10 @@ export function Menu({ items, label, trigger, triggerIcon, triggerClassName, too
         <IconButton
           ref={triggerRef}
           label={label ?? t('moreActions')}
-          icon={triggerIcon ?? <Ellipsis aria-hidden size={18} />}
+          // The vertical ⋮ drawn as the rail's ⋯ turned upright (the same three dots): that icon is
+          // in the entry already, and EllipsisVertical's own small chunk merged into one that put
+          // 10 kB more in front of Sports' first render.
+          icon={triggerIcon ?? <Ellipsis aria-hidden size={18} className="rotate-90" />}
           {...triggerProps}
           className={triggerClassName}
         />

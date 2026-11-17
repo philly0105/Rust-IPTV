@@ -139,7 +139,7 @@ describe("a channel menu's header", () => {
     expect(tag.textContent).toBe('US');
     // The name leads, the tag follows it.
     expect(tag.previousElementSibling?.textContent).toBe('ESPN2 FHD');
-    expect(header.querySelector('.sr-only')?.textContent).toBe('US| ESPN2 FHD');
+    expect(header.querySelector('.sr-only')?.textContent).toBe('ESPN2 FHD (US)');
     expect(header.textContent).toContain('NFL Live');
   });
 

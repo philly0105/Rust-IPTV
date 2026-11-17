@@ -1117,8 +1117,8 @@ describe('sports page', () => {
     const tag = within(row).getByTestId('channel-name-tag');
     expect([tag.previousElementSibling!.textContent, tag.textContent]).toEqual(['ESPN HD', 'US']);
     expect(tag.className).toContain('text-fg-subtle');
-    // Screen readers get the provider's name as it is.
-    expect(within(row).getByTestId('sports-stream-name').querySelector('.sr-only')!.textContent).toBe('US| ESPN HD');
+    // Screen readers get the name as plain text says it.
+    expect(within(row).getByTestId('sports-stream-name').querySelector('.sr-only')!.textContent).toBe('ESPN HD (US)');
     // Its Watch names the channel as toasts do, cleaned, never "US| ESPN HD" (w-a11y-03).
     expect(within(row).getByTestId('sports-watch').getAttribute('aria-label')).toBe('Watch Boston Celtics at New York Knicks on ESPN HD (US)');
   });

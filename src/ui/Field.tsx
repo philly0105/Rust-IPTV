@@ -2,7 +2,7 @@ import { Check, ChevronDown, Minus, Search, X } from 'lucide-react';
 import { useId, useLayoutEffect, useRef, type ComponentPropsWithRef, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { TOUCH_TARGET } from './Button';
+import { TOUCH_TARGET, TOUCH_TARGET_SQUARE } from './Button';
 import { cn } from './cn';
 import { Kbd } from './Misc';
 import { useMergedRef } from './Tooltip';
@@ -314,7 +314,8 @@ export interface ToggleProps {
  * A labelled Switch: label and description on the start side, the switch on the end. On touch
  * the whole row is the target (at least 44 px tall), as a Settings switch row is: a tap on the
  * description or the gap toggles too. The switch stays the one control for the keyboard and
- * screen readers; taps on the label, a link or a button are left to the browser.
+ * screen readers; taps on the label, a link or a button are left to the browser. With
+ * `hideLabel` the row is a 44 px square around the switch.
  */
 export function Toggle({ checked, onChange, label, description, disabled, id: idProp, className, hideLabel }: ToggleProps) {
   const autoId = useId();
@@ -325,7 +326,16 @@ export function Toggle({ checked, onChange, label, description, disabled, id: id
     onChange(!checked);
   };
   return (
-    <div className={cn('flex items-start justify-between gap-4', TOUCH_TARGET, !disabled && 'pointer-coarse:cursor-pointer', className)} onClick={onRowClick}>
+    <div
+      className={cn(
+        'flex gap-4',
+        // With no visible label the switch alone is the row: a 44 px square with it centred.
+        hideLabel ? cn('items-center justify-center', TOUCH_TARGET_SQUARE) : cn('items-start justify-between', TOUCH_TARGET),
+        !disabled && 'pointer-coarse:cursor-pointer',
+        className,
+      )}
+      onClick={onRowClick}
+    >
       <div className={cn('min-w-0', hideLabel && 'sr-only')}>
         <label htmlFor={id} className="text-sm font-medium text-fg">
           {label}
@@ -581,10 +591,10 @@ export function SearchInput({
         }}
         className={cn(
           fieldBase,
-          // pe-11 on touch: the clear button grows to 36 px there (end-1 plus 36 px reaches
-          // 39.75 px in), so the text stops short of it and a tap at the end of a query moves
-          // the caret instead of clearing the search.
-          'peer ps-9 pe-9 text-sm pointer-coarse:pe-11 [&::-webkit-search-cancel-button]:hidden',
+          // pe-12 on touch: the clear button's 44 px hit band reaches 43.75 px in from the end
+          // there, so the text stops short of it and a tap at the end of a query moves the caret
+          // instead of clearing the search.
+          'peer ps-9 pe-9 text-sm pointer-coarse:pe-12 [&::-webkit-search-cancel-button]:hidden',
           size === 'sm' ? 'h-8' : 'h-10',
           // Room for the key hint while it shows; a long placeholder ends in an ellipsis before it.
           shortcut && 'text-ellipsis pointer-fine:[&:placeholder-shown:not(:focus)]:pe-16',
@@ -603,9 +613,10 @@ export function SearchInput({
             // The button goes with the text; focus stays in the field instead of dropping to the page.
             input.current?.focus();
           }}
-          // In the 44 px touch field the clear button grows to 36 px, the most it can take
-          // inside the field's border; the input's end padding grows with it (pointer-coarse:pe-11).
-          className="absolute end-1 inline-flex size-[calc(28rem/15)] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors pointer-coarse:size-[calc(36rem/15)]"
+          // In the 44 px touch field the clear button grows to 36 px, the most it can draw inside
+          // the field's border, and an invisible 4 px band around it makes the 44 px touch target;
+          // the input's end padding grows with it (pointer-coarse:pe-12).
+          className="absolute end-1 inline-flex size-[calc(28rem/15)] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors pointer-coarse:size-[calc(36rem/15)] pointer-coarse:after:absolute pointer-coarse:after:-inset-[calc(4rem/15)] pointer-coarse:after:content-['']"
         >
           <X aria-hidden size={14} />
         </button>

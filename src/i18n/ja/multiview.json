@@ -33,6 +33,7 @@
   "fullscreenUnavailable": "ここでは全画面表示を使えません",
   "clearWall": "ウォールを空にする",
   "emptyBody": "ライブチャンネルを2〜4つ選んでください。すべてのタイルが再生され、クリックしたタイルの音声が流れます。",
+  "emptyBodyTouch": "ライブチャンネルを2〜4つ選んでください。すべてのタイルが再生され、タップしたタイルの音声が流れます。",
   "quickPicksTitle": "最近見たチャンネルとお気に入り",
   "moreChannels": "ほかのチャンネル…",
   "slotMoreLabel": "位置 {{slot}} のほかのチャンネル",

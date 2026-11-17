@@ -65,6 +65,10 @@ describe('fallback initials', () => {
   it('channel monograms skip what providers put before the name, and number empty slots', () => {
     expect(monogramText('CA EN: SKY SPORTS F1')).toBe('SS');
     expect(monogramText('PRIME: PBS HD')).toBe('PB');
+    // A feed's backup number is no initial: siblings share the station's letters (w-realdata-10).
+    expect(monogramText('PRIME: PBS HD (BACKUP 2)')).toBe('PB');
+    expect(monogramText('BLOOMBERG HD (BACKUP 2)')).toBe('BL');
+    expect(monogramText('BBC 2')).toBe('B2');
     expect(monogramText('PRIME: 🎬 ARD SD')).toBe('AR');
     expect(monogramText('US (ESPN+ 002) | Chelsea vs. Knicks (Matchday #25) Nov 17 02:00AM ET')).toBe('CK');
     expect(monogramText('NEXT | HAWKS VS ARSENAL | Tue 17 Nov 23:00 EDT (US)')).toBe('HA');

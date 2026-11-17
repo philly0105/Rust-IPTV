@@ -30,8 +30,10 @@ import {
   buttonClass,
   cn,
   displayChannelName,
+  isSeparatorName,
   nowTitleOf,
   scopeOfList,
+  separatorLabel,
   useBrowseSections,
   useChannelBrowse,
   useDisplayPrefs,
@@ -163,6 +165,14 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
         <ul ref={listRef} onKeyDown={onListKey} className="flex flex-col gap-0.5" aria-label={t('addChannels')} data-testid="add-channels-list">
           {browse.channels.map((ch) => {
             const key = itemKey(ch.ref);
+            // A provider's heading row ("#### ESPN+ ####") is no channel: a quiet caption, as Live TV draws it.
+            if (isSeparatorName(ch.name)) {
+              return (
+                <li key={key} dir="auto" className="truncate px-2.5 pt-3 pb-1 text-caption font-semibold tracking-wide text-fg-subtle uppercase" data-testid="add-channels-separator">
+                  {separatorLabel(ch.name)}
+                </li>
+              );
+            }
             const name = displayChannelName(ch.name, stripCountryPrefix);
             const on = inList(ch);
             const busy = pending === key;

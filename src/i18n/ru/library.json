@@ -367,7 +367,7 @@
   "rowResume": "Продолжить",
   "rowDetails": "Открыть подробности",
   "minutesLeftShort": "{{count}} мин",
-  "minutesLeftShortResume": "осталось {{count}} мин",
+  "minutesLeftShortResume": "Осталось {{count}} мин",
   "browseSeries": "Смотреть сериалы",
   "speedUnlimited": "Без ограничений",
   "speedDownloadTitle": "Скорость скачивания: {{title}}",

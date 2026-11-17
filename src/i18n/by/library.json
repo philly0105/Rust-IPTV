@@ -367,7 +367,7 @@
   "rowResume": "Працягнуць",
   "rowDetails": "Адкрыць падрабязнасці",
   "minutesLeftShort": "{{count}} хв",
-  "minutesLeftShortResume": "засталося {{count}} хв",
+  "minutesLeftShortResume": "Засталося {{count}} хв",
   "browseSeries": "Праглядзець серыялы",
   "speedUnlimited": "Без абмежаванняў",
   "speedDownloadTitle": "Хуткасць спампоўвання: {{title}}",

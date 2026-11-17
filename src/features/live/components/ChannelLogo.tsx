@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useState, type ReactNode, type SyntheticE
 
 import { TINT_THEME, cn, gateImage, tintVars, useImageChain } from '@/ui';
 
-import { channelNameParts } from '../lib/channelName';
+import { channelNameParts, plainChannelName } from '../lib/channelName';
 import { monogramHue, monogramText, slotNumber } from '../lib/monogram';
 
 export type LogoPlate = 'light' | 'dark';
@@ -258,7 +258,7 @@ export interface ChannelNameProps {
   testId?: string | undefined;
   /** Up to two lines instead of one (the guide's channel column, whose row has room for them). */
   twoLines?: boolean | undefined;
-  /** What screen readers hear instead of the provider's name (the guide passes `plainChannelName`). */
+  /** What screen readers hear instead of `plainChannelName` (the guide passes its own form). */
   srName?: string | undefined;
 }
 
@@ -325,7 +325,7 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
             </span>
           ) : null}
         </span>
-        <span className="sr-only">{srName ?? parts.full}</span>
+        <span className="sr-only">{srName ?? plainChannelName(name, strip)}</span>
       </span>
     );
   }
@@ -346,7 +346,8 @@ export function ChannelName({ name, strip, group, className, tagClassName, title
         </span>
         {tag}
       </span>
-      <span className="sr-only">{srName ?? parts.full}</span>
+      {/* Heard as toasts word it, "ESPN HD (US)": a reader spelled out the provider's "US| ESPN HD". */}
+      <span className="sr-only">{srName ?? plainChannelName(name, strip)}</span>
     </span>
   );
 }

@@ -801,7 +801,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               }}
             />
           ) : !input || (clientFiltered ? inOrder.isPending || (filteredItems.length === 0 && !filteredDone) : first.isPending) ? (
-            <SkeletonGrid count={18} minColumnWidth={coverWidth} />
+            <SkeletonGrid count={18} minColumnWidth={coverWidth} captionHeight={GRID_CAPTION_HEIGHT} />
           ) : total === 0 ? (
             // The search query is the narrowest thing the user typed, so it names the empty result
             // first; clearing it falls through to the rating, year and watched states below.

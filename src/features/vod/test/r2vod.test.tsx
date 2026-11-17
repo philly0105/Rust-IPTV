@@ -2,10 +2,11 @@
  * Round 2 of the UI audit (lane vod2): the landing's language picker (realdata-14), one error for a
  * failing catalog (states-feedback-05), the category rails' language badges (realdata-22).
  */
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Category, VodItem } from '@/api/types';
+import { SkeletonGrid } from '@/ui';
 
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
@@ -162,4 +163,12 @@ describe('realdata-22: a category rail leaves out the language its name already 
     const recent = screen.getByRole('heading', { name: 'Recently added' }).closest('section')!;
     expect(within(recent).getByRole('link', { name: /^Movie r1.*French/ })).toBeTruthy();
   }, 20_000);
+});
+
+describe('the category grid skeleton', () => {
+  it("gives each card the grid's caption height, so the rows stay put when the posters arrive", () => {
+    const { container } = render(<SkeletonGrid count={2} captionHeight={62} />);
+    const captions = container.querySelectorAll<HTMLElement>('[role="status"] > div > div:nth-child(2)');
+    expect([...captions].map((c) => c.style.height)).toEqual(['62px', '62px']);
+  });
 });

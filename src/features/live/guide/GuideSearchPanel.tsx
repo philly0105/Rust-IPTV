@@ -24,6 +24,7 @@ import { buttonClass, cn, EmptyState, ErrorState, IconButton, Skeleton, TOUCH_TA
 import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useDebounced } from '../hooks/useDebounced';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { displayChannelName } from '../lib/channelName';
 import { formatClock, formatDay, localDayDiff, ms, programWhen } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
@@ -160,8 +161,12 @@ export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtit
     if (refocus) inputRef.current?.focus();
   });
 
-  const placeholder = t('searchPlaceholder');
+  // The header field is 24vw wide: below about 1360 px the full hint ("Search programmes and
+  // channels") was cut mid-word, losing the part that says channels are searchable, so a
+  // narrower field shows the field's name instead.
+  const roomy = useMediaQuery('(min-width: 1360px)');
   const label = t('searchLabel');
+  const placeholder = roomy ? t('searchPlaceholder') : label;
   useEffect(() => {
     if (!field) {
       setHeader({ title, subtitle });
@@ -285,6 +290,9 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
   const shownN = shown.hits === hits ? shown.n : HITS_FIRST_BATCH;
   if (shown.hits !== hits) setShown({ hits, n: HITS_FIRST_BATCH });
   const total = hits?.length ?? 0;
+  // The core stopped at the limit: later airings exist past the last one listed (one show on 59
+  // channels at once takes 59 of the 100), so the count is a floor and the end says how far it got.
+  const capped = (search.data?.length ?? 0) >= SEARCH_LIMIT;
   useEffect(() => {
     if (shownN >= total) return;
     const id = requestAnimationFrame(() => setShown((s) => (s.hits === hits ? { hits, n: s.n + HITS_FIRST_BATCH } : s)));
@@ -388,7 +396,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
     body =
       channels.length > 0 ? (
         <p className="px-4 py-3 text-body-sm text-fg-muted" data-testid="guide-search-no-programmes">
-          {t('searchEmpty', { query: q ?? typed })}
+          {t('searchNoProgrammes', { query: q ?? typed })}
         </p>
       ) : (
         <EmptyState
@@ -428,7 +436,11 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
             </ul>
           </section>
         ))}
-        {(search.data?.length ?? 0) >= SEARCH_LIMIT ? <p className="px-4 py-3 text-center text-xs text-fg-subtle">{t('searchMore', { n: SEARCH_LIMIT })}</p> : null}
+        {capped ? (
+          <p className="px-4 py-3 text-center text-xs text-fg-subtle" data-testid="guide-search-more">
+            {t('searchMore', { time: `${formatDay(ms(hits[hits.length - 1]!.program.start), lang)} ${formatClock(ms(hits[hits.length - 1]!.program.start), lang)}` })}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -454,7 +466,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
           {t('searchResults')}
         </h2>
         <span className="font-display text-xs tabular-nums text-fg-subtle" aria-live="polite" data-testid="guide-search-count">
-          {state === 'results' && hits ? t('resultCount', { count: hits.length }) : ''}
+          {state === 'results' && hits ? t(capped ? 'resultCountMore' : 'resultCount', { count: hits.length }) : ''}
         </span>
         <IconButton size="sm" label={t('closeSearch')} icon={<X className="size-4" aria-hidden />} onClick={() => onClose(true)} />
       </div>
@@ -472,7 +484,9 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
                     data-testid="guide-search-channel"
                     className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-2 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
                   >
-                    <span className="min-w-[4.5rem] shrink-0 font-numeric text-body-sm tabular-nums text-fg-muted">{ch.number ?? ''}</span>
+                    {/* The programme rows' time column, so the logos line up; the number sits at its
+                        end, beside the logo, as the grid's channel column puts it. */}
+                    <span className="min-w-[4.5rem] shrink-0 text-end font-numeric text-body-sm tabular-nums text-fg-muted">{ch.number ?? ''}</span>
                     <ChannelLogo src={ch.logoUrl} name={displayChannelName(ch.name, stripCountryPrefix)} size={28} sourceId={ch.ref.sourceId} />
                     <ChannelName name={ch.name} strip={stripCountryPrefix} className="min-w-0 flex-1 truncate text-sm font-medium" />
                   </button>

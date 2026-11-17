@@ -206,9 +206,9 @@ export function SourceGuard() {
 
 function SourceGone({ sources }: { sources: readonly Source[] }) {
   const { t } = useTranslation(['shell', 'common']);
-  const headerTitle = t('common:errorTitleNotFound');
-  useShellHeader({ title: headerTitle }, [headerTitle]);
+  // The header and the route announcement say what the page says, not a vaguer 'Not found'.
   const title = t('shell:sourceMissing');
+  useShellHeader({ title }, [title]);
   const live = liveTabTarget(sources, readLastSource());
   return (
     <>

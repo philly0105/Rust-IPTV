@@ -177,6 +177,14 @@ impl TaskCtl {
         Arc::new(Self::new(0, source.to_string()))
     }
 
+    /// A control block no runtime tracks, for a run of a row of
+    /// `row_source` spread to `copy`. Tests only.
+    #[doc(hidden)]
+    pub fn detached_spread(row_source: &str, copy: CopyRef) -> Arc<TaskCtl> {
+        let source = copy.source_id().to_string();
+        Arc::new(Self::placed(0, source, row_source.to_string(), Some(copy)))
+    }
+
     /// Records that the transfer holds `n` connections on `source` and
     /// updates `connections` to the sum over all sources. True when the sum
     /// went down: the caller then calls [`DownloadManager::released`].
@@ -1449,6 +1457,12 @@ impl DownloadManager {
             .lock()
             .probe_backoff
             .insert(source.to_string(), Instant::now() + PROBE_ABORT_BACKOFF);
+    }
+
+    /// Lets `source` be probed again at once after an aborted round
+    /// ([`super::probe::reset`]).
+    pub(super) fn clear_probe_backoff(&self, source: &str) {
+        self.inner.lock().probe_backoff.remove(source);
     }
 
     /// The account's reported limit of `source`, once read.

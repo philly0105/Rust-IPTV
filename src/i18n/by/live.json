@@ -158,6 +158,8 @@
   "noSearchResultsInGroup": "Пошук толькі ў групе {{group}}.",
   "searchAllChannels": "Шукаць ва ўсіх каналах",
   "searchAllStations": "Шукаць ва ўсіх станцыях",
+  "searchChannelsFor": "Шукаць «{{query}}» сярод каналаў",
+  "searchStationsFor": "Шукаць «{{query}}» сярод станцый",
   "channelNumberHit": "Канал {{number}}",
   "nowShowing": "зараз: {{title}}",
   "play": "Прайграць",

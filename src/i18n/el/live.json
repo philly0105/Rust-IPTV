@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "Αναζήτηση μόνο στην ομάδα {{group}}.",
   "searchAllChannels": "Αναζήτηση σε όλα τα κανάλια",
   "searchAllStations": "Αναζήτηση σε όλους τους σταθμούς",
+  "searchChannelsFor": "Αναζήτηση «{{query}}» στα κανάλια",
+  "searchStationsFor": "Αναζήτηση «{{query}}» στους σταθμούς",
   "channelNumberHit": "Κανάλι {{number}}",
   "nowShowing": "τώρα: {{title}}",
   "play": "Αναπαραγωγή",

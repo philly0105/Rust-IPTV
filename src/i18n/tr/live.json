@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "Yalnızca {{group}} içinde aranıyor.",
   "searchAllChannels": "Tüm kanallarda ara",
   "searchAllStations": "Tüm istasyonlarda ara",
+  "searchChannelsFor": "Kanallarda “{{query}}” ara",
+  "searchStationsFor": "İstasyonlarda “{{query}}” ara",
   "channelNumberHit": "Kanal {{number}}",
   "nowShowing": "şimdi: {{title}}",
   "play": "Oynat",

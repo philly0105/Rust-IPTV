@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "Searching inside {{group}} only.",
   "searchAllChannels": "Search all channels",
   "searchAllStations": "Search all stations",
+  "searchChannelsFor": "Search channels for \"{{query}}\"",
+  "searchStationsFor": "Search stations for \"{{query}}\"",
   "channelNumberHit": "Channel {{number}}",
   "nowShowing": "now: {{title}}",
   "play": "Play",

@@ -170,6 +170,8 @@
   "noSearchResultsInGroup": "البحث غير وسط {{group}}.",
   "searchAllChannels": "قلّب فكاع القنوات",
   "searchAllStations": "قلّب فكاع المحطات",
+  "searchChannelsFor": "قلّب على “{{query}}” فالقنوات",
+  "searchStationsFor": "قلّب على “{{query}}” فالمحطات",
   "channelNumberHit": "القناة {{number}}",
   "nowShowing": "دابا: {{title}}",
   "play": "شغل",

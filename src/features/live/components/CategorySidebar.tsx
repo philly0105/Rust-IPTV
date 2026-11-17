@@ -66,6 +66,12 @@ export interface CategorySidebarProps {
    * readers only, and the region select takes the row, so "All regions" reads in full in every locale.
    */
   inDrawer?: boolean;
+  /**
+   * Takes a filter that matched no group over to the channel search (a channel's name typed into
+   * the groups filter, the first search box on the page). `stations` names Radio's items.
+   */
+  onSearchChannels?(query: string): void;
+  stations?: boolean;
 }
 
 export function linkClass(active: boolean): string {
@@ -386,6 +392,22 @@ export function CategorySidebar(props: CategorySidebarProps) {
       ) : visible.length === 0 && filter ? (
         <div className="flex flex-col items-start gap-2 px-4 pt-3 text-sm text-fg-muted">
           <p>{t('noGroupsMatch', { query: filter })}</p>
+          {props.onSearchChannels ? (
+            <Button
+              size="sm"
+              variant="primary"
+              // The whole query on two lines if it must, never cut: it is what the button carries over.
+              className="h-auto min-h-8 max-w-full py-1.5 text-start break-words whitespace-normal"
+              onClick={() => {
+                const q = filter.trim();
+                setFilter('');
+                props.onSearchChannels?.(q);
+              }}
+              data-testid="group-filter-search-channels"
+            >
+              {t(props.stations ? 'searchStationsFor' : 'searchChannelsFor', { query: filter.trim() })}
+            </Button>
+          ) : null}
           <Button size="sm" onClick={() => setFilter('')}>
             {t('clearSearch')}
           </Button>

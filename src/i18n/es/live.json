@@ -152,6 +152,8 @@
   "noSearchResultsInGroup": "Solo se busca dentro de {{group}}.",
   "searchAllChannels": "Buscar en todos los canales",
   "searchAllStations": "Buscar en todas las emisoras",
+  "searchChannelsFor": "Buscar “{{query}}” en los canales",
+  "searchStationsFor": "Buscar “{{query}}” en las emisoras",
   "channelNumberHit": "Canal {{number}}",
   "nowShowing": "ahora: {{title}}",
   "play": "Reproducir",

@@ -797,6 +797,20 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     [isRadio, sourceId],
   );
   hrefForCategoryRef.current = hrefForCategory;
+  // A channel's name typed into the groups filter (w-walkthrough-07): the query goes to the channel
+  // search of All channels, and the field takes focus so it can be refined there.
+  const searchChannelsFor = useCallback(
+    (q: string) => {
+      closeDrawer();
+      if (routeCategory !== undefined) navigate(hrefForCategory(undefined), { state: { liveSearch: q } });
+      else {
+        setSearch(q);
+        setDebouncedSearch(q);
+      }
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-page-search]')?.focus());
+    },
+    [closeDrawer, routeCategory, navigate, hrefForCategory],
+  );
   const refetchCategories = allCategories.refetch;
   const retryCategories = useCallback(() => void refetchCategories(), [refetchCategories]);
   const onPlayLive = useCallback((c: Channel) => play(c), [play]);
@@ -1050,6 +1064,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
           afterPinned={hiddenChannelsRow}
+          onSearchChannels={searchChannelsFor}
+          stations={isRadio}
         />
       </div>
     </>

@@ -152,6 +152,8 @@
   "noSearchResultsInGroup": "Ricerca solo all'interno di {{group}}.",
   "searchAllChannels": "Cerca in tutti i canali",
   "searchAllStations": "Cerca in tutte le stazioni",
+  "searchChannelsFor": "Cerca “{{query}}” nei canali",
+  "searchStationsFor": "Cerca “{{query}}” nelle stazioni",
   "channelNumberHit": "Canale {{number}}",
   "nowShowing": "ora: {{title}}",
   "play": "Riproduci",

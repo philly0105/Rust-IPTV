@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "{{group}}内のみを検索しています。",
   "searchAllChannels": "すべてのチャンネルを検索",
   "searchAllStations": "すべての局を検索",
+  "searchChannelsFor": "チャンネルで「{{query}}」を検索",
+  "searchStationsFor": "局で「{{query}}」を検索",
   "channelNumberHit": "チャンネル {{number}}",
   "nowShowing": "放送中：{{title}}",
   "play": "再生",

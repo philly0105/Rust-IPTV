@@ -546,6 +546,54 @@ describe('Empty groups and group filter', () => {
     expect(box.value).toBe('');
     expect(screen.getByText('News')).toBeTruthy();
   });
+
+  it('a group filter with no match takes the text over to the channel search (w-walkthrough-07)', () => {
+    const cats: Category[] = [{ id: 'g1', sourceId: 'src1', contentType: 'live', name: 'News', hidden: false, itemCount: 3, position: 0 }];
+    const onSearchChannels = vi.fn();
+    renderAt('/', [
+      {
+        path: '/',
+        element: (
+          <CategorySidebar
+            categories={cats}
+            hiddenCount={0}
+            isLoading={false}
+            error={null}
+            onRetry={() => undefined}
+            hrefFor={(id) => `/s/src1/live${id ? `/${id}` : ''}`}
+            onManage={() => undefined}
+            totalLabel="All channels"
+            onSearchChannels={onSearchChannels}
+          />
+        ),
+      },
+    ]);
+    const box = screen.getByRole('searchbox', { name: 'Filter groups' }) as HTMLInputElement;
+    fireEvent.change(box, { target: { value: ' espn ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search channels for "espn"' }));
+    expect(onSearchChannels).toHaveBeenCalledWith('espn');
+    // The groups come back: the filter is spent.
+    expect(box.value).toBe('');
+    expect(screen.getByText('News')).toBeTruthy();
+  });
+
+  it('from an open group, the filter text searches All channels in the channel search field', async () => {
+    rpcMock.handlers['catalog.channels'] = serve(Array.from({ length: 30 }, (_, i) => makeChannel(i)));
+    renderAt('/s/src1/live/g1', [
+      { path: '/s/:sourceId/live/:categoryId', element: <LivePage /> },
+      { path: '/s/:sourceId/live', element: <LivePage /> },
+    ]);
+    await screen.findByText('Channel 0');
+    const box = screen.getByRole('searchbox', { name: 'Filter groups' });
+    fireEvent.change(box, { target: { value: 'Channel 17' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search channels for "Channel 17"' }));
+    await waitFor(() => expect(searchBox().value).toBe('Channel 17'));
+    await waitFor(() => expect(screen.queryByText('Channel 0')).toBeNull());
+    expect(screen.getByText('Channel 17')).toBeTruthy();
+    // All channels is the open view now, not the group.
+    expect(screen.getByRole('link', { name: /All channels/ }).getAttribute('aria-current')).toBe('page');
+    await waitFor(() => expect(document.activeElement).toBe(searchBox()));
+  });
 });
 
 describe('Live list: density and UI scale', () => {

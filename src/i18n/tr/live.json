@@ -132,6 +132,7 @@
   "qualityShowAll": "Tüm kaliteleri göster",
   "qualityShowUntagged": "Etiketsiz kanalları göster",
   "qualityMayHide": "Canlı TV kalite filtresi bazı kanalları gizliyor olabilir.",
+  "qualityNote": "Yalnızca {{quality}} kanallar",
   "openSources": "Kaynakları aç",
   "noGuideHint": "Bu kanalı bir rehber kanalıyla eşleyin veya rehber ayarlarında bir rehber ekleyin.",
   "noGuideShort": "Rehber verisi yok",

@@ -132,6 +132,7 @@
   "qualityShowAll": "Show all qualities",
   "qualityShowUntagged": "Show untagged channels",
   "qualityMayHide": "The Live TV quality filter may be hiding channels.",
+  "qualityNote": "Only {{quality}} channels",
   "openSources": "Open sources",
   "noGuideHint": "Match this channel to a guide channel, or add a guide in Guide settings.",
   "noGuideShort": "No guide data",

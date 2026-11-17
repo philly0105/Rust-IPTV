@@ -46,6 +46,8 @@ export interface CategorySidebarProps {
    * `hrefFor` like a group's and is `activeId` while open; they are not filtered and have no menu.
    */
   pinned?: readonly { id: string; label: string; icon: ReactNode; count?: ReactNode }[];
+  /** Drawn after the pinned views, in their row slot (`rowHeight`): Live's Hidden channels. */
+  afterPinned?(rowHeight: number): ReactNode;
   /**
    * A single group holds what "All" holds: leave its row and the filter out (Radio, whose
    * playlists often file every station under one group), unless it is the open one.
@@ -60,14 +62,14 @@ export interface CategorySidebarProps {
   onRegionChange?(): void;
 }
 
-function linkClass(active: boolean): string {
+export function linkClass(active: boolean): string {
   return `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${
     active ? 'tuning-tick bg-selected font-medium text-fg' : 'text-fg-muted hover:bg-hover hover:text-fg'
   }`;
 }
 
 /** The active row's count steps up to fg-muted with its label (both hold 4.5:1 on the selected fill). */
-function countClass(active: boolean): string {
+export function countClass(active: boolean): string {
   return `text-xs tabular-nums ${active ? 'text-fg-muted' : 'text-fg-subtle'}`;
 }
 
@@ -335,6 +337,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
           </div>
         );
       })}
+      {props.afterPinned?.(rowHeight)}
       <div className="px-2" style={{ height: rowHeight }}>
         {/* Plain links with an explicit aria-current: radio groups differ only in `?category=`, which NavLink ignores. */}
         <ViewLink

@@ -79,11 +79,11 @@ Removing a source hides it and shows an Undo toast. The source is deleted 8 seco
 
 ### Renaming and hiding channels
 
-Right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels" under the group list shows them and brings them back, and its "Reset all edits" gives every channel of the source its provider's name back and unhides everything. The provider's catalog is never changed, so edits survive refreshes.
+Right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels", with Favorites and Recently watched at the top of the group list, shows them and brings them back, and its "Reset all edits" gives every channel of the source its provider's name back and unhides everything. The provider's catalog is never changed, so edits survive refreshes.
 
 ### Filtering by quality
 
-The Channel quality button (an HD icon) at the end of the channel list's toolbar, after the search field, hides channels below a picture quality. Pick "Any quality" (the default), "HD (720p) and up", "Full HD (1080p) and up" or "4K only". While a minimum is set the button shows it ("720p+", "1080p+" or "4K").
+The Channel quality button (an HD icon) at the end of the channel list's toolbar, after the search field, hides channels below a picture quality. Pick "Any quality" (the default), "HD (720p) and up", "Full HD (1080p) and up" or "4K only". While a minimum is set the button shows it ("720p+", "1080p+" or "4K"), and a line over the channels says so ("Only 1080p+ channels") with "Show all qualities" beside it, which turns the filter off in one press.
 
 The quality comes from the channel name your provider gives: SD, 480p or 576p count as SD; HD or 720p as HD; FHD, Full HD or 1080p as Full HD; UHD, Ultra HD, 4K, 8K or 2160p as 4K ("8K EXCLUSIVE", which some providers write on every event channel, counts as no tag). A tag in front of the name counts too, so "4K-DE - Das Erste" is 4K and "UK HD | Sky" is HD. When a name has several, the highest counts. A name you gave a channel with Rename does not change its quality. Channels whose name has no quality tag still show. To hide them too, turn on "Hide channels with no quality tag" in the same panel; it works only while a minimum is set. Radio stations have no picture and are never filtered, so the Radio page has no quality button.
 

@@ -144,6 +144,7 @@
   "qualityShowAll": "Pokaż każdą jakość",
   "qualityShowUntagged": "Pokaż kanały bez oznaczenia",
   "qualityMayHide": "Filtr jakości telewizji na żywo może ukrywać część kanałów.",
+  "qualityNote": "Tylko kanały {{quality}}",
   "openSources": "Otwórz źródła",
   "noGuideHint": "Dopasuj ten kanał do kanału przewodnika lub dodaj przewodnik w ustawieniach przewodnika.",
   "noGuideShort": "Brak danych przewodnika",

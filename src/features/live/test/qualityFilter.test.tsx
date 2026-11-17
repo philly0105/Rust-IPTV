@@ -165,6 +165,17 @@ describe('Live TV quality picker', () => {
     expect(patches()).toEqual([]);
   });
 
+  it('a list it filters says so in words over the rows, with one press to show every quality (walkthrough-02)', async () => {
+    stored = settings({ liveMinQuality: 'fhd' });
+    renderAt('/s/src1/live', LIVE);
+    await screen.findByText('Channel 0');
+    const bar = await screen.findByTestId('live-quality-bar');
+    expect(bar.textContent).toContain('Only 1080p+ channels');
+    fireEvent.click(within(bar).getByRole('button', { name: 'Show all qualities' }));
+    await waitFor(() => expect(patches()).toEqual([{ liveMinQuality: null }]));
+    await waitFor(() => expect(screen.queryByTestId('live-quality-bar')).toBeNull());
+  });
+
   it('is not on Radio, which is never filtered', async () => {
     stored = settings({ liveMinQuality: 'fhd' });
     rpcMock.handlers['catalog.categories'] = () => [];

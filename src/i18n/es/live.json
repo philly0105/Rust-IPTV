@@ -138,6 +138,7 @@
   "qualityShowAll": "Mostrar todas las calidades",
   "qualityShowUntagged": "Mostrar canales sin indicación",
   "qualityMayHide": "Puede que el filtro de calidad de TV en vivo esté ocultando canales.",
+  "qualityNote": "Solo canales {{quality}}",
   "openSources": "Abrir fuentes",
   "noGuideHint": "Asigna este canal a un canal de guía o añade una guía en los ajustes de la guía.",
   "noGuideShort": "Sin datos de guía",

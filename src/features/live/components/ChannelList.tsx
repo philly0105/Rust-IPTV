@@ -54,6 +54,8 @@ export interface ChannelListProps {
 interface ListPlace {
   active: number;
   scrollTop: number;
+  /** The channel playing (`playingKey`) while the list was last on screen. */
+  playing?: string;
 }
 
 /** Cursor and scroll offset per list key, kept for the session (bounded, oldest dropped first). */
@@ -226,9 +228,14 @@ export function ChannelList(props: ChannelListProps) {
 
   // The cursor follows the playing channel (zap, number entry, remote) once its row is loaded.
   const playingKey = playingRef ? `${playingRef.sourceId}|${playingRef.contentType}|${playingRef.itemId}` : '';
-  // A remembered cursor wins on mount; with none, the playing channel's row is picked up.
-  const followKey = useRef(listMemory.has(resetKey) ? '' : playingKey);
+  // A remembered cursor wins on mount while the same channel plays as when the list was left; with
+  // none, or once another channel started elsewhere (the mini player's Expand, Watch on Sports),
+  // the playing channel's row is picked up.
+  const followKey = useRef(listMemory.has(resetKey) && listMemory.get(resetKey)?.playing === playingKey ? '' : playingKey);
   const seenPlayingKey = useRef(playingKey);
+  useEffect(() => {
+    remember(resetKey, { playing: playingKey });
+  }, [resetKey, playingKey]);
   /** `playingKey|number|list` of the lookup under way for a channel outside the loaded pages. */
   const locating = useRef('');
   const follow = (index: number, align: 'auto' | 'center') => {

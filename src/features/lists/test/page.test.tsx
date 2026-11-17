@@ -489,7 +489,7 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
       }
     });
 
-  it('keeps the lists out of a page narrower than 66rem, behind the bar toggle, even on a wide window', async () => {
+  it('keeps the lists out of a page narrower than 79rem, behind the bar toggle, even on a wide window', async () => {
     // The harness answers every min-width query as matching (a wide window); the page itself is
     // 776 px wide, as beside the expanded rail in a 1024 px window, where three columns pushed the
     // stage off the page's end.
@@ -528,11 +528,28 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
     stubLiveExtras();
     h.renderAt('/lists/L1', routes);
     await waitFor(() => expect(rows()).toHaveLength(1));
-    // jsdom's root is 16 px, so 66rem is 1056 px (990 px at the app's 15 px root).
-    reportPageWidth(1100);
+    // jsdom's root is 16 px, so 79rem is 1264 px (1185 px at the app's 15 px root).
+    reportPageWidth(1300);
     expect(screen.getByTestId('lists-section')).toBeTruthy();
     expect(screen.queryByTestId('lists-drawer')).toBeNull();
     expect(screen.getByRole('button', { name: 'Hide lists' })).toBeTruthy();
+  });
+
+  it('stacks the stage over the channels in a window held upright, with the lists in the drawer, as Live does', async () => {
+    const real = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ ...real(query), matches: query.includes('min-width') || query.includes('portrait') })) as typeof window.matchMedia;
+    try {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+      stubLiveExtras();
+      h.renderAt('/lists/L1', routes);
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      reportPageWidth(1300);
+      expect(screen.queryByTestId('lists-section')).toBeNull();
+      expect(screen.getByTestId('list-stage-section').className).toContain('md:order-first');
+      expect(screen.getByTestId('list-page').className).toContain('md:landscape:flex-row');
+    } finally {
+      window.matchMedia = real;
+    }
   });
 });
 

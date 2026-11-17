@@ -132,6 +132,7 @@
   "qualityShowAll": "すべての画質を表示",
   "qualityShowUntagged": "画質の表記がないチャンネルを表示",
   "qualityMayHide": "ライブTVの画質フィルターでチャンネルが非表示になっている可能性があります。",
+  "qualityNote": "{{quality}} のチャンネルのみ",
   "openSources": "ソースを開く",
   "noGuideHint": "このチャンネルを番組表のチャンネルに対応付けるか、番組表の設定で番組表を追加してください。",
   "noGuideShort": "番組表データなし",

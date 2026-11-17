@@ -77,7 +77,7 @@ import { EpgRibbon, ribbonPlayback } from './EpgRibbon';
 import { HiddenChannelsButton } from './HiddenChannelsButton';
 import { LiveStageColumn } from './LiveStageColumn';
 import { ManageCategoriesDialog } from './ManageCategoriesDialog';
-import { QualityEmptyState, QualityFilterButton, useLiveQuality } from './QualityFilterButton';
+import { QualityEmptyState, QualityFilterBar, QualityFilterButton, useLiveQuality } from './QualityFilterButton';
 import { StageIdle } from './StageIdle';
 
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
@@ -153,7 +153,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const source = useRpcQuery('sources.get', { id: sourceId }, { enabled: !!sourceId });
   const settings = useRpcQuery('settings.get', undefined);
   const allCategories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, contentType), { enabled: !!sourceId });
-  // The query behind "Hidden channels (n)" below the groups: no request of its own.
+  // The query behind "Hidden channels  n" with the pinned views: no request of its own.
   const channelsHidden = (useHiddenChannelCount(sourceId) ?? 0) > 0;
   const groups = useMemo(
     () => (allCategories.data ? shownGroups(allCategories.data, channelsHidden) : undefined),
@@ -765,6 +765,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     [t, recentLabel],
   );
 
+  // walkthrough-09: Hidden channels sits with the pinned views, not under the last of 900 groups.
+  const hiddenChannelsRow = useCallback((height: number) => <MemoHiddenChannels sourceId={sourceId} height={height} />, [sourceId]);
+
   const hrefForCategory = useCallback(
     (cid?: string) =>
       isRadio
@@ -980,7 +983,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     );
   }
 
-  // Run 2: the Lists group above the groups (C3), and the source's hidden channels below them (C2).
+  // Run 2: the Lists group above the groups (C3); the source's hidden channels are with the pinned views (C2).
   // Lists hold TV channels: Radio leaves them out.
   const sidebar = (
     <>
@@ -1003,13 +1006,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onRegionChange={onRegionChange}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
+          afterPinned={hiddenChannelsRow}
         />
       </div>
-      <MemoHiddenChannels sourceId={sourceId} />
     </>
   );
 
   const listEmpty = paged.total === 0;
+  /** The list's own empty state already says the quality filter emptied it. */
+  let qualityEmpty = false;
   let listBody;
   if (paged.error) {
     listBody = <ErrorState error={paged.error} title={t('channelsLoadFailed')} onRetry={paged.retry} />;
@@ -1052,6 +1057,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       />
     );
   } else if (listEmpty && qualityFiltering && (liveView || categoryId || sourceCount > 0)) {
+    qualityEmpty = true;
     listBody = <QualityEmptyState quality={quality} />;
   } else if (listEmpty && liveView) {
     listBody = (
@@ -1188,12 +1194,20 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:landscape:w-[clamp(300px,32%,400px)] md:landscape:min-w-60 md:landscape:flex-initial md:landscape:border-e min-[150rem]:landscape:w-[clamp(300px,24%,560px)]"
         onFocus={onListFocus}
       >
+        {/* A phone's header has no room for its subtitle: with several sources the list names the
+            one browsed, and its count, as Movies does on a phone (realdata-13). */}
+        {groupOnToolbar && sourceName ? (
+          <p dir="auto" className="truncate px-(--page-gutter) pt-2 text-caption text-fg-muted" data-testid="live-source-line">
+            {countText ? t('groupWithCount', { group: sourceName, count: countText }) : sourceName}
+          </p>
+        ) : null}
         {toolbar}
         {region && !categoryId && !liveView ? (
           <p className="border-b border-divider bg-surface-2 px-3 py-1.5 text-caption text-fg-muted" data-testid="live-region-note">
             {t('regionNotApplied', { region })}
           </p>
         ) : null}
+        {qualityFiltering && !qualityEmpty ? <QualityFilterBar quality={quality} /> : null}
         {numberHit && searchNumber && !paged.error ? (
           <button
             type="button"

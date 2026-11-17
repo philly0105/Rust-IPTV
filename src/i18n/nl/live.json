@@ -132,6 +132,7 @@
   "qualityShowAll": "Alle kwaliteiten tonen",
   "qualityShowUntagged": "Kanalen zonder aanduiding tonen",
   "qualityMayHide": "Het kwaliteitsfilter van Live tv verbergt mogelijk kanalen.",
+  "qualityNote": "Alleen {{quality}}-kanalen",
   "openSources": "Open bronnen",
   "noGuideHint": "Koppel dit kanaal aan een gidskanaal, of voeg een gids toe in de gidsinstellingen.",
   "noGuideShort": "Geen gidsgegevens",

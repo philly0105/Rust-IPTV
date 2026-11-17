@@ -132,6 +132,7 @@
   "qualityShowAll": "Alle Qualitäten anzeigen",
   "qualityShowUntagged": "Sender ohne Angabe anzeigen",
   "qualityMayHide": "Der Qualitätsfilter von Live-TV blendet möglicherweise Sender aus.",
+  "qualityNote": "Nur Sender in {{quality}}",
   "openSources": "Quellen öffnen",
   "noGuideHint": "Ordnen Sie diesen Sender einem Programmführer-Sender zu oder fügen Sie in den Programmführer-Einstellungen einen Programmführer hinzu.",
   "noGuideShort": "Keine Programmdaten",

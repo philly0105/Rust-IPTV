@@ -132,6 +132,7 @@
   "qualityShowAll": "Minden minőség megjelenítése",
   "qualityShowUntagged": "Jelölés nélküli csatornák megjelenítése",
   "qualityMayHide": "Lehet, hogy az élő tévéadás minőségszűrője csatornákat rejt el.",
+  "qualityNote": "Csak {{quality}} csatornák",
   "openSources": "Források megnyitása",
   "noGuideHint": "Párosítsa ezt a csatornát egy műsorújság-csatornával, vagy adjon hozzá műsorújságot a műsorújság-beállításokban.",
   "noGuideShort": "Nincsenek műsoradatok",

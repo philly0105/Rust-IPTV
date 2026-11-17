@@ -138,6 +138,7 @@
   "qualityShowAll": "Mostra tutte le qualità",
   "qualityShowUntagged": "Mostra i canali senza indicazione",
   "qualityMayHide": "Il filtro di qualità della TV in diretta potrebbe nascondere dei canali.",
+  "qualityNote": "Solo canali {{quality}}",
   "openSources": "Apri sorgenti",
   "noGuideHint": "Associa questo canale a un canale della guida, oppure aggiungi una guida nelle impostazioni della guida.",
   "noGuideShort": "Nessun dato della guida",

@@ -51,6 +51,7 @@ import {
   nextSearchLimit,
   normalizeQuery,
   previewGroups,
+  rankChannels,
   searchRequestLimit,
   searchTerms,
   sourceFacets,
@@ -255,17 +256,22 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const dataLimit = catalog.isPlaceholderData ? settledLimit : limit;
   const capped = useMemo(() => capSearchResult(catalog.data, dataLimit), [catalog.data, dataLimit]);
   const loadingMore = catalog.isPlaceholderData && catalog.isFetching && cap.key === capKey && limit > settledLimit;
+  // Channels in the user's region and named by the whole word lead; provider heading rows drop out.
+  const ranked = useMemo(
+    () => (capped.result ? { ...capped.result, live: rankChannels(capped.result.live, query) } : undefined),
+    [capped.result, query],
+  );
 
   const answerGroups = useMemo(
     () =>
       groupSearchResults({
-        result: withNumberHits(capped.result, numbered.channels),
+        result: withNumberHits(ranked, numbered.channels),
         extraMovies: stalker.movies,
         extraSeries: stalker.series,
         sources: allSources.length ? allSources : searchSources,
         sourceFilter: facet,
       }),
-    [capped.result, numbered.channels, stalker.movies, stalker.series, allSources, searchSources, facet],
+    [ranked, numbered.channels, stalker.movies, stalker.series, allSources, searchSources, facet],
   );
   // L3-vod-5: the query the results on screen answer (catalog.search keeps the last answer while a
   // newer one loads). While the box holds a longer query than that, the results narrow to it at

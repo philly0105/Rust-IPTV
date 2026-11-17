@@ -286,7 +286,10 @@ describe('Recently watched titles (L2-visual-3, -7, -11)', () => {
     );
     expect(screen.getByText('The Matrix')).toBeTruthy();
     expect(screen.getByText('Le Bureau')).toBeTruthy();
-    expect(screen.getByText('US: News HD')).toBeTruthy();
+    // A channel keeps its whole name, quality word included: drawn with the place tag after it,
+    // and heard as "News HD (US)" (w-a11y-03).
+    expect(screen.getByText('News HD (US)')).toBeTruthy();
+    expect(screen.getByTestId('channel-name-tag').textContent).toBe('US');
     expect(screen.queryByText(/EN - The Matrix/)).toBeNull();
   });
 });

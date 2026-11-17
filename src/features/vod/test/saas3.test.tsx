@@ -156,7 +156,7 @@ describe('offline play resumes where the title says', () => {
     renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
     // The episode's row says it is on disk once the queue has loaded.
     expect(await screen.findByTestId('episode-offline')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('button', { name: 'Resume S01E02' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume episode 2' }));
     await waitFor(() => expect(played.sources).toHaveLength(1));
     expect(rpcMock.calls.filter((c) => c.cmd === 'myvideos.playSource').map((c) => c.args)).toEqual([{ id: 9 }]);
     expect(played.sources[0]).toMatchObject({ resumeSeconds: 1200 });

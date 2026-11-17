@@ -453,7 +453,7 @@ describe('SeriesDetailPage', () => {
     rpcMock.handlers['tmdb.tv'] = () => null;
     renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
     await screen.findByRole('heading', { name: 'Severance', level: 1 });
-    expect(await screen.findByRole('button', { name: 'Resume S01E02' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Resume season 1, episode 2' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Season 1/ })).toBeTruthy();
     // Phone-sized here: the row's facts leave the percent to the thumbnail's bar, and its play button says it.
     // The episode Resume points at is marked Up next (vod-detail-06).

@@ -367,11 +367,17 @@ export function SeriesDetailPage() {
           label: `${startCode} · ${t('minutesLeft', { count: Math.max(1, Math.round((startDuration - startPos.positionSeconds) / 60)) })}`,
         }
       : undefined;
+  // Play and Resume name the episode in words, not as "S01E02" (w-walkthrough-09); with one
+  // season, or for a special, the episode's number alone.
+  const episodeAction = (action: 'play' | 'resume', ep: Episode) =>
+    seasons.length <= 1 || ep.season <= 0
+      ? t(action === 'play' ? 'playEpisodeNumber' : 'resumeEpisodeNumber', { episode: ep.episode })
+      : t(action === 'play' ? 'playEpisode' : 'resumeEpisode', { season: ep.season, episode: ep.episode });
   const firstEpisode = order[0];
   // VL-hero-actions: Play from the first episode and the lock wait in More.
   const moreItems: MenuItem[] = [
     ...(firstEpisode && start && firstEpisode.id !== start.episode.id
-      ? [{ id: 'play-first', label: t('playEpisode', { code: episodeCode(firstEpisode.season, firstEpisode.episode) }), icon: <Play aria-hidden size={16} />, onSelect: () => playEpisode(firstEpisode) }]
+      ? [{ id: 'play-first', label: episodeAction('play', firstEpisode), icon: <Play aria-hidden size={16} />, onSelect: () => playEpisode(firstEpisode) }]
       : []),
     ...(lockItems.length > 0 ? [{ id: 'sep-lock', type: 'separator' as const }, ...lockItems] : []),
   ];
@@ -435,7 +441,7 @@ export function SeriesDetailPage() {
           onClick={() => playEpisode(start.episode)}
           className="max-sm:flex-1"
         >
-          {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: startCode })}
+          {episodeAction(start.resume ? 'resume' : 'play', start.episode)}
         </Button>
       ) : null}
       {trailer ? (

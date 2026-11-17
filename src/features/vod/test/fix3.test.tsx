@@ -332,7 +332,7 @@ describe('U4-fix3: watched state', () => {
     // leave Watched out (they say it in words from sm up, episodeListPhone.test).
     expect(screen.getAllByTestId('episode-watched-chip')).toHaveLength(1);
     // Play starts after the watched episode.
-    expect(screen.getByRole('button', { name: 'Play S01E02' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play episode 2' })).toBeTruthy();
 
     // The watched episode's own button offers the way back; the next one's marks it, no menu in between.
     expect(screen.getByRole('button', { name: 'Mark S01E01 as unwatched' })).toBeTruthy();

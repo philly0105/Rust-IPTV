@@ -943,13 +943,17 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, sourceNa
             // fit still widened the name's box, leaving a gap before the source: the name goes bare.
             <span title={joinList([channelName, sourceName], i18n.language)} className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
               {/* The channel gets the room. The source gives way: shortened down to a few letters,
-                  then onto the hidden second line, never "Me…" beside a cut channel name. */}
+                  then onto the hidden second line, never "Me…" beside a cut channel name. Its least
+                  width is also what the line measures, so a short source ("sports") is not sent to
+                  the hidden line beside a short name. */}
               <span dir="auto" className="max-w-full shrink-0 truncate text-match-parent">
                 {strip ? stripCountryPrefix(channelName) : splitPlaceTag(channelName).name}
               </span>
-              <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
-              <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="on-now-source">
-                {sourceName}
+              <span className="flex min-w-[7ch] grow basis-[7ch] items-baseline gap-1.5 ps-1.5">
+                <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+                <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="on-now-source">
+                  {sourceName}
+                </span>
               </span>
             </span>
           ) : (

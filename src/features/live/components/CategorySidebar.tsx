@@ -264,7 +264,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
   return (
     <nav ref={navRef} aria-label={t('groups')} className="flex h-full min-h-0 flex-col" onKeyDown={onListKey} data-testid="group-nav">
       <div className="flex items-center gap-1 px-3 pt-3 pb-2">
-        <h2 className={props.inDrawer ? 'sr-only' : 'flex-1 text-sm font-semibold text-fg'}>{t('groups')}</h2>
+        {/* The drawer's own title already says Groups, to sight and to screen readers. */}
+        {props.inDrawer ? null : <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>}
         {regions.length > 0 && !lone ? (
           <Select
             aria-label={t('region')}

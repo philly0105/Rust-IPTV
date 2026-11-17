@@ -253,9 +253,9 @@ describe('the group column', () => {
     expect(select.className).not.toContain('text-xs');
   });
 
-  it('in the drawer says "Groups" once, for screen readers, and gives the region select the row in full words (v-phone-01, v-phone-12)', () => {
+  it('in the drawer leaves "Groups" to the drawer title and gives the region select the row in full words (v-phone-01, v-phone-12, w-a11y-12)', () => {
     wrap(sidebar(undefined, true));
-    expect(screen.getByRole('heading', { name: 'Groups' }).className).toBe('sr-only');
+    expect(screen.queryByRole('heading', { name: 'Groups' })).toBeNull();
     const select = screen.getByTestId('group-region') as HTMLSelectElement;
     expect(select.options[0]!.text).toBe('All regions');
     expect(select.className).toContain('flex-1');

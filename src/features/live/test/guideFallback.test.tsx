@@ -156,7 +156,9 @@ describe('EpgGridPage short-EPG fallback', () => {
   it('offers a past archive programme download from its guide context menu', async () => {
     handlers(false);
     const now = Date.now();
-    const past = program('Yesterday news', now - 2 * HOUR, now - HOUR);
+    // An hour that ended a few minutes ago: the guide mounts programmes only from 45 minutes
+    // before its left edge, so one that ended an hour ago was missing at :09-:15 past the hour.
+    const past = program('Yesterday news', now - HOUR - 5 * MINUTE, now - 5 * MINUTE);
     rpcMock.handlers['epg.grid'] = (a) => Object.fromEntries((a as { refs: ItemRef[] }).refs.map((r) => [
       `${r.sourceId}|${r.contentType}|${r.itemId}`, r.itemId === 'c0' ? [past] : [],
     ]));

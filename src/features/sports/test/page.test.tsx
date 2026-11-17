@@ -1274,7 +1274,8 @@ describe('sports page', () => {
     setDay([h.liveGame('1')]);
     open();
     fireEvent.click(await screen.findByTestId('sports-add-source'));
-    const dlg = await screen.findByRole('dialog');
+    // The add dialog is a lazy chunk: its first import alone can pass the 1 s default on a loaded machine.
+    const dlg = await screen.findByRole('dialog', undefined, { timeout: 10000 });
     fireEvent.click(within(dlg).getByRole('tab', { name: 'M3U playlist' }));
     fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
     fireEvent.change(within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }), { target: { value: 'http://lists.example.com/huge.m3u' } });

@@ -58,6 +58,10 @@ export function LiveStageColumn(props: LiveStageColumnProps) {
         // Sized by what it holds; a short window keeps the list a toolbar and a few rows, and then
         // the screen gives way, never the ribbon (a strip cut through its text, v-live-01).
         props.stacked && 'md:order-first md:max-h-[calc(100%-14rem)] md:flex-none',
+        // A short landscape window under 768 px (720x450 is 1440x900 at 200% zoom) stacks too: the
+        // 16:9 screen took the whole height and left the list 0 px. The list keeps its toolbar and
+        // three rows; the screen letterboxes in what is left (w-a11y-02).
+        'max-md:landscape:max-h-[calc(100%-15rem)]',
         !busy && props.hiddenOnPhone && 'max-md:hidden',
       )}
     >
@@ -66,7 +70,7 @@ export function LiveStageColumn(props: LiveStageColumnProps) {
         data-idle={busy ? undefined : ''}
         className={cn(
           'relative min-h-0 bg-black md:aspect-video md:shrink pointer-coarse:[@media(max-height:30rem)]:md:shrink-0!',
-          busy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2',
+          busy ? 'aspect-video max-md:landscape:shrink' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2',
         )}
       >
         <Stage className={busy ? 'h-full w-full' : 'h-full w-full max-md:bg-transparent'}>{props.idle}</Stage>

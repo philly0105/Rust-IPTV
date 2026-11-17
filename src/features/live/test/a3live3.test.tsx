@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Channel, EpgProgram } from '@/api/types';
 import { EpgRibbon } from '../components/EpgRibbon';
+import { LiveStageColumn } from '../components/LiveStageColumn';
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { HOUR, MINUTE } from '../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
@@ -155,5 +156,14 @@ describe('the channel menu (v-live-03, v-guide-07)', () => {
     expect(menuOf(makeChannel(5), day[0])[0]).toBe('Play');
     cleanup();
     expect(menuOf(makeChannel(5))[0]).toBe('Play');
+  });
+});
+
+describe('the stage in a short landscape window under 768 px (w-a11y-02)', () => {
+  it('is capped so the list keeps its toolbar and three rows, the screen giving way', () => {
+    const Stage = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
+    renderAt('/', [{ path: '/', element: <LiveStageColumn label="Player" busy idle={null} ribbon={null} ribbonOnPhone stageTestId="stage" sectionTestId="column" Stage={Stage} /> }]);
+    expect(screen.getByTestId('column').className).toContain('max-md:landscape:max-h-[calc(100%-15rem)]');
+    expect(screen.getByTestId('stage').className).toContain('max-md:landscape:shrink');
   });
 });

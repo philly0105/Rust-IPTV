@@ -834,7 +834,7 @@ function OptionsMenu({
   view: MenuView;
   setView(v: MenuView | null): void;
   isVod: boolean;
-  /** Controls the bar has no room for (a narrow player), at the top of the root view. */
+  /** Controls the bar has no room for (a narrow player), at the top of the commands under the settings. */
   moved?: readonly MovedControl[] | undefined;
   commandsShown: MenuCommands;
   fit: MenuFit;
@@ -955,6 +955,7 @@ function OptionsMenu({
     </div>
   );
 
+  const hasMoved = !!moved && moved.length > 0;
   const hasCommands = commandsShown.screenshot || commandsShown.history || commandsShown.record || commandsShown.stop;
 
   return (
@@ -988,21 +989,6 @@ function OptionsMenu({
       {view === 'root' && (
         <>
           {header}
-          {moved && moved.length > 0 && (
-            // A popover keeps them as a row of icons (it is narrow); a sheet has the width for named rows.
-            <div data-testid="moved-controls" className={fit.sheet ? undefined : 'mb-1 flex flex-wrap items-center gap-0.5 border-b border-white/10 pb-1'}>
-              {moved.map((m) =>
-                fit.sheet ? (
-                  <MenuAction key={m.id} icon={m.rowIcon ?? m.icon} label={m.label} shortcut={m.shortcut} onClick={m.onClick} />
-                ) : (
-                  <CtlButton key={m.id} role="menuitem" label={m.label} shortcut={m.shortcut} onClick={m.onClick}>
-                    {m.icon}
-                  </CtlButton>
-                ),
-              )}
-              {fit.sheet && <MenuSeparator />}
-            </div>
-          )}
           {tracks.qualities.length > 0 && <MenuRow label={t('quality')} value={qualityValue} onClick={() => setView('quality')} />}
           {/* Always there, like Subtitles: a stream with one track says so instead of leaving no row. */}
           <MenuRow label={t('audioTrack')} value={audioValue} disabled={!audioChoice} onClick={() => setView('audio')} />
@@ -1022,7 +1008,16 @@ function OptionsMenu({
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
           {/* failover: other copies of the live channel. */}
           <AlternatesRow onOpen={() => setView('sources')} />
-          {(hasCommands || !isVod) && <MenuSeparator />}
+          {(hasCommands || !isVod || hasMoved) && <MenuSeparator />}
+          {hasMoved && (
+            // Named rows with their keys, as the sheet always had: a lone unlabelled icon above
+            // Subtitles was the first stop of the keyboard (v-player-04).
+            <div role="none" data-testid="moved-controls">
+              {moved.map((m) => (
+                <MenuAction key={m.id} icon={m.rowIcon ?? m.icon} label={m.label} shortcut={m.shortcut} onClick={m.onClick} />
+              ))}
+            </div>
+          )}
           {/* Live: favourite the channel, put it on the multi-view wall. */}
           {!isVod && <ChannelActions onDone={() => setView(null)} />}
           {/* Screenshot (C6): the menu closes first, so it is never in the picture. */}

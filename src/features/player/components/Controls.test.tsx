@@ -632,6 +632,9 @@ describe('Controls for fullscreen live TV', () => {
   });
 });
 
+/** A named menu row's label, without its key caps. */
+const rowName = (b: Element): string | null | undefined => b.querySelector('.flex-1')?.textContent;
+
 describe('Controls in a narrow player', () => {
   let restore: () => void = () => undefined;
   beforeEach(() => {
@@ -652,8 +655,12 @@ describe('Controls in a narrow player', () => {
 
     openMenu();
     const moved = screen.getByTestId('moved-controls');
-    const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map(rowName);
     expect(names).toEqual(['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture', 'Fill window']);
+    // Named rows under the settings, with their keys: focus opens on the first setting (v-player-04).
+    expect(screen.getByRole('menuitemcheckbox', { name: /stream info/i }).compareDocumentPosition(moved) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /^subtitles/i }));
+    expect(screen.getByRole('menuitem', { name: /fill window/i }).getAttribute('aria-keyshortcuts')).toBe('Shift+F');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Picture in picture' }));
     expect(commands.togglePip).toHaveBeenCalledTimes(1);
     expect(menu()).toBeNull();
@@ -666,7 +673,7 @@ describe('Controls in a narrow player', () => {
     expect(screen.getByRole('button', { name: 'Open channel list' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
     openMenu();
-    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
     expect(names.slice(0, 2)).toEqual(['Previous channel', 'Next channel']);
   });
 
@@ -676,7 +683,7 @@ describe('Controls in a narrow player', () => {
     render(<Controls variant="overlay" visible />);
     expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
     openMenu();
-    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
     expect(names).not.toContain('Next channel');
   });
 
@@ -751,7 +758,7 @@ describe('Controls in a narrow player', () => {
       expect(screen.getByRole('button', { name: 'Forward 10 seconds' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
       openMenu();
-      const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+      const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
       expect(names).toEqual(['Picture in picture', 'Fill window']);
     })();
   });

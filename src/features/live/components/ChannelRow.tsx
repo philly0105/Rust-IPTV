@@ -212,7 +212,8 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         {...longPress}
       >
         {/* On the names' line: the number and logo columns stay, empty. */}
-        <span aria-hidden className={cn('shrink-0', NUMBER_WIDTH)} />
+        {/* In the number's font: its width is in ch, so another font set the caption off the names (v-live-08). */}
+        <span aria-hidden className={cn('shrink-0 font-numeric text-sm', NUMBER_WIDTH)} />
         {compact ? null : <span aria-hidden className="shrink-0" style={{ width: props.station ? 44 : 40 }} />}
         <span dir="auto" className="min-w-0 truncate text-caption font-semibold tracking-wide text-fg-subtle uppercase">
           {separatorLabel(channel.name)}

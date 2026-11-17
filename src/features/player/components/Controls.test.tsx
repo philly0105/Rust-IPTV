@@ -1084,6 +1084,20 @@ describe('Controls on a short player (review: the scrim darkened most of a phone
 });
 
 describe('Controls seek row in a right-to-left language (review: times swapped against the fill)', () => {
+  it('keeps the transport buttons left to right beside it, and mirrors the rest of the bar (v-themes-locales-10)', () => {
+    act(() => usePlayerStore.setState({ queue: [{ url: 'http://v/a.mp4', kind: 'direct', title: 'A', isLive: false, isRadio: false }, usePlayerStore.getState().source!, { url: 'http://v/b.mp4', kind: 'direct', title: 'B', isLive: false, isRadio: false }] }));
+    render(
+      <div dir="rtl">
+        <Controls variant="overlay" visible />
+      </div>,
+    );
+    const transport = document.querySelector('[data-transport]')!;
+    expect(transport.getAttribute('dir')).toBe('ltr');
+    expect(Array.from(transport.querySelectorAll('[data-ctl]'), (b) => b.getAttribute('data-ctl'))).toEqual(['prev', 'play', 'next', 'back10', 'fwd10']);
+    // Volume, options and fullscreen follow the page's direction.
+    expect(screen.getByRole('button', { name: 'Mute' }).closest('[dir]')!.getAttribute('dir')).toBe('rtl');
+  });
+
   it('lays the times and the bar out left to right, as the fill grows', () => {
     render(
       <div dir="rtl">

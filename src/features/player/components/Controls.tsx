@@ -1577,6 +1577,19 @@ function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: numbe
   return { slots: active ? slots : 0, showing };
 }
 
+/**
+ * The transport buttons (previous, play, next, 10 s back and ahead), left to right in every
+ * language, as media players keep them: they move along the seek bar, which runs left to right
+ * (`PositionSeekBar`). The rest of the bar mirrors in a right-to-left language (v-themes-locales-10).
+ */
+function Transport({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <div dir="ltr" data-transport="" className={cn('flex shrink-0 items-center', className)}>
+      {children}
+    </div>
+  );
+}
+
 /** 10 s back or ahead, as J and L do. */
 function jump(seconds: number): void {
   usePlayerStore.getState().seekBy(seconds);
@@ -1886,6 +1899,9 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
     </CtlButton>
   );
 
+  const rowGap = compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1';
+  // The row's start: previous, play, next and the 10 s skips (a narrow row keeps the spares at its end).
+  const transport = (!compact && !narrow && (prev || next)) || !panelOwnsError || (!narrow && canJump);
   const overlay = variant === 'overlay';
   /** The player itself, which takes focus after a pointer closes a menu (PL-SPACE-CLICKED-CONTROL). */
   const focusPlayer = (): void => root?.closest<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
@@ -1965,11 +1981,15 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                 onSeek={(s, step) => store.seekTo(s, { step })}
               />
             )}
-            <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1')}>
-              {!compact && !narrow && prevButton}
-              {!panelOwnsError && playButton}
-              {!compact && !narrow && nextButton}
-              {!narrow && jumpButtons}
+            <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', rowGap)}>
+              {transport && (
+                <Transport className={rowGap}>
+                  {!compact && !narrow && prevButton}
+                  {!panelOwnsError && playButton}
+                  {!compact && !narrow && nextButton}
+                  {!narrow && jumpButtons}
+                </Transport>
+              )}
               {/* Over an error a narrow row has no volume, so nothing makes the channel buttons step aside:
                   they stay together at the start, as on a wide bar. */}
               {(!narrow || panelOwnsError) && channelsButton}
@@ -2014,9 +2034,13 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
               {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
               {/* A narrow row keeps its spares right of the volume, so they can step aside when it opens. */}
               {narrow && !panelOwnsError && inRow('zap') && zapButtons}
-              {narrow && inRow('jump') && jumpButtons}
-              {narrow && inRow('skip') && prevButton}
-              {narrow && inRow('skip') && nextButton}
+              {narrow && ((inRow('jump') && jumpButtons) || (inRow('skip') && (prevButton || nextButton))) && (
+                <Transport className={rowGap}>
+                  {inRow('jump') && jumpButtons}
+                  {inRow('skip') && prevButton}
+                  {inRow('skip') && nextButton}
+                </Transport>
+              )}
 
               <div className={cn('flex items-center', big ? 'gap-2' : 'gap-1')}>
                 {tracks.text.length > 0 && !compact && inRow('captions') && (

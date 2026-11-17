@@ -53,11 +53,11 @@ fn configure_sets_journal_size_limit() {
 fn checkpoint_truncate_empties_a_grown_wal() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(DB_FILE);
-    let conn = connect(&path);
+    let mut conn = connect(&path);
     grow_wal(&conn);
     assert!(wal_len(&path) > 4_000_000, "WAL grew: {}", wal_len(&path));
 
-    checkpoint_truncate(&conn);
+    checkpoint_truncate(&mut conn);
     assert_eq!(wal_len(&path), 0, "WAL truncated to zero bytes");
     let rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))
@@ -69,7 +69,7 @@ fn checkpoint_truncate_empties_a_grown_wal() {
 fn checkpoint_truncate_does_not_wait_for_a_reader() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(DB_FILE);
-    let writer = connect(&path);
+    let mut writer = connect(&path);
     // Keep the frames un-checkpointed, so the reader reads them from the WAL
     // (a reader of a fully checkpointed WAL reads the main file and does not
     // hold it).
@@ -85,13 +85,13 @@ fn checkpoint_truncate_does_not_wait_for_a_reader() {
     // With the busy handler on, a TRUNCATE checkpoint waits up to 5 s for
     // the reader to finish.
     let started = Instant::now();
-    checkpoint_truncate(&writer);
+    checkpoint_truncate(&mut writer);
     let took = started.elapsed();
     assert!(took < Duration::from_secs(2), "blocked for {took:?}");
     assert!(wal_len(&path) > 0, "the reader still uses the WAL");
 
     reader.execute_batch("COMMIT").unwrap();
-    checkpoint_truncate(&writer);
+    checkpoint_truncate(&mut writer);
     assert_eq!(wal_len(&path), 0, "a later checkpoint truncates it");
 }
 
@@ -101,9 +101,9 @@ fn checkpoint_truncate_does_not_wait_for_a_reader() {
 fn checkpoint_truncate_restores_the_busy_handler() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(DB_FILE);
-    let conn = connect(&path);
+    let mut conn = connect(&path);
     conn.execute_batch("CREATE TABLE t(x)").unwrap();
-    checkpoint_truncate(&conn);
+    checkpoint_truncate(&mut conn);
 
     let other = connect(&path);
     other.execute_batch("BEGIN IMMEDIATE").unwrap();

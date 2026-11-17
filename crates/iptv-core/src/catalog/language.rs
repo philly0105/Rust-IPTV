@@ -30,6 +30,7 @@ use regex::Regex;
 use rusqlite::functions::FunctionFlags;
 use rusqlite::Connection;
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Detected language: a BCP 47 tag, or a group of languages.
@@ -584,18 +585,18 @@ fn text_arg<'a>(
 /// [`crate::parental::register_sql`].
 pub fn register(conn: &Connection) -> rusqlite::Result<()> {
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
-    let mut memo = CategoryMemo::default();
+    let memo = RefCell::new(CategoryMemo::default());
     conn.create_scalar_function(SQL_FUNCTION, 2, flags, move |ctx| {
         let title = text_arg(ctx, 0)?.unwrap_or_default();
-        let category = memo.verdict(text_arg(ctx, 1)?);
+        let category = memo.borrow_mut().verdict(text_arg(ctx, 1)?);
         Ok(combine(title_verdict(title), category))
     })?;
     conn.create_scalar_function(TITLE_SQL_FUNCTION, 1, flags, |ctx| {
         Ok(title_verdict(text_arg(ctx, 0)?.unwrap_or_default()))
     })?;
-    let mut memo = CategoryMemo::default();
+    let memo = RefCell::new(CategoryMemo::default());
     conn.create_scalar_function(CATEGORY_SQL_FUNCTION, 1, flags, move |ctx| {
-        Ok(memo.verdict(text_arg(ctx, 0)?))
+        Ok(memo.borrow_mut().verdict(text_arg(ctx, 0)?))
     })?;
     // parental: the hide-mode filters match adult category names in SQL.
     crate::parental::register_sql(conn)

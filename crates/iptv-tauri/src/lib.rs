@@ -1124,8 +1124,8 @@ fn checkpoint_wal(state: &AppState, wait: std::time::Duration) {
         .db
         .get_timeout(wait.max(std::time::Duration::from_millis(100)))
     {
-        Ok(conn) => {
-            iptv_core::db::checkpoint_truncate(&conn);
+        Ok(mut conn) => {
+            iptv_core::db::checkpoint_truncate(&mut conn);
             tracing::info!("WAL checkpoint attempted on exit");
         }
         Err(err) => tracing::warn!(%err, "WAL checkpoint on exit skipped"),

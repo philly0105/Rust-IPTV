@@ -175,6 +175,7 @@
   "searching": "جارٍ البحث",
   "noResultsTitle": "لا توجد نتائج لـ «{{query}}»",
   "noResultsHint": "تحقّق من الإملاء، أو اكتب الحروف الأولى من الكلمة: البحث يطابق بدايات الكلمات.",
+  "noCatalogResults": "لا توجد قنوات أو أفلام أو مسلسلات أو برامج تطابق «{{query}}».",
   "noResultsInSourceTitle": "لا توجد نتائج لـ «{{query}}» في {{source}}",
   "noResultsInSourceHint": "يقتصر البحث على هذا المصدر. قد تجد ما تبحث عنه في مصادر أخرى.",
   "searchAllSources": "البحث في جميع المصادر",

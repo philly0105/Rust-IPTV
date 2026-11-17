@@ -147,6 +147,7 @@
   "searching": "검색 중",
   "noResultsTitle": "\"{{query}}\"에 대한 결과가 없습니다",
   "noResultsHint": "철자를 확인하거나 단어의 첫 글자를 입력하세요. 검색은 단어의 앞부분으로 찾습니다.",
+  "noCatalogResults": "\"{{query}}\"와 일치하는 채널, 영화, 시리즈, 프로그램이 없습니다.",
   "noResultsInSourceTitle": "{{source}}에서 \"{{query}}\"에 대한 결과가 없습니다",
   "noResultsInSourceHint": "이 소스에서만 검색했습니다. 다른 소스에 있을 수도 있습니다.",
   "searchAllSources": "모든 소스에서 검색",

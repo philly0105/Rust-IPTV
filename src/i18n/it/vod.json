@@ -154,6 +154,7 @@
   "searching": "Ricerca in corso",
   "noResultsTitle": "Nessun risultato per \"{{query}}\"",
   "noResultsHint": "Controlla l'ortografia o digita le prime lettere di una parola: la ricerca trova l'inizio delle parole.",
+  "noCatalogResults": "Nessun canale, film, serie o programma corrisponde a \"{{query}}\".",
   "noResultsInSourceTitle": "Nessun risultato per \"{{query}}\" in {{source}}",
   "noResultsInSourceHint": "La ricerca è limitata a questa sorgente. Potrebbe trovarsi in altre sorgenti.",
   "searchAllSources": "Cerca in tutte le sorgenti",

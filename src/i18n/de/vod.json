@@ -147,6 +147,7 @@
   "searching": "Suche läuft",
   "noResultsTitle": "Keine Ergebnisse für „{{query}}“",
   "noResultsHint": "Prüfen Sie die Schreibweise oder tippen Sie die ersten Buchstaben eines Wortes: Die Suche findet Wortanfänge.",
+  "noCatalogResults": "Keine Sender, Filme, Serien oder Sendungen passen zu „{{query}}“.",
   "noResultsInSourceTitle": "Keine Ergebnisse für „{{query}}“ in {{source}}",
   "noResultsInSourceHint": "Die Suche ist auf diese Quelle beschränkt. Andere Quellen haben den Titel vielleicht.",
   "searchAllSources": "Alle Quellen durchsuchen",

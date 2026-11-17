@@ -556,12 +556,15 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       />
     );
     // The search of everything also finds settings, as the palette does: when only settings
-    // match, they lead and the no-results note under them is a quiet line, not the page's state.
+    // match, they lead and the no-results note under them is one quiet line, not the page's state.
     if (settingRows.length > 0) {
       body = (
         <>
           <SettingsMatches rows={settingRows} />
-          <EmptyState size="inline" icon={<SearchX />} title={t('noResultsTitle', { query })} description={t('noResultsHint')} />
+          {/* One quiet line: the page did find "subtitle", so no empty state and no spelling hint. */}
+          <p className="px-3 text-body-sm text-fg-muted" data-testid="search-no-catalog">
+            {t('noCatalogResults', { query })}
+          </p>
         </>
       );
     }

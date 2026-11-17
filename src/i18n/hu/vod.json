@@ -147,6 +147,7 @@
   "searching": "Keresés…",
   "noResultsTitle": "Nincs találat a következőre: „{{query}}”",
   "noResultsHint": "Ellenőrizze a helyesírást, vagy írja be egy szó első betűit: a keresés a szavak elejét találja meg.",
+  "noCatalogResults": "Egy csatorna, film, sorozat vagy műsor sem egyezik ezzel: „{{query}}”.",
   "noResultsInSourceTitle": "Nincs találat erre: „{{query}}” (forrás: {{source}})",
   "noResultsInSourceHint": "A keresés erre a forrásra korlátozódik. Más forrásokban lehet találat.",
   "searchAllSources": "Keresés az összes forrásban",

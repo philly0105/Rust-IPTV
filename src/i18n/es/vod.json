@@ -154,6 +154,7 @@
   "searching": "Buscando",
   "noResultsTitle": "No hay resultados para «{{query}}»",
   "noResultsHint": "Revisa la ortografía o escribe las primeras letras de una palabra: la búsqueda encuentra el inicio de las palabras.",
+  "noCatalogResults": "Ningún canal, película, serie o programa coincide con «{{query}}».",
   "noResultsInSourceTitle": "No hay resultados para «{{query}}» en {{source}}",
   "noResultsInSourceHint": "La búsqueda se limita a esta fuente. Puede que esté en otras.",
   "searchAllSources": "Buscar en todas las fuentes",

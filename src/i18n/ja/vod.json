@@ -147,6 +147,7 @@
   "searching": "検索中",
   "noResultsTitle": "「{{query}}」の検索結果はありません",
   "noResultsHint": "つづりを確認するか、単語の最初の数文字を入力してください。検索は単語の先頭で一致します。",
+  "noCatalogResults": "「{{query}}」に一致するチャンネル、映画、シリーズ、番組はありません。",
   "noResultsInSourceTitle": "{{source}} に「{{query}}」の検索結果はありません",
   "noResultsInSourceHint": "検索はこのソースに限定されています。ほかのソースにあるかもしれません。",
   "searchAllSources": "すべてのソースを検索",

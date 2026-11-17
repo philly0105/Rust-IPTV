@@ -147,6 +147,7 @@
   "searching": "正在搜索",
   "noResultsTitle": "没有“{{query}}”的结果",
   "noResultsHint": "请检查拼写，或输入词语的前几个字母：搜索按词首匹配。",
+  "noCatalogResults": "没有与“{{query}}”匹配的频道、电影、剧集或节目。",
   "noResultsInSourceTitle": "在 {{source}} 中没有“{{query}}”的结果",
   "noResultsInSourceHint": "搜索仅限于此播放源，其他播放源中可能会有。",
   "searchAllSources": "搜索所有播放源",

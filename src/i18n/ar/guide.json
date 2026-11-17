@@ -29,6 +29,8 @@
   "jumpTitle": "الانتقال إلى تاريخ ووقت",
   "jumpDay": "اليوم",
   "jumpTime": "الوقت",
+  "jumpNoGuide": "لا يوجد دليل بعد",
+  "jumpGuideEnds": "يمتد الدليل حتى {{day}}. الأيام اللاحقة لا برامج لها بعد.",
   "jumpGo": "انتقال",
   "jumpNow": "الآن",
   "recordSeries": "تسجيل المسلسل",

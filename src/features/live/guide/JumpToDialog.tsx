@@ -30,6 +30,11 @@ export interface JumpToDialogProps {
   /** The grid window's start: the dialog opens on its day and time. */
   start: number;
   now: number;
+  /**
+   * Where the guide's programmes end (the latest of a few rows on screen), if known: days after it
+   * are drawn quiet and say they have no guide yet. They can still be picked.
+   */
+  guideEnd?: number;
   /** A chosen instant on a 30-minute slot. */
   onJump(at: number): void;
   /** Back to the live window. */
@@ -50,7 +55,7 @@ function relativeDay(diff: number, locale: string): string | undefined {
   return new Intl.RelativeTimeFormat(intlLocale(locale), { numeric: 'auto' }).format(diff, 'day');
 }
 
-export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpToDialogProps) {
+export function JumpToDialog({ open, onClose, start, now, guideEnd, onJump, onNow }: JumpToDialogProps) {
   const { t, i18n } = useTranslation('guide');
   const lang = i18n.language;
   const days = useMemo(() => jumpDays(now), [localDayStart(now)]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -159,6 +164,8 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
               const diff = localDayDiff(d, now);
               const selected = d === day;
               const rel = relativeDay(diff, lang);
+              const noGuide = guideEnd !== undefined && d >= guideEnd;
+              const name = rel ? `${rel}, ${formatDay(d, lang)}` : formatDay(d, lang);
               return (
                 <button
                   key={d}
@@ -175,6 +182,7 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
                   onKeyDown={(e) => onChipKey(e, i)}
                   data-testid="guide-jump-day"
                   data-day={d}
+                  data-no-guide={noGuide ? '' : undefined}
                   className={cn(
                     'relative flex min-h-12 flex-col items-start justify-center rounded-md border px-2.5 py-1.5 text-start outline-none',
                     'focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus-visible:ring-offset-surface',
@@ -182,7 +190,7 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
                     // The chosen day takes the neutral selected fill and an amber edge, like a radio card.
                     selected
                       ? 'border-accent bg-selected text-fg'
-                      : diff < 0
+                      : diff < 0 || noGuide
                         ? 'border-divider bg-surface text-fg-muted hover:bg-surface-2 active:bg-surface-3'
                         : 'border-edge bg-surface-2 text-fg hover:bg-surface-3 active:bg-pressed',
                   )}
@@ -191,11 +199,16 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
                     {rel ?? chipFormats.weekday.format(d)}
                   </span>
                   <span aria-hidden className="text-body-sm font-medium whitespace-nowrap tabular-nums">{chipFormats.date.format(d)}</span>
-                  <span className="sr-only">{rel ? `${rel}, ${formatDay(d, lang)}` : formatDay(d, lang)}</span>
+                  <span className="sr-only">{noGuide ? `${name}, ${t('jumpNoGuide')}` : name}</span>
                 </button>
               );
             })}
           </div>
+          {guideEnd !== undefined && days.some((d) => d >= guideEnd) ? (
+            <p className="text-caption text-fg-muted" data-testid="guide-jump-extent">
+              {t('jumpGuideEnds', { day: formatDay(guideEnd - 1, lang) })}
+            </p>
+          ) : null}
         </div>
 
         <Select

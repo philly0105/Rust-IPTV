@@ -29,6 +29,8 @@
   "jumpTitle": "날짜와 시간으로 이동",
   "jumpDay": "날짜",
   "jumpTime": "시간",
+  "jumpNoGuide": "아직 가이드 없음",
+  "jumpGuideEnds": "가이드는 {{day}}까지 있습니다. 이후 날짜에는 아직 프로그램이 없습니다.",
   "jumpGo": "이동",
   "jumpNow": "지금",
   "recordSeries": "시리즈 녹화",

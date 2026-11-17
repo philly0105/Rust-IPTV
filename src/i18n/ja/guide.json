@@ -29,6 +29,8 @@
   "jumpTitle": "日時を指定して移動",
   "jumpDay": "日付",
   "jumpTime": "時刻",
+  "jumpNoGuide": "番組表はまだありません",
+  "jumpGuideEnds": "番組表は{{day}}までです。それ以降の日にはまだ番組がありません。",
   "jumpGo": "移動",
   "jumpNow": "現在",
   "recordSeries": "シリーズ録画",

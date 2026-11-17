@@ -29,6 +29,8 @@
   "jumpTitle": "Ir a fecha y hora",
   "jumpDay": "Día",
   "jumpTime": "Hora",
+  "jumpNoGuide": "sin guía todavía",
+  "jumpGuideEnds": "La guía llega hasta {{day}}. Los días siguientes aún no tienen programas.",
   "jumpGo": "Ir",
   "jumpNow": "Ahora",
   "recordSeries": "Grabar serie",

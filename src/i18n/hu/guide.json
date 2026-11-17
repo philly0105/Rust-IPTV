@@ -29,6 +29,8 @@
   "jumpTitle": "Ugrás dátumra és időpontra",
   "jumpDay": "Nap",
   "jumpTime": "Időpont",
+  "jumpNoGuide": "még nincs műsor",
+  "jumpGuideEnds": "A műsorújság eddig tart: {{day}}. A későbbi napokra még nincsenek műsorok.",
   "jumpGo": "Ugrás",
   "jumpNow": "Most",
   "recordSeries": "Sorozatfelvétel",

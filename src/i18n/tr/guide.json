@@ -29,6 +29,8 @@
   "jumpTitle": "Tarih ve saate git",
   "jumpDay": "Gün",
   "jumpTime": "Saat",
+  "jumpNoGuide": "henüz rehber yok",
+  "jumpGuideEnds": "Rehber {{day}} tarihine kadar. Sonraki günlerde henüz program yok.",
   "jumpGo": "Git",
   "jumpNow": "Şimdi",
   "recordSeries": "Diziyi kaydet",

@@ -29,6 +29,8 @@
   "jumpTitle": "Naar datum en tijd gaan",
   "jumpDay": "Dag",
   "jumpTime": "Tijd",
+  "jumpNoGuide": "nog geen gids",
+  "jumpGuideEnds": "De gids loopt tot {{day}}. Latere dagen hebben nog geen programma's.",
   "jumpGo": "Ga",
   "jumpNow": "Nu",
   "recordSeries": "Serie opnemen",

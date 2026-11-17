@@ -29,13 +29,13 @@ afterAll(() => {
 });
 afterEach(cleanup);
 
-function setup(over: { start?: number; now?: number } = {}) {
+function setup(over: { start?: number; now?: number; guideEnd?: number } = {}) {
   const now = over.now ?? new Date(2026, 9, 21, 10, 10).getTime(); // Wed 21 Oct, 10:10 CEST
   const start = over.start ?? defaultStart(now);
   const onJump = vi.fn();
   const onNow = vi.fn();
   const onClose = vi.fn();
-  renderGuide(<JumpToDialog open onClose={onClose} start={start} now={now} onJump={onJump} onNow={onNow} />);
+  renderGuide(<JumpToDialog open onClose={onClose} start={start} now={now} guideEnd={over.guideEnd} onJump={onJump} onNow={onNow} />);
   const dialog = screen.getByTestId('guide-jump');
   const chips = () => within(dialog).getAllByTestId('guide-jump-day');
   const time = () => within(dialog).getByRole('combobox', { name: 'Time' }) as HTMLSelectElement;
@@ -43,6 +43,27 @@ function setup(over: { start?: number; now?: number } = {}) {
 }
 
 describe('JumpToDialog', () => {
+  it('dims the days after the guide ends and says where it ends (walkthrough-13)', () => {
+    const now = new Date(2026, 9, 21, 10, 10).getTime();
+    const guideEnd = new Date(2026, 9, 23, 6, 0).getTime(); // Fri 23 Oct, 06:00
+    const { chips, dialog } = setup({ now, guideEnd });
+    const dim = chips().filter((c) => c.hasAttribute('data-no-guide'));
+    // Sat 24 Oct to Mon 2 Nov: the chips after Friday.
+    expect(dim.map((c) => Number(c.dataset.day))).toEqual(jumpDays(now).filter((d) => d >= guideEnd));
+    expect(dim[0]!.textContent).toContain('no guide yet');
+    expect(chips().find((c) => Number(c.dataset.day) === new Date(2026, 9, 23).getTime())!.hasAttribute('data-no-guide')).toBe(false);
+    expect(within(dialog).getByTestId('guide-jump-extent').textContent).toBe(`The guide runs to ${formatDay(guideEnd - 1, 'en')}. Later days have no programmes yet.`);
+    // Still a day to pick: the grid then says it is past the guide's end.
+    fireEvent.click(dim[0]!);
+    expect(dim[0]!.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('dims nothing while the guide’s end is unknown', () => {
+    const { chips, dialog } = setup();
+    expect(chips().some((c) => c.hasAttribute('data-no-guide'))).toBe(false);
+    expect(within(dialog).queryByTestId('guide-jump-extent')).toBeNull();
+  });
+
   it('shows 16 day chips labelled by formatDay, with the window day selected', () => {
     const { now, chips, dialog } = setup();
     expect(within(dialog).getByRole('heading', { name: 'Jump to date and time' })).toBeTruthy();

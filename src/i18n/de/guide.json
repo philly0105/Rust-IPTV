@@ -29,6 +29,8 @@
   "jumpTitle": "Zu Datum und Uhrzeit springen",
   "jumpDay": "Tag",
   "jumpTime": "Uhrzeit",
+  "jumpNoGuide": "noch keine Programmdaten",
+  "jumpGuideEnds": "Die Programmdaten reichen bis {{day}}. Für spätere Tage gibt es noch keine Sendungen.",
   "jumpGo": "Springen",
   "jumpNow": "Jetzt",
   "recordSeries": "Serie aufnehmen",

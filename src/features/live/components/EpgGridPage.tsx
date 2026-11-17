@@ -1796,6 +1796,27 @@ export function EpgGridPage() {
   // The dialog reads the window's start only as it opens: closed, it gets a fixed value, so a
   // scroll or a drag does not re-render it on every frame.
   const [jumpIdleStart] = useState(() => shownTime[0]);
+  // How far the guide reaches, so the dialog can dim the days it has nothing for: as it opens, the
+  // next fourteen days of a few rows on screen that have programmes (no descriptions). Rows with
+  // only the provider's short guide count for nothing, and with none the days are not dimmed.
+  const [extent, setExtent] = useState<{ refs: ItemRef[]; from: string; to: string } | null>(null);
+  useEffect(() => {
+    if (!jumpOpen) return;
+    const refs: ItemRef[] = [];
+    for (const v of vItems) {
+      const ch = paged.getChannel(v.index);
+      if (ch && (programsFor(ch)?.length ?? 0) > 0) refs.push(ch.ref);
+      if (refs.length >= 8) break;
+    }
+    const from = Date.now() - offsetMs;
+    setExtent(refs.length > 0 ? { refs, from: new Date(from).toISOString(), to: new Date(from + GRID_TRACK_AFTER).toISOString() } : null);
+  }, [jumpOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const extentGrid = useRpcQuery('epg.grid', gridArgs(extent?.refs ?? NO_REFS, extent?.from ?? '', extent?.to ?? ''), { enabled: jumpOpen && !!extent, staleTime: GRID_STALE_MS });
+  const guideEnd = useMemo(() => {
+    let end = 0;
+    for (const list of Object.values(extentGrid.data ?? {})) for (const p of list) end = Math.max(end, ms(p.end));
+    return end > 0 ? end + offsetMs : undefined;
+  }, [extentGrid.data, offsetMs]);
   // The toolbar's window label reads the visible span from context (GuideWindowContext), so the
   // rest of the toolbar (pickers, genre chips, buttons) does not re-render on every scroll frame.
   const guideWindow = useMemo(() => ({ start: shownTime[0], end: shownTime[1] }), [shownTime]);
@@ -2203,7 +2224,7 @@ export function EpgGridPage() {
           onPointerLeave={releaseHover}
         />
       ) : null}
-      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={jumpOpen ? shownTime[0] : jumpIdleStart} now={now} onJump={goTo} onNow={toNow} />
+      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={jumpOpen ? shownTime[0] : jumpIdleStart} now={now} guideEnd={jumpOpen ? guideEnd : undefined} onJump={goTo} onNow={toNow} />
 
       {gridError ? (
         <div role="alert" className="border-b border-divider bg-surface-2 px-3 py-2 text-sm text-danger">
@@ -2876,7 +2897,9 @@ const GuideWindowButton = memo(function GuideWindowButton({ stacked, lang, onJum
         data-testid="guide-window"
         className={cn(
           'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-          stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+          // Wide: the secondary button's frame, so the date reads as something to press (the stacked
+          // and phone labels are filled the same way).
+          stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 border border-edge bg-surface-2 text-sm whitespace-nowrap hover:bg-surface-3',
         )}
       >
         {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}

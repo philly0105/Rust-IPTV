@@ -29,6 +29,8 @@
   "jumpTitle": "跳至日期和時間",
   "jumpDay": "日期",
   "jumpTime": "時間",
+  "jumpNoGuide": "尚無節目表",
+  "jumpGuideEnds": "節目表截至{{day}}。之後的日期尚無節目。",
   "jumpGo": "跳至",
   "jumpNow": "現在",
   "recordSeries": "系列錄影",

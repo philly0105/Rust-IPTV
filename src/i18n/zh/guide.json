@@ -29,6 +29,8 @@
   "jumpTitle": "跳转到日期和时间",
   "jumpDay": "日期",
   "jumpTime": "时间",
+  "jumpNoGuide": "暂无节目指南",
+  "jumpGuideEnds": "节目指南截至{{day}}。之后的日期暂无节目。",
   "jumpGo": "跳转",
   "jumpNow": "现在",
   "recordSeries": "录制系列",

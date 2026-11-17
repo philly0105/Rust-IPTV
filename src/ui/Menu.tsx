@@ -1,4 +1,4 @@
-import { EllipsisVertical } from 'lucide-react';
+import { Ellipsis } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -347,7 +347,10 @@ export function Menu({ items, label, trigger, triggerIcon, triggerClassName, too
         <IconButton
           ref={triggerRef}
           label={label ?? t('moreActions')}
-          icon={triggerIcon ?? <EllipsisVertical aria-hidden size={18} />}
+          // The vertical ⋮ drawn as the rail's ⋯ turned upright (the same three dots): that icon is
+          // in the entry already, and EllipsisVertical's own small chunk merged into one that put
+          // 10 kB more in front of Sports' first render.
+          icon={triggerIcon ?? <Ellipsis aria-hidden size={18} className="rotate-90" />}
           {...triggerProps}
           className={triggerClassName}
         />

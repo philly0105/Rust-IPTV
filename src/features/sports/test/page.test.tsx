@@ -922,19 +922,61 @@ describe('sports page', () => {
     player.fail = new Error('Stream offline');
     await openReady();
     expect(within(card(later)).queryByTestId('sports-watch')).toBeNull();
-    // With nothing to do yet, the best row says when Watch comes.
-    const from = within(card(later)).getByTestId('sports-watch-from');
-    const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
-    // A clock and the time on screen, nothing that looks like a button; the sentence is what it reads and its tooltip.
-    expect(from.getAttribute('title')).toBe(`Watch from ${at}`);
-    expect(within(from).getByText(`Watch from ${at}`).className).toContain('sr-only');
-    expect(from.querySelector('svg')?.getAttribute('class')).toContain('lucide-clock');
     expect(within(card(soon)).queryByTestId('sports-watch-from')).toBeNull();
+    expect(within(card(soon)).queryByTestId('sports-remind')).toBeNull();
     fireEvent.click(within(card(soon)).getByTestId('sports-watch'));
     await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't play ESPN HD"));
     expect(h.lastToast()?.variant).toBe('error');
     // A failed play leaves the zap context alone.
     expect(player.state.zapContext).toBeUndefined();
+  });
+
+  it("offers Remind me on an upcoming game's streams before Watch comes, and says when Watch comes with reminders off", async () => {
+    const later = h.game('2', { startMs: Date.now() + 40 * h.MINUTE });
+    setDay([later]);
+    setStreams(later, [h.match(ESPN)]);
+    rpc.handlers['recordings.capabilities'] = () => ({ supported: false });
+    const reminders: object[] = [];
+    rpc.handlers['reminders.list'] = () => [...reminders];
+    rpc.handlers['reminders.add'] = (args) => {
+      reminders.push({ id: 'r1', status: 'pending', ...(args as object) });
+      return reminders[0];
+    };
+    rpc.handlers['reminders.remove'] = () => {
+      reminders.length = 0;
+      return null;
+    };
+    await openReady();
+    const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
+    // Not a row that looks pressable and does nothing: the row's one action is a reminder.
+    const remind = await within(card(later)).findByRole('button', { name: 'Remind me about Boston Celtics at New York Knicks on ESPN HD' });
+    expect(remind.textContent).toBe('Remind me');
+    expect(remind.getAttribute('aria-pressed')).toBe('false');
+    expect(within(card(later)).queryByTestId('sports-watch-from')).toBeNull();
+    fireEvent.click(remind);
+    await waitFor(() => expect(rpc.callsOf('reminders.add')).toHaveLength(1));
+    // The game's programme, as Record would take it: ten minutes before the start.
+    expect(rpc.callsOf('reminders.add')[0]).toMatchObject({
+      ref: ESPN.ref,
+      channelName: 'ESPN HD',
+      title: 'Boston Celtics at New York Knicks',
+      start: new Date(later.startMs - 10 * h.MINUTE).toISOString(),
+    });
+    const set = await within(card(later)).findByRole('button', { name: 'Reminder set' });
+    expect(set.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(set);
+    await waitFor(() => expect(rpc.callsOf('reminders.remove')).toEqual([{ id: 'r1' }]));
+    cleanup();
+
+    // Reminders off: the best row says when Watch comes, in words, with nothing that looks like a button.
+    h.resetShared();
+    rpc.handlers['settings.get'] = () => ({ stripCountryPrefix: true, remindersEnabled: false });
+    await openReady();
+    const from = await within(card(later)).findByTestId('sports-watch-from');
+    await waitFor(() => expect(within(card(later)).queryByTestId('sports-remind')).toBeNull());
+    expect(from.textContent).toBe(`Watch from ${at}`);
+    expect(from.querySelector('svg')?.getAttribute('class')).toContain('lucide-clock');
+    expect(within(card(later)).queryByRole('button', { name: /Remind me/ })).toBeNull();
   });
 
   it('replays a final game from a channel archive, and offers nothing without one', async () => {

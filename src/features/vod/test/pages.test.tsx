@@ -4,6 +4,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { rpcKey } from '@/api/query';
 import type { Category, Page, PageQuery, SeriesDetail, TmdbMovie, VodDetail, VodItem } from '@/api/types';
+import { downloadToastId } from '@/features/library/lib/queue';
+import { useToastStore } from '@/ui';
 
 import { CORNER_TOUCH_INERT } from '../components/PosterCard';
 import { ActorPage } from '../pages/ActorPage';
@@ -602,6 +604,8 @@ describe('Downloads of M3U movies and whole seasons', () => {
       headers: { referrer: 'http://ref.example/', userAgent: 'Row/1' },
       fileNameHint: 'Heat.mkv',
     });
+    // The queued toast takes the download's own id, so its Downloaded toast replaces it (v-phone-14).
+    await waitFor(() => expect(useToastStore.getState().toasts.some((x) => x.id === downloadToastId(1))).toBe(true));
   });
 
   it('refuses an M3U movie that streams as an HLS playlist', async () => {

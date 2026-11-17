@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "Niets gepland",
   "scheduledEmptyBody": "Open de tv-gids en kies Herinner me, Opnemen of Serie opnemen bij een programma.",
   "scheduledEmptyBodyNoRecord": "Open de tv-gids en kies Herinner me bij een programma.",
+  "scheduledNoSourcesBody": "Voeg eerst een bron toe. Programma's die je in de tv-gids inplant, verschijnen dan hier.",
   "scheduledOpenGuide": "Tv-gids openen",
   "scheduledNow": "Wordt opgenomen",
   "scheduledUpcoming": "Binnenkort",

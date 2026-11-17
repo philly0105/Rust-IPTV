@@ -18,6 +18,7 @@
   "localDataHint": "Listen werden von der App gespeichert. Versuchen Sie es erneut oder starten Sie die App neu, wenn der Fehler bleibt.",
   "emptyTitle": "Noch keine Listen",
   "emptyHint": "Fassen Sie Sender aus beliebigen Quellen zusammen, etwa Sport oder Kinder.",
+  "emptyNoSources": "Fügen Sie zuerst eine Quelle hinzu. Dann fassen Sie ihre Sender in Listen zusammen, etwa Sport oder Kinder.",
   "sidebarEmpty": "Fassen Sie Sender aus beliebigen Quellen zusammen.",
   "channelCount_one": "{{formatted}} Sender",
   "channelCount_other": "{{formatted}} Sender",

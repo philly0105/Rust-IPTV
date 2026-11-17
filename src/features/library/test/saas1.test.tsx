@@ -15,7 +15,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Download, Recording, Reminder } from '@/api/types';
 import { useToastStore } from '@/ui';
 
-import { DownloadWatcher, downloadToastId, downloadTransitions } from '../components/DownloadWatcher';
+import { DownloadWatcher, downloadTransitions } from '../components/DownloadWatcher';
+import { downloadToastId } from '../lib/queue';
 import { DownloadsPage } from '../pages/DownloadsPage';
 import { ScheduledPage } from '../pages/ScheduledPage';
 import { fakePlayer, i18n, installDomStubs, renderAt } from './harness';

@@ -6,6 +6,7 @@ import { invalidate, queryClient } from '@/api/query';
 import type { DownloadStartArgs } from '@/api/rpc';
 import { RpcError, rpc } from '@/api/transport';
 import { sameRef, type Download, type ItemRef, type PlaybackPosition, type RequestHeaders } from '@/api/types';
+import { downloadToastId } from '@/features/library/lib/queue';
 import { playItem, usePlayerStore } from '@/features/player';
 
 import { downloadFileName } from '../lib/format';
@@ -111,9 +112,11 @@ export function usePlayback(target: PlayTarget | undefined) {
       const key = opts.episodeId ?? '';
       setPendingDownload(key);
       try {
-        await rpc('downloads.start', await downloadArgs(target, opts, t('downloadNotFile')));
+        const queued = await rpc('downloads.start', await downloadArgs(target, opts, t('downloadNotFile')));
         void invalidate('downloads.');
         toast({
+          // The download's own id: its Downloaded (or failed) toast replaces this one in place.
+          id: downloadToastId(queued.id),
           title: t('downloadQueued'),
           description: opts.subtitle ? `${target.title}  ${opts.subtitle}` : target.title,
           variant: 'success',

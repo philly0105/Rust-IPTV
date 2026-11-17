@@ -105,6 +105,21 @@ describe('MyListPage: list and header', () => {
     expect(title.getAttribute('title')).toBe('Arrival');
   });
 
+  it('on touch puts the ⋮ beside the title and lets a tap anywhere on the row open it (v-phone-07)', async () => {
+    await loaded();
+    const row = rowOf('Arrival');
+    expect(row.className).toContain('pointer-coarse:grid-cols-[3rem_minmax(0,1fr)_auto]');
+    const actions = within(row).getByTestId('mylist-actions').className;
+    expect(actions).toContain('pointer-coarse:col-start-3');
+    expect(actions).toContain('pointer-coarse:row-start-1');
+    // Above the title's stretched target, so the ⋮ and Play still get their own taps.
+    expect(actions).toMatch(/(^|\s)relative(\s|$)/);
+    expect(actions).toContain('z-[1]');
+    const open = within(row).getByTestId('mylist-open').className;
+    expect(open).toContain('pointer-coarse:after:absolute');
+    expect(open).toContain('pointer-coarse:after:inset-0');
+  });
+
   it('shows the source on each row only when the list spans several', async () => {
     await loaded();
     expect(screen.queryAllByTestId('mylist-source')).toHaveLength(0);

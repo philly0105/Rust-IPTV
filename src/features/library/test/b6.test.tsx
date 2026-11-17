@@ -176,6 +176,22 @@ describe('favorite undo puts it back in place (D3)', () => {
     expect(rpc.callsOf('favorites.toggle')).toEqual([]);
   });
 
+  it("names a provider-prefixed channel the cleaned way in the row's labels and the toast (w-a11y-03)", async () => {
+    const fav = makeFavorite('live', 'c1', 0);
+    fav.snapshot = { title: 'UK| BBC Two', contentType: 'live' };
+    rpc.handlers['favorites.list'] = () => [fav];
+    rpc.handlers['favorites.remove'] = () => undefined;
+    renderAt('/favorites', favoritesRoute);
+
+    const remove = await screen.findByRole('button', { name: 'Remove BBC Two (UK) from favorites' });
+    const row = remove.closest<HTMLElement>('[role="listitem"]')!;
+    expect(within(row).getByRole('button', { name: 'Play BBC Two (UK)' })).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Move BBC Two (UK) down' })).toBeTruthy();
+    expect(within(row).getAllByRole('button', { name: 'Actions for BBC Two (UK)' }).length).toBeGreaterThan(0);
+    fireEvent.click(remove);
+    await waitFor(() => expect(lastToast()?.title).toBe('Removed BBC Two (UK) from favorites'));
+  });
+
   it('reinsertFavorite keeps the current order of the others', () => {
     const [a, b, c] = [makeFavorite('live', 'a', 0), makeFavorite('live', 'b', 1), makeFavorite('live', 'c', 2)];
     expect(reinsertFavorite([{ ...c!, position: 0 }, { ...a!, position: 1 }], b!, 1).map((e) => e.ref.itemId)).toEqual(['c', 'b', 'a']);
@@ -199,6 +215,70 @@ describe('focus stays in the list after a row is removed (D4)', () => {
     fireEvent.keyDown(first, { key: 'Delete' });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove Watched a from history' })).toBeNull());
     await waitFor(() => expect(document.activeElement?.textContent).toContain('Watched b'));
+  });
+});
+
+describe('removing the last row hands focus to the empty state (w-a11y-09)', () => {
+  it('Recently watched: Delete on the only row focuses Browse channels', async () => {
+    let stored = [makeRecent('a', new Date().toISOString())];
+    rpc.handlers['recent.list'] = () => stored;
+    rpc.handlers['positions.continueWatching'] = () => [];
+    rpc.handlers['recent.remove'] = () => {
+      stored = [];
+    };
+    renderAt('/recent', recentRoute);
+    const row = (await screen.findByRole('button', { name: 'Remove Watched a from history' })).closest<HTMLElement>('[role="listitem"]')!;
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: 'Delete' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('library-empty-browse')));
+  });
+
+  it("Favorites: the only row's remove button hands focus to Browse channels", async () => {
+    let stored = [makeFavorite('movie', 'm1', 0)];
+    rpc.handlers['favorites.list'] = () => stored;
+    rpc.handlers['favorites.remove'] = () => {
+      stored = [];
+    };
+    renderAt('/favorites', favoritesRoute);
+    const remove = await screen.findByRole('button', { name: 'Remove movie m1 from favorites' });
+    act(() => remove.focus());
+    fireEvent.click(remove);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('library-empty-browse')));
+  });
+});
+
+describe("Shift+F10 opens a movie or series row's own menu (w-a11y-10)", () => {
+  it('Favorites: the menu key on a movie row opens its menu, and Remove works from it', async () => {
+    let stored = [makeFavorite('movie', 'm1', 0)];
+    rpc.handlers['favorites.list'] = () => stored;
+    rpc.handlers['favorites.remove'] = () => {
+      stored = [];
+    };
+    renderAt('/favorites', favoritesRoute);
+    const row = (await screen.findByRole('button', { name: 'Remove movie m1 from favorites' })).closest<HTMLElement>('[role="listitem"]')!;
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
+    const menu = await screen.findByRole('menu', { name: 'Actions for movie m1' });
+    expect(within(menu).getByRole('menuitem', { name: 'Open' })).toBe(document.activeElement);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Remove/ }));
+    await waitFor(() => expect(rpc.callsOf('favorites.remove')).toHaveLength(1));
+  });
+
+  it("Recently watched: the Menu key opens a resumable row's menu, and the strip's menu button is out of the Tab order", async () => {
+    const movie = makePosition('m1', 300, 1800);
+    rpc.handlers['recent.list'] = () => [{ ref: movie.ref, viewedAt: new Date().toISOString(), snapshot: movie.snapshot! }];
+    rpc.handlers['positions.continueWatching'] = () => [movie];
+    renderAt('/recent', recentRoute);
+    const strip = (await screen.findAllByRole('button', { name: 'Actions for Continue m1' }))[0]!;
+    expect(strip.tabIndex).toBe(-1);
+    const row = strip.closest<HTMLElement>('[role="listitem"]')!;
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: 'ContextMenu' });
+    const menu = await screen.findByRole('menu', { name: 'Actions for Continue m1' });
+    expect(within(menu).getByRole('menuitem', { name: 'Clear progress' })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(document.activeElement).toBe(row);
   });
 });
 

@@ -76,6 +76,8 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
       renderCard={(c, rail) => {
         const nn = nowNext.data?.[itemKey(c.ref)];
         const name = displayChannelName(c.name, prefs.stripCountryPrefix);
+        // Read aloud and in toasts: the cleaned name ("ESPN HD (US)"), as the list page names it.
+        const plain = plainChannelName(c.name, prefs.stripCountryPrefix);
         return (
           <ChannelCard
             rail={rail}
@@ -86,7 +88,7 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
             nowProgress={progress(nn?.now?.start, nn?.now?.end, offset)}
             sourceName={sourceName.get(c.ref.sourceId)}
             isRadio={c.ref.contentType === 'radio'}
-            ariaLabel={ts('playTitle', { title: plainChannelName(c.name, prefs.stripCountryPrefix) })}
+            ariaLabel={ts('playTitle', { title: plain })}
             // Right click, the context-menu key and Shift+F10: Home's channel menu (its Play plays from the list too).
             channel={c}
             // Taken out of the list from Home, with the list page's Undo.
@@ -97,13 +99,13 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
                 icon: <X className="size-4" />,
                 onSelect: () => {
                   const entry = entries?.find((e) => e.channel === c);
-                  if (entry) removeEntries(list, [entry], name);
+                  if (entry) removeEntries(list, [entry], plain);
                 },
               },
             ]}
             onPlay={() =>
               void playFromList(c, list.id, nn?.now?.title, name).catch((err: unknown) =>
-                toast({ title: tl('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
+                toast({ title: tl('playFailed', { name: plain }), description: errorDescription(err), variant: 'error' }),
               )
             }
           />

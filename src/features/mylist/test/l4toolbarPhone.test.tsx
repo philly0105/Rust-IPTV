@@ -60,4 +60,24 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
     const view = screen.getByRole('radiogroup', { name: 'View' });
     expect(classes(view)).not.toContain('p-0.5');
   });
+
+  it('puts the view switch after the sort in the DOM as on screen, so Tab goes left to right (v-vod-12)', () => {
+    render(
+      <MyListToolbar
+        filter="all"
+        sort="order"
+        hideWatched={false}
+        counts={{ all: 2, movie: 1, series: 1 }}
+        watchedCount={1}
+        onFilter={noop}
+        onSort={noop}
+        onHideWatched={noop}
+        onView={noop}
+      />,
+    );
+    const view = screen.getByRole('radiogroup', { name: 'View' });
+    const sort = screen.getByTestId('mylist-sort');
+    expect(sort.compareDocumentPosition(view) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(view.className).not.toMatch(/order-/);
+  });
 });

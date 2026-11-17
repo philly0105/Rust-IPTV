@@ -254,6 +254,7 @@
   "scheduledEmptyTitle": "Niente in programma",
   "scheduledEmptyBody": "Apri la guida TV e scegli Ricordamelo, Registra o Registra serie su un programma.",
   "scheduledEmptyBodyNoRecord": "Apri la guida TV e scegli Ricordamelo su un programma.",
+  "scheduledNoSourcesBody": "Aggiungi prima una sorgente. I programmi che pianifichi dalla sua guida TV compariranno qui.",
   "scheduledOpenGuide": "Apri la guida TV",
   "scheduledNow": "In registrazione",
   "scheduledUpcoming": "Prossimamente",

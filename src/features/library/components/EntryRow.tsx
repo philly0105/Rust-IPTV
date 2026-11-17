@@ -19,12 +19,14 @@
 
 import { k } from '../lib/keys';
 import { ArrowDown, ArrowUp, EllipsisVertical, GripVertical, Info, Play, Trash2, X } from 'lucide-react';
-import { memo, useRef, type DragEvent } from 'react';
+import { memo, useRef, useState, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
 // Straight from live, as useCoverColumn takes useMediaQuery: deps.ts hands over ChannelLogo only.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
+// Already in the Library pages' first load (Live's rows share it), so the keyboard's row menu adds no chunk.
+import { ContextMenu } from '@/features/live/components/ContextMenu';
 import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
@@ -44,6 +46,8 @@ export interface EntryRowProps {
   time: string;
   /** The hover strip's remove button's name, with the title ("Remove Heat from favorites"). */
   removeLabel: string;
+  /** The name in the row's button labels (`spokenEntryTitle`: a channel's cleaned name); the shown title by default. */
+  spokenTitle?: string;
   /**
    * The touch menu's remove item, without the title ("Remove from favorites"): the menu is already
    * named for the row, and a long channel name cut the titled label to "Remove US| ESPN Alt…",
@@ -67,6 +71,12 @@ export interface EntryRowProps {
    * (EntryChannelMenu) at `pos`: a right click, the touch ⋮, or the strip's ⋮ ask for it.
    */
   onChannelMenu?: ((pos: { x: number; y: number }) => void) | undefined;
+  /**
+   * A movie or series row's own menu (the touch menu's items) drawn at `menuAt`: Shift+F10 or the
+   * Menu key on the row ask for it, as they open a channel row's menu. `onMenuClose` clears it.
+   */
+  menuAt?: { x: number; y: number } | null | undefined;
+  onMenuClose?: (() => void) | undefined;
   /** Reorder affordances (favorites only). */
   reorder?: {
     canUp: boolean;
@@ -124,18 +134,21 @@ const HOVER_ACTIONS =
 const HIDE_UNDER_ACTIONS =
   'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible not-pointer-coarse:group-has-[[aria-expanded=true]]:invisible';
 
-function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, menuRemoveLabel, busy, now, resume, onOpen, onRemove, onChannelMenu, reorder }: EntryRowProps) {
+function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, spokenTitle, menuRemoveLabel, busy, now, resume, onOpen, onRemove, onChannelMenu, menuAt, onMenuClose, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
   const playable = type === 'live' || type === 'radio';
   // Older movie and series snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
   const title = snapshotTitle(entryRef, snapshot.title).title;
+  const spoken = spokenTitle ?? title;
   const busyButton = useBusyButtons(!!busy);
   const minutesLeft = now ? Math.max(1, Math.round(now.leftSeconds / 60)) : 0;
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
-  const openLabel = resume ? resume.label : playable ? t('playTitle', { title }) : t('openTitle', { title });
+  const openLabel = resume ? resume.label : playable ? t('playTitle', { title: spoken }) : t('openTitle', { title: spoken });
   const rowRef = useRef<HTMLDivElement>(null);
+  // The strip's ⋮ on a resumable row: its menu holds what the strip has no button for.
+  const [stripMenuAt, setStripMenuAt] = useState<{ x: number; y: number } | null>(null);
   // What a resumable row adds to its menu: on a fine pointer these are the strip's own menu, beside
   // its Resume and remove buttons; on touch they join the one menu at the row's end.
   const resumeItems: MenuItem[] = resume
@@ -167,6 +180,11 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
     { id: 'sep', type: 'separator' as const },
     { id: 'remove', label: menuRemoveLabel, icon: <Trash2 size={16} aria-hidden />, danger: true, disabled: !!busy, onSelect: onRemove },
   ];
+  const menuHeader = {
+    media: playable ? <ChannelLogo src={snapshot.posterUrl ?? undefined} name={title} size={28} sourceId={entryRef.sourceId} /> : undefined,
+    title: playable ? <ChannelName name={title} className="truncate text-match-parent" /> : title,
+    subtitle: now ? now.title : resume?.episode ?? t(k('type', type)),
+  };
   return (
     <div
       ref={rowRef}
@@ -251,12 +269,23 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
                 <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
                 <span className="shrink-0">{t(k('type', type))}</span>
                 {resume.episode && (
-                  <span dir="auto" className="truncate text-match-parent">
-                    {resume.episode}
-                  </span>
+                  <>
+                    <span aria-hidden className="shrink-0 text-fg-subtle">
+                      ·
+                    </span>
+                    <span dir="auto" className="truncate text-match-parent">
+                      {resume.episode}
+                    </span>
+                  </>
                 )}
+                {/* The first part to give way: on a phone "N min left" and the bar already say where it
+                    stopped, and in Greek or Russian the three parts did not fit beside the time left
+                    (they painted over it). Wider, it ellipsizes before it could touch the time left. */}
                 {resume.at !== undefined && (
-                  <span className="shrink-0 tabular-nums" data-testid="entry-stopped">
+                  <span
+                    className={cn('min-w-0 truncate tabular-nums', resume.minutesLeft !== undefined && 'max-sm:hidden')}
+                    data-testid="entry-stopped"
+                  >
                     <span aria-hidden className="me-1.5 text-fg-subtle">
                       ·
                     </span>
@@ -285,10 +314,16 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           <span className="flex w-full min-w-0 items-center gap-1.5 text-caption text-fg-muted pointer-coarse:text-body-sm">
             <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
             <span className="shrink-0">{t(k('type', type))}</span>
+            {/* A dot between the type and the subtitle, as the resume line has: "Movie 2019" read as one phrase. */}
             {snapshot.subtitle && (
-              <span dir="auto" className="truncate text-match-parent">
-                {snapshot.subtitle}
-              </span>
+              <>
+                <span aria-hidden className="shrink-0 text-fg-subtle">
+                  ·
+                </span>
+                <span dir="auto" className="truncate text-match-parent">
+                  {snapshot.subtitle}
+                </span>
+              </>
             )}
           </span>
         )}
@@ -296,13 +331,14 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       {/* A fixed column, so the monograms line up down the list. */}
       {showSource && <SourceBadge source={source} className="hidden w-40 shrink-0 md:inline-flex" />}
       {/* One line at any length ("Added 2 minutes ago"): rows keep one height. A fixed width, so a
-          longer date ("Added 2 weeks ago") never pushes the source column left on its row. With the
-          move arrows and the grip the strip is five controls wide, so the column is wider there and
-          the strip stays over it, clear of the programme line and its time left. */}
+          longer date ("Added 2 weeks ago") never pushes the source column left on its row. On
+          Favorites the strip is six controls wide (the move arrows, Play, ⋮, remove and the grip,
+          184 px), so the column is 192 px there and the strip stays over it, clear of the programme
+          line and its time left. */}
       <span
         className={cn(
           'hidden shrink-0 truncate whitespace-nowrap text-end text-caption tabular-nums text-fg-subtle sm:block',
-          reorder ? 'w-40' : 'w-36',
+          reorder ? 'w-48' : 'w-36',
           HIDE_UNDER_ACTIONS,
         )}
         title={time}
@@ -316,7 +352,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
             <IconButton
               size="sm"
               tabIndex={-1}
-              label={t('moveUp', { title })}
+              label={t('moveUp', { title: spoken })}
               icon={<ArrowUp size={14} aria-hidden />}
               disabled={!reorder.canUp}
               {...busyButton('up', () => reorder.onMove(-1))}
@@ -325,7 +361,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
             <IconButton
               size="sm"
               tabIndex={-1}
-              label={t('moveDown', { title })}
+              label={t('moveDown', { title: spoken })}
               icon={<ArrowDown size={14} aria-hidden />}
               disabled={!reorder.canDown}
               {...busyButton('down', () => reorder.onMove(1))}
@@ -344,13 +380,23 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           data-action="open"
         />
         {resume && (
-          <Menu items={resumeItems} label={t('entryMenu', { title })} align="end" triggerIcon={<EllipsisVertical size={14} aria-hidden />} triggerClassName="h-8 w-8" />
+          // Out of the Tab order like its siblings: the row is the keyboard stop, and Shift+F10 on it
+          // opens the row's own menu, which holds these items too (w-a11y-10).
+          <IconButton
+            size="sm"
+            tabIndex={-1}
+            label={t('entryMenu', { title: spoken })}
+            aria-haspopup="menu"
+            aria-expanded={stripMenuAt !== null}
+            icon={<EllipsisVertical size={14} aria-hidden />}
+            onClick={(e) => setStripMenuAt(menuAnchor(e.currentTarget))}
+          />
         )}
         {onChannelMenu && (
           <IconButton
             size="sm"
             tabIndex={-1}
-            label={t('entryMenu', { title })}
+            label={t('entryMenu', { title: spoken })}
             aria-haspopup="menu"
             icon={<EllipsisVertical size={14} aria-hidden />}
             onClick={(e) => onChannelMenu(menuAnchor(e.currentTarget))}
@@ -386,7 +432,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           covers: the logo or poster, the title and what is on (or what it is). */}
       {onChannelMenu ? (
         <IconButton
-          label={t('entryMenu', { title })}
+          label={t('entryMenu', { title: spoken })}
           aria-haspopup="menu"
           icon={<EllipsisVertical aria-hidden size={18} />}
           onClick={(e) => onChannelMenu(menuAnchor(e.currentTarget))}
@@ -395,18 +441,16 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       ) : (
         <Menu
           items={menuItems}
-          label={t('entryMenu', { title })}
+          label={t('entryMenu', { title: spoken })}
           align="end"
           triggerIcon={<EllipsisVertical aria-hidden size={18} />}
           triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"
-          sheetHeader={{
-            media: playable ? (
-              <ChannelLogo src={snapshot.posterUrl ?? undefined} name={title} size={28} sourceId={entryRef.sourceId} />
-            ) : undefined,
-            title: playable ? <ChannelName name={title} className="truncate text-match-parent" /> : title,
-            subtitle: now ? now.title : resume?.episode ?? t(k('type', type)),
-          }}
+          sheetHeader={menuHeader}
         />
+      )}
+      {menuAt && onMenuClose && <ContextMenu pos={menuAt} items={menuItems} label={t('entryMenu', { title: spoken })} header={menuHeader} onClose={onMenuClose} />}
+      {stripMenuAt && (
+        <ContextMenu pos={stripMenuAt} items={resumeItems} label={t('entryMenu', { title: spoken })} header={menuHeader} onClose={() => setStripMenuAt(null)} />
       )}
     </div>
   );

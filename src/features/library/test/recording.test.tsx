@@ -64,6 +64,7 @@ beforeAll(installDomStubs);
 beforeEach(() => {
   rpc.reset();
   rpc.handlers['recordings.capabilities'] = () => ({ supported: true, mpv: true });
+  rpc.handlers['sources.list'] = () => [{ id: 's1', kind: 'm3u', name: 'Main' }];
   fakePlayer.played.length = 0;
 });
 afterEach(cleanup);
@@ -113,6 +114,19 @@ describe('ScheduledPage', () => {
     renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
     expect(await screen.findByText('Nothing scheduled')).toBeTruthy();
     expect(screen.getByRole('link', { name: /Open TV guide/ }).getAttribute('href')).toBe('/epg');
+    // Nothing recorded or set to record: My videos would open empty, so the page does not point there.
+    expect(screen.queryByTestId('scheduled-recordings-link')).toBeNull();
+  });
+
+  it('with no source, asks for one first and leaves out the link to recordings (v-vod-13)', async () => {
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.list'] = () => [];
+    rpc.handlers['sources.list'] = () => [];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    expect(await screen.findByText(/Add a source first/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add a source' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Open TV guide/ })).toBeNull();
+    expect(screen.queryByTestId('scheduled-recordings-link')).toBeNull();
   });
 
   it('lists running, upcoming and finished items and cancels a reminder', async () => {

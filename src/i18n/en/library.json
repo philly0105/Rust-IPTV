@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "Nothing scheduled",
   "scheduledEmptyBody": "Open the TV guide and choose Remind me, Record or Record series on a programme.",
   "scheduledEmptyBodyNoRecord": "Open the TV guide and choose Remind me on a programme.",
+  "scheduledNoSourcesBody": "Add a source first. Programmes you schedule from its TV guide then show up here.",
   "scheduledOpenGuide": "Open TV guide",
   "scheduledNow": "Recording now",
   "scheduledUpcoming": "Upcoming",

@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "沒有預約",
   "scheduledEmptyBody": "開啟節目表，在節目上選擇提醒我、錄影或系列錄影。",
   "scheduledEmptyBodyNoRecord": "開啟節目表，在節目上選擇提醒我。",
+  "scheduledNoSourcesBody": "請先新增播放來源。之後你在節目表中預約的節目會顯示在這裡。",
   "scheduledOpenGuide": "開啟節目表",
   "scheduledNow": "錄影中",
   "scheduledUpcoming": "即將進行",

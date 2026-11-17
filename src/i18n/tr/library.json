@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "Planlanmış bir şey yok",
   "scheduledEmptyBody": "TV rehberini açın ve bir programda Bana hatırlat, Kaydet veya Diziyi kaydet'i seçin.",
   "scheduledEmptyBodyNoRecord": "TV rehberini açın ve bir programda Bana hatırlat'ı seçin.",
+  "scheduledNoSourcesBody": "Önce bir kaynak ekleyin. TV rehberinden planladığınız programlar burada görünür.",
   "scheduledOpenGuide": "TV rehberini aç",
   "scheduledNow": "Şu an kaydediliyor",
   "scheduledUpcoming": "Yaklaşanlar",

@@ -2,7 +2,9 @@
 
 import { sameRef, type ItemRef, type ItemSnapshot, type PlaybackPosition, type Source } from '@/api/types';
 import { queueSeriesFrom } from '@/features/vod/lib/episodeQueue';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale, relativeTimeFormat } from '@/lib/intl';
+import { snapshotTitle } from '@/lib/title';
 
 import { playItem, usePlayerStore } from '../deps';
 
@@ -12,6 +14,14 @@ export function detailPath(ref: ItemRef): string | undefined {
   if (ref.contentType === 'movie') return `/s/${sid}/movie/${iid}`;
   if (ref.contentType === 'series') return `/s/${sid}/series/${iid}`;
   return undefined;
+}
+
+/**
+ * An entry's name in labels read aloud and in toasts: a channel's cleaned name ("ESPN HD (US)", not
+ * the provider's "US| ESPN HD"), a movie's or series' title as the VOD cards show it.
+ */
+export function spokenEntryTitle(ref: ItemRef, title: string, stripCountryPrefix: boolean): string {
+  return ref.contentType === 'live' || ref.contentType === 'radio' ? plainChannelName(title, stripCountryPrefix) : snapshotTitle(ref, title).title;
 }
 
 export class SourceGoneError extends Error {

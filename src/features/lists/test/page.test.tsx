@@ -576,6 +576,17 @@ describe('/lists', () => {
     fireEvent.click(within(create).getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(h.location.current).toBe('/lists/new1'));
   });
+
+  it('with no source, asks for one first instead of offering an empty list (v-vod-13)', async () => {
+    h.installCore(rpc, []);
+    rpc.handlers['sources.list'] = () => [];
+    stubLiveExtras();
+    h.renderAt('/lists', routes, <ListsDialogHost />);
+    expect(await screen.findByTestId('lists-no-sources')).toBeTruthy();
+    expect(screen.getByText(/Add a source first/)).toBeTruthy();
+    expect(screen.getByTestId('no-sources-add')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Create list' })).toBeNull();
+  });
 });
 
 describe('Home rails', () => {
@@ -638,6 +649,28 @@ describe('Home rails', () => {
     const sports = await screen.findByTestId('dashboard-rail-list-L1');
     expect(await within(sports).findByText('Live TV')).toBeTruthy();
     expect(within(sports).queryByText('Backup list')).toBeNull();
+  });
+
+  it('names a provider-prefixed channel the cleaned way to screen readers and in its removal toast', async () => {
+    const TWO = h.channel('4', 'UK| BBC Two');
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [TWO], { onDashboard: true })]);
+    rpc.handlers['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    rpc.handlers['channels.edits'] = () => [];
+    h.renderAt('/dashboard', [
+      {
+        path: '/dashboard',
+        element: (
+          <ChannelMenuHost>
+            <CustomListRails />
+          </ChannelMenuHost>
+        ),
+      },
+    ]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    const card = await within(sports).findByRole('button', { name: /^Play BBC Two \(UK\)/ });
+    fireEvent.contextMenu(card, { clientX: 40, clientY: 40 });
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Remove from this list' }));
+    await waitFor(() => expect(h.lastToast()?.title).toBe('Removed BBC Two (UK) from Sports'));
   });
 
   it('leaves out the channels of a source in its delete-undo window, and brings them back on Undo', async () => {

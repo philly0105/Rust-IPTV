@@ -133,6 +133,26 @@ describe('My Videos All includes recordings (L2-guide-library-8)', () => {
     expect(within(grid).getAllByTestId('library-card').map((c) => c.dataset['kind'])).toEqual(['recording']);
   });
 
+  it('names a recording card\'s channel as the other library rows do, and dates it without this year (v-vod-07)', async () => {
+    rpc.handlers['myvideos.list'] = () => [];
+    const thisYear = new Date();
+    thisYear.setMonth(0, 5);
+    thisYear.setHours(16, 12, 0, 0);
+    rpc.handlers['recordings.library'] = () => [
+      recording({ channelName: 'UK| BBC One News HD', date: thisYear.toISOString() }),
+      recording({ id: 'r.r1.1', channelName: 'Alpha', date: '2024-03-02T18:00:00Z' }),
+    ];
+    renderAt('/my-videos', libraryRoutes);
+    const grid = await screen.findByTestId('my-videos-grid');
+    await waitFor(() => expect(within(grid).getAllByTestId('library-card')).toHaveLength(2));
+    const [recent, old] = within(grid).getAllByTestId('library-card');
+    // The provider's "UK|" becomes the quiet tag after the name (the full name stays for a screen reader).
+    expect(within(recent!).getByTestId('channel-name-tag').textContent).toBe('UK');
+    expect(recent!.textContent).not.toContain(String(thisYear.getFullYear()));
+    expect(recent!.textContent).toContain('Jan 5');
+    expect(old!.textContent).toContain('2024');
+  });
+
   it('names the queue link with its label, which shows on a phone too (L2-visual-4)', async () => {
     renderAt('/my-videos', libraryRoutes);
     const link = await screen.findByRole('link', { name: 'Open download queue' });

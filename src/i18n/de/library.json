@@ -237,6 +237,7 @@
   "scheduledEmptyTitle": "Nichts geplant",
   "scheduledEmptyBody": "Öffne den TV-Guide und wähle bei einer Sendung Erinnern, Aufnehmen oder Serie aufnehmen.",
   "scheduledEmptyBodyNoRecord": "Öffne den TV-Guide und wähle bei einer Sendung Erinnern.",
+  "scheduledNoSourcesBody": "Fügen Sie zuerst eine Quelle hinzu. Sendungen, die Sie in ihrem TV-Guide vormerken, erscheinen dann hier.",
   "scheduledOpenGuide": "TV-Guide öffnen",
   "scheduledNow": "Wird aufgenommen",
   "scheduledUpcoming": "Demnächst",

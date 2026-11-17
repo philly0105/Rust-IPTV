@@ -339,9 +339,9 @@ describe('groups sidebar', () => {
         regionScope="src1:live"
       />
     );
-    // A row reads its name, then its channel count.
+    // A row's provider name: the link's title (the drawn name puts the place's tag after it).
     const names = () =>
-      [...document.querySelectorAll<HTMLElement>('[data-cat-index]')].map((l) => l.textContent?.replace(/\d+$/, '')).filter((n) => n?.includes('|'));
+      [...document.querySelectorAll<HTMLElement>('[data-cat-index]')].map((l) => l.getAttribute('title')).filter((n) => n?.includes('|'));
     renderIn('/', [{ path: '/', element: withScope() }]);
     const picker = screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement;
     // Most groups first; a tag on one group only (DE) is not offered.

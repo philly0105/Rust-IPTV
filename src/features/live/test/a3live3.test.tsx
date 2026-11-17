@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Channel, EpgProgram } from '@/api/types';
 import { EpgRibbon } from '../components/EpgRibbon';
+import { ChannelName } from '../components/ChannelLogo';
 import { LiveStageColumn } from '../components/LiveStageColumn';
 import { StageIdle } from '../components/StageIdle';
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
@@ -201,5 +202,13 @@ describe('the idle stage while the channel last watched is looked up (w-realdata
     cleanup();
     renderAt('/', [{ path: '/', element: <StageIdle kind="live" now={now} /> }]);
     expect(screen.getAllByText(/Nothing playing|Pick a channel/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('group names (w-realdata-13)', () => {
+  it("draw the place's tag after the name, quiet, as channel rows do; the provider's name stays whole for readers", () => {
+    renderAt('/', [{ path: '/', element: <ChannelName name="US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ" className="truncate" /> }]);
+    expect(screen.getByTestId('channel-name-tag').textContent).toBe('US');
+    expect(screen.getByText('US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ').className).toContain('sr-only');
   });
 });

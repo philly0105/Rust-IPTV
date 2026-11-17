@@ -139,7 +139,8 @@ describe('Add channels on a list', () => {
     // Live TV's pick holds here too.
     const region = (await screen.findByTestId('scope-region', {}, { timeout: 5000 })) as HTMLSelectElement;
     expect(region.value).toBe('UK');
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(expect.arrayContaining(['UK| SPORTS5', 'UK| NEWS5']));
+    // A group's provider name is its title (the drawn name puts the place's tag after it).
+    expect(screen.getAllByRole('option').map((o) => o.querySelector('[title]')?.getAttribute('title'))).toEqual(expect.arrayContaining(['UK| SPORTS', 'UK| NEWS']));
     expect(screen.queryByRole('option', { name: /US\| SPORTS/ })).toBeNull();
     fireEvent.change(region, { target: { value: '' } });
     expect(await screen.findByRole('option', { name: /US\| SPORTS/ })).toBeTruthy();

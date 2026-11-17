@@ -907,9 +907,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             data-testid="live-groups-toggle"
           >
             <span className="sr-only">{`${t('groups')}: `}</span>
-            <span dir="auto" className="truncate">
-              {groupLabel}
-            </span>
+            {category && groupLabel === category.name ? (
+              // The group as the sidebar draws it: its place's tag after the name, quiet (w-realdata-13).
+              <ChannelName name={groupLabel} className="min-w-0 truncate" />
+            ) : (
+              <span dir="auto" className="truncate">
+                {groupLabel}
+              </span>
+            )}
             <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
           </Button>
         ) : (

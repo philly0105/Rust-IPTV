@@ -12,6 +12,7 @@ import { useLongPress } from '../hooks/useLongPress';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { groupRegion, groupRegions, readRegion, regionLabel, writeRegion } from '../lib/groupRegion';
 import { documentIsRtl } from '../lib/rtl';
+import { ChannelName } from './ChannelLogo';
 
 /** A group row's slot at 100 %. */
 const ROW = 36;
@@ -526,7 +527,8 @@ const GroupLink = memo(function GroupLink({
         className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
         title={locked ? `${c.name} (${lockedLabel})` : c.name}
       >
-        <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
+        {/* Drawn as a channel row draws its name: "PRIME ᴿᴬᵂ" and a quiet "US" after it (w-realdata-13). */}
+        <ChannelName name={c.name} className="min-w-0 flex-1 truncate text-match-parent" />
         {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} /> : null}
         <span className={countClass(active)}>{count}</span>
       </Link>

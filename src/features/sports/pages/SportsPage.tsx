@@ -68,11 +68,14 @@ const PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:sticky [@media(
 const CLEAR_PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:[&_button]:scroll-mt-32';
 
 /**
- * A filter chip on a phone, beside the day strip: its icon and count, with the label hidden but still
- * the chip's name. The label's empty box would leave two gaps between the icon and the count, so the
- * gap goes and the icon keeps one of its own.
+ * A filter chip on a phone, beside the day strip, while it is off: its icon and count, with the label
+ * hidden but still the chip's name. The label's empty box would leave two gaps between the icon and the
+ * count, so the gap goes and the icon keeps one of its own. Turned on, the chip says its name, so what
+ * hides games is never only an icon.
  */
 const COMPACT_CHIP = 'max-sm:gap-0 max-sm:px-3 max-sm:[&>svg]:me-1.5';
+const compactChip = (pressed: boolean) => (pressed ? undefined : COMPACT_CHIP);
+const compactLabel = (pressed: boolean) => (pressed ? undefined : 'max-sm:sr-only');
 
 /** What the quality chip turns on: Full HD (1080p) and up. */
 const QUALITY_FLOOR: ChannelQuality = 'fhd';
@@ -427,8 +430,8 @@ export function SportsPage() {
           the league tabs (the margin takes back the padding where it is not pinned). The day tabs'
           rule is its bottom edge.
           On a phone it is two rows, not three: the league tabs across the width, then the day strip
-          with the filter chips at its end, drawn as their icon and count (their label stays their
-          name). The chips' own row held a sixth of the first screen for one or two small chips. The
+          with the filter chips at its end, drawn as their icon and count while off (their label stays
+          their name) and "1080p+" in words. The chips' own row held a sixth of the first screen for one or two small chips. The
           first row's box steps aside there (display: contents), so its two parts sit on the grid. */}
       <div
         ref={toolbarRef}
@@ -455,13 +458,13 @@ export function SportsPage() {
                     backToTop();
                     toggleMyTeamsOnly(!myTeamsOnly);
                   }}
-                  className={COMPACT_CHIP}
+                  className={compactChip(myTeamsOnly)}
                   icon={<Star aria-hidden size={14} className={myTeamsOnly ? 'shrink-0 fill-current' : 'shrink-0'} />}
                   count={myTeamsCount}
                   title={t('myTeamsHint')}
                   data-testid="sports-my-teams"
                 >
-                  <span className="max-sm:sr-only">{t('myTeams')}</span>
+                  <span className={compactLabel(myTeamsOnly)}>{t('myTeams')}</span>
                 </FilterChip>
               ) : null}
               {hasSources ? (
@@ -471,13 +474,13 @@ export function SportsPage() {
                     backToTop();
                     toggleStreamsOnly(!streamsOnly);
                   }}
-                  className={COMPACT_CHIP}
+                  className={compactChip(streamsOnly)}
                   icon={<Tv aria-hidden size={14} className="shrink-0" />}
                   count={watchable}
                   title={t('withStreamsHint')}
                   data-testid="sports-streams-only"
                 >
-                  <span className="max-sm:sr-only">{t('withStreamsFilter')}</span>
+                  <span className={compactLabel(streamsOnly)}>{t('withStreamsFilter')}</span>
                 </FilterChip>
               ) : null}
               {hasSources ? (
@@ -494,12 +497,14 @@ export function SportsPage() {
                     writeHdOnly(!hdOnly);
                     setHdOnly(!hdOnly);
                   }}
-                  className={COMPACT_CHIP}
-                  icon={<Hd aria-hidden size={14} className="shrink-0" />}
+                  // On a phone, the words alone: an HD glyph said nothing on a touch screen, where its
+                  // tooltip never shows, and "1080p+" is about as narrow.
+                  className="max-sm:px-3"
+                  icon={<Hd aria-hidden size={14} className="shrink-0 max-sm:hidden" />}
                   title={liveFloor ? t('qualityLiveOn', { quality: qualityLabel }) : t('qualityHint', { quality: qualityLabel })}
                   data-testid="sports-quality"
                 >
-                  <span className="max-sm:sr-only">{`${qualityLabel}+`}</span>
+                  {`${qualityLabel}+`}
                 </FilterChip>
               ) : null}
             </div>

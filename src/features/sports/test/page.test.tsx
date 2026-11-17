@@ -557,6 +557,12 @@ describe('sports page', () => {
       expect(chip.querySelector('svg')).toBeTruthy();
       expect(classes(within(chip).getByText(label))).toContain('max-sm:sr-only');
       expect(screen.getByRole('button', { name: new RegExp(`^${label} ?\\d+$`) })).toBe(chip);
+      // Turned on, it says its name there too: what hides games is never only an icon.
+      fireEvent.click(chip);
+      expect(chip.getAttribute('aria-pressed')).toBe('true');
+      expect(classes(within(chip).getByText(label))).not.toContain('max-sm:sr-only');
+      expect(classes(chip)).not.toContain('max-sm:gap-0');
+      fireEvent.click(chip);
     }
   });
 
@@ -762,9 +768,9 @@ describe('sports page', () => {
     const chip = screen.getByTestId('sports-quality');
     expect(chip.getAttribute('aria-pressed')).toBe('false');
     expect(chip.getAttribute('title')).toBe('Hide streams whose channel name marks a quality below 1080p. Only on this page: Live TV keeps its own filter.');
-    // On a phone it is its icon, its label hidden but still its name.
-    expect(chip.querySelector('svg')).toBeTruthy();
-    expect(within(chip).getByText('1080p+').className.split(' ')).toContain('max-sm:sr-only');
+    // On a phone it is its words: the HD glyph said nothing where no tooltip shows.
+    expect(chip.querySelector('svg')!.getAttribute('class')).toContain('max-sm:hidden');
+    expect(within(chip).getByText('1080p+').className.split(' ')).not.toContain('max-sm:sr-only');
     const names = () => {
       const list = within(card(g)).getByTestId('sports-streams');
       const toggle = within(list).queryByTestId('sports-show-all');

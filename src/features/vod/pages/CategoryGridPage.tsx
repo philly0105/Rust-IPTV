@@ -335,8 +335,9 @@ const GRID_PADDING_TOP = 16;
 /**
  * The grid's listbox. The keyboard cursor's ring on the card shows where focus is; the listbox
  * draws a ring of its own only while it has focus and no cursor, so one focus never shows two rings.
+ * Its end room grows to the floating mini player's height over the window's foot (VirtualGrid).
  */
-const GRID_CLASS = 'rounded-md pb-8 outline-none focus-visible:shadow-none [&:not([aria-activedescendant])]:focus-visible:ring-2 [&:not([aria-activedescendant])]:focus-visible:ring-focus';
+const GRID_CLASS = 'rounded-md pb-[max(--spacing(8),var(--player-float-inset,0px))] outline-none focus-visible:shadow-none [&:not([aria-activedescendant])]:focus-visible:ring-2 [&:not([aria-activedescendant])]:focus-visible:ring-focus';
 
 /** Below this many titles a category drops its decade chips and its search field. */
 const FEW_TITLES = 12;

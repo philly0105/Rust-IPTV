@@ -2354,8 +2354,10 @@ export function EpgGridPage() {
             data-view-at={viewAtRef.current}
             // The ring shows only once the grid has held focus for 150 ms: the brief holds of a
             // window shift (16-98 ms) would otherwise flash a frame around the whole grid. It goes
-            // at once when a cell takes focus (no delay out of the focused state).
-            className="relative min-h-0 flex-1 cursor-grab overflow-auto overscroll-x-none overscroll-y-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:delay-150"
+            // at once when a cell takes focus (no delay out of the focused state). The bottom padding
+            // is the floating mini player's height over the window's foot (ShellLayout), so the last
+            // row scrolls clear of it.
+            className="relative min-h-0 flex-1 cursor-grab overflow-auto pb-[var(--player-float-inset,0px)] overscroll-x-none overscroll-y-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:delay-150"
             style={{ overflowAnchor: 'none' }}
           >
             <div

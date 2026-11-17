@@ -408,7 +408,7 @@ export function MyVideoDetailPage() {
   const episodeList = entry.kind === 'series' && (
     <VirtualRows
       // Browsing, the list lays out at its full height inside the page's own scroller.
-      className={watching ? '-mx-2 px-2' : '-mx-2 flex-none overflow-visible px-2'}
+      className={watching ? '-mx-2 px-2' : '-mx-2 flex-none overflow-visible px-2 pb-0'}
       rows={rows}
       label={t('downloadedEpisodes')}
       rowHeight={(r) => (r.kind === 'header' ? SEASON_HEADER_HEIGHT : EPISODE_ROW_HEIGHT)}

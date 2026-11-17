@@ -342,7 +342,9 @@ function ShellNavigationEffects() {
  * Room at the end of a page that scrolls in <main>, as tall as the floating mini player sits over
  * the window's foot (PlayerDock writes --player-float-inset), so the page's last row can scroll
  * clear of it (v-shell-home-13). A page that fills <main> and scrolls inside itself (the guide, a
- * catalog grid) gets none: a strip across the whole width would only shorten it.
+ * catalog grid) gets none: a strip across the whole width would only shorten it. Those scrollers
+ * (VirtualGrid, VirtualList, VirtualCardGrid, VirtualRows, the guide's grid) end in a bottom padding
+ * of the same variable instead, so their last row scrolls clear without the page losing height.
  */
 function FloatInsetSpacer() {
   const ref = useRef<HTMLDivElement>(null);

@@ -285,7 +285,7 @@ export function VirtualCardGrid<T>({
         const next = e.relatedTarget;
         if (next instanceof Node && !e.currentTarget.contains(next)) lastFocus.current = null;
       }}
-      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)}
+      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[var(--player-float-inset,0px)]', className)}
       data-testid={testId}
     >
       {hasHeader ? <div ref={headerRef}>{header}</div> : null}

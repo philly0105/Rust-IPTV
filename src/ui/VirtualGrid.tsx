@@ -304,7 +304,7 @@ export function VirtualGrid<T>({
       }}
       data-testid={testId}
       data-columns={columns}
-      className={cn('relative h-full overflow-y-auto overscroll-contain', className)}
+      className={cn('relative h-full overflow-y-auto overscroll-contain pb-[var(--player-float-inset,0px)]', className)}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
         <PosterCellWidthContext.Provider value={postersFillCells ? posterWidth : undefined}>

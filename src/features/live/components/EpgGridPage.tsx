@@ -2512,7 +2512,7 @@ export function EpgGridPage() {
               // A press of its own: the clipboard takes it now that no request stands between.
               copyText(programmeLink?.url ?? '').then(
                 () => {
-                  toast({ title: t('urlCopied'), variant: 'success' });
+                  toast({ title: t('programmeLinkCopied'), variant: 'success' });
                   setProgrammeLink(null);
                 },
                 (err: unknown) => toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' }),

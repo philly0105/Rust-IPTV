@@ -35,6 +35,7 @@
   "copyLink": "Bağlantıyı kopyala",
   "copyManually": "Bağlantı kendiliğinden kopyalanmadı. \"Bağlantıyı kopyala\"ya basın ya da adresi seçip kopyalayın.",
   "urlCopied": "Yayın adresi kopyalandı",
+  "programmeLinkCopied": "Program bağlantısı kopyalandı",
   "copyFailed": "Yayın adresi kopyalanamadı",
   "emptyGroup": "Bu grupta kanal yok",
   "epgMappingTitle": "{{name}} için rehber verisi",

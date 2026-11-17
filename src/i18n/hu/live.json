@@ -35,6 +35,7 @@
   "copyLink": "Link másolása",
   "copyManually": "A link nem másolódott ki magától. Nyomja meg a „Link másolása” gombot, vagy jelölje ki a címet, és másolja ki.",
   "urlCopied": "Adatfolyam címe másolva",
+  "programmeLinkCopied": "Műsor linkje másolva",
   "copyFailed": "Nem sikerült másolni az adatfolyam címét",
   "emptyGroup": "Ebben a csoportban nincs csatorna",
   "epgMappingTitle": "Műsoradatok – {{name}}",

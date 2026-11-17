@@ -35,6 +35,7 @@
   "copyLink": "Link kopiëren",
   "copyManually": "De link is niet vanzelf gekopieerd. Druk op 'Link kopiëren' of selecteer het adres en kopieer het.",
   "urlCopied": "Streamadres gekopieerd",
+  "programmeLinkCopied": "Programmalink gekopieerd",
   "copyFailed": "Kan het streamadres niet kopiëren",
   "emptyGroup": "Deze groep heeft geen kanalen",
   "epgMappingTitle": "Gidsgegevens voor {{name}}",

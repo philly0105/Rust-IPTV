@@ -2,6 +2,7 @@ import { cleanup, configure, fireEvent, screen, waitFor, within } from '@testing
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, ItemRef, Page, PageQuery } from '@/api/types';
+import { useToastStore } from '@/ui';
 
 import { EpgGridPage } from '../components/EpgGridPage';
 import { EpgRibbon } from '../components/EpgRibbon';
@@ -197,6 +198,8 @@ describe('EpgGridPage short-EPG fallback', () => {
     fireEvent.click(within(pop).getByTestId('program-copy-link'));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://provider.test/timeshift/news.ts'));
     expect(screen.queryByTestId('programme-link-field')).toBeNull();
+    // Named as the button names it, not as the channel's own stream address (v-guide-08).
+    await waitFor(() => expect(useToastStore.getState().toasts.map((x) => x.title)).toContain('Programme link copied'));
 
     // When it refuses, the link is offered in a field with a Copy button.
     writeText.mockRejectedValue(new Error('denied'));

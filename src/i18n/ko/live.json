@@ -35,6 +35,7 @@
   "copyLink": "링크 복사",
   "copyManually": "링크가 자동으로 복사되지 않았습니다. '링크 복사'를 누르거나 주소를 선택해 복사하세요.",
   "urlCopied": "스트림 주소를 복사했습니다",
+  "programmeLinkCopied": "프로그램 링크를 복사했습니다",
   "copyFailed": "스트림 주소를 복사할 수 없습니다",
   "emptyGroup": "이 그룹에는 채널이 없습니다",
   "epgMappingTitle": "{{name}}의 가이드 데이터",

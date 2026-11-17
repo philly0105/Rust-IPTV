@@ -35,6 +35,7 @@
   "copyLink": "Link kopieren",
   "copyManually": "Der Link wurde nicht automatisch kopiert. Drücken Sie „Link kopieren“ oder markieren Sie die Adresse und kopieren Sie sie.",
   "urlCopied": "Stream-Adresse kopiert",
+  "programmeLinkCopied": "Link zur Sendung kopiert",
   "copyFailed": "Die Stream-Adresse konnte nicht kopiert werden",
   "emptyGroup": "Diese Gruppe enthält keine Sender",
   "epgMappingTitle": "Programmdaten für {{name}}",

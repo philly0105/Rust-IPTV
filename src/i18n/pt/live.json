@@ -38,6 +38,7 @@
   "copyLink": "Copiar link",
   "copyManually": "O link não foi copiado automaticamente. Toque em \"Copiar link\" ou selecione o endereço e copie-o.",
   "urlCopied": "Endereço do stream copiado",
+  "programmeLinkCopied": "Link do programa copiado",
   "copyFailed": "Não foi possível copiar o endereço do stream",
   "emptyGroup": "Este grupo não tem canais",
   "epgMappingTitle": "Dados do guia para {{name}}",

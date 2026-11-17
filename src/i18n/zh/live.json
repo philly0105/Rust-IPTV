@@ -35,6 +35,7 @@
   "copyLink": "复制链接",
   "copyManually": "链接未能自动复制。请点按“复制链接”，或选中地址后复制。",
   "urlCopied": "流地址已复制",
+  "programmeLinkCopied": "节目链接已复制",
   "copyFailed": "无法复制流地址",
   "emptyGroup": "此分组中没有频道",
   "epgMappingTitle": "{{name}} 的节目指南数据",

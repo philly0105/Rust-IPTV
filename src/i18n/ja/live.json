@@ -35,6 +35,7 @@
   "copyLink": "リンクをコピー",
   "copyManually": "リンクを自動でコピーできませんでした。「リンクをコピー」を押すか、アドレスを選択してコピーしてください。",
   "urlCopied": "ストリームのアドレスをコピーしました",
+  "programmeLinkCopied": "番組のリンクをコピーしました",
   "copyFailed": "ストリームのアドレスをコピーできませんでした",
   "emptyGroup": "このグループにはチャンネルがありません",
   "epgMappingTitle": "{{name}}の番組表データ",

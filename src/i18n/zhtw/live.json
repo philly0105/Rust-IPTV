@@ -35,6 +35,7 @@
   "copyLink": "複製連結",
   "copyManually": "連結未能自動複製。請按「複製連結」，或選取位址後複製。",
   "urlCopied": "已複製串流位址",
+  "programmeLinkCopied": "已複製節目連結",
   "copyFailed": "無法複製串流位址",
   "emptyGroup": "此群組沒有頻道",
   "epgMappingTitle": "{{name}} 的節目表資料",

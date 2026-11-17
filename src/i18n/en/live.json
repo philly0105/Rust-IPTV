@@ -35,6 +35,7 @@
   "copyLink": "Copy link",
   "copyManually": "The link didn't copy on its own. Press Copy link, or select the address and copy it.",
   "urlCopied": "Stream address copied",
+  "programmeLinkCopied": "Programme link copied",
   "copyFailed": "Couldn't copy the stream address",
   "emptyGroup": "This group has no channels",
   "epgMappingTitle": "Guide data for {{name}}",

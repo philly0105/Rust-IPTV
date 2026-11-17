@@ -400,12 +400,17 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // at 7:00 on 50 channels is one row, and "+" says the answer stopped at the limit.
   const programmeRows = useMemo(() => countProgrammeRows(programmeHits), [programmeHits]);
   const programmesMore = programmeHits.length >= PROGRAMME_LIMIT;
+  // A failed guide search keeps its tab and says so (states-feedback-06): a missing Programmes
+  // section read as "nothing is on".
+  const programmesFailed = !!programmes.error;
+  const programmesTab = programmeHits.length > 0 || programmesFailed;
+  const programmeError = programmesFailed ? <ProgrammeSearchError error={programmes.error} onRetry={programmes.retry} /> : null;
   // Top results (critique: search): when the answer spans more than one type, the page opens on a
   // slice of each (a rail of movies, of series, the first channels and programmes), each with
   // "See all" to its tab, instead of the first type alone and a mostly empty screen.
-  const topAvailable = groups.length + (programmeHits.length > 0 ? 1 : 0) > 1;
+  const topAvailable = groups.length + (programmesTab ? 1 : 0) > 1;
   const showTop = topAvailable && (typeParam === 'top' || typeParam === null || (!groups.some((g) => g.kind === typeParam) && typeParam !== 'programmes'));
-  const showProgrammes = !showTop && programmeHits.length > 0 && (typeParam === 'programmes' || groups.length === 0);
+  const showProgrammes = !showTop && programmesTab && (typeParam === 'programmes' || groups.length === 0);
   /** The URL of one type's tab, for a Top results section's "See all". Stable between URL changes, so typing keeps Top results' memo. */
   const typeHref = useCallback(
     (kind: string) => {
@@ -518,6 +523,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     const facetName = allSources.find((s) => s.id === facet)?.name ?? facets.find((f) => f.sourceId === facet)?.sourceName;
     body = (
       <EmptyState
+        // Inline over the guide's error, so the two read as one answer.
+        size={programmeError ? 'inline' : 'page'}
         icon={<SearchX size={28} />}
         title={facetName ? t('noResultsInSourceTitle', { query, source: facetName }) : t('noResultsTitle', { query })}
         description={t('noResultsInSourceHint')}
@@ -528,9 +535,11 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         }
       />
     );
+    if (programmeError) body = <>{body}{programmeError}</>;
   } else if (!anyResults) {
     body = (
       <EmptyState
+        size={programmeError ? 'inline' : 'page'}
         icon={<SearchX size={28} />}
         title={t('noResultsTitle', { query })}
         description={t('noResultsHint')}
@@ -548,6 +557,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         </>
       );
     }
+    // Nothing found, but the guide was not searched: "No results" alone would say nothing is on.
+    if (programmeError) body = <>{body}{programmeError}</>;
   } else {
     body = (
       <>
@@ -582,8 +593,15 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
               label: t(`group_${g.kind}`),
               badge: capped.more[g.kind] ? t('searchCountMore', { count: g.hits.length }) : g.hits.length,
             })),
-            ...(programmeHits.length > 0
-              ? [{ id: 'programmes', label: t('group_programmes'), badge: programmesMore ? t('searchCountMore', { count: programmeRows }) : programmeRows }]
+            ...(programmesTab
+              ? [
+                  {
+                    id: 'programmes',
+                    label: t('group_programmes'),
+                    // No count when the guide search failed and found nothing.
+                    badge: programmeHits.length === 0 ? undefined : programmesMore ? t('searchCountMore', { count: programmeRows }) : programmeRows,
+                  },
+                ]
               : []),
           ]}
         />
@@ -596,6 +614,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
                 programmes={programmeHits}
                 programmeRows={programmeRows}
                 programmesMore={programmesMore}
+                programmeError={programmeError}
                 sources={allSources}
                 showBadges={showBadges}
                 stripCountryPrefix={prefs.stripCountryPrefix}
@@ -607,7 +626,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
             </div>
           ) : showProgrammes ? (
             <div {...tabPanelProps('search-results', 'programmes')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
-              <ProgrammeList hits={programmeHits} sources={allSources} showSource={showBadges} stripCountryPrefix={prefs.stripCountryPrefix} />
+              {programmeHits.length > 0 && (
+                <ProgrammeList hits={programmeHits} sources={allSources} showSource={showBadges} stripCountryPrefix={prefs.stripCountryPrefix} />
+              )}
+              {programmeError}
             </div>
           ) : activeGroup && (
             <div
@@ -710,6 +732,12 @@ function CappedNotice({
       )}
     </div>
   );
+}
+
+/** The guide's search failed (every source's, or some): said where its programmes would be, with Try again. */
+function ProgrammeSearchError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const { t } = useTranslation('vod');
+  return <ErrorState size="inline" error={error} title={t('searchGuideFailed')} onRetry={onRetry} />;
 }
 
 /** Inline notice when part of a search failed while other results are shown. */
@@ -1499,6 +1527,7 @@ const TopResults = memo(function TopResults({
   programmes,
   programmeRows,
   programmesMore,
+  programmeError,
   sources,
   showBadges,
   stripCountryPrefix,
@@ -1513,6 +1542,8 @@ const TopResults = memo(function TopResults({
   /** Shows the programmes fold into (the tab's count). */
   programmeRows: number;
   programmesMore: boolean;
+  /** The guide's search failed: said under the section's heading. */
+  programmeError: ReactNode;
   sources: readonly Source[];
   showBadges: boolean;
   stripCountryPrefix: boolean;
@@ -1603,15 +1634,18 @@ const TopResults = memo(function TopResults({
   return (
     <div className="flex flex-col gap-10" data-testid="search-top">
       {sections.map((x) => x.node)}
-      {programmes.length > 0 && (
+      {(programmes.length > 0 || programmeError) && (
         <section aria-labelledby="search-top-programmes" className="flex flex-col gap-3" data-search-section="programmes">
           <SectionHeader
             id="search-top-programmes"
             title={t('group_programmes')}
-            count={count(programmeRows, programmesMore)}
-            seeAll={{ to: typeHref('programmes') }}
+            count={programmes.length > 0 ? count(programmeRows, programmesMore) : undefined}
+            seeAll={programmes.length > 0 ? { to: typeHref('programmes') } : undefined}
           />
-          <ProgrammeList hits={programmes} limit={TOP_PROGRAMMES} sources={sources} showSource={showBadges} stripCountryPrefix={stripCountryPrefix} />
+          {programmes.length > 0 && (
+            <ProgrammeList hits={programmes} limit={TOP_PROGRAMMES} sources={sources} showSource={showBadges} stripCountryPrefix={stripCountryPrefix} />
+          )}
+          {programmeError}
         </section>
       )}
     </div>

@@ -239,6 +239,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "تعذر تحميل هذه العناوين",
   "searchPartialError": "تعذّر تحميل بعض النتائج.",
+  "searchGuideFailed": "تعذّر البحث في دليل البرامج",
   "previousEpisode": "الحلقة السابقة",
   "previousEpisodeCode": "الحلقة السابقة ({{code}})",
   "captionMyList": "قائمتي",

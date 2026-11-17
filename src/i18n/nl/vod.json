@@ -199,6 +199,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Deze titels konden niet worden geladen",
   "searchPartialError": "Sommige resultaten konden niet worden geladen.",
+  "searchGuideFailed": "Kan niet zoeken in de programmagids",
   "previousEpisode": "Vorige aflevering",
   "previousEpisodeCode": "Vorige aflevering ({{code}})",
   "captionMyList": "Mijn lijst",

@@ -219,6 +219,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Не удалось загрузить эти названия",
   "searchPartialError": "Не удалось загрузить часть результатов.",
+  "searchGuideFailed": "Не удалось выполнить поиск по телегиду",
   "previousEpisode": "Предыдущий эпизод",
   "previousEpisodeCode": "Предыдущий эпизод ({{code}})",
   "captionMyList": "Мой список",

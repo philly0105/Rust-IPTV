@@ -199,6 +199,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Couldn't load these titles",
   "searchPartialError": "Some results could not be loaded.",
+  "searchGuideFailed": "Couldn't search the TV guide",
   "previousEpisode": "Previous episode",
   "previousEpisodeCode": "Previous episode ({{code}})",
   "captionMyList": "My List",

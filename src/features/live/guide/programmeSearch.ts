@@ -48,11 +48,16 @@ export interface ProgrammeSearch {
   hits: GuideSearchHit[];
   /** A source has not answered the current query yet. */
   pending: boolean;
+  /** The first error of a source whose search failed (its programmes are missing from `hits`). */
+  error: unknown;
+  /** Asks the sources whose search failed again. */
+  retry: () => void;
 }
 
 /**
  * Programmes whose titles match `raw` in the next 14 days, across `sourceIds`, at most `limit`
- * (and `limit` per source). A source whose search fails is left out; the others still show.
+ * (and `limit` per source). A source whose search fails is left out of `hits`, the others still
+ * show, and `error` says one failed.
  */
 export function useProgrammeSearch(
   sourceIds: readonly string[],
@@ -84,5 +89,11 @@ export function useProgrammeSearch(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [on, stamp, opts.limit, opts.offsetMinutes, sourceIds.join(',')],
   );
-  return { hits, pending };
+  const failed = on ? results.filter((r) => r.isError) : [];
+  return {
+    hits,
+    pending,
+    error: failed[0]?.error ?? undefined,
+    retry: () => failed.forEach((r) => void r.refetch()),
+  };
 }

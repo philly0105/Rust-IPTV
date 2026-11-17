@@ -199,6 +199,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Δεν ήταν δυνατή η φόρτωση αυτών των τίτλων",
   "searchPartialError": "Ορισμένα αποτελέσματα δεν φορτώθηκαν.",
+  "searchGuideFailed": "Δεν ήταν δυνατή η αναζήτηση στον οδηγό προγράμματος",
   "previousEpisode": "Προηγούμενο επεισόδιο",
   "previousEpisodeCode": "Προηγούμενο επεισόδιο ({{code}})",
   "captionMyList": "Η λίστα μου",

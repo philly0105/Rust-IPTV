@@ -219,6 +219,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Не ўдалося загрузіць гэтыя назвы",
   "searchPartialError": "Некаторыя вынікі не атрымалася загрузіць.",
+  "searchGuideFailed": "Не атрымалася пашукаць у праграме перадач",
   "previousEpisode": "Папярэдні эпізод",
   "previousEpisodeCode": "Папярэдні эпізод ({{code}})",
   "captionMyList": "Мой спіс",

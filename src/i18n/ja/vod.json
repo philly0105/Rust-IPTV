@@ -199,6 +199,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "これらのタイトルを読み込めませんでした",
   "searchPartialError": "一部の結果を読み込めませんでした。",
+  "searchGuideFailed": "番組表を検索できませんでした",
   "previousEpisode": "前のエピソード",
   "previousEpisodeCode": "前のエピソード（{{code}}）",
   "captionMyList": "マイリスト",

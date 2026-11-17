@@ -209,6 +209,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Impossible de charger ces titres",
   "searchPartialError": "Certains résultats n’ont pas pu être chargés.",
+  "searchGuideFailed": "Impossible de rechercher dans le guide TV",
   "previousEpisode": "Épisode précédent",
   "previousEpisodeCode": "Épisode précédent ({{code}})",
   "captionMyList": "Ma liste",

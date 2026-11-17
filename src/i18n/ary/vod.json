@@ -239,6 +239,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "ما قدرناش نحمّلو هاد العناوين",
   "searchPartialError": "شي نتائج ما تشارجاوش.",
+  "searchGuideFailed": "ما قدرناش نقلبو فدليل البرامج",
   "previousEpisode": "الحلقة اللي قبل",
   "previousEpisodeCode": "الحلقة اللي قبل ({{code}})",
   "captionMyList": "الليستة ديالي",

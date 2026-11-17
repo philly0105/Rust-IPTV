@@ -199,6 +199,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "이 타이틀을 불러오지 못했습니다",
   "searchPartialError": "일부 결과를 불러오지 못했습니다.",
+  "searchGuideFailed": "TV 가이드를 검색하지 못했습니다",
   "previousEpisode": "이전 에피소드",
   "previousEpisodeCode": "이전 에피소드 ({{code}})",
   "captionMyList": "내 목록",

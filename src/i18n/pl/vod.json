@@ -219,6 +219,7 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Nie udało się wczytać tych tytułów",
   "searchPartialError": "Nie udało się wczytać części wyników.",
+  "searchGuideFailed": "Nie udało się przeszukać przewodnika TV",
   "previousEpisode": "Poprzedni odcinek",
   "previousEpisodeCode": "Poprzedni odcinek ({{code}})",
   "captionMyList": "Moja lista",

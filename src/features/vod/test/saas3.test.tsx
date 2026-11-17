@@ -267,6 +267,35 @@ describe('search programmes', () => {
   });
 });
 
+describe('a failed guide search (states-feedback-06)', () => {
+  const fail = () => {
+    throw new Error('simulated failure');
+  };
+
+  it('keeps the Programmes tab and says the guide was not searched, with Try again', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 7, 'Harbor News')], movies: [], series: [] });
+    rpcMock.handlers['epg.search'] = fail;
+    renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain("Couldn't search the TV guide");
+    // Top results holds the channel and the Programmes section with the error, under its own tab.
+    expect(screen.getByRole('tab', { name: /^Programmes/ }).textContent).toBe('Programmes');
+    expect(screen.getByTestId('search-top').querySelector('[data-search-section="programmes"]')?.contains(alert)).toBe(true);
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : [programme(1, 0, 23, 30)]);
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await screen.findByTestId('search-programmes');
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('with nothing else found, says so under "No results" instead of only "No results"', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    rpcMock.handlers['epg.search'] = fail;
+    renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
+    expect((await screen.findByRole('alert')).textContent).toContain("Couldn't search the TV guide");
+    expect(screen.getByText('No results for "harbor"')).toBeTruthy();
+  });
+});
+
 describe('search programmes on several channels', () => {
   it('fold a show airing on several channels at once into one row, with a link to each other channel', async () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });

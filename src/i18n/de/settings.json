@@ -336,7 +336,7 @@
   "englishOnlyHint": "Blendet Sender, Filme und Serien aus, deren Name oder Kategorie eine andere Sprache angibt. Alles ohne eindeutige Sprache bleibt sichtbar.",
   "vodMinRating": "Mindestbewertung",
   "vodMinRatingHint": "Blendet Titel mit niedrigerer Bewertung aus. Titel ohne Bewertung bleiben sichtbar.",
-  "vodMinRatingAny": "Beliebig",
+  "vodMinRatingAny": "Alle",
   "vodMinRatingOff": "Jede Bewertung",
   "vodMinRatingValue": "{{value}} oder höher",
   "recordingsFolder": "Aufnahmeordner",

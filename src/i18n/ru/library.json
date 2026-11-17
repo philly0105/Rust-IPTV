@@ -257,7 +257,7 @@
   "progressCleared": "Прогресс {{title}} сброшен",
   "undoFailed": "Не удалось отменить",
   "clearSearch": "Очистить поиск",
-  "scheduledTitle": "Запланированное",
+  "scheduledTitle": "Расписание",
   "scheduledRecordingsLink": "Записи в «Мои видео»",
   "scheduledSummary_one": "{{count}} запланированный пункт",
   "scheduledSummary_few": "{{count}} запланированных пункта",

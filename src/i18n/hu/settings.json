@@ -336,7 +336,7 @@
   "englishOnlyHint": "Elrejti azokat a csatornákat, filmeket és sorozatokat, amelyek neve vagy kategóriája más nyelvet jelöl. Ami nem egyértelmű nyelvű, látható marad.",
   "vodMinRating": "Minimális értékelés",
   "vodMinRatingHint": "Elrejti az ennél alacsonyabb értékelésű tartalmakat. Az értékelés nélküli tartalmak láthatók maradnak.",
-  "vodMinRatingAny": "Bármilyen",
+  "vodMinRatingAny": "Összes",
   "vodMinRatingOff": "Bármilyen értékelés",
   "vodMinRatingValue": "{{value}} vagy magasabb",
   "recordingsFolder": "Felvételek mappája",

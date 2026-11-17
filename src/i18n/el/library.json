@@ -225,7 +225,7 @@
   "progressCleared": "Η πρόοδος του {{title}} διαγράφηκε",
   "undoFailed": "Η αναίρεση απέτυχε",
   "clearSearch": "Εκκαθάριση αναζήτησης",
-  "scheduledTitle": "Προγραμματισμένα",
+  "scheduledTitle": "Πρόγραμμα",
   "scheduledRecordingsLink": "Εγγραφές στα Βίντεό μου",
   "scheduledSummary_one": "{{count}} επερχόμενο στοιχείο",
   "scheduledSummary_other": "{{count}} επερχόμενα στοιχεία",

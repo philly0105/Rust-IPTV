@@ -397,7 +397,7 @@ export function SeriesDetailPage() {
       <HeroIcon caption={t('captionFavorite')}>
         <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
       </HeroIcon>
-      <HeroIcon caption={t('watched')}>
+      <HeroIcon caption={t('captionWatched')}>
         {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too,
             so it waits for the seasons (from the list row alone it would write the series row only). */}
         <WatchedButton

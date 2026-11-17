@@ -297,7 +297,7 @@ function DownloadRing({ percent, moving }: { percent: number; moving: boolean })
  * While the file comes in, a ring around the download glyph shows how much has (VL-hero-actions),
  * so the state reads without the tooltip, which touch never shows; only a download of unknown
  * size falls back to the spinner. It comes in its `HeroIcon`, whose phone caption is the state in
- * a word (Download, 45 %, Paused, Downloaded).
+ * a word (Download, 45 %, Paused, Saved).
  */
 function RoundDownloadButton({
   download,
@@ -317,7 +317,7 @@ function RoundDownloadButton({
   }
   const failed = status === 'failed';
   return (
-    <HeroIcon caption={failed ? t('captionRetry') : t('download')}>
+    <HeroIcon caption={failed ? t('captionRetry') : t('captionDownload')}>
       <IconButton
         size="lg"
         variant="secondary"
@@ -347,9 +347,10 @@ function RoundDownloadState({ download, downloadedHref }: { download: Download; 
           : status === 'queued'
             ? t('downloadQueuedShort')
             : t('downloading');
+  // "Saved", not "Downloaded": the longer word cut to "Download…" on a phone read as the action (v-phone-06).
   const caption =
     status === 'completed'
-      ? t('downloaded')
+      ? t('captionDownloaded')
       : status === 'paused'
         ? t('captionPaused')
         : pct !== undefined

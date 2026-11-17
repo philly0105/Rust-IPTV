@@ -242,6 +242,8 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     expect(downloaded.getAttribute('href')).toBe('/my-videos/42');
     expect(downloaded.querySelector('svg')!.getAttribute('class')).toContain('hard-drive-download');
     expect(downloaded.querySelector('.text-success')).toBeNull();
+    // The phone tile's caption is the state in a word that fits, not "Download…" (v-phone-06).
+    expect(downloaded.closest('[data-testid=vod-hero-icons] > div')!.textContent).toBe('Saved');
     expect(within(await openHeroMenu()).getByRole('menuitem', { name: 'Stream instead' })).toBeTruthy();
   });
 

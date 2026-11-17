@@ -228,7 +228,7 @@ export function HeroIcon({ caption, children }: { caption: string; children: Rea
   return (
     <div className="flex min-w-0 flex-col items-center gap-1">
       {children}
-      <span aria-hidden className="max-w-full truncate text-caption text-fg-muted sm:hidden">
+      <span aria-hidden className="line-clamp-2 max-w-full text-center text-caption leading-tight break-words text-fg-muted hyphens-auto sm:hidden">
         {caption}
       </span>
     </div>

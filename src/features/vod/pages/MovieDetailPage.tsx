@@ -315,7 +315,7 @@ export function MovieDetailPage() {
       <HeroIcon caption={t('captionFavorite')}>
         <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
       </HeroIcon>
-      <HeroIcon caption={t('watched')}>
+      <HeroIcon caption={t('captionWatched')}>
         <WatchedButton itemRef={ref} watched={watched} round />
       </HeroIcon>
       {playback.canDownload && (

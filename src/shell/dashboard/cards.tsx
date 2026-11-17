@@ -786,9 +786,10 @@ function CardMenuButton({ label, tabIndex, onOpen }: { label: string; tabIndex: 
 
 /**
  * "S2 E4 · Calm Before" as its code and its title. A line without the separator is a title
-          // A finger gets the 44 px target every phone control has: an invisible band 7 px round the
-          // 30 px disc, above the card's own button, so a near miss opens the menu instead of playing.
-          "pointer-coarse:after:absolute pointer-coarse:after:-inset-[calc(7rem/15)] pointer-coarse:after:rounded-full pointer-coarse:after:content-['']",
+          // A finger gets the 44 px target every phone control has: an invisible band round the 30 px
+          // disc (8 px out from inside its 1 px border), above the card's own button, so a near miss
+          // opens the menu instead of playing.
+          "pointer-coarse:after:absolute pointer-coarse:after:-inset-[calc(8rem/15)] pointer-coarse:after:rounded-full pointer-coarse:after:content-['']",
  * alone, unless it is only a code ("S2 E4"). Exported for tests.
  */
 export function splitEpisodeLine(line: string | undefined): [code: string | undefined, title: string | undefined] {

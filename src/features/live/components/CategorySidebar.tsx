@@ -389,7 +389,9 @@ export function CategorySidebar(props: CategorySidebarProps) {
           </Button>
         </div>
       ) : (
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" data-testid="group-list">
+        // tabIndex -1: with the roving stop on a pinned row above, Chrome made the scroller its own
+        // unnamed Tab stop (w-a11y-01); the arrows reach every group from that stop.
+        <div ref={scrollRef} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3 outline-none" data-testid="group-list">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((v) => {
               const c = visible[v.index]!;

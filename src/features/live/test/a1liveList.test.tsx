@@ -239,6 +239,11 @@ describe('the group column', () => {
     expect(open.map((el) => el.dataset.catIndex)).toEqual(['pin-1']);
   });
 
+  it('keeps the groups scroller out of the Tab order, so it is no unnamed stop (w-a11y-01)', () => {
+    wrap(sidebar());
+    expect(screen.getByTestId('group-list').getAttribute('tabindex')).toBe('-1');
+  });
+
   it('names its region options by groups, and is as tall as the button beside it (live-15, live-03)', () => {
     wrap(sidebar());
     const select = screen.getByTestId('group-region') as HTMLSelectElement;

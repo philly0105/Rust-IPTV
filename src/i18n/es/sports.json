@@ -27,6 +27,8 @@
   "findingStreams": "Buscando transmisiones…",
   "noStreams": "No se encontró ninguna transmisión",
   "qualityNote": "Puede que el filtro de calidad esté ocultando transmisiones.",
+  "streamsFailed": "No se pudieron buscar transmisiones",
+  "streamsErrorTitle": "No se pudieron revisar tus canales para estos partidos",
   "showAllStreams_one": "Mostrar {{count}} transmisión",
   "showAllStreams_many": "Mostrar las {{count}} transmisiones",
   "showAllStreams_other": "Mostrar las {{count}} transmisiones",

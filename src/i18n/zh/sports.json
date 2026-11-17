@@ -27,6 +27,8 @@
   "findingStreams": "正在查找直播源…",
   "noStreams": "未找到直播源",
   "qualityNote": "画质筛选可能隐藏了部分直播源。",
+  "streamsFailed": "无法查找直播源",
+  "streamsErrorTitle": "无法为这些比赛检查你的频道",
   "showAllStreams_one": "显示全部 {{count}} 个",
   "showAllStreams_other": "显示全部 {{count}} 个",
   "showFewer": "收起",

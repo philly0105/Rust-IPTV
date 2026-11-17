@@ -30,6 +30,8 @@ const data = vi.hoisted(() => ({
   live: [] as unknown[],
   streams: new Map<string, unknown[]>(),
   streamsLoading: false,
+  streamsError: null as unknown,
+  streamRetries: 0,
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
   weekCalls: [] as string[][],
@@ -61,7 +63,10 @@ vi.mock('../hooks/useGames', () => ({
 vi.mock('../hooks/useGameStreams', () => ({
   useGameStreams: (games: readonly { key: string }[], enabled = true) => {
     data.streamCalls.push({ keys: games.map((g) => g.key), enabled });
-    return enabled ? { streams: data.streams, loading: data.streamsLoading } : { streams: new Map(), loading: false };
+    const retry = () => void data.streamRetries++;
+    return enabled
+      ? { streams: data.streams, loading: data.streamsLoading, error: data.streamsError, retry }
+      : { streams: new Map(), loading: false, error: null, retry };
   },
 }));
 
@@ -171,6 +176,8 @@ beforeEach(() => {
   data.live = [];
   data.streams = new Map();
   data.streamsLoading = false;
+  data.streamsError = null;
+  data.streamRetries = 0;
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
   data.weekCalls.length = 0;
@@ -1146,6 +1153,30 @@ describe('sports page', () => {
     rpc.handlers['settings.get'] = () => ({ liveMinQuality: 'hd' });
     await openReady();
     await waitFor(() => expect(within(card(g)).getByTestId('sports-quality-note').textContent).toBe(' The quality filter may be hiding streams.'));
+  });
+
+  it("says the streams couldn't be checked when the channel index fails, not that none was found", async () => {
+    const found = h.liveGame('1');
+    const missing = h.game('2', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([found, missing]);
+    setStreams(found, [h.match(ESPN)]);
+    data.streamsError = Object.assign(new Error('database is locked'), { code: 'db' });
+    localStorage.setItem('tsrust.sportsStreamsOnly', '1');
+    await openReady();
+    // One message for the page with a retry; the card without a stream says it couldn't check.
+    const alert = screen.getAllByRole('alert').find((a) => a.textContent?.includes("Couldn't check your channels for these games"));
+    expect(alert).toBeTruthy();
+    expect(within(card(missing)).getByTestId('sports-streams-failed').textContent).toBe("Couldn't check for streams");
+    expect(within(card(missing)).queryByTestId('sports-no-streams')).toBeNull();
+    // What the parts that answered found still shows.
+    expect(within(card(found)).getByTestId('sports-watch')).toBeTruthy();
+    // With streams hides nothing and counts nothing while it can't know.
+    const chip = screen.getByTestId('sports-streams-only');
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    expect(chip.textContent).toBe('With streams');
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
+    fireEvent.click(within(alert!).getByRole('button', { name: 'Try again' }));
+    expect(data.streamRetries).toBeGreaterThan(0);
   });
 
   it('says streams are being looked for while matching runs', async () => {

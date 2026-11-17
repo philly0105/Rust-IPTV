@@ -27,6 +27,8 @@
   "findingStreams": "Streams werden gesucht…",
   "noStreams": "Kein Stream gefunden",
   "qualityNote": "Der Qualitätsfilter blendet möglicherweise Streams aus.",
+  "streamsFailed": "Streams konnten nicht geprüft werden",
+  "streamsErrorTitle": "Ihre Sender konnten nicht nach diesen Spielen durchsucht werden",
   "showAllStreams_one": "{{count}} Stream anzeigen",
   "showAllStreams_other": "Alle {{count}} Streams anzeigen",
   "showFewer": "Weniger anzeigen",

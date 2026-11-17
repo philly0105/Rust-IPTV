@@ -27,6 +27,8 @@
   "findingStreams": "Поиск трансляций…",
   "noStreams": "Трансляция не найдена",
   "qualityNote": "Фильтр качества может скрывать часть трансляций.",
+  "streamsFailed": "Не удалось проверить трансляции",
+  "streamsErrorTitle": "Не удалось проверить ваши каналы на эти игры",
   "showAllStreams_one": "Показать {{count}} трансляцию",
   "showAllStreams_few": "Показать все {{count}} трансляции",
   "showAllStreams_many": "Показать все {{count}} трансляций",

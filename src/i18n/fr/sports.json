@@ -27,6 +27,8 @@
   "findingStreams": "Recherche de flux…",
   "noStreams": "Aucun flux trouvé",
   "qualityNote": "Le filtre de qualité masque peut-être des flux.",
+  "streamsFailed": "Impossible de chercher des flux",
+  "streamsErrorTitle": "Impossible de vérifier vos chaînes pour ces matchs",
   "showAllStreams_one": "Afficher {{count}} flux",
   "showAllStreams_many": "Afficher les {{count}} flux",
   "showAllStreams_other": "Afficher les {{count}} flux",

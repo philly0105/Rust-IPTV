@@ -27,6 +27,8 @@
   "findingStreams": "Ricerca degli stream…",
   "noStreams": "Nessuno stream trovato",
   "qualityNote": "Il filtro di qualità potrebbe nascondere degli stream.",
+  "streamsFailed": "Impossibile cercare gli stream",
+  "streamsErrorTitle": "Impossibile controllare i tuoi canali per queste partite",
   "showAllStreams_one": "Mostra {{count}} stream",
   "showAllStreams_many": "Mostra tutti i {{count}} stream",
   "showAllStreams_other": "Mostra tutti i {{count}} stream",

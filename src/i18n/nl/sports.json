@@ -27,6 +27,8 @@
   "findingStreams": "Streams zoeken…",
   "noStreams": "Geen stream gevonden",
   "qualityNote": "Het kwaliteitsfilter verbergt mogelijk streams.",
+  "streamsFailed": "Kon niet naar streams zoeken",
+  "streamsErrorTitle": "Kon je zenders niet controleren voor deze wedstrijden",
   "showAllStreams_one": "{{count}} stream tonen",
   "showAllStreams_other": "Alle {{count}} streams tonen",
   "showFewer": "Minder tonen",

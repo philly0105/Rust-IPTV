@@ -27,6 +27,8 @@
   "findingStreams": "配信を検索中…",
   "noStreams": "配信が見つかりません",
   "qualityNote": "画質フィルターで配信が非表示になっている可能性があります。",
+  "streamsFailed": "配信を確認できませんでした",
+  "streamsErrorTitle": "これらの試合についてチャンネルを確認できませんでした",
   "showAllStreams_one": "{{count}} 件すべて表示",
   "showAllStreams_other": "{{count}} 件すべて表示",
   "showFewer": "表示を減らす",

@@ -81,6 +81,8 @@ export interface StreamContext {
   remindersOn: boolean;
   /** Live TV's quality filter or the page's "1080p+" is on, so a missing stream may be its doing. */
   qualityFiltered: boolean;
+  /** Part of the channel index failed: a game with no stream may have one that wasn't looked through. */
+  streamsFailed: boolean;
   /** What the player plays, once a Watch or Replay on this page has loaded it; the row it came from says so. */
   playing: PlayerSource | undefined;
   /** A recording is waiting or running for this programme on this channel. */
@@ -107,7 +109,7 @@ function usePlayingSource(store: PlayerStore | null): PlayerSource | undefined {
   return useSyncExternalStore(store ? store.subscribe : noSubscription, () => store?.getState().source);
 }
 
-export function useStreamContext(now: number, sourceCount: number, hdOnly = false): StreamContext {
+export function useStreamContext(now: number, sourceCount: number, hdOnly = false, streamsFailed = false): StreamContext {
   const { t } = useTranslation('sports');
   const { toast } = useToast();
   const prefs = useDisplayPrefs();
@@ -183,6 +185,7 @@ export function useStreamContext(now: number, sourceCount: number, hdOnly = fals
       canRecord,
       remindersOn,
       qualityFiltered,
+      streamsFailed,
       playing,
       isRecording,
       reminderFor,
@@ -191,7 +194,7 @@ export function useStreamContext(now: number, sourceCount: number, hdOnly = fals
       record,
       remind,
     }),
-    [now, prefs.stripCountryPrefix, sourceCount, canRecord, remindersOn, qualityFiltered, playing, isRecording, reminderFor, watch, replay, record, remind],
+    [now, prefs.stripCountryPrefix, sourceCount, canRecord, remindersOn, qualityFiltered, streamsFailed, playing, isRecording, reminderFor, watch, replay, record, remind],
   );
 }
 
@@ -489,6 +492,13 @@ export function StreamList({
       return (
         <p className="text-caption text-fg-subtle" data-testid="sports-streams-loading">
           {t('findingStreams')}
+        </p>
+      );
+    }
+    if (ctx.streamsFailed) {
+      return (
+        <p className="text-caption text-fg-subtle" data-testid="sports-streams-failed">
+          {t('streamsFailed')}
         </p>
       );
     }

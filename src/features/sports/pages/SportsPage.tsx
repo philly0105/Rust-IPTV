@@ -231,7 +231,9 @@ export function SportsPage() {
     () => filterGames(leagueDay, null, query).filter((g) => !filterMyTeams || followsGame(followed, g)),
     [leagueDay, query, filterMyTeams, followed],
   );
-  const ctx = useStreamContext(now, sourceCount, hdOnly);
+  // Part of the channel index failed: a game with no stream may have one the page couldn't look through.
+  const streamsError = hasSources ? (dayStreams.error ?? liveStreams.error ?? null) : null;
+  const ctx = useStreamContext(now, sourceCount, hdOnly, streamsError !== null);
   // Live TV's filter has already left the lower qualities out of the index.
   const floorStreams = hdOnly && !liveFloor;
   const dayMatches = useMemo(() => (floorStreams ? atFloor(dayStreams.streams) : dayStreams.streams), [floorStreams, dayStreams.streams]);
@@ -244,8 +246,9 @@ export function SportsPage() {
   };
   const matching = sources.isPending || dayStreams.loading || liveStreams.loading;
   const hasStream = (g: Game) => (streamsOf(g).streams?.length ?? 0) > 0;
-  // Nothing is hidden for want of a stream until matching is done, or where there is nothing to match.
-  const filterStreams = streamsOnly && hasSources && !matching;
+  // Nothing is hidden for want of a stream until matching is done, or where there is nothing to match or
+  // the channels couldn't be read.
+  const filterStreams = streamsOnly && hasSources && !matching && streamsError === null;
   const keep = (list: Game[]) => (filterStreams ? list.filter(hasStream) : list);
 
   const sections = useMemo(() => sectionGames(liveGames, dayGames), [liveGames, dayGames]);
@@ -257,7 +260,7 @@ export function SportsPage() {
   // Nothing counted yet (the day still loading, or ESPN failed with nothing to show): no number, not a 0.
   const uncounted = allDay.games.length === 0 && (loading || failed);
   const watchable =
-    hasSources && !matching && !uncounted ? [...sections.live, ...sections.upcoming, ...sections.final].filter(hasStream).length : undefined;
+    hasSources && !matching && !uncounted && streamsError === null ? [...sections.live, ...sections.upcoming, ...sections.final].filter(hasStream).length : undefined;
 
   // A league that failed with no games kept has no count either; the others still have theirs.
   const counts = useMemo(() => {
@@ -515,6 +518,18 @@ export function SportsPage() {
       {noSources ? (
         // One short row over the day's games, which still list without a source.
         <NoSourcesState layout="banner" icon={<Tv />} title={t('noSourcesTitle')} description={t('noSourcesHint')} testId="sports-add-source" stateTestId="sports-no-sources" stay />
+      ) : null}
+      {streamsError !== null && allDay.games.length > 0 ? (
+        // One message for the page, not "No stream found" on every card: the cards say they couldn't check.
+        <ErrorState
+          size="inline"
+          error={streamsError}
+          title={t('streamsErrorTitle')}
+          onRetry={() => {
+            dayStreams.retry();
+            liveStreams.retry();
+          }}
+        />
       ) : null}
       {live.length > 0 ? (
         <Section id="live" title={t('liveNow')} count={live.length}>

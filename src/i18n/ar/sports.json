@@ -27,6 +27,8 @@
   "findingStreams": "جارٍ البحث عن بث…",
   "noStreams": "لم يُعثر على بث",
   "qualityNote": "قد تكون تصفية الجودة تخفي بعض البث.",
+  "streamsFailed": "تعذّر البحث عن بث",
+  "streamsErrorTitle": "تعذّر فحص قنواتك بحثًا عن هذه المباريات",
   "showAllStreams_zero": "عرض الكل ({{count}})",
   "showAllStreams_one": "عرض الكل ({{count}})",
   "showAllStreams_two": "عرض الكل ({{count}})",

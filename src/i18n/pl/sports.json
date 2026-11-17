@@ -27,6 +27,8 @@
   "findingStreams": "Szukanie transmisji…",
   "noStreams": "Nie znaleziono transmisji",
   "qualityNote": "Filtr jakości może ukrywać część transmisji.",
+  "streamsFailed": "Nie udało się sprawdzić transmisji",
+  "streamsErrorTitle": "Nie udało się sprawdzić Twoich kanałów pod kątem tych meczów",
   "showAllStreams_one": "Pokaż {{count}} transmisję",
   "showAllStreams_few": "Pokaż wszystkie {{count}} transmisje",
   "showAllStreams_many": "Pokaż wszystkie {{count}} transmisji",

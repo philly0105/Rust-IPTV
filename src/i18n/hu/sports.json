@@ -27,6 +27,8 @@
   "findingStreams": "Közvetítések keresése…",
   "noStreams": "Nem található közvetítés",
   "qualityNote": "Lehet, hogy a minőségszűrő közvetítéseket rejt el.",
+  "streamsFailed": "Nem sikerült közvetítést keresni",
+  "streamsErrorTitle": "Nem sikerült átnézni a csatornáit ezekhez a meccsekhez",
   "showAllStreams_one": "{{count}} közvetítés megjelenítése",
   "showAllStreams_other": "Mind a(z) {{count}} közvetítés megjelenítése",
   "showFewer": "Kevesebb",

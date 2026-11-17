@@ -296,6 +296,16 @@ describe('useChannelIndex', () => {
       expect([...new Set(asked.map((a) => a.categoryId))].sort()).toEqual(['c0', 'c1', 'c2', 'c4']);
       expect(asked.filter((a) => a.categoryId === 'c0').map((a) => a.query.offset)).toEqual([0]);
     });
+
+    it('reads a failed part again on retry', async () => {
+      serveMany('c1');
+      const { result } = renderHook(() => useChannelIndex(), { wrapper });
+      await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+      serveMany();
+      result.current.retry();
+      await waitFor(() => expect(result.current.error).toBeNull());
+      await waitFor(() => expect(result.current.channels).toHaveLength(sizes.reduce((a, b) => a + b, 0)));
+    });
   });
 
   it('searches each network once, keeps real network channels and lists every channel once', async () => {

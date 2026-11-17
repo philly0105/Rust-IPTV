@@ -296,13 +296,14 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       {/* A fixed column, so the monograms line up down the list. */}
       {showSource && <SourceBadge source={source} className="hidden w-40 shrink-0 md:inline-flex" />}
       {/* One line at any length ("Added 2 minutes ago"): rows keep one height. A fixed width, so a
-          longer date ("Added 2 weeks ago") never pushes the source column left on its row. With the
-          move arrows and the grip the strip is five controls wide, so the column is wider there and
-          the strip stays over it, clear of the programme line and its time left. */}
+          longer date ("Added 2 weeks ago") never pushes the source column left on its row. On
+          Favorites the strip is six controls wide (the move arrows, Play, ⋮, remove and the grip,
+          184 px), so the column is 192 px there and the strip stays over it, clear of the programme
+          line and its time left. */}
       <span
         className={cn(
           'hidden shrink-0 truncate whitespace-nowrap text-end text-caption tabular-nums text-fg-subtle sm:block',
-          reorder ? 'w-40' : 'w-36',
+          reorder ? 'w-48' : 'w-36',
           HIDE_UNDER_ACTIONS,
         )}
         title={time}

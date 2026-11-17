@@ -117,7 +117,7 @@ describe('Favorites rows say what is on air', () => {
     expect(time.className).toContain('not-pointer-coarse:group-hover:invisible');
     expect(time.className).toContain('not-pointer-coarse:in-focus-visible:invisible');
     expect(time.className).toContain('not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible');
-    expect(time.className).toMatch(/(^|\s)w-40(\s|$)/);
+    expect(time.className).toMatch(/(^|\s)w-48(\s|$)/);
     // Touch: one menu button, hidden on a fine pointer (the strip has its own ⋮ before it). A
     // channel's menu is Live TV's (library-04), with the page's moves among its entries.
     const trigger = within(row).getAllByRole('button', { name: /Actions for/ }).at(-1)!;

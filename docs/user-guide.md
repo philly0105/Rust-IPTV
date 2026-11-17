@@ -184,6 +184,26 @@ See [recording.md](architecture/recording.md).
 - Downloads go to `downloads/` in the app data folder unless you choose another downloads folder. In the browser they always go to `<data dir>/downloads` on the server.
 - My videos plays what you downloaded, also offline. The Downloads page and My videos have their own keys; see [Keyboard shortcuts](#keyboard-shortcuts).
 
+### Download speed
+
+A movie or episode downloads over several connections at once when the server allows it, up to 8 per file. The app starts with 2, adds more while each one makes the file faster, and replaces a slow connection with a fresh one. Playback and recordings always come first: a download gives back connections when you start watching.
+
+While a download runs, its row shows how many connections and sources it uses, for example "4 connections · 3 sources", and "From <source>" when the bytes come from another source's copy. While anything downloads, the page header shows a small graph of the total download speed. The Speed details button on a running row (on a phone, Speed details in the row's menu) opens a breakdown:
+
+- which sources are serving the file ("Main source", "Identical copy") and how fast each is;
+- the source's connection limit ("Account allows N", "Tested: N allowed", or "Limit unknown");
+- one sentence on what holds the speed back, such as "Your internet connection is the limit" or a provider that caps each connection;
+- "Recent changes": what happened in the last minute, such as a copy joining or leaving, a connection test's result, or a fall back to one connection.
+
+Settings > General > Downloads has four related settings:
+
+- Max connections per file: Auto (the default) or a fixed number from 1 to 8.
+- Use other sources to speed up downloads (on): when another of your sources has the same file, byte for byte, the download reads from both. The app checks the copies match before it uses one and again while it downloads, and drops a copy that stops matching.
+- Allow equivalent copies (off): lets a download whose own source is busy start from another source's copy with the same quality and format instead of waiting. "The file may differ from the one you picked": it can be a different encode, so it is off by default.
+- Connection tests: one switch per Xtream and Stalker source.
+
+What a learned connection limit means: many providers report how many connections an account may open, and some allow more than they report. When a large download has room, the app tries one extra connection, at most once a week per source. If the provider accepts it, the source's limit becomes the tested number ("Test found N allowed") and later downloads use it. If the provider refuses it or drops your oldest connection, the app keeps to the reported limit ("Test found extra connections refused", "Test found the oldest connection dropped"). A test stops at once if you start playback or a recording. Turn the switch off for a provider that objects ("Off: downloads keep to the account's limit"), or press Test again to forget the result and test on the next large download.
+
 ## My List, favorites, channel lists and watch stats
 
 Four places in the side rail's Library keep things for you. Which one?

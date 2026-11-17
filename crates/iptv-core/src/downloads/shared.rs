@@ -34,15 +34,6 @@ pub fn sample_offsets(total: i64) -> [i64; 3] {
     [0, (total / 2) / SAMPLE_LEN * SAMPLE_LEN, total - SAMPLE_LEN]
 }
 
-/// Whether `[at, at + len)` lies wholly inside one of the three sample
-/// windows. An empty range is never inside.
-pub fn inside_samples(total: i64, at: i64, len: i64) -> bool {
-    len > 0
-        && sample_offsets(total)
-            .iter()
-            .any(|&w| at >= w && at.saturating_add(len) <= w + SAMPLE_LEN)
-}
-
 /// `dl_mirror:<sourceId>:<first 16 hex digits of sha256(contentType "\0"
 /// itemId "\0" episodeId-or-empty)>`. The source id stays readable so a
 /// source delete can drop its records by prefix.
@@ -321,23 +312,6 @@ mod tests {
             sample_offsets(MIN_MIRROR_TOTAL),
             [0, MIN_MIRROR_TOTAL / 2, MIN_MIRROR_TOTAL - SAMPLE_LEN]
         );
-    }
-
-    #[test]
-    fn inside_samples_needs_one_whole_window() {
-        let total = MIN_MIRROR_TOTAL + 12_345;
-        let [_, mid, end] = sample_offsets(total);
-        assert!(inside_samples(total, 0, SAMPLE_LEN));
-        assert!(inside_samples(total, 100, 200));
-        assert!(!inside_samples(total, 0, SAMPLE_LEN + 1));
-        assert!(!inside_samples(total, SAMPLE_LEN - 10, 20));
-        assert!(inside_samples(total, mid, SAMPLE_LEN));
-        assert!(!inside_samples(total, mid - 1, 10));
-        assert!(inside_samples(total, end + 5, SAMPLE_LEN - 5));
-        assert!(inside_samples(total, total - 1, 1));
-        assert!(!inside_samples(total, total - 1, 2));
-        assert!(!inside_samples(total, 100, 0));
-        assert!(!inside_samples(total, i64::MAX - 1, 10));
     }
 
     #[test]

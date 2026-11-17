@@ -365,6 +365,18 @@ async fn origin_is_stored_and_cleared_when_a_row_starts_over() {
         .unwrap();
     assert_eq!(read(env.state.clone()).await.origin, None);
 
+    // And a row whose `.part` was deleted (cancel, a failure that cannot
+    // resume): it holds no equivalent bytes any more.
+    let o = origin.clone();
+    env.state
+        .db_call(move |c| {
+            store::set_origin(c, id, Some(&o))?;
+            store::clear_destination(c, id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(read(env.state.clone()).await.origin, None);
+
     // Clearing works, and a missing row is reported.
     env.state
         .db_call(move |c| store::set_origin(c, id, None))

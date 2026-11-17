@@ -1811,7 +1811,12 @@ export function EpgGridPage() {
     const from = Date.now() - offsetMs;
     setExtent(refs.length > 0 ? { refs, from: new Date(from).toISOString(), to: new Date(from + GRID_TRACK_AFTER).toISOString() } : null);
   }, [jumpOpen]); // eslint-disable-line react-hooks/exhaustive-deps
-  const extentGrid = useRpcQuery('epg.grid', gridArgs(extent?.refs ?? NO_REFS, extent?.from ?? '', extent?.to ?? ''), { enabled: jumpOpen && !!extent, staleTime: GRID_STALE_MS });
+  const extentGrid = useRpcQuery('epg.grid', gridArgs(extent?.refs ?? NO_REFS, extent?.from ?? '', extent?.to ?? ''), {
+    enabled: jumpOpen && !!extent,
+    staleTime: GRID_STALE_MS,
+    // Hashed once per refs array like the grid's own keys: the page renders on every scroll frame.
+    queryKeyHashFn: gridKeyHash,
+  });
   const guideEnd = useMemo(() => {
     let end = 0;
     for (const list of Object.values(extentGrid.data ?? {})) for (const p of list) end = Math.max(end, ms(p.end));

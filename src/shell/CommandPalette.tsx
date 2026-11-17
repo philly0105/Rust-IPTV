@@ -91,13 +91,17 @@ interface PaletteItem {
   title: string;
   group: string;
   icon?: LucideIcon;
-  /** A picture instead of the icon: a channel's logo. */
-  /** A channel logo (fitted into the tile), or with `poster` a title's poster (cropped to fill it). */
-  image?: { src: string; sourceId: string; poster?: boolean };
+  /**
+   * A channel logo (fitted into the tile), or with `poster` a title's poster (cropped to fill it).
+   * A title always has one: without a poster, or when it fails, the tile is its initials.
+   */
+  image?: { src?: string; sourceId: string; poster?: boolean };
   shortcut?: string;
   keywords?: string[];
   /** Quiet trailing text: a favourite's or recent item's kind, then its source when there are several. */
   detail?: readonly string[];
+  /** A channel's provider name after the details, drawn as the channel rows draw theirs (a programme's channel). */
+  detailChannel?: string;
   /** One more detail from 640 px up; a phone's row keeps that room for its title. */
   wideDetail?: string;
   /**
@@ -156,6 +160,7 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
   const sources = useVisibleSources();
   const favorites = useRpcQuery('favorites.list', {}, { enabled: open });
   const recent = useRpcQuery('recent.list', RECENT_ARGS, { enabled: open });
+  const strip = useDisplayPrefs().stripCountryPrefix;
   const q = query.trim();
 
   return useMemo(() => {
@@ -185,12 +190,12 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
                   playItem({ ref, title, posterUrl: snapshot.posterUrl, isLive: true, isRadio: ref.contentType === 'radio', sourceKind: source.kind }),
                 )
                 .catch((err: unknown) =>
-                  toast({ variant: 'error', title: t('playFailed', { title }), description: errorDescription(err) }),
+                  toast({ variant: 'error', title: t('playFailed', { title: plainChannelName(title, strip) }), description: errorDescription(err) }),
                 )
           : () => void navigate(`/s/${sid}/${ref.contentType}/${iid}`),
       };
     });
-  }, [q, sources.data, favorites.data, recent.data, t, navigate]);
+  }, [q, sources.data, favorites.data, recent.data, strip, t, navigate]);
 }
 
 /** Most library channels, and most library movies and series, the palette lists for one query. */
@@ -212,6 +217,7 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
   const { t } = useTranslation(['shell', 'vod', 'player']);
   const navigate = useNavigate();
   const sources = useVisibleSources();
+  const strip = useDisplayPrefs().stripCountryPrefix;
   const debounced = normalizeQuery(useDebounced(query, CATALOG_DEBOUNCE_MS));
   // While a newer query waits, the last answer stays and narrows by the filter below, so the
   // groups do not blink out between keystrokes.
@@ -238,7 +244,7 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
         isRadio: c.isRadio,
         sourceKind,
         ...(c.categoryId ? { categoryId: c.categoryId } : {}),
-      }).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title: c.name }), description: errorDescription(err) }));
+      }).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title: plainChannelName(c.name, strip) }), description: errorDescription(err) }));
     // The number is what matched, so it is the row's keyword and its detail says so.
     const typedNumber = channelNumberQuery(q);
     const byNumber = typedNumber === undefined ? [] : numbered.channels.filter((c) => sourceById.has(c.ref.sourceId) && !skip.has(itemKey(c.ref)));
@@ -294,14 +300,14 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
         title: v.title,
         group: titles,
         icon: CONTENT_ICONS[v.ref.contentType],
-        image: v.posterUrl ? { src: v.posterUrl, sourceId: v.ref.sourceId, poster: true } : undefined,
+        image: { src: v.posterUrl, sourceId: v.ref.sourceId, poster: true },
         keywords,
         detail: [[kind, v.year].filter(Boolean).join(' · '), many ? source.name : ''].filter(Boolean),
         run: () => void navigate(detailHref(v.ref) ?? '/search'),
       });
     }
     return items;
-  }, [q, debounced, catalog.data, catalog.isPlaceholderData, numbered.channels, sources.data, skip, t, navigate]);
+  }, [q, debounced, catalog.data, catalog.isPlaceholderData, numbered.channels, sources.data, skip, strip, t, navigate]);
   return { items, pending };
 }
 
@@ -321,6 +327,7 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
   const sources = useVisibleSources();
   const recent = useRpcQuery('recent.list', RECENT_ARGS, { enabled: open });
   const resume = useRpcQuery('positions.continueWatching', homeContinueArgs(), { enabled: open });
+  const strip = useDisplayPrefs().stripCountryPrefix;
   const empty = !query.trim();
 
   return useMemo(() => {
@@ -349,7 +356,7 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
         icon: isRadio ? Radio : Tv,
         image: r.snapshot.posterUrl ? { src: r.snapshot.posterUrl, sourceId: r.ref.sourceId } : undefined,
         detail: many ? [source.name] : undefined,
-        run: play({ ref: r.ref, title, posterUrl: r.snapshot.posterUrl, isLive: true, isRadio, sourceKind: source.kind }, title),
+        run: play({ ref: r.ref, title, posterUrl: r.snapshot.posterUrl, isLive: true, isRadio, sourceKind: source.kind }, plainChannelName(title, strip)),
       });
     }
     const continuing = t('railContinueWatching');
@@ -365,8 +372,8 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
         title,
         group: continuing,
         icon: p.ref.contentType === 'series' ? Layers : Clapperboard,
-        // The title's poster, as the channel rows above show their logos; the glyph only without one.
-        image: p.snapshot.posterUrl ? { src: p.snapshot.posterUrl, sourceId: p.ref.sourceId, poster: true } : undefined,
+        // The title's poster, as the channel rows above show their logos; its initials without one.
+        image: { src: p.snapshot.posterUrl, sourceId: p.ref.sourceId, poster: true },
         detail: p.snapshot.subtitle ? [p.snapshot.subtitle] : undefined,
         run: play(
           { ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot.subtitle, posterUrl: p.snapshot.posterUrl, isLive: false, isRadio: false, sourceKind: source.kind },
@@ -375,7 +382,7 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
       });
     }
     return items;
-  }, [empty, sources.data, recent.data, resume.data, t]);
+  }, [empty, sources.data, recent.data, resume.data, strip, t]);
 }
 
 /** Most guide programmes the palette lists for one query: distinct shows, after folding. */
@@ -440,9 +447,10 @@ function useProgrammeItems(query: string, open: boolean): { items: PaletteItem[]
         title: hit.program.title,
         group,
         icon: CalendarRange,
-        // "Today 7:00 AM" as the Search page's day headings say it, and the channel as it reads
-        // everywhere else ("ESPN HD (US)", not the provider's "US| ESPN HD").
-        detail: [`${airingDay(at, now, lang)} ${formatClock(at, lang)}`, plainChannelName(hit.channelName, prefs.stripCountryPrefix)],
+        // "Today 7:00 AM" as the Search page's day headings say it, and the channel as the channel
+        // rows draw it (the place tag after the name, quiet), not the provider's "US| ESPN HD".
+        detail: [`${airingDay(at, now, lang)} ${formatClock(at, lang)}`],
+        detailChannel: hit.channelName,
         wideDetail: channels > 1 ? t('countChannels', { count: channels }) : undefined,
         // The core matched the title with diacritics folded ("cafe" finds "Café"), which the
         // palette's own filter does not: the typed words count as its keywords.
@@ -450,7 +458,7 @@ function useProgrammeItems(query: string, open: boolean): { items: PaletteItem[]
         run: () => void navigate(link.to, { state: link.state }),
       };
     });
-  }, [query, hits, debounced, prefs.stripCountryPrefix, t, i18n.language, navigate]);
+  }, [query, hits, debounced, t, i18n.language, navigate]);
   return { items, pending };
 }
 
@@ -579,13 +587,16 @@ export function usePaletteItems(): PaletteItem[] {
       // External players run only in the desktop app; the browser's settings page has no such section.
       if (section === 'players' && !isDesktop) continue;
       const key = `settings${section[0]!.toUpperCase()}${section.slice(1)}`;
+      // Under the Settings heading the section's name alone ("Playback"), so the word that tells
+      // the rows apart leads; "Settings: Playback" still finds it ("settings play").
+      const full = t('settingsSection', { section: sectionName(section) });
       items.push({
         id: `settings.${section}`,
-        title: t('settingsSection', { section: sectionName(section) }),
+        title: sectionName(section),
         group: set,
         icon: SettingsIcon,
         run: go(`/settings/${section}`),
-        keywords: settingsKeywords(key, section, t, en),
+        keywords: [full, ...settingsKeywords(key, section, t, en)],
       });
     }
     // Single settings by their own names ("Interface size" for "font size"), opening the group
@@ -703,9 +714,14 @@ export function CommandPalette() {
     // "NBA 05" from League Pass starts with "nba" and outscores the "US| NBA TV FHD" they watch,
     // which then sat eighth and lost Enter. A library group scores at most what the content
     // group does, and on a tie the content (listed first, the sort is stable) leads.
+    // Guide programmes come after both (w-realdata-06): "sky sports" with SKY SPORTS ACTION HD
+    // among the recent channels selected a "Sky Sports News" airing. They score at most what the
+    // best channel or title group does, and the sort leaves them after it on a tie.
     const own = scored.find(([g]) => g[1][0]?.id.startsWith('content.'))?.[1];
-    return scored
-      .map(([g, score]) => [g, own !== undefined && g[1][0]?.id.startsWith('catalog.') ? Math.min(score, own) : score] as const)
+    const capped = scored.map(([g, score]) => [g, own !== undefined && g[1][0]?.id.startsWith('catalog.') ? Math.min(score, own) : score] as const);
+    const library = Math.max(0, ...capped.filter(([g]) => /^(content|catalog)\./.test(g[1][0]?.id ?? '')).map(([, score]) => score));
+    return capped
+      .map(([g, score]) => [g, library > 0 && g[1][0]?.id.startsWith('programme.') ? Math.min(score, library) : score] as const)
       .sort((a, b) => b[1] - a[1])
       .map(([g]) => g);
   }, [groups, query]);
@@ -864,6 +880,9 @@ export function CommandPalette() {
                         {d}
                       </span>
                     ))}
+                    {it.detailChannel && (
+                      <ChannelName name={it.detailChannel} strip={prefs.stripCountryPrefix} title={it.detailChannel} className={detailText} />
+                    )}
                     {it.wideDetail && (
                       <span dir="auto" title={it.wideDetail} className={cn(detailText, 'max-sm:hidden')}>
                         {it.wideDetail}

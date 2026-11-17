@@ -83,8 +83,10 @@ describe('full text on hover (L3-visual-12)', () => {
       'The Evening Bulletin With Extended Weather',
       'A Provider Name Long Enough To Truncate',
     ]) {
-      const el = screen.getByText(text);
-      expect(el.getAttribute('title'), text).toBe(text);
+      // A channel's name is drawn in parts ("Harbor News International" + " HD") under one titled
+      // span; the text found is its screen-reader copy inside that span.
+      const el = screen.getByText(text).closest('[title]');
+      expect(el?.getAttribute('title'), text).toBe(text);
     }
     expect(screen.getByTestId('source-card-caption').getAttribute('title')).toBeTruthy();
   });

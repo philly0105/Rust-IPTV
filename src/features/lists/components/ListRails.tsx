@@ -116,7 +116,12 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
 /** The rails of `lists` (those with Show on Home), loaded lazily by `CustomListRails`. */
 export function ListRails({ lists }: { lists: readonly CustomList[] }) {
   const sources = useVisibleSources();
-  const sourceName = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
+  // With one source its name under every card says nothing (and read like a programme): the card
+  // says Live TV or Radio, as Home's other channel rails do.
+  const sourceName = useMemo(() => {
+    const all = sources.data ?? [];
+    return new Map(all.length > 1 ? all.map((s) => [s.id, s.name]) : []);
+  }, [sources.data]);
   return (
     <>
       {lists.map((l) => (

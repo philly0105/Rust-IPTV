@@ -286,9 +286,10 @@ describe('sports page', () => {
     expect(within(screen.getByTestId('sports-leagues')).getByRole('tablist').className).toContain('flex-wrap');
     // Every league is on show: each card names its own.
     expect(within(card(nfl)).getByTestId('sports-game-league').textContent).toBe('NFL');
-    // A team search counts the games it finds, as With streams does, and the counts come back with it cleared.
+    // A team search counts the games it finds, as With streams does, and marks only the leagues where one
+    // it finds is on; the counts come back with it cleared.
     act(() => useShellStore.getState().header!.search!.onChange('bears'));
-    await waitFor(() => expect(pills.map((p) => p.textContent)).toEqual(['All 1, Live now', 'NFL 1', 'NCAAFCollege Football 0', 'NBA 0', 'MLB 0, Live now']));
+    await waitFor(() => expect(pills.map((p) => p.textContent)).toEqual(['All 1', 'NFL 1', 'NCAAFCollege Football 0', 'NBA 0', 'MLB 0']));
     act(() => useShellStore.getState().header!.search!.onChange(''));
     await waitFor(() => expect(pills[3]!.textContent).toBe('NBA 1'));
 

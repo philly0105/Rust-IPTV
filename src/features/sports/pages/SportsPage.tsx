@@ -273,7 +273,7 @@ export function SportsPage() {
     for (const l of failedLeagues) delete all[l];
     return all;
   }, [uncounted, allDay.games, failedLeagues, query]);
-  const liveLeagues = useMemo(() => new Set<League>(allLive.games.map((g) => g.league)), [allLive.games]);
+  const liveLeagues = useMemo(() => new Set<League>(filterGames(allLive.games, null, query).map((g) => g.league)), [allLive.games, query]);
   const showLeague = league === null;
   const myTeamsCount = useMemo(
     () => (followed.size > 0 ? [...new Set([...leagueLive, ...leagueDay].filter((g) => followsGame(followed, g)).map((g) => g.key))].length : 0),

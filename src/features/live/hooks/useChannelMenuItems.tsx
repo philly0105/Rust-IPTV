@@ -144,7 +144,7 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
       // External players run only in the desktop app; the server answers `unsupported` (as InlinePlayer gates them).
       ...(isDesktop && src
         ? [
-            { id: 'mpv', label: t('playIn', { player: 'MPV' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv') },
+            { id: 'mpv', label: t('playIn', { player: 'mpv' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv') },
             { id: 'vlc', label: t('playIn', { player: 'VLC' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('vlc') },
           ]
         : []),

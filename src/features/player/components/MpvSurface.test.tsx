@@ -198,7 +198,7 @@ describe('MpvSurface bounds', () => {
     expect((attach?.[1] as { bounds: Bounds }).bounds).toEqual({ x: 0, y: 0, width: 800, height: 440 });
 
     // The opening notice is a hole over the picture; the video keeps its full height.
-    expect(screen.getByText('Opening the stream in MPV').closest('[data-mpv-reserved]')).toBeTruthy();
+    expect(screen.getByText('Opening the stream in mpv').closest('[data-mpv-reserved]')).toBeTruthy();
     await tick(100);
     expect(sent().at(-1)).toEqual({ x: 0, y: 0, width: 800, height: 440 });
 
@@ -432,7 +432,7 @@ describe('MpvSurface attach', () => {
     expect(calls('mpv.attach')[0]?.[1]).toMatchObject({ volume: 35, muted: true });
     expect(calls('mpv.setProperty')).toHaveLength(0);
     // Connecting: a designed state in the surface, no "0:00 / 0:00" readout yet.
-    expect(screen.getByTestId('mpv-connecting').textContent).toContain('Connecting to MPV');
+    expect(screen.getByTestId('mpv-connecting').textContent).toContain('Connecting to mpv');
     expect(screen.queryByText(/0:00/)).toBeNull();
 
     // A state event from before the session was configured must not reset the saved volume.
@@ -925,7 +925,7 @@ describe('embedded mpv readouts and errors', () => {
     mpvState = { ...mpvState, loaded: true };
     fireEvent.click(retry);
     expect(rpcMock.mock.calls.some((c) => c[0] === 'mpv.load')).toBe(true);
-    expect(screen.getByText('Opening the stream in MPV')).toBeTruthy();
+    expect(screen.getByText('Opening the stream in mpv')).toBeTruthy();
   });
 
   it.each([
@@ -963,7 +963,7 @@ describe('embedded mpv recovery', () => {
     act(() => emitState({ ...mpvState, attached: false, error: crash }));
     const alert = screen.getByRole('alert');
     expect(alert.getAttribute('data-error-class')).toBe('crashed');
-    expect(alert.textContent).toContain('MPV stopped unexpectedly');
+    expect(alert.textContent).toContain('mpv stopped unexpectedly');
 
     fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
     await tick();
@@ -1007,7 +1007,7 @@ describe('embedded mpv recovery', () => {
     expect(screen.queryByText(/no longer exists/i)).toBeNull();
     const { useToastStore } = await import('@/ui/Toast');
     // Not found is not a failed start (L3-desktop-6): it says so and how to fix it.
-    expect(useToastStore.getState().toasts.at(-1)).toMatchObject({ title: "MPV wasn't found. Set its path under External players.", variant: 'info' });
+    expect(useToastStore.getState().toasts.at(-1)).toMatchObject({ title: "mpv wasn't found. Set its path under External players.", variant: 'info' });
   });
 
   it('a rejected load is reported with its class instead of loading forever', async () => {
@@ -1139,7 +1139,7 @@ describe('embedded mpv recovery', () => {
     await tick();
     expect(usePlayerStore.getState().mode).toBe('inline');
     const last = useToastStore.getState().toasts.at(-1);
-    expect(last).toMatchObject({ id: MPV_FALLBACK_TOAST, variant: 'info', title: "MPV wasn't found. Set its path under External players." });
+    expect(last).toMatchObject({ id: MPV_FALLBACK_TOAST, variant: 'info', title: "mpv wasn't found. Set its path under External players." });
     expect(last?.action?.label).toBe('Settings: External players');
     act(() => last?.action?.onClick());
     expect(await screen.findByText('players settings')).toBeTruthy();
@@ -1154,8 +1154,8 @@ describe('embedded mpv recovery', () => {
     await tick();
     expect(usePlayerStore.getState().mode).toBe('inline');
     const last = useToastStore.getState().toasts.at(-1);
-    expect(last).toMatchObject({ id: MPV_FALLBACK_TOAST, variant: 'error', title: 'Embedded MPV failed to start' });
-    expect(last?.action?.label).toBe('Try MPV again');
+    expect(last).toMatchObject({ id: MPV_FALLBACK_TOAST, variant: 'error', title: 'Embedded mpv failed to start' });
+    expect(last?.action?.label).toBe('Try mpv again');
     attachError = null;
     act(() => last?.action?.onClick());
     await tick();

@@ -345,7 +345,7 @@ The server keeps its database, logs, image cache and downloads (recordings inclu
 
 ### mpv not found
 
-Embedded playback needs mpv. Without it the app says so once ("MPV wasn't found") and plays streams in the built-in player for the rest of the session. On Windows, put `mpv.exe` in `vendor/mpv/` or install mpv with WinGet, scoop or choco and restart the app, or set its path in Settings > External players, which makes the next stream try mpv again. On macOS, run `brew install mpv` and restart the app; embedded mpv there loads Homebrew's `libmpv`, so the path setting does not change it. When mpv is found but fails to start, the notice offers "Try MPV again".
+Embedded playback needs mpv. Without it the app says so once ("mpv wasn't found") and plays streams in the built-in player for the rest of the session. On Windows, put `mpv.exe` in `vendor/mpv/` or install mpv with WinGet, scoop or choco and restart the app, or set its path in Settings > External players, which makes the next stream try mpv again. On macOS, run `brew install mpv` and restart the app; embedded mpv there loads Homebrew's `libmpv`, so the path setting does not change it. When mpv is found but fails to start, the notice offers "Try mpv again".
 
 ### The window opens off-screen
 

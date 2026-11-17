@@ -120,7 +120,7 @@
   "doubleClickHint": "النقرة الواحدة تحدد القناة، والنقرة المزدوجة تشغّلها.",
 
   "playerPaths": "مواقع المشغلات",
-  "mpvPath": "مسار مشغل MPV",
+  "mpvPath": "مسار مشغل mpv",
   "vlcPath": "مسار VLC",
   "playerPathHint": "المسار الكامل للبرنامج، أو اتركه فارغًا للبحث في PATH.",
   "playerPathMissing": "لم يعد هناك شيء في هذا المسار، ولم يُعثر على {{player}} آخر.",

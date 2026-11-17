@@ -120,7 +120,7 @@
   "doubleClickHint": "Ein einfacher Klick wählt einen Sender aus, ein Doppelklick spielt ihn ab.",
 
   "playerPaths": "Speicherorte der Player",
-  "mpvPath": "MPV-Pfad",
+  "mpvPath": "mpv-Pfad",
   "vlcPath": "VLC-Pfad",
   "playerPathHint": "Vollständiger Pfad zum Programm oder leer lassen, um im PATH zu suchen.",
   "playerPathMissing": "Unter diesem Pfad ist nichts mehr, und kein anderes {{player}} wurde gefunden.",

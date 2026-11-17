@@ -467,7 +467,7 @@ describe('sports page', () => {
     expect(within(card(flex)).getByTestId('sports-notes').textContent).toBe('FLEX: 3:30 - 4:30pm OR 6 - 8pm ET start');
     expect(within(card(postponed)).getByTestId('sports-phase-badge').textContent).toBe('Postponed');
     expect(within(card(postponed)).getByTestId('sports-notes').textContent).toBe('Rain - Makeup date April 30');
-    expect(within(card(canceled)).getByTestId('sports-phase-badge').textContent).toBe('Canceled');
+    expect(within(card(canceled)).getByTestId('sports-phase-badge').textContent).toBe('Cancelled');
     // Nothing airs for a postponed game: no stream list.
     expect(within(card(postponed)).queryByTestId('sports-streams')).toBeNull();
     expect(within(card(postponed)).queryByTestId('sports-no-streams')).toBeNull();

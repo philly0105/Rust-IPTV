@@ -1174,7 +1174,7 @@ describe('Live context menu: Copy stream address (round 2)', () => {
     desktop.value = true;
     try {
       menu = await openMenu(4);
-      fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play in MPV' }));
+      fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play in mpv' }));
       await waitFor(() => expect(calls('parental.check')).toHaveLength(2));
       await new Promise((r) => setTimeout(r, 50));
       expect(writeText).not.toHaveBeenCalled();
@@ -1189,7 +1189,7 @@ describe('Live context menu: Copy stream address (round 2)', () => {
     renderIn('/s/src1/live', LIVE);
     const menu = await openMenu(4);
     // Server mode: the core answers `unsupported` for external players, so they are not offered.
-    expect(within(menu).queryByRole('menuitem', { name: 'Play in MPV' })).toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Play in mpv' })).toBeNull();
     expect(within(menu).queryByRole('menuitem', { name: 'Play in VLC' })).toBeNull();
     expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
   });

@@ -120,7 +120,7 @@
   "doubleClickHint": "Egy kattintással kijelöli a csatornát, dupla kattintással lejátssza.",
 
   "playerPaths": "Lejátszók helye",
-  "mpvPath": "MPV elérési útvonala",
+  "mpvPath": "mpv elérési útvonala",
   "vlcPath": "VLC elérési útvonala",
   "playerPathHint": "A program teljes elérési útja, vagy hagyja üresen a PATH-ban való kereséshez.",
   "playerPathMissing": "Ezen az útvonalon már nincs semmi, és másik {{player}} sem található.",
@@ -133,7 +133,7 @@
   "detectFailed": "A keresés sikertelen.",
   "extraArgs": "További argumentumok",
   "extraArgsHint": "A lejátszó az adatfolyam URL-címe előtt kapja meg őket.",
-  "mpvArgs": "MPV-argumentumok",
+  "mpvArgs": "mpv-argumentumok",
   "vlcArgs": "VLC-argumentumok",
 
   "epgGlobalUrls": "Műsorújság-URL-címek",

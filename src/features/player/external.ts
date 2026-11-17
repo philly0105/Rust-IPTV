@@ -9,7 +9,7 @@ import { toast } from '@/ui/Toast';
 import { useMediaStore } from './media';
 import { errorMessage, usePlayerStore } from './store';
 
-const PLAYER_NAMES = { mpv: 'MPV', vlc: 'VLC' } as const;
+const PLAYER_NAMES = { mpv: 'mpv', vlc: 'VLC' } as const;
 
 let bound = false;
 

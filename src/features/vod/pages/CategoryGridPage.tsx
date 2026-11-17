@@ -134,6 +134,8 @@ interface GridCellProps {
   gridFocused: boolean;
   resume: Map<string, number>;
   locks: VodLocks;
+  /** The category's own language: its posters leave out a badge that every one of them would carry (realdata-22). */
+  quietLanguage: string | undefined;
 }
 
 /**
@@ -141,7 +143,7 @@ interface GridCellProps {
  * stay loaded. Memoised on stable props (L2-vod-1): a scroll re-renders only the cells it mounts,
  * not every cell on screen, and a page's arrival re-renders only that page's cells.
  */
-const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFocused, resume, locks }: GridCellProps) {
+const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFocused, resume, locks, quietLanguage }: GridCellProps) {
   const page = pageOf(index, pageSize);
   const q = useVodPage(input, page, usePageOpen(page));
   const item = q.data?.items[index - page * pageSize];
@@ -160,6 +162,7 @@ const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFo
       resume={resume}
       watched={watched.has(itemKey(item.ref))}
       locked={locks.itemLocked(item)}
+      quietLanguage={quietLanguage}
     />
   );
 });
@@ -172,6 +175,7 @@ const GridPoster = memo(function GridPoster({
   resume,
   watched,
   locked,
+  quietLanguage,
 }: {
   item: VodItem | SeriesItem;
   sourceKind: SourceKind;
@@ -180,12 +184,17 @@ const GridPoster = memo(function GridPoster({
   resume: Map<string, number>;
   watched: boolean;
   locked: boolean;
+  quietLanguage: string | undefined;
 }) {
   const prefetch = useMemo<PrefetchTarget>(
     () => ({ ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl }),
     [item, sourceKind],
   );
   const myList = useMemo(() => myListTarget(item), [item]);
+  const language = useMemo(() => {
+    const lang = itemLanguage(item.title, item.categoryName);
+    return lang?.code === quietLanguage ? undefined : lang;
+  }, [item, quietLanguage]);
   // C4: the keyboard cursor moves aria-activedescendant, not focus, so a cursor that rests on a
   // poster for 120 ms warms its detail page the way a resting pointer does.
   usePrefetchOnRest(active && gridFocused ? prefetch : null);
@@ -201,7 +210,7 @@ const GridPoster = memo(function GridPoster({
       rating={item.rating}
       progress={watched ? undefined : resume.get(resumeKey(item.ref))}
       watched={watched}
-      language={itemLanguage(item.title, item.categoryName)}
+      language={language}
       // C3: the saved marker and pointer toggle on the corner; S toggles it from the keyboard.
       myList={myList}
       prefetch={prefetch}
@@ -398,6 +407,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
   // Under Movies, "Movies | Action" reads "Action" (the grid's accessible name keeps the provider's).
   const shownName = categoryId === ALL_CATEGORIES ? categoryName : sectionlessCategoryName(categoryName, kind);
+  // "EN | ACTION": every poster would carry the same EN badge and "English" in its caption, which
+  // the title already says (realdata-22). A title in another language than its category keeps it.
+  const quietLanguage = categoryId !== ALL_CATEGORIES && category ? itemLanguage('', category.name)?.code : undefined;
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   // One string for the page h1 and the shell header title (C16), so they always agree. The shell
   // header shows it; the page's h1 is for assistive technology only, so the title shows once.
@@ -613,16 +625,26 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           resume={resume}
           watched={watchedKeys.has(itemKey(item.ref))}
           locked={locks.itemLocked(item)}
+          quietLanguage={quietLanguage}
         />
       ) : null,
-    [sourceKind, gridFocused, resume, watchedKeys, locks],
+    [sourceKind, gridFocused, resume, watchedKeys, locks, quietLanguage],
   );
   const renderPagedCell = useCallback(
     (i: number, _index: number, state: VirtualItemState) =>
       input ? (
-        <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={state.active && gridFocused} resume={resume} locks={locks} />
+        <GridCell
+          input={input}
+          index={i}
+          pageSize={pageSize}
+          active={state.active}
+          gridFocused={state.active && gridFocused}
+          resume={resume}
+          locks={locks}
+          quietLanguage={quietLanguage}
+        />
       ) : null,
-    [input, pageSize, gridFocused, resume, locks],
+    [input, pageSize, gridFocused, resume, locks, quietLanguage],
   );
 
   return (

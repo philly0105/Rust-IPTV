@@ -302,8 +302,8 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const regionSelect = regions.length > 0 ? <RegionSelect regions={regions} value={region} onChange={pickRegion} /> : null;
   const manageLabel = hiddenCount > 0 ? t('manageCategoriesHidden', { count: hiddenCount }) : t('manageCategories');
 
-  const card = useCallback(
-    (item: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean) => (
+  const card = useCallback<LandingCardRender>(
+    (item, i, rail, isWatched, quietLanguage) => (
       <LandingCard
         item={item}
         index={i}
@@ -312,6 +312,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
         watched={isWatched}
         locked={locks.itemLocked(item)}
         sourceKind={sourceKind}
+        quietLanguage={quietLanguage}
       />
     ),
     [resume, locks, sourceKind],
@@ -425,6 +426,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                 seeAllTo={hrefFor(c.id)}
                 grid={grid}
                 categoryId={c.id}
+                categoryLanguage={itemLanguage('', c.name)?.code}
                 sort="added"
                 rootRef={scrollRef}
                 card={card}
@@ -463,6 +465,9 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 /** The grid arguments every landing rail shares; each rail adds its category and sort. */
 type RailGrid = Omit<GridQueryInput, 'categoryId' | 'sort'>;
 
+/** A landing poster for a rail, told the language its category already names (`quietLanguage`). */
+type LandingCardRender = (item: VodItem | SeriesItem, index: number, rail: RailCardProps, watched: boolean, quietLanguage?: string) => ReactNode;
+
 /**
  * Top rated or a category's rail (VOD-LANDING-RENDERS). Memoized on plain props, and it builds its
  * grid's arguments and See all itself, so a page render (another query's answer) leaves it and
@@ -478,6 +483,7 @@ const LandingRail = memo(function LandingRail({
   rootRef,
   card,
   menu,
+  categoryLanguage,
 }: {
   title: string;
   count?: string | undefined;
@@ -486,12 +492,18 @@ const LandingRail = memo(function LandingRail({
   categoryId: string;
   sort: GridQueryInput['sort'];
   rootRef: RefObject<HTMLDivElement | null>;
-  card: CatalogRailProps['card'];
+  card: LandingCardRender;
   menu: CatalogRailProps['menu'];
+  /** The category's own language ("EN" for "EN | ACTION"): its posters leave out that badge (realdata-22). */
+  categoryLanguage?: string | undefined;
 }) {
   const input = useMemo(() => (grid ? { ...grid, categoryId, sort } : undefined), [grid, categoryId, sort]);
   const seeAll = useMemo(() => ({ to: seeAllTo }), [seeAllTo]);
-  return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={card} menu={menu} />;
+  const railCard = useMemo<CatalogRailProps['card']>(
+    () => (categoryLanguage ? (item, i, rail, watched) => card(item, i, rail, watched, categoryLanguage) : card),
+    [card, categoryLanguage],
+  );
+  return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={railCard} menu={menu} />;
 });
 
 /**
@@ -507,6 +519,7 @@ const LandingCard = memo(function LandingCard({
   watched,
   locked,
   sourceKind,
+  quietLanguage,
 }: {
   item: VodItem | SeriesItem;
   index: number;
@@ -515,9 +528,16 @@ const LandingCard = memo(function LandingCard({
   watched: boolean;
   locked: boolean;
   sourceKind: SourceKind | undefined;
+  /** The rail's category names this language: a poster of it shows no badge for it (realdata-22). */
+  quietLanguage: string | undefined;
 }) {
   const myList = useMemo(() => myListTarget(item), [item]);
-  const language = useMemo(() => itemLanguage(item.title, item.categoryName), [item]);
+  // In "EN | ACTION" every poster carried the same EN badge and "English" in its caption; a title
+  // in another language than its category keeps both, and so does every title in a mixed rail.
+  const language = useMemo(() => {
+    const lang = itemLanguage(item.title, item.categoryName);
+    return lang?.code === quietLanguage ? undefined : lang;
+  }, [item, quietLanguage]);
   const prefetch = useMemo<PrefetchTarget | undefined>(
     () => (sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined),
     [item, sourceKind],

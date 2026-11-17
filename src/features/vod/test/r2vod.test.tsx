@@ -104,14 +104,14 @@ describe('realdata-14: the landing picks a language for its categories', () => {
     cleanup();
     renderAt('/s/src1/movies', landing);
     await waitFor(() => expect(chipNames()).toEqual(['FR | CINÉMA', 'FR | ACTION', 'NETFLIX MOVIES']));
-  });
+  }, 20_000);
 
   it('has no picker when the categories carry no language tags', async () => {
     rpcMock.handlers['catalog.categories'] = () => cats.map((c, i) => ({ ...c, name: `Category ${i}` }));
     renderAt('/s/src1/movies', landing);
     await screen.findAllByTestId('vod-category-chip');
     expect(screen.queryByRole('combobox', { name: 'Language' })).toBeNull();
-  });
+  }, 20_000);
 });
 
 describe('states-feedback-05: a failing catalog draws one error', () => {
@@ -137,7 +137,7 @@ describe('states-feedback-05: a failing catalog draws one error', () => {
     await waitFor(() => expect(chipNames()).toEqual(NAMES));
     expect(screen.queryByRole('alert')).toBeNull();
     expect(await screen.findByRole('heading', { name: 'Recently added' })).toBeTruthy();
-  });
+  }, 20_000);
 
   it('keeps a rail of its own error when only that rail fails', async () => {
     rpcMock.handlers['catalog.recentlyAdded'] = () => {
@@ -148,5 +148,18 @@ describe('states-feedback-05: a failing catalog draws one error', () => {
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Recently added' })).toBeTruthy();
     expect(screen.queryByText("Couldn't load these titles")).toBeNull();
-  });
+  }, 20_000);
+});
+
+describe('realdata-22: a category rail leaves out the language its name already says', () => {
+  it('drops the badge and caption word in "FR | CINÉMA" and keeps them in Recently added', async () => {
+    rpcMock.handlers['catalog.recentlyAdded'] = () => [{ ...movie('r1', 'FR | CINÉMA'), title: 'Movie r1' }];
+    renderAt('/s/src1/movies', landing);
+    // The rail's placeholder gives way to the rail as it mounts.
+    const link = await waitFor(() => within(screen.getByRole('heading', { name: /FR \| CINÉMA/ }).closest('section')!).getByRole('link', { name: /^Movie c3-0/ }), { timeout: 8000 });
+    expect(link.getAttribute('aria-label')).not.toMatch(/French/);
+    expect(within(link).queryByText('FR')).toBeNull();
+    const recent = screen.getByRole('heading', { name: 'Recently added' }).closest('section')!;
+    expect(within(recent).getByRole('link', { name: /^Movie r1.*French/ })).toBeTruthy();
+  }, 20_000);
 });

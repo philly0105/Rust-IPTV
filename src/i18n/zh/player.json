@@ -267,7 +267,6 @@
   "sleepStopped": "睡眠定时器已停止播放",
   "sleepStoppedAt": "已于 {{time}} 停止",
   "shortcutSleepTimer": "睡眠定时器（关闭、15、30、45、60、90 分钟）",
-  "zapBannerLabel": "频道信息",
   "zapLoadingGuide": "正在加载节目指南",
   "zapNoGuide": "无节目信息",
   "zapLocked": "已锁定",

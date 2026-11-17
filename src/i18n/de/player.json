@@ -267,7 +267,6 @@
   "sleepStopped": "Der Sleep-Timer hat die Wiedergabe gestoppt",
   "sleepStoppedAt": "Gestoppt um {{time}}",
   "shortcutSleepTimer": "Sleep-Timer (aus, 15, 30, 45, 60, 90 Min.)",
-  "zapBannerLabel": "Senderinfo",
   "zapLoadingGuide": "Programmführer wird geladen",
   "zapNoGuide": "Keine Programminformationen",
   "zapLocked": "Gesperrt",

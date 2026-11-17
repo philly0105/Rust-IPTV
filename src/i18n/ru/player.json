@@ -267,7 +267,6 @@
   "sleepStopped": "Таймер сна остановил воспроизведение",
   "sleepStoppedAt": "Остановлено в {{time}}",
   "shortcutSleepTimer": "Таймер сна (выкл., 15, 30, 45, 60, 90 мин)",
-  "zapBannerLabel": "О канале",
   "zapLoadingGuide": "Загрузка телегида",
   "zapNoGuide": "Нет данных телегида",
   "zapLocked": "Заблокирован",

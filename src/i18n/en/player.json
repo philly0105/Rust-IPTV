@@ -267,7 +267,6 @@
   "sleepStopped": "Sleep timer stopped playback",
   "sleepStoppedAt": "Stopped at {{time}}",
   "shortcutSleepTimer": "Sleep timer (off, 15, 30, 45, 60, 90 min)",
-  "zapBannerLabel": "Channel info",
   "zapLoadingGuide": "Loading the guide",
   "zapNoGuide": "No guide information",
   "zapLocked": "Locked",

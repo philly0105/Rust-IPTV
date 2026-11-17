@@ -19,7 +19,8 @@
 //!   "equivalent copies" setting allows for queue spreading.
 //!
 //! Nothing here ever fails a download: lookups that fail find no mirrors,
-//! checks that fail record `Unavailable` for an hour.
+//! checks that fail record `Unavailable` for an hour, and a source with no
+//! spare connection for two minutes.
 
 mod cache;
 mod discover;
@@ -127,8 +128,8 @@ pub fn still_matches(fp: &Fingerprint, total: i64, validator: Option<&str>) -> b
 ///
 /// Standing verdicts and cached fingerprints decide first; every other
 /// candidate is sampled under `mgr.try_hold(.., Verify)` on its source, and
-/// a source whose hold is refused is skipped (recorded Unavailable for an
-/// hour). Every comparison is recorded: a copy with other bytes is
+/// a source whose hold is refused is skipped (recorded Unavailable for two
+/// minutes; a failed check, for an hour). Every comparison is recorded: a copy with other bytes is
 /// Equivalent (under both copies' records, for queue spreading) when
 /// [`equivalent`] holds for the two copies' quality, container and total,
 /// else Differs. Equivalent copies are never returned. Never errors:
@@ -181,6 +182,14 @@ pub async fn record_mismatch(
     against_authority: bool,
 ) {
     verify::record_mismatch(state, item, mirror, against_authority).await
+}
+
+/// Forgets removed source `source_id` in the mirror cache: drops its
+/// copies' records (fingerprints and verdicts) and strips every verdict
+/// naming one of its copies from the other records. Called by the
+/// source-delete path inside its transaction.
+pub fn forget_source(conn: &Connection, source_id: &str) -> CoreResult<()> {
+    cache::forget_source(conn, source_id).map(|_| ())
 }
 
 /// Test hook: ages every mirror record's fingerprint and verdict stamps by

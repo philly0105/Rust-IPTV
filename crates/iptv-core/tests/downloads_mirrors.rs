@@ -662,7 +662,7 @@ async fn a_validator_fingerprint_renews_a_lapsed_verdict_without_asking() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn busy_or_failing_sources_are_unavailable_for_an_hour() {
+async fn busy_sources_wait_two_minutes_and_failing_ones_an_hour() {
     let app = app().await;
     let mut panels = movie_panels(
         &app,
@@ -707,15 +707,64 @@ async fn busy_or_failing_sources_are_unavailable_for_an_hour() {
     );
     assert!(cached_identical(&app, &item).await.is_empty());
 
-    // Within the hour neither is asked again, room or not.
+    // A moment later neither is asked again, room or not.
     panels[2].file(1, SIZE, 0);
     assert!(identical(&app, &item, &fp, &[]).await.is_empty());
     assert_eq!(requests(&panels), after);
-    // An hour on, both are checked again.
+    // Two minutes on, the busy source is checked again; the failed one
+    // waits out its hour.
+    mirrors::age_records(&app.state, Duration::from_secs(121))
+        .await
+        .unwrap();
+    assert_eq!(identical(&app, &item, &fp, &[]).await, vec!["ub"]);
+    assert_eq!(requests(&panels)[2], after[2]);
+    // An hour on, the failed one too.
     mirrors::age_records(&app.state, Duration::from_secs(3601))
         .await
         .unwrap();
     assert_eq!(identical(&app, &item, &fp, &[]).await, vec!["ub", "uc"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_removed_source_leaves_no_verdicts_behind() {
+    let app = app().await;
+    let _panels = movie_panels(
+        &app,
+        &["ra", "rb", "rc"],
+        &[Variant::Same, Variant::Same, Variant::Same],
+        1,
+        "Heat (1995)",
+        PanelOptions::default,
+    )
+    .await;
+    let (a, b, c) = (movie("ra", 1), movie("rb", 1), movie("rc", 1));
+    let fp = fingerprint_of(&app, &a).await;
+    assert_eq!(identical(&app, &a, &fp, &[]).await, vec!["rb", "rc"]);
+    assert_eq!(verdict(&app, &b, &a).await, Some(Verdict::Identical));
+    assert_eq!(cached_identical(&app, &c).await, vec!["ra"]);
+
+    iptv_core::sources::remove(&app.state, "rb").await.unwrap();
+    let named = |rec: Option<MirrorRecord>| -> Vec<String> {
+        rec.map(|r| {
+            r.verdicts
+                .iter()
+                .map(|e| e.copy.source_id().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+    };
+    assert!(record(&app, &b).await.is_none(), "rb's own record went");
+    assert_eq!(named(record(&app, &a).await), vec!["rc"]);
+    assert_eq!(named(record(&app, &c).await), vec!["ra"]);
+    assert_eq!(cached_identical(&app, &a).await, vec!["rc"]);
+    assert_eq!(identical(&app, &a, &fp, &[]).await, vec!["rc"]);
+
+    // A junction report that arrives late writes nothing about rb.
+    mirrors::record_mismatch(&app.state, &a, &b, true).await;
+    mirrors::record_mismatch(&app.state, &b, &a, true).await;
+    mirrors::record_mismatch(&app.state, &a, &b, false).await;
+    assert!(record(&app, &b).await.is_none());
+    assert_eq!(named(record(&app, &a).await), vec!["rc"]);
 }
 
 /// Polls `done` for up to 30 s.
@@ -883,12 +932,17 @@ async fn record_mismatch_in_both_modes() {
     assert!(identical(&app, &item, &fp, &[]).await.is_empty());
     assert_eq!(requests(&panels), second);
     // A mismatch on a pair nothing knows about is recorded too.
-    let stranger = movie("nobody", 3);
+    let stranger = movie("xb", 3);
     mirrors::record_mismatch(&app.state, &item, &stranger, true).await;
     assert_eq!(
         verdict(&app, &item, &stranger).await,
         Some(Verdict::Differs)
     );
+    // One on a source that does not exist is not.
+    let ghost = movie("nobody", 3);
+    mirrors::record_mismatch(&app.state, &item, &ghost, true).await;
+    assert_eq!(verdict(&app, &item, &ghost).await, None);
+    assert!(record(&app, &ghost).await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -67,7 +67,10 @@ pub(super) async fn identical_copies(
     let (key, print) = (item.clone(), fp.clone());
     let record = state
         .db_write(move |c| {
-            cache::store_fingerprint(c, &key, &print)?;
+            // A source removed meanwhile gets no record back.
+            if cache::source_exists(c, key.source_id())? {
+                cache::store_fingerprint(c, &key, &print)?;
+            }
             cache::load(c, &key)
         })
         .await
@@ -214,7 +217,7 @@ async fn check_source(
                 source,
                 "no spare connection to verify a mirror; skipped for now"
             );
-            note(state, item, fp, &copy, Verdict::Unavailable, None).await;
+            note_busy(state, item, &copy).await;
             continue;
         }
         let checked = tokio::time::timeout(VERIFY_LIMIT, async {
@@ -228,7 +231,12 @@ async fn check_source(
                 let key = copy.clone();
                 let stored = print.clone();
                 if let Err(err) = state
-                    .db_write(move |c| cache::store_fingerprint(c, &key, &stored))
+                    .db_write(move |c| {
+                        if cache::source_exists(c, key.source_id())? {
+                            cache::store_fingerprint(c, &key, &stored)?;
+                        }
+                        Ok(())
+                    })
                     .await
                 {
                     tracing::warn!(error = %err, "could not store a mirror fingerprint");
@@ -293,9 +301,40 @@ async fn note(
         validator: fp.validator.clone(),
         checked_at: at,
     });
-    let (owner, other) = (item.clone(), copy.clone());
+    save(state, item, entry, back).await;
+}
+
+/// Records that `copy`'s source had no spare connection to verify it: an
+/// Unavailable verdict that stands only [`cache::BUSY_TTL`].
+async fn note_busy(state: &Arc<AppState>, item: &CopyRef, copy: &CopyRef) {
+    let entry = VerdictEntry {
+        copy: copy.clone(),
+        verdict: Verdict::Unavailable,
+        total: None,
+        validator: Some(cache::BUSY.to_string()),
+        checked_at: stamp(now()),
+    };
+    save(state, item, entry, None).await;
+}
+
+/// Writes `entry` under `item`'s record and `back` under the record of
+/// `entry.copy`, only while both sources still exist (a source removed
+/// meanwhile must not come back as a record, or be named in one).
+async fn save(
+    state: &Arc<AppState>,
+    item: &CopyRef,
+    entry: VerdictEntry,
+    back: Option<VerdictEntry>,
+) {
+    let owner = item.clone();
     let wrote = state
         .db_write(move |c| {
+            let other = entry.copy.clone();
+            if !cache::source_exists(c, owner.source_id())?
+                || !cache::source_exists(c, other.source_id())?
+            {
+                return Ok(());
+            }
             cache::record_verdict(c, &owner, entry)?;
             if let Some(back) = back {
                 cache::record_verdict(c, &other, back)?;
@@ -336,8 +375,15 @@ pub(super) async fn record_mismatch(
             };
             let theirs = cache::load(c, &mirror)?.and_then(|r| r.fingerprint);
             let ours = cache::load(c, &item)?.and_then(|r| r.fingerprint);
-            cache::record_verdict(c, &item, entry(&mirror, theirs))?;
-            cache::record_verdict(c, &mirror, entry(&item, ours))?;
+            // A removed source's records stay gone, and nothing names it.
+            let (item_on, mirror_on) = (
+                cache::source_exists(c, item.source_id())?,
+                cache::source_exists(c, mirror.source_id())?,
+            );
+            if item_on && mirror_on {
+                cache::record_verdict(c, &item, entry(&mirror, theirs))?;
+                cache::record_verdict(c, &mirror, entry(&item, ours))?;
+            }
             Ok(())
         })
         .await;

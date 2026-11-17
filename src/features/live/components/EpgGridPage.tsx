@@ -45,7 +45,7 @@ import { queryClient as appQueryClient, rpcKey, useRpcQuery } from '@/api/query'
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Settings, type Source, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, fieldClass, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, fieldClass, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, useUiScale, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 import { copyText } from '@/lib/clipboard';
 import { formatDurationParts } from '@/lib/duration';
@@ -2556,12 +2556,30 @@ const MemoMappingDialog = memo(EpgMappingDialog);
  * `label`, starting at `labelX` with the label's 8 px of padding), from the text lengths at the
  * ruler's 12 px: a short "5:30" 80 px after the slot line stays, a "12:30 PM" the pill lands on goes.
  */
-export function rulerLabelCovered(nowX: number, pill: string, labelX: number, label: string): boolean {
+export function rulerLabelCovered(nowX: number, pill: string, labelX: number, label: string, scale = 1): boolean {
+  const [from, to] = rulerLabelCoverRange(nowX, pill, label, scale);
+  return labelX > from && labelX < to;
+}
+
+/** Text width at 12 px: `perChar` for Latin figures and letters, a full em for CJK and kana. */
+function rulerTextPx(text: string, perChar: number): number {
+  let px = 0;
+  for (const ch of text) px += ch.codePointAt(0)! >= 0x2e80 ? 12 : perChar;
+  return px;
+}
+
+/**
+ * The label starts (px from the track's start) at which the now pill covers a ruler label: open
+ * interval `[from, to]`. The edge label that sticks past the channel column starts at the scroll
+ * position rather than its slot line, so the sticky-title tracker checks it against this range
+ * too. `scale` is the UI scale the ruler's 12 px text is drawn at.
+ */
+export function rulerLabelCoverRange(nowX: number, pill: string, label: string, scale = 1): [number, number] {
   // Barlow Semi Condensed is about 0.5 em a character plus the pill's 6 px padding a side; Inter
   // tabular figures about 0.6 em. A few px of margin round both.
-  const half = (pill.length * 6 + 12) / 2 + 2;
-  const labelEnd = labelX + 8 + label.length * 7.2 + 4;
-  return nowX - half < labelEnd && nowX + half > labelX;
+  const half = ((rulerTextPx(pill, 6) + 12) / 2 + 2) * scale;
+  const width = (8 + rulerTextPx(label, 7.2) + 4) * scale;
+  return [nowX - half - width, nowX + half];
 }
 
 /** The time header: the channel column's corner and a label per 30-minute slot. */
@@ -2600,10 +2618,12 @@ const GuideHeader = memo(function GuideHeader({
   pin(cell: HTMLElement): () => void;
 }) {
   const { t } = useTranslation('live');
+  const scale = useUiScale();
   const ruler = useRef<HTMLDivElement>(null);
   const corner = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => (corner.current ? pin(corner.current) : undefined), [pin]);
-  useLayoutEffect(() => (ruler.current ? trackTitles(ruler.current) : undefined), [trackTitles, slots, start, slotPx, channelCol]);
+  // Re-registered as the pill moves, so the tracker re-checks the edge label against it.
+  useLayoutEffect(() => (ruler.current ? trackTitles(ruler.current) : undefined), [trackTitles, slots, start, slotPx, channelCol, nowLabel, nowX, scale]);
   return (
     <div ref={ruler} role="row" className="sticky top-0 z-20 border-b border-divider bg-surface" style={{ height, width: channelCol + trackWidth }}>
       {nowLabel ? (
@@ -2626,18 +2646,24 @@ const GuideHeader = memo(function GuideHeader({
       {slots.map((slot, i) => {
         // The now pill stands on the ruler: a label it would cover, even in part, steps aside.
         const slotX = ((slot - start) / (GRID_SLOT_MIN * MINUTE)) * slotPx;
-        const covered = !!nowLabel && rulerLabelCovered(nowX, nowLabel, slotX, labels[i] ?? '');
+        const cover = nowLabel ? rulerLabelCoverRange(nowX, nowLabel, labels[i] ?? '', scale) : null;
+        const covered = !!cover && slotX > cover[0] && slotX < cover[1];
         return (
           <div role="columnheader" key={slot} data-slot={slot} className="absolute top-0 flex h-full items-center border-s border-divider text-xs tabular-nums text-fg-muted" style={{ ...inlineStart(channelCol + slotX, rtl), width: slotPx }}>
             {/* Sticky past the channel column: the slot the window starts in keeps its time in
                 view while the column covers its start, so the left of the grid is never unlabelled.
                 Only the labels at the visible edge get the sticky class (trackTitles), and they
                 paint over the slots (z-index), so the ruler is a few layers rather than one per
-                slot. The class is the tracker's, so React's must not change: covered is a style. */}
+                slot. The class and the inline visibility are the tracker's (it hides an edge label
+                with no room, or one the pill covers where it sticks), so covered is an attribute
+                with a static class: an inline visibility of '' falls back to it. */}
             <span
-              className="z-[1] px-2 whitespace-nowrap"
-              style={{ insetInlineStart: channelCol, visibility: covered ? 'hidden' : undefined }}
+              className="z-[1] px-2 whitespace-nowrap data-covered:invisible"
+              style={{ insetInlineStart: channelCol }}
               data-testid="ruler-label"
+              data-covered={covered || undefined}
+              data-cover-from={cover?.[0]}
+              data-cover-to={cover?.[1]}
               data-pad-left={slotX}
               data-pad-width={slotPx}
             >

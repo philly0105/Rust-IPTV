@@ -83,11 +83,17 @@ export function createStickyTitleManager() {
   // ellipsis) and hidden when that is too narrow to read, which leaves a plain block. The cell
   // sits at left + 1 with 8 px padding and its title sticks 8 px past the edge: 17 px of the
   // cell are not text room. While moving, the title is left alone (no style write per frame).
+  // A ruler label carries the range of starts the now pill covers (data-cover-from/-to); stuck
+  // at the edge it starts at the scroll position, so it is hidden there by that range, and
+  // shown otherwise even where its slot line would be covered (its data-covered class).
   const setCap = ({ el, left, width }: Cell, scroll: number) => {
     const full = width - 18;
     const room = Math.floor(Math.min(left + width - scroll - 17, full));
     const max = `${Math.max(0, room)}px`;
-    const visibility = room < Math.min(CELL_TEXT_MIN_PX, full) ? 'hidden' : '';
+    const { coverFrom, coverTo } = el.dataset;
+    const ruler = coverTo !== undefined;
+    const covered = ruler && scroll > Number(coverFrom) && scroll < Number(coverTo);
+    const visibility = covered || room < Math.min(CELL_TEXT_MIN_PX, full) ? 'hidden' : ruler && el.dataset.covered !== undefined ? 'visible' : '';
     if (el.style.maxWidth !== max) el.style.maxWidth = max;
     if (el.style.visibility !== visibility) el.style.visibility = visibility;
   };

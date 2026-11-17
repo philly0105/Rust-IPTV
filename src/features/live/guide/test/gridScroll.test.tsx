@@ -163,6 +163,37 @@ describe('helpers', () => {
     expect(rulerLabelCovered(140, '7:58 PM', 150, '8:00 PM')).toBe(true);
   });
 
+  it('the label the now pill covers stays hidden at rest, also where it sticks at the edge (v-guide-01)', async () => {
+    // Shown as the stylesheet resolves it: the tracker's inline visibility wins, '' falls back to
+    // the data-covered:invisible class.
+    const shown = (label: HTMLElement) => label.style.visibility === 'visible' || (label.style.visibility === '' && label.dataset.covered === undefined);
+    const labelOf = (slot: number) => screen.getAllByTestId('ruler-label').find((l) => Number(l.parentElement!.dataset.slot) === slot)!;
+    const slot = defaultStart(Date.now()) + 2 * HOUR;
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['Date'] });
+    vi.setSystemTime(slot + 8 * MINUTE);
+    try {
+      rpc.handlers['epg.grid'] = hourly(slot);
+      renderGuide({ path: '/epg?source=src1', routes: GRID });
+      await screen.findByRole('button', { name: /^c1 P0,/ });
+      expect(screen.getByTestId('epg-now-pill')).toBeTruthy();
+      // The slot now is in: its label sits under the pill. The next one is clear of it.
+      expect(shown(labelOf(slot))).toBe(false);
+      expect(shown(labelOf(slot + 30 * MINUTE))).toBe(true);
+      const grid = screen.getByTestId('epg-grid');
+      const viewAt = Number(grid.dataset.viewAt);
+      // Scrolled 3 minutes into the slot: the label sticks at the edge, still under the pill.
+      act(() => { grid.scrollLeft += ((slot + 3 * MINUTE - viewAt) / MINUTE) * 5; fireEvent.scroll(grid); });
+      await waitFor(() => expect(grid.hasAttribute('data-guide-moving')).toBe(false));
+      await waitFor(() => expect(labelOf(slot).className).toContain('sticky'));
+      expect(shown(labelOf(slot))).toBe(false);
+      // 14 minutes in, the pill is under the channel column: the stuck label shows its time again.
+      act(() => { grid.scrollLeft += 11 * 5; fireEvent.scroll(grid); });
+      await waitFor(() => expect(shown(labelOf(slot))).toBe(true));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 
 });
 

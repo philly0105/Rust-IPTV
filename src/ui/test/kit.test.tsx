@@ -262,10 +262,13 @@ describe('IconButton tooltip', () => {
     expect(screen.getByRole('textbox', { name: 'Name' }).className).toContain(floor);
     expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain(floor);
     expect(screen.getByRole('combobox', { name: 'Sort' }).className).toContain(floor);
-    // The clear button grows inside the taller field, and the text's end padding grows past it
-    // (end-1 plus 36 px is 39.75 px; pe-11 is 41.25 px), so the button never covers the query.
-    expect(screen.getByRole('button', { name: 'Clear search' }).className).toContain('pointer-coarse:size-[calc(36rem/15)]');
-    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain('pointer-coarse:pe-11');
+    // The clear button grows inside the taller field and a 4 px band takes its target to 44 px;
+    // the text's end padding grows past the band (end-1 plus 40 px is 43.75 px; pe-12 is 45 px),
+    // so the button never covers the query.
+    const clear = screen.getByRole('button', { name: 'Clear search' }).className;
+    expect(clear).toContain('pointer-coarse:size-[calc(36rem/15)]');
+    expect(clear).toContain('pointer-coarse:after:-inset-[calc(4rem/15)]');
+    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain('pointer-coarse:pe-12');
     // The track takes the floor and its segments stretch to fill it.
     expect(screen.getByRole('radiogroup', { name: 'View' }).className).toContain(floor);
     // A band over the track's padding takes each segment's target to the track's 44 px (an sm

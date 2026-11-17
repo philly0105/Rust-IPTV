@@ -51,6 +51,9 @@ pub const MAX_CONNECTIONS: usize = 8;
 /// Smallest segment worth its own connection: splitting stops below twice
 /// this, so the last few seconds of a file never open new connections.
 pub const MIN_SEGMENT: i64 = 4 * 1024 * 1024;
+/// A connection-limit probe runs only with this much of the file left. A
+/// transfer on one connection enters the engine for a due probe only then.
+pub const PROBE_MIN_LEFT: i64 = 32 * 1024 * 1024;
 /// How often the coordinator saves the sidecar, reports progress and
 /// re-reads how many connections it may hold.
 const TICK: Duration = Duration::from_millis(250);
@@ -342,26 +345,36 @@ impl Plan {
     /// untouched one, one `src` already wrote part of, the rest of one
     /// another source wrote part of (cut off into a segment of its own),
     /// or the second half of the one with the most left.
+    ///
+    /// A segment whose worker ended can still have blocks in the writer's
+    /// queue (`queued` ahead of `pos`). Those land later, so the segment
+    /// keeps everything up to `queued`: a cut there, never at `pos`, keeps
+    /// every `pos` within its `end`, and bytes one source handed are never
+    /// recorded as another's.
     fn pick(&mut self, src: u16, validated: bool) -> Option<usize> {
-        let free = |p: &Plan, want: &dyn Fn(&Seg) -> bool| {
+        let free = |p: &Plan, want: &dyn Fn(&Seg, i64) -> bool| {
             p.ranges
                 .segments
                 .iter()
                 .enumerate()
-                .find(|(i, s)| !p.taken[*i] && s.pos < s.end && want(s))
+                .find(|(i, s)| {
+                    let front = p.queued[*i].max(s.pos);
+                    !p.taken[*i] && front < s.end && want(s, front)
+                })
                 .map(|(i, _)| i)
         };
-        let i = if let Some(i) = free(self, &|s| s.pos == s.start) {
+        let i = if let Some(i) = free(self, &|s, front| front == s.start) {
             i
-        } else if let Some(i) = free(self, &|s| s.src == src) {
+        } else if let Some(i) = free(self, &|s, front| s.src == src && front == s.pos) {
             i
-        } else if let Some(i) = free(self, &|_| true) {
+        } else if let Some(i) = free(self, &|_, _| true) {
             let s = self.ranges.segments[i];
-            self.ranges.segments[i].end = s.pos;
+            let front = self.queued[i].max(s.pos);
+            self.ranges.segments[i].end = front;
             self.push(Seg {
-                start: s.pos,
+                start: front,
                 end: s.end,
-                pos: s.pos,
+                pos: front,
                 src,
                 checked: false,
             })
@@ -383,7 +396,7 @@ impl Plan {
             .segments
             .iter()
             .enumerate()
-            .any(|(i, s)| !self.taken[i] && s.pos < s.end)
+            .any(|(i, s)| !self.taken[i] && self.queued[i].max(s.pos) < s.end)
             || self
                 .ranges
                 .segments
@@ -774,6 +787,95 @@ mod tests {
         p.reset(1);
         assert_eq!(p.ranges.segments[1], seg(16 * MIB, 20 * MIB, 16 * MIB));
         assert_eq!(p.epoch[1], 1);
+    }
+
+    /// A sink that, while the writer is mid-write (the plan unlocked), lets
+    /// the authority pick: the moment a multi-source run cut another
+    /// source's segment at its recorded `pos`, so the block then recorded
+    /// past the new end and the next split panicked (`min > max`).
+    struct PickDuringWrite<'a> {
+        plan: &'a parking_lot::Mutex<Plan>,
+        picked: Option<usize>,
+    }
+
+    impl writer::Sink for PickDuringWrite<'_> {
+        fn write_at(&mut self, _buf: &[u8], _at: u64) -> io::Result<()> {
+            self.picked = self.plan.lock().pick(0, true);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_cut_keeps_what_waits_for_the_writer_so_no_segment_passes_its_end() {
+        let total = 64 * MIB;
+        let mut r = Ranges::new(total, etag(), 0);
+        r.sources.push(SegSource {
+            copy: Some(CopyRef::new(
+                ItemRef::new("b", ContentType::Movie, "7"),
+                None,
+            )),
+            validator: None,
+        });
+        // The mirror's worker ended at 12 MiB; 10 MiB are recorded and the
+        // last 2 wait in the writer's queue. The authority's segment is busy.
+        r.segments = vec![
+            Seg {
+                src: 0,
+                checked: true,
+                ..seg(0, 8 * MIB, 4 * MIB)
+            },
+            Seg {
+                src: 1,
+                ..seg(8 * MIB, total, 10 * MIB)
+            },
+        ];
+        let mut p = Plan::new(r);
+        p.taken[0] = true;
+        p.queued[1] = 12 * MIB;
+        let plan = parking_lot::Mutex::new(p);
+        let mut sink = PickDuringWrite {
+            plan: &plan,
+            picked: None,
+        };
+        let block = writer::Block {
+            seg: 1,
+            at: 10 * MIB,
+            epoch: 0,
+            data: vec![0; 2 * MIB as usize],
+        };
+        writer::apply(&mut sink, &plan, &block).unwrap();
+        let mut p = plan.lock();
+        assert_eq!(sink.picked, Some(2));
+        assert_eq!(p.ranges.segments[1].end, 12 * MIB, "cut after the queue");
+        assert_eq!(p.ranges.segments[1].pos, 12 * MIB);
+        assert_eq!(p.ranges.segments[1].src, 1, "the mirror's bytes stay its");
+        assert_eq!(
+            p.ranges.segments[2],
+            Seg {
+                src: 0,
+                checked: true,
+                ..seg(12 * MIB, total, 12 * MIB)
+            }
+        );
+        assert!(p.ranges.is_consistent());
+        // The split that panicked on a `pos` past its `end`.
+        p.taken[2] = true;
+        assert!(p.split().is_some());
+        assert!(p.ranges.is_consistent());
+    }
+
+    #[test]
+    fn a_segment_whose_bytes_all_wait_for_the_writer_is_not_free() {
+        let mut p = Plan::new(Ranges::new(40 * MIB, etag(), 0));
+        p.ranges.segments[0].end = 8 * MIB;
+        p.queued[0] = 8 * MIB;
+        let tail = p.push(seg(8 * MIB, 40 * MIB, 8 * MIB));
+        p.taken[tail] = true;
+        // Segment 0 is not untouched (its bytes are queued) and has nothing
+        // past them to fetch: the new worker splits the busy tail instead.
+        assert_eq!(p.pick(0, true), Some(2));
+        assert_eq!(p.ranges.segments[0].end, 8 * MIB);
+        assert_eq!(p.ranges.segments[0].src, 0);
     }
 
     #[test]

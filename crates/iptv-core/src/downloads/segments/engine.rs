@@ -14,7 +14,7 @@ use super::stats::{self, Meter, STATS_EVERY};
 use super::writer::{self, Block, Writer, BLOCK};
 use super::{
     Job, MirrorPlan, Plan, Ranges, SegEnd, SegSource, CLOSE_GRACE, FIRST_TICK, MAX_CONNECTIONS,
-    SAVE_EVERY, TICK,
+    PROBE_MIN_LEFT, SAVE_EVERY, TICK,
 };
 use crate::downloads::manager::HoldPurpose;
 use crate::downloads::transfer::{self, Pace};
@@ -52,8 +52,6 @@ const LINE_HOLD: Duration = Duration::from_secs(30);
 const RECYCLE_MIN_AGE: Duration = Duration::from_secs(5);
 /// Nor more often than this.
 const RECYCLE_EVERY: Duration = Duration::from_secs(30);
-/// A connection-limit probe runs only with this much of the file left.
-const PROBE_MIN_LEFT: i64 = 32 * 1024 * 1024;
 /// A refusal this soon after a probe closed its connections is the panel
 /// still counting them, not the account's limit.
 const AFTER_PROBE: Duration = Duration::from_secs(3);
@@ -277,6 +275,9 @@ impl Ramp {
         if self.hold.is_some_and(|t| now >= t) {
             self.hold = None;
             self.line = None;
+            // The line is judged again by the next added connection; until
+            // then nothing holds a probe back.
+            self.gained = None;
         }
         if self.before.is_some() && conns < self.target && room < self.target {
             // The allowance dipped before the added connection ran.
@@ -651,6 +652,14 @@ pub async fn run(
                                 ctl.push_note(TransferNote::MirrorDropped { source_id: id, reason });
                             }
                         }
+                        Err(WorkerError::Dropped(err)) if probing.is_some() => {
+                            // A kick-oldest panel ends the oldest connection
+                            // (one of these) when the probe opens one more:
+                            // the probe reads the drop as the kick, and the
+                            // segment is asked for again.
+                            tracing::info!(id = job.id, error = %err, "a connection ended while a probe ran; trying again");
+                            ctl.note_drop(&ctl.source);
+                        }
                         Err(WorkerError::Refused(err))
                             if probe_ended.is_some_and(|t| t.elapsed() <= AFTER_PROBE) =>
                         {
@@ -910,14 +919,18 @@ fn desired(cx: &Cx<'_>, srcs: &[Src], target: usize) -> Desired {
 }
 
 /// Records the connections the transfer holds on each source; a queued
-/// download of a source may start when they went down.
+/// download of a source may start when they went down. The authority keeps
+/// at least the one connection the run started with, even while only
+/// mirrors fetch: the manager counts a running transfer against its own
+/// source (`preempt`), so a row started there meanwhile would only be asked
+/// to yield again, over and over, until this one ends.
 fn hold(cx: &Cx<'_>, srcs: &[Src], running: &[Running]) {
     let ctl = cx.job.ctl;
     let before = ctl.connections.load(Ordering::Relaxed);
     for (i, s) in srcs.iter().enumerate() {
         let Some(c) = &s.conn else { continue };
         let n = count(running, i);
-        let n = if i == 0 && running.is_empty() { 1 } else { n };
+        let n = if i == 0 { n.max(1) } else { n };
         ctl.set_held(&c.id, n);
     }
     if ctl.connections.load(Ordering::Relaxed) < before {
@@ -1591,6 +1604,14 @@ async fn hand(
     };
     if handed {
         *sent += len;
+    } else {
+        // The block never reached the writer: nothing will move `pos` past
+        // `sent`, so `queued` must not claim it either (a later worker
+        // would never fetch those bytes).
+        let mut p = cx.plan.lock();
+        if p.epoch[seg] == epoch && p.queued[seg] == *sent + len {
+            p.queued[seg] = *sent;
+        }
     }
     handed
 }

@@ -2,6 +2,7 @@ import { configure, act, cleanup, fireEvent, screen, waitFor, within } from '@te
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FavoriteEntry, PlaybackPosition, RecentEntry, VodItem } from '@/api/types';
+import { focusableIn } from '@/ui';
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from './harness';
 
@@ -439,7 +440,7 @@ describe('phone layout (below 1024 px)', () => {
   const narrowWindow = (narrow: boolean) => {
     window.matchMedia = ((query: string) => ({
       ...matchMedia(query),
-      matches: narrow && query === '(max-width: 1023px)',
+      matches: narrow && query === '(max-width: 1099px)',
     })) as typeof window.matchMedia;
   };
   beforeEach(() => {
@@ -479,6 +480,37 @@ describe('phone layout (below 1024 px)', () => {
     fireEvent.click(within(nav).getByRole('link', { name: 'Recently watched' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
     await waitFor(() => expect(nav.getAttribute('data-peek')).toBeNull());
+  });
+
+  it('the open rail holds focus: the page behind is inert, Tab cycles inside, Escape hands focus back to Expand', async () => {
+    narrowWindow(true);
+    act(() => useShellStore.setState({ railPeek: false }));
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const expand = within(nav).getByRole('button', { name: 'Expand sidebar' });
+    expand.focus();
+    fireEvent.click(expand);
+    const header = screen.getByTestId('shell-header');
+    expect(header.closest('[inert]')).not.toBeNull();
+    expect(document.getElementById('main')!.closest('[inert]')).not.toBeNull();
+    expect(nav.closest('[inert]')).toBeNull();
+    // Collapse sidebar is the rail's last control: Tab wraps to its first, Shift+Tab back.
+    const items = focusableIn(nav);
+    expect(items.at(-1)).toBe(expand);
+    fireEvent.keyDown(expand, { key: 'Tab' });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0]!, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(expand);
+    // From a link inside, Escape closes it and focus goes back to the button that opened it.
+    const recent = within(nav).getByRole('link', { name: 'Recently watched' });
+    recent.focus();
+    // The focus moves above show and hide tooltips; let them settle as a real key press would.
+    await act(async () => {});
+    fireEvent.keyDown(recent, { key: 'Escape' });
+    await waitFor(() => expect(nav.getAttribute('data-peek')).toBeNull());
+    expect(document.activeElement).toBe(expand);
+    expect(header.closest('[inert]')).toBeNull();
   });
 
   it('the rail can be hidden from the open rail and shown again, and focus moves to the button that brings it back', async () => {
@@ -1554,7 +1586,7 @@ describe('Run 3 onboarding wiring', () => {
       window.matchMedia = stubbed;
     });
     const setNarrow = (narrow: boolean) => {
-      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: narrow && query === '(max-width: 1023px)' })) as typeof window.matchMedia;
+      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: narrow && query === '(max-width: 1099px)' })) as typeof window.matchMedia;
     };
 
     it('from lg up the page search field holds it', async () => {
@@ -1582,7 +1614,7 @@ describe('Run 3 onboarding wiring', () => {
     });
 
     it('on a phone the tab bar Search tab holds it, and the header has no search, palette or theme button', async () => {
-      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: query === '(max-width: 639px)' || query === '(max-width: 1023px)' })) as typeof window.matchMedia;
+      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: query === '(max-width: 639px)' || query === '(max-width: 1099px)' })) as typeof window.matchMedia;
       renderRoutes(routes(<SearchFieldPage />), '/favorites');
       await screen.findByText('favorites page');
       const search = document.querySelectorAll('[data-tour="search"]');

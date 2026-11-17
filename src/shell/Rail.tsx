@@ -1,12 +1,12 @@
-import { ChevronDown, ChevronUp, Ellipsis, Keyboard, PanelLeftClose, PanelLeftDashed, PanelLeftOpen, Plus, RotateCw, Server, Settings as SettingsIcon } from 'lucide-react';
-import { type CSSProperties, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, Ellipsis, Keyboard, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Server, Settings as SettingsIcon } from 'lucide-react';
+import { type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Source } from '@/api/types';
-import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
+import { BrandMark, Button, cn, focusableIn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
 import { ActivityMark, ActivityText } from './activityMarks';
 import { useOffline } from './connection';
@@ -746,7 +746,7 @@ const ONBOARDING_ROUTES = new Set(['/dashboard', '/sources']);
 
 /**
  * Memoized (performance audit SH-1): it follows the location itself, so the shell's own re-renders pass it by.
- * `autoCollapsed`: below 1024 px, where the rail docks as icons and Expand opens it over the page
+ * `autoCollapsed`: below 1100 px (RAIL_DOCK_QUERY), where the rail docks as icons and Expand opens it over the page
  * (`peek`, the shell store's railPeek) without moving the page: a 72 px column stays in its place.
  */
 export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false }: { collapsed: boolean; autoCollapsed: boolean; peek?: boolean }) {
@@ -801,6 +801,38 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
   useEffect(() => {
     if (collapsed) void loadRailMenu().catch(() => {});
   }, [collapsed]);
+
+  // Open over the page the rail is modal (v-shell-home-01): the page behind the scrim is inert and
+  // Tab cycles inside the rail, so a keyboard user never works a page they can barely see. Escape,
+  // the scrim and Collapse close it (the Escape chain hands focus back to Expand sidebar).
+  const navRef = useRef<HTMLElement>(null);
+  // A layout effect: Hide sidebar focuses the header's Show sidebar right after the rail goes.
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const shell = nav?.parentElement;
+    if (!peek || !nav || !shell) return;
+    const made: HTMLElement[] = [];
+    for (const el of Array.from(shell.children)) {
+      // The scrim stays live: a press on it closes the rail.
+      if (el === nav || !(el instanceof HTMLElement) || el.hasAttribute('inert') || el.hasAttribute('data-rail-scrim')) continue;
+      el.setAttribute('inert', '');
+      made.push(el);
+    }
+    return () => {
+      for (const el of made) el.removeAttribute('inert');
+    };
+  }, [peek]);
+  const trapTab = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'Tab' || e.defaultPrevented) return;
+    const items = focusableIn(e.currentTarget);
+    const first = items[0];
+    const last = items.at(-1);
+    if (!first || !last) return;
+    const edge = e.shiftKey ? first : last;
+    if (document.activeElement !== edge && e.currentTarget.contains(document.activeElement)) return;
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  };
 
   // With no sources the list itself is the add row (or the page's own onboarding).
   const canAdd = !noSources && !(sources.isError && !offline);
@@ -898,11 +930,14 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
             // The press's default would move focus to <body>.
             e.preventDefault();
             setRailPeek(false);
+            document.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
           }}
         />
       )}
       <nav
+        ref={navRef}
         aria-label={t('mainNavigation')}
+        onKeyDown={peek ? trapTab : undefined}
         data-testid="shell-rail"
         data-collapsed={collapsed || undefined}
         data-peek={peek || undefined}
@@ -916,8 +951,31 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
           <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5 rounded-md" aria-label={t('appName')}>
             {/* The colour mark is the app icon: the same in every theme and accent, never tinted. */}
             <BrandMark size={collapsed ? 32 : 28} className="shrink-0" />
-            {!collapsed && <span className="truncate font-display text-title-sm tracking-tight">{t('appName')}</span>}
+            {/* Open over the page the row gives the name's room to Hide sidebar; the mark and the link's name stay. */}
+            {!collapsed && !peek && <span className="truncate font-display text-title-sm tracking-tight">{t('appName')}</span>}
           </Link>
+          {/*
+            Open over the page, the rail can also go away entirely (the header's Show sidebar brings
+            it back). A worded button up here, so the footer keeps one sidebar control: two panel
+            glyphs side by side told a touch user nothing about which closed the drawer.
+          */}
+          {peek && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                // The rail and this button go: focus moves on to the header's Show sidebar button.
+                flushSync(toggleRailHidden);
+                document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
+              }}
+              data-rail-hide=""
+              className="-me-2 ms-auto min-w-0 shrink px-2"
+            >
+              <span title={t('hideRail')} className="truncate">
+                {t('hideRail')}
+              </span>
+            </Button>
+          )}
         </div>
 
         {/*
@@ -1010,24 +1068,9 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed, peek = false 
           )}
           {autoCollapsed ? (
             // Below lg the rail docks as icons and opens over the page to show its names (on a
-            // touch tablet, where no tooltip comes, the only way to read them). Open, it can also go
-            // away entirely: the header's Show sidebar button brings it back.
+            // touch tablet, where no tooltip comes, the only way to read them).
             <>
-              {peek && (
-                <IconButton
-                  label={t('hideRail')}
-                  tooltipSide="top"
-                  icon={<PanelLeftDashed aria-hidden size={18} className="rtl:-scale-x-100" />}
-                  onClick={() => {
-                    // The rail and this button go: focus moves on to the header's Show sidebar button.
-                    flushSync(toggleRailHidden);
-                    document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
-                  }}
-                  data-rail-hide=""
-                  className="size-(--rail-item-height) text-fg-muted"
-                />
-              )}
-              {/* One button that opens and closes, so focus stays on it either way. */}
+              {/* One button that opens and closes, so focus stays on it either way. Hide sidebar is in the brand row. */}
               <IconButton
                 label={peek ? t('collapseRail') : t('expandRail')}
                 tooltipSide={peek ? 'top' : 'inline-end'}

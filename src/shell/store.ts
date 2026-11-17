@@ -85,12 +85,12 @@ export interface ShellStore {
   helpOpen: boolean;
   railCollapsed: boolean;
   /**
-   * Below 1024 px, where the rail is always icons: the user hid it (header button brings it back).
+   * Below 1100 px, where the rail is always icons: the user hid it (header button brings it back).
    * Wider windows ignore it, so the rail never goes missing on a desktop.
    */
   railHidden: boolean;
   /**
-   * Below 1024 px, where the rail is docked as icons: the full rail is open over the page for a
+   * Below 1100 px, where the rail is docked as icons: the full rail is open over the page for a
    * moment (Expand sidebar), until a link is followed, Escape, a press outside or Collapse.
    */
   railPeek: boolean;

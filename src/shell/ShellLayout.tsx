@@ -18,7 +18,7 @@ import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
 import { focusSearchWhenReady, SEARCH_FIELD } from './focusSearch';
 import { Header, HEADER_SEARCH_WIDTH } from './Header';
-import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
+import { LIBRARY_LINKS, PHONE_QUERY, RAIL_DOCK_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
@@ -266,7 +266,12 @@ function GlobalShortcuts() {
       if (s.paletteOpen) return s.setPaletteOpen(false);
       if (s.helpOpen) return s.setHelpOpen(false);
       if (s.panelOpen) return s.setPanelOpen(false);
-      if (s.railPeek) return s.setRailPeek(false);
+      if (s.railPeek) {
+        // Focus goes back to Expand sidebar, the button that opened it (the rail is the same element).
+        s.setRailPeek(false);
+        document.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
+        return;
+      }
       // Leaves a search or text field; a focused link, card or button keeps focus (and the Tab position).
       const active = document.activeElement;
       if (active instanceof HTMLElement && isTextEntry(active)) active.blur();
@@ -528,14 +533,14 @@ export function ShellLayout() {
   const { t } = useTranslation('shell');
   const language = useSettingsValue(selectLanguage);
   const railPref = useShellStore((s) => s.railCollapsed);
-  const narrow = useMediaQuery('(max-width: 1023px)');
+  const narrow = useMediaQuery(RAIL_DOCK_QUERY);
   const wide = useMediaQuery('(min-width: 1440px)');
   // Below sm the tab bar replaces the rail (CB-PHONE-NAV).
   const phone = useMediaQuery(PHONE_QUERY);
-  // Hiding the rail is a narrow-window choice: from 1024 px up it always shows, and on a phone
+  // Hiding the rail is a narrow-window choice: from 1100 px up it always shows, and on a phone
   // there is no rail to show.
   const railHidden = useShellStore((s) => s.railHidden) && narrow && !phone;
-  // Below 1024 px the icon rail opens over the page (Expand sidebar), only while it is docked.
+  // Below 1100 px the icon rail opens over the page (Expand sidebar), only while it is docked.
   const railPeekPref = useShellStore((s) => s.railPeek);
   const railPeek = railPeekPref && narrow && !phone && !railHidden;
   const collapsed = !railPeek && (railPref || narrow);

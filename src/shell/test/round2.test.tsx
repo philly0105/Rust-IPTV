@@ -184,7 +184,7 @@ let matchMedia: typeof window.matchMedia;
 function media(...queries: string[]) {
   window.matchMedia = ((query: string) => ({ ...matchMedia(query), matches: queries.includes(query) })) as typeof window.matchMedia;
 }
-const PHONE = ['(max-width: 639px)', '(max-width: 1023px)'];
+const PHONE = ['(max-width: 639px)', '(max-width: 1099px)'];
 
 beforeAll(() => {
   installDomStubs();
@@ -295,7 +295,7 @@ describe('a page can ask the header to step aside', () => {
   });
 
   it('stays while the rail is hidden, whose Show button is in the header', async () => {
-    media('(max-width: 1023px)');
+    media('(max-width: 1099px)');
     useShellStore.setState({ railHidden: true });
     renderRoutes(routes(), '/aside');
     await screen.findByText('aside page');

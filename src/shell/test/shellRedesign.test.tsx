@@ -77,7 +77,7 @@ let matchMedia: typeof window.matchMedia;
 function media(...queries: string[]) {
   window.matchMedia = ((query: string) => ({ ...matchMedia(query), matches: queries.includes(query) })) as typeof window.matchMedia;
 }
-const PHONE = ['(max-width: 639px)', '(max-width: 1023px)'];
+const PHONE = ['(max-width: 639px)', '(max-width: 1099px)'];
 
 beforeAll(installDomStubs);
 beforeEach(() => {

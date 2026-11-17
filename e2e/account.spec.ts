@@ -25,6 +25,8 @@ test.describe.serial('account warnings', () => {
     const source = await submitAndWaitForImport(page, dialog, NAME);
     expect(source.kind).toBe('xtream');
 
+    // The first source opens its content; return to inspect its source card.
+    await page.goto('/sources');
     const card = page.getByTestId('source-card').filter({ hasText: NAME });
     const badge = card.getByTestId('account-badge-expiring');
     await expect(badge).toBeVisible();

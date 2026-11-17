@@ -87,6 +87,8 @@ async function openSettings(page: Page): Promise<Locator> {
 }
 
 test.describe.serial('parental controls', () => {
+  // Group navigation stays beside the player when the page has room for it.
+  test.use({ viewport: { width: 1600, height: 900 } });
   let xtream: Source;
   let m3u: Source;
 

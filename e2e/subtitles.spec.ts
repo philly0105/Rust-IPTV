@@ -211,7 +211,7 @@ test.describe.serial('subtitles', () => {
 
     menu = await openSubtitleMenu(page);
     await loadFile(page, menu, 'broken.srt');
-    const failed = toast(page, 'Could not load broken.srt');
+    const failed = toast(page, "Couldn't load broken.srt");
     await expect(failed).toBeVisible();
     await expect(failed).toContainText('The file has no subtitle lines that can be read.');
     await expect.poll(async () => (await textTracks(page)).length).toBe(2);
@@ -255,11 +255,12 @@ test.describe.serial('subtitles', () => {
 
       // The style view is a dialog, the others are menus: one frame, found by its test id.
       const frame = page.getByTestId('player-options-menu');
-      const header = (await page.getByTestId('shell-header').boundingBox())!;
+      // The phone's playing view hides the shell header.
+      const headerBottom = await page.getByTestId('shell-header').evaluateAll((els) => els[0]?.getBoundingClientRect().bottom ?? 0);
       const expectBelowHeader = async (view: string): Promise<void> => {
         await expect(frame).toHaveAttribute('data-view', view);
         const r = (await frame.boundingBox())!;
-        expect(r.y, `${view} view top`).toBeGreaterThanOrEqual(header.y + header.height - 0.5);
+        expect(r.y, `${view} view top`).toBeGreaterThanOrEqual(headerBottom - 0.5);
         expect(r.y + r.height, `${view} view bottom`).toBeLessThanOrEqual(vp.height);
         // Taller content scrolls inside the frame instead of running off the screen.
         expect(await frame.evaluate((m) => getComputedStyle(m).overflowY)).toBe('auto');

@@ -8,6 +8,8 @@ import { channelButton, gotoLive, openAllTitlesGrid, playerRegion } from './ui';
 
 /** Opens the live view, plays the first channel and waits for playback. */
 export async function playFirstLiveChannel(page: Page, sourceId: string, channel = 'BBC One'): Promise<void> {
+  // These desktop flows inspect the groups column before playing.
+  await page.setViewportSize({ width: 1600, height: 900 });
   await gotoLive(page, sourceId);
   for (const g of ['News', 'Sports', 'Entertainment']) {
     await expect(page.getByRole('navigation', { name: 'Groups' }).getByRole('link', { name: new RegExp(`^${g} \\d+$`) })).toBeVisible();
@@ -55,7 +57,7 @@ export async function openMovieFromGrid(page: Page, sourceId: string, title: str
 
 /** Plays the movie on its detail page and waits for it to advance; returns the media url. */
 export async function playMovieOnDetail(page: Page): Promise<string> {
-  await page.getByTestId('vod-movie-detail').getByRole('button', { name: 'Play', exact: true }).click();
+  await page.getByTestId('vod-movie-detail').getByTestId('vod-hero-actions').getByRole('button', { name: /^(Play|Resume from \d+:\d{2})$/ }).click();
   const nowPlaying = page.getByRole('region', { name: 'Now playing' });
   await expect(nowPlaying).toBeVisible();
   await expect(nowPlaying.getByRole('button', { name: 'Pause' })).toBeVisible();
@@ -64,33 +66,17 @@ export async function playMovieOnDetail(page: Page): Promise<string> {
   return st.src;
 }
 
-/**
- * Toggles the favorite from the detail page's More menu off and on, and checks /favorites. The
- * hero keeps My List, watched and download as buttons; the favorite is a menu item whose label
- * says which way it goes (Add to favorites, Remove from favorites).
- */
+/** Toggles the detail hero's Favorite button off and on, and checks /favorites. */
 export async function favoriteFromDetail(page: Page, detailTestId: string, title: string): Promise<void> {
-  const more = page.getByTestId(detailTestId).getByRole('button', { name: 'More actions', exact: true });
-  const item = (name: string) => page.getByRole('menu').getByRole('menuitem', { name, exact: true });
+  const button = page.getByTestId(detailTestId).getByTestId('vod-hero-actions').getByRole('button', { name: 'Favorite', exact: true });
   const isFav = async () => (await favorites(page.request)).some((f) => f.snapshot.title.includes(title));
-  /** Opens the menu, checks it offers `offered` (the state the page shows), and picks it. */
-  const toggle = async (offered: string) => {
-    await more.click();
-    await expect(item(offered)).toBeVisible();
-    await item(offered).click();
-    // The menu has played its exit before the next opens.
-    await expect(page.getByRole('menu')).toHaveCount(0);
-  };
-  await toggle('Add to favorites');
-  await expect.poll(isFav).toBe(true);
-  // Toggle off and back on; each time the menu offers the other way.
-  await toggle('Remove from favorites');
-  await expect.poll(isFav).toBe(false);
-  await toggle('Add to favorites');
-  await expect.poll(isFav).toBe(true);
-  await more.click();
-  await expect(item('Remove from favorites')).toBeVisible();
-  await page.keyboard.press('Escape');
+  for (const selected of [true, false, true]) {
+    await expect(button).toHaveAttribute('aria-pressed', String(!selected));
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', String(selected));
+    await expect.poll(isFav).toBe(selected);
+    await expect(button).not.toHaveAttribute('aria-busy', 'true');
+  }
 
   await page.goto('/favorites');
   await expect(page.getByTestId('favorites-page')).toBeVisible();

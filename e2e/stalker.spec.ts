@@ -23,6 +23,8 @@ test.describe.serial('stalker flow', () => {
     source = await addStalker(page, NAME);
     expect(source.kind).toBe('stalker');
     expect(source.channelCount).toBeGreaterThanOrEqual(30);
+    // The first source opens its content; return to inspect its source card.
+    await page.goto('/sources');
     await expect(page.getByTestId('source-card').filter({ hasText: NAME })).toBeVisible();
     expect(STALKER.macAddress).toBe('00:1A:79:00:00:01');
   });
@@ -81,7 +83,7 @@ test.describe.serial('stalker flow', () => {
     await expect(s1).toHaveAttribute('aria-selected', 'true');
     await expect(episodes).toHaveCount(3);
     for (const title of ['The Lamp Room', 'Fog Signal', 'Low Tide Ledger']) {
-      await expect(detail.getByRole('button', { name: new RegExp(`^Play S01E[0-9]+ ${title}$`) })).toBeVisible();
+      await expect(detail.getByRole('button', { name: new RegExp(`^Play S01E[0-9]+ ${title}(, Up next)?$`) })).toBeVisible();
     }
     // Keyboard, as in playFirstEpisode: the hero backdrop intercepts pointer clicks on the tabs.
     await s1.focus();
@@ -89,7 +91,7 @@ test.describe.serial('stalker flow', () => {
     await expect(s2).toHaveAttribute('aria-selected', 'true');
     await expect(episodes).toHaveCount(2);
     for (const title of ['The Relief Keeper', 'Last Light']) {
-      await expect(detail.getByRole('button', { name: new RegExp(`^Play S02E[0-9]+ ${title}$`) })).toBeVisible();
+      await expect(detail.getByRole('button', { name: new RegExp(`^Play S02E[0-9]+ ${title}(, Up next)?$`) })).toBeVisible();
     }
     await page.keyboard.press('ArrowLeft');
     await expect(s1).toHaveAttribute('aria-selected', 'true');

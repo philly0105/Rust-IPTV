@@ -87,7 +87,7 @@ test.describe('My List', () => {
     const detail = page.getByTestId('vod-movie-detail');
     await expect(detail.getByRole('heading', { level: 1 })).toBeVisible();
 
-    const button = detail.getByTestId('mylist-button');
+    const button = detail.getByTestId('vod-hero-actions').getByTestId('mylist-button');
     await expect(button).toHaveAttribute('aria-pressed', 'false');
     await button.click();
     await expect(button).toHaveAttribute('aria-pressed', 'true');
@@ -110,11 +110,11 @@ test.describe('My List', () => {
 
     // Pressing the button again takes it out, with Undo.
     await page.goto(`/s/${sourceId}/movie/${id}`);
-    await expect(detail.getByTestId('mylist-button')).toHaveAttribute('aria-pressed', 'true');
-    await detail.getByTestId('mylist-button').click();
-    await expect(detail.getByTestId('mylist-button')).toHaveAttribute('aria-pressed', 'false');
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'false');
     await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(detail.getByTestId('mylist-button')).toHaveAttribute('aria-pressed', 'true');
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
     await expect.poll(async () => titlesOf(await listed(request))).toEqual([title]);
   });
 
@@ -200,9 +200,9 @@ test.describe('My List', () => {
           expect(rows.length).toBeGreaterThan(0);
           for (const r of rows) expect(r.title / r.row, 'title share of the row at 390 px').toBeGreaterThan(0.6);
           expect(rows.filter((r) => r.clipped), 'titles cut short at 390 px').toEqual([]);
-          // The move buttons show without hover, and the search sits in the page toolbar.
+          // The move buttons show without hover, and search is available in the shell header.
           expect(await page.getByTestId('mylist-move').first().evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
-          await expect(page.getByTestId('mylist-search')).toBeVisible();
+          await expect(page.getByRole('banner').getByRole('searchbox', { name: 'Search My List' })).toBeVisible();
         }
         for (const v of await seriousViolations(page)) failures.push(`${path} @ ${vp.width}: ${v}`);
       }

@@ -32,6 +32,7 @@ use parking_lot::Mutex;
 use reqwest::header::{ACCEPT_ENCODING, CONTENT_RANGE, IF_RANGE, RANGE};
 use reqwest::StatusCode;
 use std::io;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -60,6 +61,15 @@ const AFTER_PROBE: Duration = Duration::from_secs(3);
 const MIN_OUTSIDE: i64 = 4 * 1024;
 /// Stream failures after which a mirror leaves the transfer.
 const MIRROR_FAILURES: u32 = 3;
+/// An extra connection of the authority that could not be opened (no
+/// connection, no answer in time) is asked for again after this, doubled
+/// for each failure in a row.
+const RETRY_BASE: Duration = Duration::from_secs(1);
+/// Failures in a row to open one, after which the attempt ends and its
+/// run retries it.
+const OPEN_FAILURES: u32 = 4;
+/// How often a transfer that may use mirrors and has none looks again.
+const FIND_EVERY: Duration = Duration::from_secs(60);
 
 /// One source's connection details, shared by its workers.
 struct Conn {
@@ -98,6 +108,8 @@ struct Src {
     /// Its allowance fell to zero and the note says so.
     fell: bool,
     failures: u32,
+    /// No new connection before this: the last could not be opened.
+    retry_at: Option<Instant>,
     /// Next address of the host to reopen a slow connection on.
     cursor: usize,
     /// Slow connections closed and waiting to reopen: address index and
@@ -117,6 +129,7 @@ impl Src {
             used: false,
             fell: false,
             failures: 0,
+            retry_at: None,
             cursor: 1,
             reopen: Vec::new(),
             bytes: 0,
@@ -196,8 +209,10 @@ enum WorkerError {
     /// The stream broke off: an error, an early end, nothing for the idle
     /// limit.
     Dropped(CoreError),
-    /// The request got no body: a refusal, a server error, no connection.
+    /// The server refused the request (an HTTP error status).
     Refused(CoreError),
+    /// The request got no answer: no connection, or no headers in time.
+    Unreachable(CoreError),
     /// The answer was not the range asked for.
     Changed(String),
     /// Overlapping bytes differ from what source `other` wrote.
@@ -214,6 +229,9 @@ struct Cx<'a> {
     /// Requests read past their segment's end for the tail check: the
     /// authority has no validator, or mirrors take part.
     tails: AtomicBool,
+    /// Addresses of the host a pinned request could not connect to:
+    /// skipped when a connection is reopened.
+    dead: Mutex<Vec<SocketAddr>>,
 }
 
 /// Bytes on disk a worker compares an answer's bytes with.
@@ -365,6 +383,7 @@ pub async fn run(
         tx: Mutex::new(Some(tx)),
         total,
         tails: AtomicBool::new(tails),
+        dead: Mutex::new(Vec::new()),
     };
     let cx = &cx;
     let server_mode = crate::http::is_server_mode(state);
@@ -409,6 +428,8 @@ pub async fn run(
     let mut ramp = Ramp::new(0);
     let mut finding: Option<BoxFuture<'_, Vec<Found>>> =
         job.mirrors.as_ref().map(|m| find_mirrors(cx, m).boxed());
+    // When the last mirror search ended.
+    let mut searched = Instant::now();
     let mut probing: Option<BoxFuture<'_, ()>> = None;
     let mut probe_ended: Option<Instant> = None;
     let mut last_stats = Instant::now();
@@ -470,8 +491,12 @@ pub async fn run(
                 } else if !complete {
                     loop {
                         let mut added = false;
+                        let now = Instant::now();
                         for (i, src) in srcs.iter_mut().enumerate() {
                             let Some(conn) = src.usable() else { continue };
+                            if src.retry_at.is_some_and(|t| now < t) {
+                                continue;
+                            }
                             let have =
                                 count(&running, i) + starting.iter().filter(|s| s.src == i).count();
                             if have >= want.per[i] {
@@ -514,6 +539,22 @@ pub async fn run(
                     &mut next_wid,
                     &mut running,
                 ));
+            }
+            // "Use identical copies" turned off: the mirrors leave now.
+            if !state.settings.read().download_use_mirrors {
+                finding = None;
+                for i in 1..srcs.len() {
+                    if srcs[i].mirror && !srcs[i].dropped {
+                        let (id, used) = (srcs[i].id(), srcs[i].used);
+                        drop_source(&mut srcs, &mut running, i);
+                        if used {
+                            ctl.push_note(TransferNote::MirrorDropped {
+                                source_id: id,
+                                reason: MirrorDropReason::Unavailable,
+                            });
+                        }
+                    }
+                }
             }
             // Retire the newest workers of a source over its share: within
             // one tick of its allowance falling (playback wins).
@@ -639,13 +680,25 @@ pub async fn run(
                                     mgr.mirror_refused(&id);
                                     Some(MirrorDropReason::Refused)
                                 }
-                                WorkerError::Dropped(_) => {
-                                    ctl.note_drop(&id);
+                                WorkerError::Dropped(_) | WorkerError::Unreachable(_) => {
+                                    if matches!(e, WorkerError::Dropped(_)) {
+                                        ctl.note_drop(&id);
+                                    }
                                     srcs[src].failures += 1;
                                     (srcs[src].failures >= MIRROR_FAILURES)
                                         .then_some(MirrorDropReason::Failed)
                                 }
-                                _ => Some(MirrorDropReason::Failed),
+                                _ => {
+                                    // It answered with another file: the pair
+                                    // is verified again before it is used.
+                                    if let Some(mirror) = srcs[src].copy.clone() {
+                                        let (state, item) = (Arc::clone(state), job.copy.clone());
+                                        tokio::spawn(async move {
+                                            mirrors::record_mismatch(&state, &item, &mirror, false).await;
+                                        });
+                                    }
+                                    Some(MirrorDropReason::Failed)
+                                }
                             };
                             if let Some(reason) = reason {
                                 drop_source(&mut srcs, &mut running, src);
@@ -659,6 +712,18 @@ pub async fn run(
                             // segment is asked for again.
                             tracing::info!(id = job.id, error = %err, "a connection ended while a probe ran; trying again");
                             ctl.note_drop(&ctl.source);
+                        }
+                        Err(WorkerError::Unreachable(err))
+                            if !running.is_empty() && srcs[0].failures + 1 < OPEN_FAILURES =>
+                        {
+                            // An extra connection could not be opened (a
+                            // network hiccup, a slow answer): the others go
+                            // on, and it is asked for again after a while.
+                            let s = &mut srcs[0];
+                            s.failures += 1;
+                            let delay = RETRY_BASE * 2u32.pow(s.failures - 1);
+                            s.retry_at = Some(Instant::now() + delay);
+                            tracing::info!(id = job.id, error = %err, ?delay, "a connection could not be opened; asking again");
                         }
                         Err(WorkerError::Refused(err))
                             if probe_ended.is_some_and(|t| t.elapsed() <= AFTER_PROBE) =>
@@ -711,6 +776,7 @@ pub async fn run(
                 if finding.is_some() =>
             {
                 finding = None;
+                searched = Instant::now();
                 if attach(cx, &mut srcs, found) {
                     must_save = true;
                 }
@@ -761,7 +827,16 @@ pub async fn run(
             if !stopping && !server_mode {
                 recycle(cx, &mut running, now);
             }
+            // Settings and refusals apply live: the same check `desired`
+            // makes.
+            let may = transfer::may_split(
+                state,
+                &ctl.source,
+                ctl,
+                job.one_connection.load(Ordering::Relaxed),
+            );
             if !stopping
+                && may
                 && probing.is_none()
                 && ramp.gained != Some(false)
                 && total - done >= PROBE_MIN_LEFT
@@ -771,6 +846,20 @@ pub async fn run(
                         probing =
                             Some(probe::probe(state, mgr, ctl, ep, total).map(|_| ()).boxed());
                     }
+                }
+            }
+            // No mirror serves the transfer: copies that were busy or
+            // unknown may be free now.
+            if let Some(m) = &job.mirrors {
+                if !stopping
+                    && may
+                    && finding.is_none()
+                    && now.duration_since(searched) >= FIND_EVERY
+                    && total - done > PROBE_MIN_LEFT
+                    && state.settings.read().download_use_mirrors
+                    && !srcs.iter().any(|s| s.mirror && s.usable().is_some())
+                {
+                    finding = Some(find_mirrors(cx, m).boxed());
                 }
             }
             let secs = now.duration_since(last_stats).as_secs_f64().max(0.001);
@@ -839,9 +928,12 @@ pub async fn run(
     }
     settle_save(job.id, Some(spawn_save(job, ranges, None))).await;
     match failure {
-        Some(WorkerError::Failed(err) | WorkerError::Refused(err) | WorkerError::Dropped(err)) => {
-            SegEnd::Error { err, bytes: done }
-        }
+        Some(
+            WorkerError::Failed(err)
+            | WorkerError::Refused(err)
+            | WorkerError::Dropped(err)
+            | WorkerError::Unreachable(err),
+        ) => SegEnd::Error { err, bytes: done },
         _ => SegEnd::Stopped(done),
     }
 }
@@ -865,13 +957,17 @@ fn desired(cx: &Cx<'_>, srcs: &[Src], target: usize) -> Desired {
     let (state, ctl, mgr) = (cx.job.state, cx.job.ctl, cx.job.mgr);
     let one = cx.job.one_connection.load(Ordering::Relaxed);
     let may = transfer::may_split(state, &ctl.source, ctl, one);
-    let (cap, single) = {
+    let (cap, single, use_mirrors) = {
         let settings = state.settings.read();
         let cap = match settings.download_max_connections {
             0 => MAX_CONNECTIONS,
             n => usize::from(n).min(MAX_CONNECTIONS),
         };
-        (cap, settings.download_single_connection.clone())
+        (
+            cap,
+            settings.download_single_connection.clone(),
+            settings.download_use_mirrors,
+        )
     };
     let wants: Vec<usize> = srcs
         .iter()
@@ -885,7 +981,7 @@ fn desired(cx: &Cx<'_>, srcs: &[Src], target: usize) -> Desired {
                 };
             }
             match s.usable() {
-                Some(c) if may => {
+                Some(c) if may && use_mirrors => {
                     let n = mgr.allowance_on(ctl, &c.id);
                     if single.contains(&c.id) {
                         n.min(1)
@@ -1047,8 +1143,21 @@ async fn find_mirrors(cx: &Cx<'_>, m: &MirrorPlan) -> Vec<Found> {
     let fp = match &m.fingerprint {
         Some(fp) => fp.clone(),
         None => {
-            // The cached fingerprint no longer matches the file: read it
-            // again over a held connection.
+            // The cached fingerprint no longer matched the file: read it
+            // again over a held connection, unless an earlier search of
+            // this transfer already did.
+            let validator = cx.plan.lock().ranges.sources[0].validator.clone();
+            let key = m.item.clone();
+            let cached = job
+                .state
+                .db_call(move |c| mirrors::cached_fingerprint(c, &key))
+                .await
+                .ok()
+                .flatten()
+                .filter(|fp| mirrors::still_matches(fp, cx.total, validator.as_deref()));
+            if let Some(fp) = cached {
+                return search(cx, m, &fp).await;
+            }
             let Some(ep) = job.authority.as_ref() else {
                 return Vec::new();
             };
@@ -1069,11 +1178,17 @@ async fn find_mirrors(cx: &Cx<'_>, m: &MirrorPlan) -> Vec<Found> {
             fp
         }
     };
+    search(cx, m, &fp).await
+}
+
+/// The copies identical to the authority's, by its fingerprint `fp`.
+async fn search(cx: &Cx<'_>, m: &MirrorPlan, fp: &shared::Fingerprint) -> Vec<Found> {
+    let job = cx.job;
     if fp.total != cx.total {
         return Vec::new();
     }
     let exclude = [job.ctl.source.clone()];
-    let found = mirrors::identical_copies(job.state, job.mgr, &m.item, &fp, &exclude).await;
+    let found = mirrors::identical_copies(job.state, job.mgr, &m.item, fp, &exclude).await;
     let mut out = Vec::with_capacity(found.len());
     for mirror in found {
         let client = crate::http::source_client(
@@ -1463,8 +1578,8 @@ async fn compare(cx: &Cx<'_>, r: &Ref, got: &[u8]) -> Result<Option<bool>, Worke
 }
 
 /// A client that connects to address `k` of `url`'s host, and that
-/// address.
-async fn pinned_to(cx: &Cx<'_>, url: &str, k: usize) -> Option<(reqwest::Client, String)> {
+/// address. None for an address a request could not connect to before.
+async fn pinned_to(cx: &Cx<'_>, url: &str, k: usize) -> Option<(reqwest::Client, SocketAddr)> {
     let u = url::Url::parse(url).ok()?;
     let host = u.host_str()?.to_string();
     let port = u.port_or_known_default()?;
@@ -1473,8 +1588,11 @@ async fn pinned_to(cx: &Cx<'_>, url: &str, k: usize) -> Option<(reqwest::Client,
         return None;
     }
     let addr = addrs[k % addrs.len()];
+    if cx.dead.lock().contains(&addr) {
+        return None;
+    }
     let client = crate::http::pinned_client(cx.job.state, &host, addr)?;
-    Some((client, addr.ip().to_string()))
+    Some((client, addr))
 }
 
 /// Asks `conn` for bytes `from..to`: at the URL its last answer came from,
@@ -1495,17 +1613,32 @@ async fn open(
         Some((u, c)) => (u.clone(), c.clone()),
         None => (conn.url.clone(), conn.client.clone()),
     };
-    let (client, address) = match addr {
-        Some(k) => match pinned_to(cx, &url, k).await {
-            Some((c, a)) => (c, Some(a)),
-            None => (client, None),
-        },
-        None => (client, None),
+    let address = match addr {
+        Some(k) => pinned_to(cx, &url, k).await,
+        None => None,
     };
-    meter.set_peer(host_of(&url), address);
+    meter.set_peer(
+        host_of(&url),
+        address.as_ref().map(|(_, a)| a.ip().to_string()),
+    );
     let answer = tokio::select! {
         _ = retire.cancelled() => return Ok(None),
-        r = request(cx, conn, &client, &url, from, to) => r,
+        r = request(cx, conn, address.as_ref().map_or(&client, |(c, _)| c), &url, from, to) => r,
+    };
+    // An address of the host that does not answer is skipped from now on,
+    // and the request goes the usual way: it says nothing about the
+    // provider's limit.
+    let answer = match (answer, address) {
+        (Err(WorkerError::Unreachable(err)), Some((_, a))) => {
+            tracing::info!(id = cx.job.id, address = %a.ip(), error = %err, "an address of the host did not answer; skipping it");
+            cx.dead.lock().push(a);
+            meter.set_peer(host_of(&url), None);
+            tokio::select! {
+                _ = retire.cancelled() => return Ok(None),
+                r = request(cx, conn, &client, &url, from, to) => r,
+            }
+        }
+        (answer, _) => answer,
     };
     let resp = match answer {
         Ok(resp) => resp,
@@ -1513,7 +1646,8 @@ async fn open(
             let why = match &e {
                 WorkerError::Refused(err)
                 | WorkerError::Failed(err)
-                | WorkerError::Dropped(err) => err.to_string(),
+                | WorkerError::Dropped(err)
+                | WorkerError::Unreachable(err) => err.to_string(),
                 WorkerError::Changed(why) => why.clone(),
                 WorkerError::Mismatch { .. } => String::new(),
             };
@@ -1558,9 +1692,14 @@ async fn request(
     if let Some(v) = &conn.validator {
         req = req.header(IF_RANGE, v.as_str());
     }
+    // No answer is not a refusal: only an HTTP status says the provider
+    // turned the connection down.
     let resp = crate::http::send_within(req, cx.job.head_limit)
         .await
-        .map_err(WorkerError::Refused)?;
+        .map_err(|e| match e {
+            CoreError::Invalid(_) => WorkerError::Refused(e),
+            e => WorkerError::Unreachable(e),
+        })?;
     check_range(&resp, from, cx.total)?;
     Ok(resp)
 }

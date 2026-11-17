@@ -94,6 +94,13 @@ struct Dest {
 enum AttemptEnd {
     Done(i64),
     Stopped(i64),
+    /// The copy the queue spread the row to is not the file it was
+    /// verified as: the row goes back to the queue, and the pair's verdict
+    /// is gone.
+    Respread {
+        message: String,
+        bytes: i64,
+    },
     Error {
         err: CoreError,
         /// Offset the attempt started writing at.
@@ -172,6 +179,15 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                     bytes,
                     part: Some(dest.part_path.clone()),
                     progressed: reached.unwrap_or(0).max(bytes) > had,
+                }
+            }
+            AttemptEnd::Respread { message, bytes } => {
+                return Outcome::Requeue {
+                    reason: WaitReason::Provider,
+                    message,
+                    bytes,
+                    progressed: false,
+                    part: Some(dest.part_path.clone()),
                 }
             }
             AttemptEnd::Error {
@@ -730,7 +746,18 @@ async fn attempt(
     if resume_from > 0 && rep.total == Some(resume_from) {
         return AttemptEnd::Done(resume_from);
     }
+    // A `.part` without a sidecar was written from the row's own copy (a
+    // spread run keeps one): another copy's bytes after them would make a
+    // file of two copies that no comparison checks, so a spread run starts
+    // over. The `.part` stays as it is until the run writes.
+    let resume_from = if auth.spread.is_some() {
+        0
+    } else {
+        resume_from
+    };
     ctl.bytes.store(resume_from, Ordering::Relaxed);
+    // What the row knew, for a spread run that goes back to the queue.
+    let known = (rep.total, rep.validator.clone());
 
     // Mirrors need the authority's fingerprint before its file is split.
     let mut plan = if splittable {
@@ -852,6 +879,31 @@ async fn attempt(
     } else {
         return error(http_status_error(status), resume_from, resume_from);
     }
+    if let Some(copy) = &auth.spread {
+        let own = own_copy(row);
+        if changed_since_verified(state, &own, copy, rep).await {
+            drop(resp);
+            tracing::info!(
+                id,
+                source = %copy.source_id(),
+                "the copy the download was spread to changed since it was verified; queueing it again"
+            );
+            mirrors::record_mismatch(state, &own, copy, false).await;
+            (rep.total, rep.validator) = known;
+            return AttemptEnd::Respread {
+                message: "The copy on another source changed since it was checked; the download waits for its own source.".into(),
+                bytes: existing,
+            };
+        }
+    }
+    // A spread run's single stream keeps a sidecar naming its copy: a
+    // later run on another copy then compares these bytes instead of
+    // taking them for its own. Without a total there is no sidecar, and
+    // the `.part` is not resumable.
+    let spread_total = rep.total.filter(|_| auth.spread.is_some());
+    if auth.spread.is_some() && rep.total.is_none() {
+        rep.validator = None;
+    }
 
     // Written in its own task and waited for only once the stream is gone:
     // an import can hold the write lock for seconds, and a transfer asked to
@@ -913,6 +965,21 @@ async fn attempt(
         no_holes(ctl, rep);
     }
 
+    if let Some(t) = spread_total {
+        let (part, ranges) = (
+            dest.part_path.clone(),
+            Ranges::new(t, authority_source(&auth, rep), offset),
+        );
+        let saved = tokio::task::spawn_blocking(move || segments::save_synced(&part, &ranges))
+            .await
+            .map_err(std::io::Error::other)
+            .and_then(|r| r);
+        if let Err(e) = saved {
+            drop(resp);
+            settle_recorded(id, recorded).await;
+            return error(CoreError::Io(e), offset, offset);
+        }
+    }
     let file = tokio::fs::OpenOptions::new()
         .write(true)
         .append(offset > 0)
@@ -1033,6 +1100,25 @@ async fn attempt(
     if let Err(e) = flushed {
         return error(CoreError::Io(e), started_at, offset);
     }
+    if let Some(t) = spread_total.filter(|_| stream.is_none()) {
+        let part = dest.part_path.clone();
+        let ranges = Ranges::new(t, authority_source(&auth, rep), offset);
+        let complete = matches!(end, Some(Ok(()))) && offset >= t;
+        let saved = tokio::task::spawn_blocking(move || {
+            if complete {
+                segments::remove(&part);
+                Ok(())
+            } else {
+                segments::save_synced(&part, &ranges)
+            }
+        })
+        .await;
+        if let Ok(Err(e)) | Err(e) = saved.map_err(std::io::Error::other) {
+            // The sidecar written at the start stands: the bytes are
+            // fetched again.
+            tracing::warn!(id, error = %e, "could not save download ranges");
+        }
+    }
     if let Some(stream) = stream {
         let ranges = Ranges::new(rep.total.unwrap_or(0), authority_source(&auth, rep), offset);
         return segmented(
@@ -1130,6 +1216,48 @@ fn authority_source(auth: &Authority, rep: &Representation) -> SegSource {
         copy: auth.spread.clone(),
         validator: rep.validator.clone(),
     }
+}
+
+/// Whether the spread copy `copy` answered with another file than the one
+/// it was verified identical to `own` as: the total or validator its
+/// verdict recorded, or its cached fingerprint, say otherwise.
+async fn changed_since_verified(
+    state: &Arc<AppState>,
+    own: &CopyRef,
+    copy: &CopyRef,
+    rep: &Representation,
+) -> bool {
+    let Some(total) = rep.total else {
+        return false;
+    };
+    let (own, copy, validator) = (own.clone(), copy.clone(), rep.validator.clone());
+    state
+        .db_call(move |c| {
+            let entry = shared::read_record::<shared::MirrorRecord>(c, &shared::mirror_key(&own))?
+                .and_then(|r| {
+                    r.verdicts
+                        .into_iter()
+                        .filter(|v| {
+                            v.copy == copy
+                                && matches!(
+                                    v.verdict,
+                                    shared::Verdict::Identical | shared::Verdict::Equivalent
+                                )
+                        })
+                        .max_by(|a, b| a.checked_at.cmp(&b.checked_at))
+                });
+            let by_verdict = entry.is_some_and(|v| {
+                v.total.is_some_and(|t| t != total)
+                    || v.validator
+                        .as_deref()
+                        .is_some_and(|x| Some(x) != validator.as_deref())
+            });
+            let by_cache = mirrors::cached_fingerprint(c, &copy)?
+                .is_some_and(|fp| !mirrors::still_matches(&fp, total, validator.as_deref()));
+            Ok(by_verdict || by_cache)
+        })
+        .await
+        .unwrap_or(false)
 }
 
 /// The file system cannot leave holes: the rest of the run keeps one

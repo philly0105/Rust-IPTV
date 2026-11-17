@@ -19,9 +19,12 @@
 //! - SC4: connection-limit probes against a panel that refuses, one that
 //!   allows 3, and one that kicks the oldest connection.
 //! - SC5: a season queued on one account runs on four at once.
-//! - `writer_keeps_up`: the loopback download rate, asserted at 100 MB/s in
-//!   release builds only (debug builds generate the panel's bytes too slowly
-//!   to say anything about the writer).
+//! - SCr: a 302 to an edge host is resolved once, pinned, and split.
+//! - `mirror_yields_to_playback`: playback on a mirror's account takes its
+//!   connection back within about a second.
+//! - `writer_keeps_up`: the loopback download over 6 to 8 connections, its
+//!   rate asserted at 100 MB/s in release builds only (debug builds generate
+//!   the panel's bytes too slowly to say anything about the writer).
 //!
 //! Timings are shortened through the test hooks (ramp window, probe step),
 //! and sizes are what the spec names except where a comment says otherwise;
@@ -31,12 +34,12 @@ mod dl_panel;
 
 use dl_panel::{
     add_movie, add_series, add_xtream_source, movie_ref, variant_content, LimitMode, Line, Panel,
-    PanelOptions, Validators, Variant,
+    PanelOptions, Redirect, Validators, Variant,
 };
 use iptv_core::downloads::shared::{self, MirrorRecord, Verdict};
 use iptv_core::model::{
-    ConnectionLimitMode, CopyRef, Download, DownloadStatus, OneConnectionReason, Settings,
-    SourceConnectionLimit, TransferNote, TransferStats,
+    ConnectionLimitMode, CopyRef, Download, DownloadStatus, MirrorDropReason, OneConnectionReason,
+    Settings, SourceConnectionLimit, TransferNote, TransferStats,
 };
 use iptv_core::rpc::RpcRouter;
 use iptv_core::{AppState, BroadcastSink};
@@ -573,9 +576,31 @@ async fn sc2_a_provider_without_validators_still_splits() {
 // SC3
 // ---------------------------------------------------------------------------
 
+/// Size of the measured one-connection baselines: a second or two at the
+/// scenarios' caps.
+const BASELINE: u64 = 8 * MIB;
+
+/// Downloads `file` of `source` (a [`BASELINE`]-sized file with its own
+/// title) and checks it.
+async fn baseline(lab: &Lab, source: &str, panel: &Panel, file: u32) -> Run {
+    let run = lab
+        .run_movie(
+            source,
+            file,
+            "Baseline Copy",
+            &panel.movie_url(file),
+            BASELINE,
+        )
+        .await;
+    assert_exact(file, BASELINE, &run);
+    run
+}
+
 /// Two accounts with one connection each, `mirror_variant` being what the
-/// second holds of file 1 (`size` bytes at `kbps` on both). Returns the lab,
-/// the panels and the source ids (authority first).
+/// second holds of file 1 (`size` bytes at `kbps` on both). The authority
+/// also holds file 2 ([`BASELINE`] bytes, its own title, no copy anywhere
+/// else) for the measured one-connection baseline. Returns the lab, the
+/// panels and the source ids (authority first).
 async fn two_copies(
     tag: &str,
     size: u64,
@@ -590,12 +615,22 @@ async fn two_copies(
         p.set_enforced(1);
     }
     a.file(1, size, kbps);
+    a.file(2, BASELINE, kbps);
     b.file_variant(1, size, kbps, mirror_variant);
     let sa = lab.source(&format!("{tag}-a"), &a).await;
     let sb = lab.source(&format!("{tag}-b"), &b).await;
     for s in [&sa, &sb] {
         add_movie(&lab.state, s, 1, "Two Copies (2022)", Some(2022), "mp4").await;
     }
+    add_movie(
+        &lab.state,
+        &sa,
+        2,
+        "Baseline Copy (2020)",
+        Some(2020),
+        "mp4",
+    )
+    .await;
     let both = vec![sa.clone(), sb.clone()];
     lab.settings(|s| s.download_probe_disabled = both).await;
     (lab, [a, b], [sa, sb])
@@ -622,14 +657,15 @@ async fn sc3_differing_mirror_is_never_used() {
     let all = vec![sa.clone(), sb.clone(), sc.clone()];
     lab.settings(|s| s.download_probe_disabled = all).await;
 
+    let before = baseline(&lab, &sa, &a, 2).await;
     let run = lab
         .run_movie(&sa, 1, "Two Copies", &a.movie_url(1), SIZE)
         .await;
     report(
         "SC3a",
-        mbps(KBPS * 1024, 1.0),
+        before.mbps(),
         run.mbps(),
-        "before: one connection's cap; the differing copies add nothing",
+        "before: one connection; the differing copies add nothing",
     );
 
     assert_exact(1, SIZE, &run);
@@ -680,14 +716,15 @@ async fn sc3_planted_mismatch_is_caught() {
     const KBPS: u64 = 4 * 1024;
     let (lab, [a, b], [sa, sb]) =
         two_copies("sc3b", SIZE, KBPS, Variant::DiffersOutsideSamples).await;
+    let before = baseline(&lab, &sa, &a, 2).await;
     let run = lab
         .run_movie(&sa, 1, "Two Copies", &a.movie_url(1), SIZE)
         .await;
     report(
         "SC3b",
-        mbps(KBPS * 1024, 1.0),
+        before.mbps(),
         run.mbps(),
-        "before: one connection's cap; the planted copy is caught and dropped",
+        "before: one connection; the planted copy is caught and dropped",
     );
 
     assert_exact(1, SIZE, &run);
@@ -732,10 +769,27 @@ async fn sc3_no_validator_change_restarts_on_one_connection() {
     p.set_reported(4);
     p.set_enforced(4);
     p.file(1, SIZE, KBPS);
+    p.file(2, BASELINE, KBPS);
     let sid = lab.source("sc3c", &p).await;
     add_movie(&lab.state, &sid, 1, "Changing (2021)", Some(2021), "mp4").await;
+    add_movie(
+        &lab.state,
+        &sid,
+        2,
+        "Baseline Copy (2020)",
+        Some(2020),
+        "mp4",
+    )
+    .await;
     let only = vec![sid.clone()];
-    lab.settings(|s| s.download_probe_disabled = only).await;
+    lab.settings(|s| {
+        s.download_probe_disabled = only.clone();
+        s.download_single_connection = only;
+    })
+    .await;
+    let before = baseline(&lab, &sid, &p, 2).await;
+    lab.settings(|s| s.download_single_connection = Vec::new())
+        .await;
 
     let began = Instant::now();
     let d = lab.start_movie(&sid, 1, "Changing", &p.movie_url(1)).await;
@@ -773,9 +827,9 @@ async fn sc3_no_validator_change_restarts_on_one_connection() {
     let secs = began.elapsed().as_secs_f64();
     report(
         "SC3c",
-        mbps(KBPS * 1024, 1.0),
+        before.mbps(),
         mbps(SIZE, secs),
-        "before: one connection's cap; after includes the restart",
+        "before: one connection; after includes the restart",
     );
 
     let path = Path::new(done.file_path.as_deref().unwrap());
@@ -793,7 +847,12 @@ async fn sc3_no_validator_change_restarts_on_one_connection() {
         "no oneConnection{{changed}} note: {notes:?}"
     );
     // After the restart the whole file came again, from byte 0.
-    let after: Vec<_> = p.log().into_iter().skip(requests_before).collect();
+    let after: Vec<_> = p
+        .log()
+        .into_iter()
+        .skip(requests_before)
+        .filter(|l| l.file == 1)
+        .collect();
     assert!(
         after
             .iter()
@@ -833,7 +892,7 @@ fn refusals(p: &Panel) -> u64 {
     p.counts().get("refused").copied().unwrap_or(0)
 }
 
-/// SC4, refuse: the panel allows what it reports (1). The first transfer
+/// SC4b, refuse: the panel allows what it reports (1). The first transfer
 /// probes once and is refused; a second within the week does not probe; a
 /// third after the record ages past a week probes again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
@@ -865,7 +924,7 @@ async fn sc4_a_refusing_panel_is_probed_once_a_week() {
         .run_movie(&sid, 3, "Probe 3", &p.movie_url(3), SIZE)
         .await;
     report(
-        "SC4",
+        "SC4b",
         first.mbps(),
         second.mbps(),
         "refusing panel: the transfer that probed, then one within the week",
@@ -899,7 +958,7 @@ async fn sc4_a_refusing_panel_is_probed_once_a_week() {
     assert!(p.peak() <= 1);
 }
 
-/// SC4, allow 3: the account reports 1, the panel allows 3. The probe
+/// SC4a, allow 3: the account reports 1, the panel allows 3. The probe
 /// learns 3, and (amendment A1: a learned limit keeps no connection for
 /// playback) the transfer goes on with 3 connections and never more.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
@@ -933,7 +992,7 @@ async fn sc4_a_panel_allowing_three_is_learned_and_used() {
         .run_movie(&sid, 1, "Probe 1", &p.movie_url(1), SIZE)
         .await;
     let ratio = report(
-        "SC4",
+        "SC4a",
         before.mbps(),
         after.mbps(),
         &format!(
@@ -965,9 +1024,10 @@ async fn sc4_a_panel_allowing_three_is_learned_and_used() {
     );
 }
 
-/// SC4, kick-oldest: the panel accepts a second connection and ends the
+/// SC4c, kick-oldest: the panel accepts a second connection and ends the
 /// oldest (the transfer's own). The probe sees the kick, records limit 1,
-/// and the file still completes byte-exact.
+/// and the file still completes byte-exact. The baseline runs with probing
+/// off (one connection, nothing kicked).
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn sc4_a_kick_oldest_panel_is_detected_without_corruption() {
     const SIZE: u64 = 64 * MIB;
@@ -980,17 +1040,37 @@ async fn sc4_a_kick_oldest_panel_is_detected_without_corruption() {
     .await;
     p.set_enforced(1);
     let (lab, sid) = probe_lab("sc4k", &p, 1, SIZE, KBPS).await;
+    p.file(9, 2 * BASELINE, KBPS);
+    add_movie(
+        &lab.state,
+        &sid,
+        9,
+        "Baseline Copy (2020)",
+        Some(2020),
+        "mp4",
+    )
+    .await;
+    let only = vec![sid.clone()];
+    lab.settings(|s| s.download_probe_disabled = only).await;
+    let before = lab
+        .run_movie(&sid, 9, "Baseline Copy", &p.movie_url(9), 2 * BASELINE)
+        .await;
+    assert_exact(9, 2 * BASELINE, &before);
+    let kicked_before = p.kicked();
+    lab.settings(|s| s.download_probe_disabled = Vec::new())
+        .await;
     let run = lab
         .run_movie(&sid, 1, "Probe 1", &p.movie_url(1), SIZE)
         .await;
     report(
-        "SC4",
-        mbps(KBPS * 1024, 1.0),
+        "SC4c",
+        before.mbps(),
         run.mbps(),
-        "kick-oldest panel: before is one connection's cap",
+        "kick-oldest panel: probing off, then on",
     );
 
     assert_exact(1, SIZE, &run);
+    assert_eq!(kicked_before, 0, "the baseline was kicked without a probe");
     assert!(p.kicked() >= 1, "the panel never kicked a connection");
     let record = lab
         .limit(&sid)
@@ -1157,22 +1237,31 @@ async fn sc5_a_season_spreads_over_four_accounts() {
 // Writer
 // ---------------------------------------------------------------------------
 
-/// Spec check 15: on loopback with no speed cap and a split over every
-/// connection the engine allows, the download rate shows whether the
-/// writer keeps up. Release builds must reach 100 MB/s; debug builds only
-/// print (the panel's byte generation is the bottleneck there).
+/// Spec check 15: on loopback, split over the connections the engine allows
+/// (8), the download rate shows whether the writer keeps up. Each
+/// connection is capped, so every added one raises the total by more than
+/// the ramp's 10% and the ramp climbs to 8 (one per 150 ms gain window);
+/// the file is long enough to run there for a while. Both builds must reach
+/// 6 connections; release builds must also reach 100 MB/s, debug builds
+/// only print the rate (the panel's byte generation is the bottleneck).
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn writer_keeps_up() {
-    let size: u64 = if cfg!(debug_assertions) {
-        64 * MIB
+    // 8 x 8 MiB/s in debug, 8 x 24 MiB/s (192 MiB/s) in release.
+    let (size, kbps): (u64, u64) = if cfg!(debug_assertions) {
+        (128 * MIB, 8 * 1024)
     } else {
-        512 * MIB
+        (512 * MIB, 24 * 1024)
     };
     let lab = lab().await;
+    iptv_core::downloads::set_ramp_timing(
+        &lab.state,
+        Duration::from_millis(150),
+        Duration::from_secs(10),
+    );
     let p = Panel::spawn(600).await;
     // 9 reported: a budget of 8, the engine's cap.
     p.set_reported(9);
-    p.file(1, size, 0);
+    p.file(1, size, kbps);
     let sid = lab.source("writer", &p).await;
     add_movie(&lab.state, &sid, 1, "Loopback (2026)", Some(2026), "mp4").await;
     let only = vec![sid.clone()];
@@ -1181,19 +1270,217 @@ async fn writer_keeps_up() {
         .run_movie(&sid, 1, "Loopback", &p.movie_url(1), size)
         .await;
     let rate = run.mbps();
+    let connections = lab.max_connections(run.download.id);
     println!(
-        "writer_keeps_up: {} MiB in {:.2} s over {} connections, {rate:.1} MB/s{}",
+        "writer_keeps_up: {} MiB in {:.2} s over {connections} connections (panel peak {}), {rate:.1} MB/s{}",
         size / MIB,
         run.secs,
-        lab.max_connections(run.download.id),
+        p.peak(),
         if cfg!(debug_assertions) {
-            " (debug build: printed only)"
+            " (debug build: rate printed only)"
         } else {
             ""
         }
     );
     assert_exact(1, size, &run);
+    assert!(
+        connections >= 6 && p.peak() >= 6,
+        "the ramp stopped at {connections} connections (panel peak {})",
+        p.peak()
+    );
+    assert!(p.peak() <= 8, "the panel saw {} connections", p.peak());
     if cfg!(not(debug_assertions)) {
         assert!(rate >= 100.0, "the loopback download ran at {rate:.1} MB/s");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Redirects
+// ---------------------------------------------------------------------------
+
+/// SCr: a panel that answers `/movie/` with a 302 to a CDN-like edge on
+/// another origin, sends no validator, and allows 4 connections (3 for
+/// downloads). The run resolves the redirect once and sends every segment
+/// to the edge URL (pinned) rather than through the panel; three capped
+/// connections beat the measured one-connection baseline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn scr_redirected_edge_is_pinned_and_split() {
+    const SIZE: u64 = 64 * MIB;
+    const KBPS: u64 = 6 * 1024;
+    let lab = lab().await;
+    let p = Panel::with(PanelOptions {
+        seed: 700,
+        validators: Validators::None,
+        redirect: Some(Redirect::EdgeHost {
+            token_ttl: Duration::from_secs(120),
+        }),
+        ..PanelOptions::default()
+    })
+    .await;
+    p.set_reported(4);
+    p.set_enforced(4);
+    p.file(1, SIZE, KBPS);
+    p.file(2, 2 * BASELINE, KBPS);
+    let sid = lab.source("scr", &p).await;
+    add_movie(&lab.state, &sid, 1, "Edge Served (2025)", Some(2025), "mp4").await;
+    add_movie(
+        &lab.state,
+        &sid,
+        2,
+        "Baseline Copy (2020)",
+        Some(2020),
+        "mp4",
+    )
+    .await;
+    let only = vec![sid.clone()];
+    lab.settings(|s| {
+        s.download_probe_disabled = only.clone();
+        s.download_single_connection = only;
+    })
+    .await;
+    let before = lab
+        .run_movie(&sid, 2, "Baseline Copy", &p.movie_url(2), 2 * BASELINE)
+        .await;
+    lab.settings(|s| s.download_single_connection = Vec::new())
+        .await;
+    let after = lab
+        .run_movie(&sid, 1, "Edge Served", &p.movie_url(1), SIZE)
+        .await;
+    let connections = lab.max_connections(after.download.id);
+    let ratio = report(
+        "SCr",
+        before.mbps(),
+        after.mbps(),
+        &format!("302 to an edge host, no validator, {connections} connections"),
+    );
+
+    assert_exact(2, 2 * BASELINE, &before);
+    assert_exact(1, SIZE, &after);
+    let log: Vec<_> = p.log().into_iter().filter(|l| l.file == 1).collect();
+    let edge_segments = log
+        .iter()
+        .filter(|l| l.route == "edge" && l.status == 206 && l.range.is_some_and(|(a, _)| a > 0))
+        .count();
+    assert!(
+        edge_segments >= 2,
+        "only {edge_segments} segment requests reached the edge: {log:?}"
+    );
+    let through_panel: Vec<_> = log
+        .iter()
+        .filter(|l| l.route != "edge" && l.range.is_some_and(|(a, _)| a > 0))
+        .collect();
+    assert!(
+        through_panel.is_empty(),
+        "segments went through the panel's redirect, not the pinned edge URL: {through_panel:?}"
+    );
+    assert!(
+        connections >= 3,
+        "the transfer ran {connections} connections"
+    );
+    assert!(p.peak() <= 4, "the panel saw {} connections", p.peak());
+    assert!(ratio >= 1.8, "SCr ratio {ratio:.2} is below 1.8");
+}
+
+// ---------------------------------------------------------------------------
+// Mirrors and playback
+// ---------------------------------------------------------------------------
+
+/// Playback starting on a mirror's account takes its connection back: the
+/// mirror closes within about a second with a mirrorDropped{playback} note,
+/// and the file still completes byte-exact.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn mirror_yields_to_playback() {
+    const SIZE: u64 = 48 * MIB;
+    const KBPS: u64 = 4 * 1024;
+    let lab = lab().await;
+    let a = Panel::spawn(940).await;
+    let b = Panel::spawn(941).await;
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+        p.file(1, SIZE, KBPS);
+    }
+    let sa = lab.source("yield-a", &a).await;
+    let sb = lab.source("yield-b", &b).await;
+    for s in [&sa, &sb] {
+        add_movie(&lab.state, s, 1, "Yield Copy (2018)", Some(2018), "mp4").await;
+    }
+    let both = vec![sa.clone(), sb.clone()];
+    lab.settings(|s| s.download_probe_disabled = both).await;
+
+    let began = Instant::now();
+    let d = lab.start_movie(&sa, 1, "Yield Copy", &a.movie_url(1)).await;
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let now = lab.get(d.id).await;
+        lab.sample(&now);
+        if b.open() > 0 && now.sources == Some(2) {
+            break;
+        }
+        assert!(
+            now.status != DownloadStatus::Completed,
+            "the file completed before the mirror joined"
+        );
+        assert!(Instant::now() < deadline, "the mirror never joined");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Playback starts on the mirror's account.
+    let t0 = Instant::now();
+    lab.ok(
+        "downloads.playback",
+        json!({"clientId": "tv", "sourceIds": [sb]}),
+    )
+    .await;
+    while b.open() > 0 {
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "the mirror never let go"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let yielded = t0.elapsed();
+    let dropped = |notes: &[TransferNote]| {
+        notes.iter().any(|n| {
+            matches!(
+                n,
+                TransferNote::MirrorDropped { source_id, reason: MirrorDropReason::Playback }
+                    if *source_id == sb
+            )
+        })
+    };
+    // The note arrives with the next stats event.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !dropped(&lab.notes(d.id)) && Instant::now() < deadline {
+        let now = lab.get(d.id).await;
+        lab.sample(&now);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let notes = lab.notes(d.id);
+    lab.ok(
+        "downloads.playback",
+        json!({"clientId": "tv", "sourceIds": []}),
+    )
+    .await;
+    let run = Run {
+        download: lab.finish(d.id).await,
+        bytes: SIZE,
+        secs: began.elapsed().as_secs_f64(),
+    };
+    println!(
+        "mirror_yields_to_playback: the mirror closed {} ms after playback started; {:.1} MB/s overall",
+        yielded.as_millis(),
+        run.mbps()
+    );
+
+    assert_exact(1, SIZE, &run);
+    assert!(
+        yielded <= Duration::from_millis(1500),
+        "the mirror took {} ms to yield",
+        yielded.as_millis()
+    );
+    assert!(
+        dropped(&notes),
+        "no mirrorDropped{{playback}} note for the mirror: {notes:?}"
+    );
+    assert!(a.peak() <= 1 && b.peak() <= 1);
 }

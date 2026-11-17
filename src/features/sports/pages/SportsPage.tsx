@@ -32,7 +32,7 @@ import { LEAGUE_KEYS, LeagueFilter } from '../components/LeagueFilter';
 import { GRID_COLUMNS, SportsSkeleton } from '../components/SportsSkeleton';
 import { QUALITY_LABEL, useStreamContext, type StreamContext } from '../components/StreamList';
 import { WeekSearch } from '../components/WeekSearch';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, intlLocale, useLiveQuality, useNow, useShell, useVisibleSources } from '../deps';
+import { Button, EmptyState, ErrorState, FilterChip, Page, SearchEverythingLink, SectionHeader, cn, intlLocale, useLiveQuality, useNow, useShell, useVisibleSources } from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -341,7 +341,9 @@ export function SportsPage() {
             <Button size="sm" variant="secondary" onClick={() => setWeekSearch(true)} data-testid="sports-search-week">
               {t('searchWeek')}
             </Button>
-          ) : undefined
+          ) : (
+            <SearchEverythingLink query={query} size="sm" />
+          )
         }
       />
     );

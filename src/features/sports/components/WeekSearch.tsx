@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { EmptyState, formatClock, formatDay } from '../deps';
+import { EmptyState, formatClock, formatDay, SearchEverythingLink } from '../deps';
 import { useSportsDays } from '../hooks/useGames';
 import { filterGames } from '../lib/filter';
 import { LEAGUES, type Game } from '../lib/types';
@@ -37,7 +37,14 @@ export function WeekSearch({ days, query, onPick }: { days: readonly string[]; q
         </p>
       );
     }
-    return <EmptyState title={t('noTeamWeek', { query: query.trim() })} description={t('emptyDayHint')} />;
+    // No game this week: the search of everything may still find the team's channel or a show about it.
+    return (
+      <EmptyState
+        title={t('noTeamWeek', { query: query.trim() })}
+        description={t('emptyDayHint')}
+        action={<SearchEverythingLink query={query} size="sm" />}
+      />
+    );
   }
   return (
     <section aria-labelledby="sports-week-heading" className="flex flex-col gap-3" data-testid="sports-week">

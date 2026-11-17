@@ -25,6 +25,7 @@ import { itemKey, type ItemRef, type SeriesItem, type SourceKind, type VodItem }
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
 import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useShortcut } from '@/shell';
+import { SearchEverythingLink } from '@/shell/SearchEverythingLink';
 
 import { GridMyListProvider, PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
 import { CategoryPickerDialog } from '../components/CategoryPickerDialog';
@@ -790,9 +791,12 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 title={<span title={echoQuery(search) !== search ? search : undefined}>{t('noSearchMatchTitle', { query: echoQuery(search) })}</span>}
                 description={t('noSearchMatchHint')}
                 action={
-                  <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
-                    {t('clearSearch')}
-                  </button>
+                  <>
+                    <SearchEverythingLink query={search} size="sm" />
+                    <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
+                      {t('clearSearch')}
+                    </button>
+                  </>
                 }
               />
             ) : filtered ? (

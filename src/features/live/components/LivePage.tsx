@@ -41,6 +41,7 @@ import { requestPin } from '@/features/parental/gate';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { applyStatus, hidesContent, useParentalStatus } from '@/features/parental/status';
 import { registerCommands, useShell, useShortcut } from '@/shell';
+import { SearchEverythingLink } from '@/shell/SearchEverythingLink';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 import { intlLocale } from '@/lib/intl';
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
@@ -1046,9 +1047,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               </Button>
             </>
           ) : (
-            <Button size="sm" onClick={clearSearch}>
-              {t('clearSearch')}
-            </Button>
+            // Not in this source's channels: the search of everything also looks in the others and the guide.
+            <>
+              <SearchEverythingLink query={debouncedSearch} size="sm" />
+              <Button size="sm" onClick={clearSearch}>
+                {t('clearSearch')}
+              </Button>
+            </>
           )
         }
       />

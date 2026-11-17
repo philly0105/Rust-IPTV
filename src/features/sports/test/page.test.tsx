@@ -234,6 +234,8 @@ describe('sports page', () => {
     expect(tabs[7]!.textContent).toMatch(/^Today \w{3} \d{1,2}$/);
     expect(screen.getByRole('tab', { name: TODAY }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByTestId('sports-day-panel').getAttribute('aria-labelledby')).toBe(`sports-day-tab-${today()}`);
+    // Only the picked day's panel exists, so only its tab points at one (w-a11y-11).
+    expect(tabs.filter((t) => t.hasAttribute('aria-controls')).map((t) => t.getAttribute('aria-controls'))).toEqual([screen.getByTestId('sports-day-panel').id]);
 
     fireEvent.click(screen.getByRole('tab', { name: /^Tomorrow / }));
     await waitFor(() => expect(h.location.current).toBe(`/sports?day=${tomorrow}`));

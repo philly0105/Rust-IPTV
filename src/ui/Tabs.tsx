@@ -26,8 +26,9 @@ export interface TabsProps {
    */
   variant?: 'underline' | 'pill';
   /**
-   * When set, each tab gets aria-controls=`${panelIdPrefix}-${id}`; render
-   * panels with `tabPanelProps(panelIdPrefix, id)`.
+   * When set, the selected tab gets aria-controls=`${panelIdPrefix}-${id}`; render
+   * its panel with `tabPanelProps(panelIdPrefix, id)`. Only the selected tab's panel
+   * is in the DOM, so the others point at nothing.
    */
   panelIdPrefix?: string;
 }
@@ -183,7 +184,7 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
             role="tab"
             id={`${prefix}-tab-${item.id}`}
             aria-selected={selected}
-            aria-controls={panelIdPrefix ? `${prefix}-${item.id}` : undefined}
+            aria-controls={panelIdPrefix && selected ? `${prefix}-${item.id}` : undefined}
             tabIndex={selected ? 0 : -1}
             disabled={item.disabled}
             onClick={() => onChange(item.id)}

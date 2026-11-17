@@ -140,6 +140,13 @@ export interface CallOptions {
    * reason (an `AbortError`), not an RpcError.
    */
   signal?: AbortSignal;
+  /**
+   * Web only: give up after this many ms with a `timeout` RpcError that is not retried, so a call
+   * the server accepted but never answers ends in an error with Try again instead of a skeleton
+   * forever. For reads only (useRpcQuery sets it); commands that run long by design (imports,
+   * refreshes, backups) never pass it. Desktop calls cannot be cancelled and ignore it.
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -163,6 +170,30 @@ export function takeEarlyRpc(cmd: string, args: unknown, opts?: CallOptions): Pr
 }
 
 async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<unknown> {
+  if (!opts?.timeoutMs) return callWebOnce(cmd, args, opts, opts?.signal);
+  // The caller's signal still cancels; the timer aborts the request (and its body) on its own.
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, opts.timeoutMs);
+  const forward = () => ctrl.abort(opts.signal?.reason);
+  if (opts.signal?.aborted) forward();
+  else opts.signal?.addEventListener('abort', forward, { once: true });
+  try {
+    return await callWebOnce(cmd, args, opts, ctrl.signal);
+  } catch (err) {
+    // Not retried: the user has waited long enough, and Try again asks once more.
+    if (timedOut) throw new RpcError('timeout', `The server took too long to answer ${cmd}`, false);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', forward);
+  }
+}
+
+async function callWebOnce(cmd: string, args: unknown, opts: CallOptions | undefined, signal: AbortSignal | undefined): Promise<unknown> {
   // Awaited only when there is one, so every other call starts its request synchronously.
   const early = takeEarlyRpc(cmd, args, opts);
   let res = early ? await early : null;
@@ -173,10 +204,10 @@ async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(args ?? null),
         ...(opts?.keepalive ? { keepalive: true } : {}),
-        ...(opts?.signal ? { signal: opts.signal } : {}),
+        ...(signal ? { signal } : {}),
       });
     } catch (err) {
-      if (opts?.signal?.aborted) throw abortReason(opts.signal);
+      if (signal?.aborted) throw abortReason(signal);
       const message = err instanceof Error ? err.message : 'Network request failed';
       // `details.transport` tells the UI the app's own server is unreachable (not a provider error).
       throw new RpcError('network', `Cannot reach the server: ${message}`, true, { transport: 'unreachable' });

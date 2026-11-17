@@ -1,5 +1,6 @@
 {
-  "title": "Listák",
+  "title": "Csatornalisták",
+  "lead": "Saját csatornacsoportjai",
   "newList": "Új lista",
   "newListName": "Az új lista neve",
   "createList": "Lista létrehozása",
@@ -17,6 +18,7 @@
   "localDataHint": "A listákat az alkalmazás tárolja. Próbálja újra, vagy indítsa újra az alkalmazást, ha a hiba továbbra is fennáll.",
   "emptyTitle": "Még nincsenek listák",
   "emptyHint": "Csoportosítson csatornákat bármely forrásból, például Sport vagy Gyerek.",
+  "emptyNoSources": "Először adjon hozzá egy forrást. Utána csoportosítsa a csatornáit listákba, például Sport vagy Gyerek.",
   "sidebarEmpty": "Csoportosítson csatornákat bármely forrásból.",
   "channelCount_one": "{{formatted}} csatorna",
   "channelCount_other": "{{formatted}} csatorna",

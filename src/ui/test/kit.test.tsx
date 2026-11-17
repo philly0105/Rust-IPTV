@@ -242,6 +242,8 @@ describe('IconButton tooltip', () => {
     expect(cls).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
     expect(cls).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
     expect(buttonClass('secondary', 'md')).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
+    // h-12 is only 39 px in compact density: lg takes the floor too.
+    expect(buttonClass('primary', 'lg')).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
   });
 
   it('gives fields, segmented controls and pill tabs the same 44 px floor, so a touch toolbar lines up', () => {
@@ -260,12 +262,22 @@ describe('IconButton tooltip', () => {
     expect(screen.getByRole('textbox', { name: 'Name' }).className).toContain(floor);
     expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain(floor);
     expect(screen.getByRole('combobox', { name: 'Sort' }).className).toContain(floor);
-    // The clear button grows inside the taller field, and the text's end padding grows past it
-    // (end-1 plus 36 px is 39.75 px; pe-11 is 41.25 px), so the button never covers the query.
-    expect(screen.getByRole('button', { name: 'Clear search' }).className).toContain('pointer-coarse:size-[calc(36rem/15)]');
-    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain('pointer-coarse:pe-11');
+    // The clear button grows inside the taller field and a 4 px band takes its target to 44 px;
+    // the text's end padding grows past the band (end-1 plus 40 px is 43.75 px; pe-12 is 45 px),
+    // so the button never covers the query.
+    const clear = screen.getByRole('button', { name: 'Clear search' }).className;
+    expect(clear).toContain('pointer-coarse:size-[calc(36rem/15)]');
+    expect(clear).toContain('pointer-coarse:after:-inset-[calc(4rem/15)]');
+    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain('pointer-coarse:pe-12');
     // The track takes the floor and its segments stretch to fill it.
     expect(screen.getByRole('radiogroup', { name: 'View' }).className).toContain(floor);
+    // A band over the track's padding takes each segment's target to the track's 44 px (an sm
+    // track pads by half a step).
+    const segment = within(screen.getByRole('radiogroup', { name: 'View' })).getByRole('radio', { name: 'A' }).className;
+    expect(segment).toContain('pointer-coarse:before:absolute');
+    expect(segment).toContain('pointer-coarse:before:-inset-y-0.5');
+    expect(segment).not.toContain('pointer-coarse:before:-inset-y-1');
+    expect(within(screen.getByRole('tablist', { name: 'Kind' })).getByRole('tab', { name: 'All' }).className).toContain('pointer-coarse:before:-inset-y-1');
     const pills = screen.getByRole('tablist', { name: 'Kind' });
     expect(pills.className).toContain(floor);
     expect(within(pills).getByRole('tab', { name: 'All' }).className).toContain('pointer-coarse:self-stretch');
@@ -536,6 +548,38 @@ describe('page scaffold', () => {
 describe('Dialog sheet and header row', () => {
   const classes = () => screen.getByRole('dialog').className.split(/\s+/);
 
+  it('stands a sheet on the on-screen keyboard while it is open (iPhone Safari keeps the layout viewport)', () => {
+    const vv = Object.assign(new EventTarget(), { height: 844, offsetTop: 0, scale: 1 });
+    const had = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const height = window.innerHeight;
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: vv });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    try {
+      render(
+        <Dialog open onClose={() => {}} title="Add a source">
+          <input aria-label="URL" />
+        </Dialog>,
+      );
+      const layer = () => screen.getByRole('dialog').parentElement!;
+      expect(layer().style.getPropertyValue('--kb-inset')).toBe('0px');
+      act(() => {
+        vv.height = 500;
+        vv.dispatchEvent(new Event('resize'));
+      });
+      expect(layer().style.getPropertyValue('--kb-inset')).toBe('344px');
+      // Pinch zoom shrinks the visual viewport too; the sheet stays where it is.
+      act(() => {
+        vv.scale = 2;
+        vv.dispatchEvent(new Event('resize'));
+      });
+      expect(layer().style.getPropertyValue('--kb-inset')).toBe('0px');
+    } finally {
+      if (had) Object.defineProperty(window, 'visualViewport', had);
+      else delete (window as { visualViewport?: unknown }).visualViewport;
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+    }
+  });
+
   it("`sheet` makes a bottom sheet below sm, and a caller's max-sm height cap wins over the sheet's", () => {
     const { rerender } = render(
       <Dialog open onClose={() => {}} title="Sort and filter" sheet>
@@ -546,16 +590,16 @@ describe('Dialog sheet and header row', () => {
       expect.arrayContaining([
         'max-sm:fixed',
         'max-sm:inset-x-0',
-        'max-sm:bottom-0',
+        'max-sm:bottom-[var(--kb-inset,0px)]',
         'max-sm:rounded-b-none',
-        'max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))]',
+        'max-sm:max-h-[calc(100dvh-var(--kb-inset,0px)-max(1.5rem,var(--toast-reserve,0px)))]',
         'max-sm:motion-safe:animate-sheet-in',
         // A narrower gutter on a phone, for the header, body and footer alike.
         'max-sm:[--dialog-gutter:1rem]',
       ]),
     );
     // The floating card's phone height cap gives way to the sheet's, not the other way round.
-    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))]']);
+    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[calc(100dvh-var(--kb-inset,0px)-max(1.5rem,var(--toast-reserve,0px)))]']);
     rerender(
       <Dialog open onClose={() => {}} title="Sort and filter" sheet className="max-sm:max-h-[70dvh]">
         <p>Body</p>
@@ -693,7 +737,7 @@ describe('artwork fallback tint (src/ui/tint.ts)', () => {
       expect(light).toContain(`light:max-md:${v}`);
     }
     // Under them, in every theme and so on the stage, the deep stops and white initials.
-    expect(TINT_THEME.split(' ')).toEqual(expect.arrayContaining(['[background-image:var(--tint-dark)]', 'text-white/90']));
+    expect(TINT_THEME.split(' ')).toEqual(expect.arrayContaining(['[background-image:var(--tint-dark)]', 'text-white/75']));
   });
 
   it('a tile on glass keeps the deep stops in every theme', () => {
@@ -760,6 +804,57 @@ describe('icon stroke (DS-ICON-STROKE)', () => {
   });
 });
 
+describe('icon size utilities (DS-ICON-SCALE)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  // The unlayered rule that sizes an icon, as px at 100 % ('' when none matches).
+  const rules = [...globals.matchAll(/^(svg\.lucide\.size-[^{]+)\{\s*width: calc\(([\d.]+)rem \/ 15\);/gm)].map((m) => [m[1]!.trim(), m[2]!] as const);
+  const sizeOf = (el: Element) => rules.find(([sel]) => el.matches(sel))?.[1] ?? '';
+
+  it('puts size-3 to size-6 on Lucide icons on the 12/14/16/18/24 scale, and leaves variant sizes alone', () => {
+    const { container } = render(
+      <>
+        <House data-i="3" className="size-3" />
+        <House data-i="3.5" className="size-3.5" />
+        <House data-i="4" className="size-4 text-fg-muted" />
+        <House data-i="5" className="size-5" />
+        <House data-i="6" className="size-6" />
+        <House data-i="coarse" className="size-4 pointer-coarse:size-5" />
+      </>,
+    );
+    const icon = (k: string) => container.querySelector(`[data-i="${k}"]`)!;
+    expect(['3', '3.5', '4', '5', '6'].map((k) => sizeOf(icon(k)))).toEqual(['12', '14', '16', '18', '24']);
+    expect(sizeOf(icon('coarse'))).toBe('');
+  });
+});
+
+describe('touch text fields (phone-02)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  // The selector of the rule inside the coarse-pointer block that sets the 16 px floor.
+  const block = /@media \(pointer: coarse\)\s*\{\s*([^{}]+)\{\s*font-size:\s*max\(16px, 1rem\);\s*\}/.exec(globals);
+  const selector = (block?.[1] ?? '').trim();
+
+  it('keeps every text field at 16 px or more on touch, so iPhone Safari does not zoom on focus', () => {
+    expect(selector).not.toBe('');
+    const { container } = render(
+      <>
+        <input data-f="text" />
+        <input data-f="search" type="search" />
+        <input data-f="password" type="password" />
+        <textarea data-f="area" />
+        <Select data-f="select" options={[{ value: 'a', label: 'A' }]} className="w-auto" />
+        <input data-f="check" type="checkbox" />
+        <input data-f="range" type="range" />
+      </>,
+    );
+    const el = (k: string) => container.querySelector(`[data-f="${k}"]`)!;
+    for (const k of ['text', 'search', 'password', 'area', 'select']) expect(el(k).matches(selector)).toBe(true);
+    // The select's invisible sizer grows with it, or the wider label would be cut.
+    expect(container.querySelector('[data-select-sizer]')!.matches(selector)).toBe(true);
+    expect(el('check').matches(selector)).toBe(false);
+    expect(el('range').matches(selector)).toBe(false);
+  });
+});
+
 describe('features use the kit controls (DS-DUPLICATE-CONTROLS)', () => {
   const ROOT = join(__dirname, '..', '..');
   function sources(dir: string): string[] {
@@ -816,6 +911,12 @@ describe('features use the kit controls (DS-DUPLICATE-CONTROLS)', () => {
         .map((m) => `${rel(f)}:${text.slice(0, m.index).split('\n').length}`);
     });
     expect(bare).toEqual([]);
+  });
+
+  // A px text size ignores the UI scale (DayChart's 11 px labels stayed small at 125 %).
+  it('sizes no text in px', () => {
+    const px = files.flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/\btext-\[\d+(?:\.\d+)?px\]/g)].map((m) => `${rel(f)}: ${m[0]}`));
+    expect(px).toEqual([]);
   });
 
   it('puts no native title on an IconButton', () => {

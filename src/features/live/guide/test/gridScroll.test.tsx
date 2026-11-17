@@ -163,6 +163,37 @@ describe('helpers', () => {
     expect(rulerLabelCovered(140, '7:58 PM', 150, '8:00 PM')).toBe(true);
   });
 
+  it('the label the now pill covers stays hidden at rest, also where it sticks at the edge (v-guide-01)', async () => {
+    // Shown as the stylesheet resolves it: the tracker's inline visibility wins, '' falls back to
+    // the data-covered:invisible class.
+    const shown = (label: HTMLElement) => label.style.visibility === 'visible' || (label.style.visibility === '' && label.dataset.covered === undefined);
+    const labelOf = (slot: number) => screen.getAllByTestId('ruler-label').find((l) => Number(l.parentElement!.dataset.slot) === slot)!;
+    const slot = defaultStart(Date.now()) + 2 * HOUR;
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['Date'] });
+    vi.setSystemTime(slot + 8 * MINUTE);
+    try {
+      rpc.handlers['epg.grid'] = hourly(slot);
+      renderGuide({ path: '/epg?source=src1', routes: GRID });
+      await screen.findByRole('button', { name: /^c1 P0,/ });
+      expect(screen.getByTestId('epg-now-pill')).toBeTruthy();
+      // The slot now is in: its label sits under the pill. The next one is clear of it.
+      expect(shown(labelOf(slot))).toBe(false);
+      expect(shown(labelOf(slot + 30 * MINUTE))).toBe(true);
+      const grid = screen.getByTestId('epg-grid');
+      const viewAt = Number(grid.dataset.viewAt);
+      // Scrolled 3 minutes into the slot: the label sticks at the edge, still under the pill.
+      act(() => { grid.scrollLeft += ((slot + 3 * MINUTE - viewAt) / MINUTE) * 5; fireEvent.scroll(grid); });
+      await waitFor(() => expect(grid.hasAttribute('data-guide-moving')).toBe(false));
+      await waitFor(() => expect(labelOf(slot).className).toContain('sticky'));
+      expect(shown(labelOf(slot))).toBe(false);
+      // 14 minutes in, the pill is under the channel column: the stuck label shows its time again.
+      act(() => { grid.scrollLeft += 11 * 5; fireEvent.scroll(grid); });
+      await waitFor(() => expect(shown(labelOf(slot))).toBe(true));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 
 });
 
@@ -271,7 +302,7 @@ describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
     );
   }
 
-  it('the channel column shows the logo and number, with the name for screen readers and as a tooltip', async () => {
+  it('the channel column shows the logo (else the name) and number, with the name for screen readers and as a tooltip', async () => {
     phone();
     const at = defaultStart(Date.now());
     rpc.handlers['epg.grid'] = hourly(at);
@@ -280,8 +311,11 @@ describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
     const channel = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
     expect(channel.dataset.compact).toBe('');
     expect(channel.title).toBe('Play Channel 0');
-    expect(screen.getByText('Channel 0').className).toContain('sr-only');
-    expect((channel.closest('[role="rowheader"]') as HTMLElement).style.width).toBe('72px');
+    expect(within(channel).getAllByText('Channel 0').some((el) => el.className.includes('sr-only'))).toBe(true);
+    // No logo: the name is drawn where the logo goes (three "ES" monograms told nothing apart).
+    expect(within(channel).getByTestId('guide-compact-name').textContent).toBe('Channel 0');
+    expect(channel.querySelector('[data-monogram]')).toBeNull();
+    expect((channel.closest('[role="rowheader"]') as HTMLElement).style.width).toBe('88px');
   });
 
   it('a programme opens as a bottom sheet over a scrim; pressing the scrim closes it', async () => {
@@ -373,7 +407,7 @@ describe('rows and windows without guide data (L1-guide-library-14, L1-perf-1)',
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     const notice = await screen.findByTestId('guide-no-data');
     expect(notice.textContent).toContain('Nothing in the guide for this time.');
-    expect(notice.textContent).not.toContain('Add an XMLTV address');
+    expect(notice.textContent).not.toContain('Add a guide');
     fireEvent.click(within(notice).getByRole('button', { name: 'Back to now' }));
     // Back at now with no guide at all: the empty state over the rows, with the way to add one (LG-10).
     await waitFor(() => expect(screen.getByTestId('guide-no-data').textContent).toContain('No guide data for these channels yet.'));
@@ -393,6 +427,58 @@ describe('rows waiting for guide data (L4-live-3)', () => {
     expect(lines.style.insetInlineStart).toBe('220px');
     expect(lines.querySelectorAll('.skeleton-surface').length).toBe(2);
     expect(screen.queryByTestId('no-guide-label')).toBeNull();
+  });
+
+  it('a window whose guide failed shows the error state over quiet rows, not skeletons that never end (v-guide-06)', async () => {
+    rpc.handlers['epg.grid'] = () => Promise.reject(new Error('boom'));
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const failed = await screen.findByTestId('guide-window-failed');
+    expect(within(failed).getByRole('heading', { name: 'The guide for this time did not load' })).toBeTruthy();
+    expect(screen.queryAllByTestId('row-guide-pending')).toHaveLength(0);
+    expect(screen.getAllByTestId('no-guide-band')).toHaveLength(CHANNELS.length);
+    // The slim "Part of the guide" line is for a partial failure only.
+    expect(screen.queryByTestId('guide-part-failed')).toBeNull();
+    // Try again asks again and, answered, draws the programmes.
+    const asked = rpc.of('epg.grid').length;
+    rpc.handlers['epg.grid'] = hourly(defaultStart(Date.now()));
+    fireEvent.click(within(failed).getByRole('button', { name: 'Try again' }));
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    expect(rpc.of('epg.grid').length).toBeGreaterThan(asked);
+    expect(screen.queryByTestId('guide-window-failed')).toBeNull();
+  });
+});
+
+describe('provider heading rows (w-realdata-01)', () => {
+  it('draw as a quiet caption with no programmes, play or menu, and the cursor passes over them', async () => {
+    const list = [{ ...makeChannel(0), name: '######## ALL CHANNELS ########' }, ...CHANNELS.slice(1)];
+    rpc.handlers['catalog.channels'] = (a) => {
+      const { query: q } = a as { query: PageQuery };
+      return { items: list.slice(q.offset, q.offset + q.limit), total: list.length, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
+    };
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    const caption = screen.getByTestId('guide-separator');
+    expect(caption.textContent).toBe('ALL CHANNELS');
+    const row = caption.closest<HTMLElement>('[role="row"]')!;
+    expect(within(row).queryAllByRole('button')).toHaveLength(0);
+    expect(within(row).queryByTestId('no-guide-band')).toBeNull();
+    fireEvent.contextMenu(caption);
+    expect(screen.queryByRole('menu')).toBeNull();
+    // The grid's tab stop is on the first channel, not on the heading, and Up from there stays.
+    const stop = await waitFor(() => {
+      const el = screen.getByTestId('epg-grid').querySelector<HTMLElement>('[tabindex="0"]');
+      expect(el?.getAttribute('aria-label')).toMatch(/^c1 /);
+      return el!;
+    });
+    act(() => stop.focus());
+    fireEvent.keyDown(stop, { key: 'ArrowUp' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 /));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c2 /));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 /));
   });
 });
 

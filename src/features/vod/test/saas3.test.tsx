@@ -23,7 +23,7 @@ import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { CATEGORY_CHIP_LIMIT, CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { currentLocation, i18n, installDomStubs, makeSource, openHeroMenu, renderAt, settings } from './harness';
+import { currentLocation, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -122,13 +122,13 @@ describe('offline play resumes where the title says', () => {
     rpcMock.handlers['positions.get'] = (): PlaybackPosition => ({ ref: mref, positionSeconds: 1800, durationSeconds: 7200, updatedAt: '2026-10-12T00:00:00Z', watched: false });
     rpcMock.handlers['downloads.list'] = () => [download({ positionSeconds: 0 })];
     renderAt('/s/src1/movie/m7', route);
-    expect(await screen.findByTestId('vod-offline-chip')).toBeTruthy();
+    expect(await screen.findByText('Plays the downloaded copy')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: 'Resume from 30:00' }));
     await waitFor(() => expect(played.sources).toHaveLength(1));
     expect(played.sources[0]).toMatchObject({ url: 'http://local/files/42', resumeSeconds: 1800 });
     // The bar under it says the same.
     expect(screen.getByText('90 minutes left')).toBeTruthy();
-    fireEvent.click(within(await openHeroMenu()).getByRole('menuitem', { name: 'Start over' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start over' }));
     await waitFor(() => expect(played.sources).toHaveLength(2));
     expect(played.sources[1]).toMatchObject({ url: 'http://local/files/42', resumeSeconds: 0 });
   });
@@ -138,7 +138,7 @@ describe('offline play resumes where the title says', () => {
     rpcMock.handlers['positions.get'] = (): PlaybackPosition => ({ ref: mref, positionSeconds: 7150, durationSeconds: 7200, updatedAt: '2026-10-12T00:00:00Z', watched: true });
     rpcMock.handlers['downloads.list'] = () => [download({ positionSeconds: 900 })];
     renderAt('/s/src1/movie/m7', route);
-    expect(await screen.findByTestId('vod-offline-chip')).toBeTruthy();
+    expect(await screen.findByText('Plays the downloaded copy')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: 'Play' }));
     await waitFor(() => expect(played.sources).toHaveLength(1));
     expect(played.sources[0]).toMatchObject({ resumeSeconds: 0 });
@@ -156,7 +156,7 @@ describe('offline play resumes where the title says', () => {
     renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
     // The episode's row says it is on disk once the queue has loaded.
     expect(await screen.findByTestId('episode-offline')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('button', { name: 'Resume S01E02' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume episode 2' }));
     await waitFor(() => expect(played.sources).toHaveLength(1));
     expect(rpcMock.calls.filter((c) => c.cmd === 'myvideos.playSource').map((c) => c.args)).toEqual([{ id: 9 }]);
     expect(played.sources[0]).toMatchObject({ resumeSeconds: 1200 });
@@ -264,6 +264,57 @@ describe('search programmes', () => {
     const tomorrow = within(list).getAllByRole('list')[1]!;
     expect(tomorrow.getAttribute('aria-labelledby')).toBe(within(list).getAllByTestId('search-programme-day')[1]!.id);
     expect(within(tomorrow).getAllByRole('button')).toHaveLength(2);
+  });
+});
+
+describe('Top results poster menu', () => {
+  it('opens the Movies rails’ menu on a right click, and Open details opens the title', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 7, 'Dune TV')], movies: [vod('src2', 1, 'Dune')], series: [] });
+    renderAt('/search?q=dune', [
+      { path: '/search', element: <SearchPage /> },
+      { path: '/s/:sourceId/movie/:itemId', element: <p>movie page</p> },
+    ]);
+    const top = await screen.findByTestId('search-top');
+    const card = await waitFor(() => {
+      const c = top.querySelector<HTMLElement>('[data-search-section="movies"] [data-grid-index="0"]');
+      expect(c).toBeTruthy();
+      return c!;
+    });
+    fireEvent.contextMenu(card, { clientX: 30, clientY: 30 });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Open details' }));
+    await screen.findByText('movie page');
+    expect(currentLocation).toBe('/s/src2/movie/m1');
+  });
+});
+
+describe('a failed guide search (states-feedback-06)', () => {
+  const fail = () => {
+    throw new Error('simulated failure');
+  };
+
+  it('keeps the Programmes tab and says the guide was not searched, with Try again', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 7, 'Harbor News')], movies: [], series: [] });
+    rpcMock.handlers['epg.search'] = fail;
+    renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain("Couldn't search the TV guide");
+    // Top results holds the channel and the Programmes section with the error, under its own tab.
+    expect(screen.getByRole('tab', { name: /^Programmes/ }).textContent).toBe('Programmes');
+    expect(screen.getByTestId('search-top').querySelector('[data-search-section="programmes"]')?.contains(alert)).toBe(true);
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : [programme(1, 0, 23, 30)]);
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await screen.findByTestId('search-programmes');
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('with nothing else found, says so under "No results" instead of only "No results"', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    rpcMock.handlers['epg.search'] = fail;
+    renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
+    expect((await screen.findByRole('alert')).textContent).toContain("Couldn't search the TV guide");
+    expect(screen.getByText('No results for "harbor"')).toBeTruthy();
   });
 });
 
@@ -437,9 +488,9 @@ describe('the landing reaches every category from the top', () => {
     const chips = await screen.findByRole('navigation', { name: 'Categories' });
     await waitFor(() => expect(within(chips).getAllByTestId('vod-category-chip')).toHaveLength(CATEGORY_CHIP_LIMIT));
     expect(within(chips).getByRole('link', { name: 'Group 0' }).getAttribute('href')).toBe('/s/src1/movies/c/k0');
-    // Before the rails in the page.
-    const recent = screen.getByRole('heading', { name: /Recently added/ });
-    expect(chips.compareDocumentPosition(recent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Before the rails in the page (Recently added is empty here and draws nothing).
+    const rail = await screen.findByRole('heading', { name: /^Group 0/ });
+    expect(chips.compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Manage is at the top as well.
     expect(within(chips).getByRole('button', { name: 'Manage categories (1 hidden)' })).toBeTruthy();
     const toggle = screen.getByRole('button', { name: 'Browse all categories' });
@@ -464,7 +515,10 @@ describe('Search names a channel as Live TV does (round 5)', () => {
     rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : [{ ...programme(1, 0, 23, 0), channelName: 'US| Harbor News HD' }]);
     renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
     const top = await screen.findByTestId('search-top');
-    const result = await within(top).findByRole('button', { name: /^US\| Harbor News HD/ });
+    // Screen readers hear the name as the card shows it, the tag after it (w-a11y-03). The card's
+    // name starts with it (after a bidi isolate); the programme row's names the channel after its
+    // time and title.
+    const result = await within(top).findByRole('button', { name: /^\W?Harbor News HD \(US\)/ });
     expect(drawn(result)).toEqual(['Harbor News HD', 'US']);
     expect(within(result).getByTestId('channel-name-tag').className).toContain('text-fg-subtle');
     const line = await screen.findByTestId('search-programme-channel');
@@ -478,7 +532,8 @@ describe('Search names a channel as Live TV does (round 5)', () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 1, 'US| Harbor News HD')], movies: [], series: [] });
     renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
     // Only channels match: the channel grid shows on its own.
-    const result = await screen.findByRole('button', { name: /^Harbor News HD/ });
+    const result = await screen.findByRole('button', { name: /Harbor News HD/ });
+    expect(result.getAttribute('aria-label')).not.toContain('US');
     expect(result.textContent).not.toContain('US');
     expect(within(result).queryByTestId('channel-name-tag')).toBeNull();
   });

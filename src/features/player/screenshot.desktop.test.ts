@@ -77,7 +77,7 @@ describe('takeScreenshot in the desktop app', () => {
     opts.action.onClick();
     await vi.waitFor(() =>
       expect(toastMock).toHaveBeenLastCalledWith({
-        title: 'Could not open the screenshot',
+        title: 'Couldn\'t open the screenshot',
         description: 'No app is set to open PNG files.',
         variant: 'error',
       }),
@@ -93,7 +93,7 @@ describe('takeScreenshot in the desktop app', () => {
     expect(toastMock).toHaveBeenCalledWith({
       title: 'Screenshot not saved',
       description:
-        "The stream's server does not allow its picture to be copied (no CORS permission). Embedded MPV can capture it: choose it in Settings > Players.",
+        "The stream's server does not allow its picture to be copied. Embedded mpv can capture it: choose it in Settings > Playback.",
       variant: 'error',
     });
   });

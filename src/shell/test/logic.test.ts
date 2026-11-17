@@ -69,6 +69,12 @@ describe('startup target', () => {
     expect(routeSourceId('/s/a%20b/movies')).toBe('a b');
     expect(routeSourceId('/epg')).toBeUndefined();
   });
+  it('opens Home, not the saved screen, while there is no source (w-walkthrough-03)', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/scheduled', showDashboard: true };
+    expect(startupTarget(s, { sources: [] })).toBe('/dashboard');
+    expect(startupTarget({ ...s, lastRoute: '/lists' }, { sources: [] })).toBe('/dashboard');
+    expect(startupTarget(s, { sources: [{ id: 'a' }] })).toBe('/scheduled');
+  });
   it('does not restore the archive of a removed source', () => {
     const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/live/archive/gone/ch1', showDashboard: true };
     expect(routeSourceId('/live/archive/a%20b/ch1')).toBe('a b');

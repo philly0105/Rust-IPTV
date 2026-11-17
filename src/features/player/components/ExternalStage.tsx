@@ -10,7 +10,7 @@ import { usePlayerSettings } from '../useSettings';
 import { glassButton } from './glassButton';
 import { ScreenshotButton } from './lazyParts';
 
-export const PLAYER_NAMES = { mpv: 'MPV', vlc: 'VLC' } as const;
+export const PLAYER_NAMES = { mpv: 'mpv', vlc: 'VLC' } as const;
 
 /**
  * What a page's player stage shows while the current item plays in MPV or VLC outside the app:

@@ -57,19 +57,29 @@ describe('channel rows without ruled lines (review round 4)', () => {
 });
 
 describe('the country tag after the name (review round 4)', () => {
-  it('draws the name first and the tag as a quiet suffix, and reads the provider name as it is', () => {
+  it('draws the name first and the tag as a quiet suffix, and reads it so: "ESPN HD (US)" (w-a11y-03)', () => {
     row();
-    const button = screen.getByRole('button', { name: /US\| ESPN HD/ });
+    const button = screen.getByRole('button', { name: /ESPN HD \(US\)/ });
     const tag = within(button).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
     expect(tag.className).toContain('text-fg-subtle');
     expect(tag.className).toContain('text-caption');
-    // The drawn name and tag are hidden from assistive tech; the raw name is there instead.
+    // The drawn name and tag are hidden from assistive tech; the cleaned name is there instead.
     const drawn = tag.parentElement!;
     expect(drawn.getAttribute('aria-hidden')).toBe('true');
     expect(drawn.textContent).toBe('ESPN HDUS');
     expect(drawn.firstChild?.textContent).toBe('ESPN HD');
-    expect(within(button).getByText('US| ESPN HD').className).toContain('sr-only');
+    expect(within(button).getByText('ESPN HD (US)').className).toContain('sr-only');
+  });
+
+  it('names "US| ESPN HD" "ESPN HD (US)" for a screen reader, once (w-a11y-03)', () => {
+    render(
+      <button type="button">
+        <ChannelName name="US| ESPN HD" />
+      </button>,
+    );
+    const button = screen.getByRole('button');
+    expect(screen.getByRole('button', { name: 'ESPN HD (US)' })).toBe(button);
   });
 
   it('leaves the tag out with the strip setting on, and draws a name without a tag as plain text', () => {
@@ -86,8 +96,13 @@ describe('the country tag after the name (review round 4)', () => {
     render(<ChannelName name="US| MLB Network HD" className="truncate" />);
     const tag = screen.getByTestId('channel-name-tag');
     const name = tag.previousElementSibling as HTMLElement;
-    // The name holds its own width up to the whole line.
-    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full', 'truncate']));
+    // The name holds its own width up to the whole line; inside it the station gives way and the
+    // feed's quality words ("HD") stay whole.
+    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full']));
+    expect((name.firstChild as HTMLElement).className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+    expect(name.firstChild?.textContent).toBe('MLB Network');
+    expect((name.lastChild as HTMLElement).textContent).toBe(' HD');
+    expect((name.lastChild as HTMLElement).className).toContain('shrink-0');
     // A tag without room wraps to a second line that the one-line box hides; it never gets an ellipsis.
     expect(tag.parentElement!.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'h-[1lh]', 'overflow-hidden']));
     expect(tag.className).toContain('whitespace-nowrap');
@@ -97,7 +112,9 @@ describe('the country tag after the name (review round 4)', () => {
   it('moves only a place code: event and content prefixes and names with a pipe stay as written', () => {
     for (const n of ['NBA: Lakers vs Celtics', 'PPV: UFC 300', 'Sky Sports | Main Event', 'beIN SPORTS 1 | HD', 'ESPN HD | Backup']) {
       render(<ChannelName name={n} testId="n" />);
-      expect(screen.getByTestId('n').textContent).toBe(n);
+      // As drawn ("HD" may stand apart as the feed's quality, with the screen readers' copy beside it).
+      const el = screen.getByTestId('n');
+      expect((el.querySelector('[aria-hidden]') ?? el).textContent).toBe(n);
       expect(screen.queryByTestId('channel-name-tag')).toBeNull();
       cleanup();
     }
@@ -114,7 +131,7 @@ describe('the country tag after the name (review round 4)', () => {
 describe('channel rows on touch (review round 4)', () => {
   it('steps the name and the programme up a size under a coarse pointer and keeps the number quiet', () => {
     row();
-    const button = screen.getByRole('button', { name: /US\| ESPN HD/ });
+    const button = screen.getByRole('button', { name: /ESPN HD \(US\)/ });
     const drawnName = within(button).getByTestId('channel-name-tag').parentElement!.parentElement!;
     expect(drawnName.className).toContain('text-body-sm');
     expect(drawnName.className).toContain('pointer-coarse:text-body');
@@ -124,7 +141,7 @@ describe('channel rows on touch (review round 4)', () => {
 
   it('keeps the playing row number in the text colour', () => {
     row({ playing: true });
-    const number = within(screen.getByRole('button', { name: /US\| ESPN HD/ })).getByText('1');
+    const number = within(screen.getByRole('button', { name: /ESPN HD \(US\)/ })).getByText('1');
     expect(number.className).toMatch(/\btext-fg\b(?!-)/);
   });
 });
@@ -148,8 +165,11 @@ describe('the idle stage names its channel in its own direction (review round 4)
     idle('US| ESPN HD');
     const tag = screen.getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
+    // The parts keep the page's order (an RTL name no longer puts its tag first); the station's
+    // name takes its own direction.
     const outer = tag.parentElement!.parentElement!;
-    expect(outer.getAttribute('dir')).toBe('auto');
+    expect(outer.getAttribute('dir')).toBeNull();
     expect(outer.className).toContain('truncate');
+    expect(screen.getByText('ESPN').getAttribute('dir')).toBe('auto');
   });
 });

@@ -260,15 +260,15 @@ describe('library removals can be undone', () => {
 
     await screen.findByTestId('entry-resume');
     fireEvent.click(screen.getAllByRole('button', { name: 'Actions for Continue p1' })[0]!);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
-    await waitFor(() => expect(lastToast()?.title).toMatch(/^Removed .* from continue watching$/));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear progress' }));
+    await waitFor(() => expect(lastToast()?.title).toMatch(/^Cleared progress on /));
     lastToast()!.action!.onClick();
     await waitFor(() =>
       expect(rpc.callsOf('positions.set')).toEqual([{ ref: pos.ref, positionSeconds: 600, durationSeconds: 2400, snapshot: pos.snapshot, updatedAt: pos.updatedAt }]),
     );
   });
 
-  it('a keyboard user resumes with Enter and reaches Remove from continue watching through the row menu', async () => {
+  it('a keyboard user resumes with Enter and reaches Clear progress through the row menu', async () => {
     const [p1, p2] = [makePosition('p1', 600, 2400), makePosition('p2', 300, 2400)];
     rpc.handlers['recent.list'] = () => [p1, p2].map((p) => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! }));
     // The saved spots as the core keeps them, so the removed one is gone from the refetch.
@@ -287,11 +287,12 @@ describe('library removals can be undone', () => {
     fireEvent.keyDown(row, { key: 'Enter' });
     await waitFor(() => expect(fakePlayer.items).toHaveLength(1));
     expect(fakePlayer.items[0]).toMatchObject({ ref: p1.ref, isLive: false });
-    // The strip's menu is a Tab stop inside the row (its buttons are not), so the keyboard gets to it.
+    // The strip's menu stays out of the Tab order like its siblings (w-a11y-10); Shift+F10 on the
+    // row opens the row's own menu, which holds the same items.
     const trigger = within(screen.getAllByTestId('entry-actions')[0]!).getByRole('button', { name: 'Actions for Continue p1' });
-    expect(trigger.tabIndex).toBe(0);
-    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
+    expect(trigger.tabIndex).toBe(-1);
+    fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear progress' }));
     await waitFor(() => expect(rpc.callsOf('positions.remove')).toHaveLength(1));
     expect((rpc.callsOf('positions.remove')[0] as { ref: { itemId: string } }).ref.itemId).toBe('p1');
     // The history entry stays; only its saved spot went, and the strip's menu with it.
@@ -313,6 +314,6 @@ describe('library removals can be undone', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Watched a from history' }));
     await waitFor(() => expect(lastToast()?.action).toBeTruthy());
     lastToast()!.action!.onClick();
-    await waitFor(() => expect(lastToast()?.title).toBe('Could not undo that'));
+    await waitFor(() => expect(lastToast()?.title).toBe('Couldn\'t undo that'));
   });
 });

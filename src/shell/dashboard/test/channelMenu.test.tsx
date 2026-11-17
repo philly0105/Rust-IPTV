@@ -147,6 +147,17 @@ afterEach(() => {
 });
 
 describe('dashboard channel card menu', () => {
+  it("the favourites rail's Remove from favorites, also from the card's visible menu button, removes the favourite", async () => {
+    renderRoutes(routes(), '/dashboard');
+    const card = await newsCard();
+    const more = card.parentElement!.querySelector<HTMLElement>('[data-card-menu]')!;
+    expect(more.getAttribute('aria-label')).toBe('More actions for News 24');
+    fireEvent.click(more);
+    const menu = await screen.findByRole('menu', { name: 'News 24' });
+    fireEvent.click(await within(menu).findByRole('menuitem', { name: 'Remove from favorites' }));
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'favorites.remove').map((c) => c.args)).toEqual([{ ref: newsRef }]));
+  });
+
   it('right click opens the channel menu with the Live entries, and Hide hides the channel', async () => {
     renderRoutes(routes(), '/dashboard');
     const card = await newsCard();
@@ -154,7 +165,8 @@ describe('dashboard channel card menu', () => {
 
     const menu = await screen.findByRole('menu', { name: 'News 24' });
     await waitFor(() => expect(itemNames(menu)).toContain('Hide channel'));
-    expect(itemNames(menu)).toEqual(['Play', 'Add to multi-view', 'Add to list…', 'Rename…', 'Hide channel']);
+    // Live TV's menu, in its order (v-shell-home-05); on the favourites rail its heart is the rail's Remove.
+    expect(itemNames(menu)).toEqual(['Play', 'Open in TV guide', 'Remove from favorites', 'Add to multi-view', 'Add to list…', 'Rename…', 'Hide channel']);
     expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Play' }));
 
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Hide channel/ }));
@@ -198,6 +210,28 @@ describe('dashboard channel card menu', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play' }));
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: sportRef, isLive: true })));
     expect(await screen.findByText('source page /s/s1/live')).toBeTruthy();
+  });
+
+  // v-shell-home-05: the menu names its channel (a phone's sheet covers the card), offers the
+  // favourite heart and opens the guide at the channel.
+  it("an On now card's menu is headed by the channel and what is on, adds a favourite and opens the guide at it", async () => {
+    onNowHome();
+    rpcMock.handlers['favorites.contains'] = () => [];
+    rpcMock.handlers['favorites.toggle'] = () => ({ isFavorite: true });
+    const { router } = renderRoutes(routes(), '/dashboard');
+    fireEvent.contextMenu(await onNowCard(), { clientX: 40, clientY: 60 });
+    let menu = await screen.findByRole('menu', { name: 'Sport 1' });
+    const header = within(document.body).getByTestId('context-menu-header');
+    expect(header.textContent).toContain('Sport 1');
+    expect(header.textContent).toContain('Match Day');
+    fireEvent.click(await within(menu).findByRole('menuitem', { name: 'Add to favorites' }));
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'favorites.toggle').map((c) => (c.args as { ref: unknown }).ref)).toEqual([sportRef]));
+
+    fireEvent.contextMenu(await onNowCard(), { clientX: 40, clientY: 60 });
+    menu = await screen.findByRole('menu', { name: 'Sport 1' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Open in TV guide' }));
+    // Its group and its row, as Live TV's guide link opens it.
+    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/epg?source=s1&category=g-sport&focus=c2'));
   });
 
   it('the second click of a double click lands nowhere on the Live TV the first one opened', async () => {
@@ -283,6 +317,8 @@ describe('dashboard channel card menu', () => {
     const menu = await screen.findByRole('menu', { name: 'Jazz FM' });
     await waitFor(() => expect(itemNames(menu)).toContain('Hide station'));
     expect(itemNames(menu)).not.toContain('Add to multi-view');
+    // A station has no row in the TV guide.
+    expect(itemNames(menu)).not.toContain('Open in TV guide');
     expect(itemNames(menu)).toContain('Add to list…');
   });
 });

@@ -182,12 +182,15 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     const actions = await screen.findByTestId('vod-hero-actions');
     const play = within(actions).getByRole('button', { name: 'Play' });
     expect(play.className).toContain('bg-accent-solid');
-    // Every other control in the row is an icon button, named for screen readers.
-    for (const b of within(actions).getAllByRole('button').filter((x) => x !== play)) {
+    // My List is the one labelled button among them (library-02): beside Favorite's heart it says
+    // which save it is. Every other control in the row is an icon button, named for screen readers.
+    const myList = within(actions).getByTestId('mylist-button');
+    expect(myList.dataset['variant']).toBe('hero');
+    expect(myList.getAttribute('aria-label')).toBeTruthy();
+    for (const b of within(actions).getAllByRole('button').filter((x) => x !== play && x !== myList)) {
       expect(b.textContent?.trim()).toBe('');
       expect(b.getAttribute('aria-label')).toBeTruthy();
     }
-    expect(within(actions).getByTestId('mylist-button').dataset['variant']).toBe('round');
     expect(within(actions).getByRole('button', { name: 'Mark as watched' })).toBeTruthy();
     expect(within(actions).getByRole('button', { name: 'Download' })).toBeTruthy();
     // Favorite sits between My List and Watched, so the page says whether the title is one.
@@ -203,6 +206,8 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     const about = screen.getByTestId('vod-about');
     expect(within(about).getByText('Alpha IPTV')).toBeTruthy();
     expect(within(about).getByText('MKV')).toBeTruthy();
+    // ...and only there: the format is not a chip in the hero's meta line (vod-detail-17).
+    expect(screen.queryByTestId('vod-detail-meta')?.textContent?.toLowerCase() ?? '').not.toContain('mkv');
   });
 
   it('a downloaded copy plays from the file, says so, and still offers the stream', async () => {
@@ -222,18 +227,30 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     rpcMock.handlers['downloads.list'] = () => [d];
     rpcMock.handlers['myvideos.playSource'] = () => ({ url: 'http://local/files/42', title: 'Dune: Part Two', isLive: false });
     renderAt('/s/src1/movie/m7', route);
-    expect(await screen.findByTestId('vod-offline-chip')).toBeTruthy();
+    expect(await screen.findByText('Plays the downloaded copy')).toBeTruthy();
+    // Said once, quietly: no green "Downloaded" pill in the meta line beside Watched's (v-vod-04).
+    expect(screen.queryByTestId('vod-offline-chip')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'Resume from 12:34' }));
     await waitFor(() => expect(callsOf('myvideos.playSource')).toEqual([{ id: 42 }]));
     await waitFor(() => expect(played.sources).toHaveLength(1));
     expect(played.sources[0]).toMatchObject({ url: 'http://local/files/42', resumeSeconds: 754 });
-    // The finished download links to its own My Videos page.
-    expect(screen.getByRole('link', { name: 'Downloaded' }).getAttribute('href')).toBe('/my-videos/42');
+    // The line under the actions says Play takes the file (downloads-recording-12).
+    expect(screen.getByText('Plays the downloaded copy')).toBeTruthy();
+    // The finished download links to its own My Videos page, drawn as the file on disk, not a
+    // second green tick beside Watched's (vod-detail-02).
+    const downloaded = screen.getByRole('link', { name: 'Downloaded' });
+    expect(downloaded.getAttribute('href')).toBe('/my-videos/42');
+    expect(downloaded.querySelector('svg')!.getAttribute('class')).toContain('hard-drive-download');
+    expect(downloaded.querySelector('.text-success')).toBeNull();
+    // The phone tile's caption is the state in a word that fits, not "Download…" (v-phone-06).
+    expect(downloaded.closest('[data-testid=vod-hero-icons] > div')!.textContent).toBe('Saved');
     expect(within(await openHeroMenu()).getByRole('menuitem', { name: 'Stream instead' })).toBeTruthy();
   });
 
   it('shows "More in <category>" from the catalog, without the title itself', async () => {
     vi.stubGlobal('IntersectionObserver', EagerObserver);
+    // The rail names the category as the grid it opens does, without the section word (v-vod-05).
+    rpcMock.handlers['catalog.categories'] = () => [cat('c1', 'Movies | Action', 12)];
     rpcMock.handlers['catalog.movies'] = (a) => {
       const q = (a as { query: PageQuery }).query;
       return { items: [{ ...movie(7), ref: mref, title: 'Dune: Part Two' }, movie(8)], total: 2, offset: q.offset, limit: q.limit };
@@ -300,7 +317,7 @@ describe('Search zero state (critique: search; CB "Search zero state")', () => {
     rememberSearch('harbor');
     renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
     const start = await screen.findByTestId('vod-search-start');
-    expect(within(start).getByText('Search every source')).toBeTruthy();
+    expect(within(start).getByText('Search everything')).toBeTruthy();
     fireEvent.click(within(start).getByRole('button', { name: 'harbor' }));
     await waitFor(() => expect(currentLocation).toBe('/search?q=harbor'));
   });

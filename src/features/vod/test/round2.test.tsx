@@ -1,7 +1,7 @@
 /**
  * Review round 2 (movies, series, search): recent searches are not kept or offered while parental
  * controls are set or unknown, and follow the other tabs' writes; the row under the player is the hero's round icon set; a favourite shows in
- * the hero; on a phone the icons carry captions and the resume bar sits under Resume; pages that
+ * the hero; the icons carry captions and the resume bar sits under Resume; pages that
  * draw no player load it on the press; "More like this" asks the catalog only near the screen and
  * never for a Stalker portal; a small category drops its decade chips and search; the landing's
  * "All categories" follows the chips instead of reading as a chosen filter.
@@ -264,9 +264,12 @@ describe('the movie page', () => {
     renderAt('/s/src1/movie/m7', detailRoute);
     await screen.findByRole('button', { name: 'Resume from 20:00' });
     const icons = screen.getByTestId('vod-hero-icons');
-    // Each round button has its caption under it, below sm only, hidden from assistive tech.
-    const captions = [...icons.querySelectorAll('span[aria-hidden]')].filter((s) => s.className.includes('sm:hidden')).map((s) => s.textContent);
-    expect(captions).toEqual(['My List', 'Favorite', 'Watched', 'Download', 'More']);
+    // Each round button has its caption under it, hidden from assistive tech.
+    const captions = [...icons.querySelectorAll('span[aria-hidden]')];
+    // Start over is a tile of its own beside Resume (vod-detail-07), and More had nothing else to hold.
+    expect(captions.map((s) => s.textContent)).toEqual(['Restart', 'My List', 'Favorite', 'Watched', 'Download']);
+    // On every width (w-walkthrough-05), except My List's: from sm that button says it itself.
+    expect(captions.filter((s) => s.className.includes('sm:hidden')).map((s) => s.textContent)).toEqual(['My List']);
     expect(icons.className).toContain('max-sm:grid');
     // Resume, then its progress, then the icons, in the DOM as on a phone's screen.
     const progress = screen.getByTestId('vod-hero-progress');

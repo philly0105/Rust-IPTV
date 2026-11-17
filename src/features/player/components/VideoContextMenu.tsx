@@ -1,4 +1,4 @@
-import { Camera, ChevronLeft, Copy, Maximize, Maximize2, Minimize, Minimize2, Pause, PictureInPicture2, Play } from 'lucide-react';
+import { AppWindow, Camera, ChevronLeft, Copy, Maximize, Minimize, Minimize2, Pause, PictureInPicture2, Play } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +11,7 @@ import { usePipStore } from '../pip';
 import { canShareSource } from '../shareable';
 import { knownSourceKind, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
+import { ChannelActions } from './lazyParts';
 import { MenuAction, MenuChoice, MenuRow, MenuSeparator, MenuToggle, PictureRows, SpeedRows, usePictureSummary } from './Controls';
 import { playerMenuLayer } from './menuFrame';
 import { SleepMenu, SleepRowValue } from './SleepTimer';
@@ -164,9 +165,14 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
       onDoubleClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={(e) => {
-        if (e.key === 'ArrowLeft' && view !== 'root') {
+        // Into a submenu and back out (mirrored in right-to-left languages); a slider keeps its arrows.
+        if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !(e.target instanceof HTMLInputElement)) {
+          const into = (e.key === 'ArrowRight') !== (e.currentTarget.closest('[dir]')?.getAttribute('dir') === 'rtl');
+          const row = e.target instanceof Element ? e.target.closest<HTMLElement>('[aria-haspopup]:not(:disabled)') : null;
+          if (into && row) row.click();
+          else if (!into && view !== 'root') setView(view === 'style' ? 'text' : 'root');
+          else return;
           e.preventDefault();
-          setView(view === 'style' ? 'text' : 'root');
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
@@ -176,7 +182,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[min(70vh,420px)] w-64 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[calc(100dvh-1rem)] w-64 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -187,7 +193,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           />
           {!pipActive && (
             <MenuAction
-              icon={isWindowFilled ? <Minimize2 className={icon} aria-hidden /> : <Maximize2 className={icon} aria-hidden />}
+              icon={isWindowFilled ? <Minimize2 className={icon} aria-hidden /> : <AppWindow className={icon} aria-hidden />}
               label={isWindowFilled ? t('exitWindowFill') : t('windowFill')}
               onClick={() => pick(() => usePlayerStore.getState().toggleWindowFill())}
             />
@@ -224,6 +230,8 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
           <MenuSeparator />
+          {/* Live: favourite the channel, put it on the multi-view wall. */}
+          <ChannelActions onDone={onClose} />
           {/* Screenshot (C6): the menu closes first, so it is never in the picture. */}
           <MenuAction icon={<Camera className={icon} aria-hidden />} label={t('screenshot')} shortcut="screenshot" onClick={() => pick(() => void takeScreenshot())} />
           {canShareSource(source, knownSourceKind) && (

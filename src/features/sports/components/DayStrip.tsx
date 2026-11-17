@@ -110,6 +110,20 @@ export function DayStrip({
     ro.observe(list);
     return () => ro.disconnect();
   }, [value, days]);
+  // When the strip's box changes width (on a phone, a filter chip beside it turned on shows its name),
+  // the picked day is put back in the middle rather than left under the fade.
+  useLayoutEffect(() => {
+    const list = boxRef.current?.querySelector<HTMLElement>('[role=tablist]');
+    if (!list || typeof ResizeObserver === 'undefined') return;
+    let width = -1;
+    const ro = new ResizeObserver(([entry]) => {
+      const next = Math.round(entry?.contentRect.width ?? 0);
+      if (width >= 0 && next !== width) centreTab(list, false);
+      width = next;
+    });
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, []);
   const items = useMemo(() => {
     const f = formattersFor(lang);
     return days.map((day) => {
@@ -120,9 +134,9 @@ export function DayStrip({
         id: day,
         label: (
           <span className="flex flex-col items-center gap-0.5 leading-tight" title={f.full.format(at)}>
-            <span className={near ? 'text-xs font-semibold' : 'text-xs font-normal opacity-80'}>{near ?? f.weekday.format(at)}</span>
+            <span className={near ? 'text-xs font-semibold' : 'text-xs font-normal text-fg-subtle in-aria-selected:text-fg'}>{near ?? f.weekday.format(at)}</span>
             {/* Not drawn between the two flex lines, but it keeps the tab's name "Today Oct 25", not "TodayOct 25". */}{' '}
-            <span className="text-xs tabular-nums font-normal opacity-80">{f.date.format(at)}</span>
+            <span className="text-xs tabular-nums font-normal text-fg-subtle in-aria-selected:text-fg">{f.date.format(at)}</span>
           </span>
         ),
       };

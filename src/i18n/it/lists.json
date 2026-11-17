@@ -1,5 +1,6 @@
 {
-  "title": "Liste",
+  "title": "Liste di canali",
+  "lead": "I tuoi gruppi di canali",
   "newList": "Nuova lista",
   "newListName": "Nome della nuova lista",
   "createList": "Crea lista",
@@ -17,6 +18,7 @@
   "localDataHint": "Le liste sono salvate dall'app. Riprova, oppure riavvia l'app se l'errore persiste.",
   "emptyTitle": "Ancora nessuna lista",
   "emptyHint": "Raggruppa canali da qualsiasi sorgente, come Sport o Bambini.",
+  "emptyNoSources": "Aggiungi prima una sorgente. Poi raggruppa i suoi canali in liste, come Sport o Bambini.",
   "sidebarEmpty": "Raggruppa canali da qualsiasi sorgente.",
   "channelCount_one": "{{formatted}} canale",
   "channelCount_many": "{{formatted}} canali",

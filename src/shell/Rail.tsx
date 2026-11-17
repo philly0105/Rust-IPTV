@@ -1,16 +1,17 @@
-import { ChevronDown, ChevronUp, Ellipsis, Keyboard, ListVideo, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Settings as SettingsIcon } from 'lucide-react';
-import { type CSSProperties, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, Ellipsis, Keyboard, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Server, Settings as SettingsIcon } from 'lucide-react';
+import { type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Source } from '@/api/types';
-import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
+import { BrandMark, Button, cn, focusableIn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
+import { ActivityMark, ActivityText } from './activityMarks';
 import { useOffline } from './connection';
-import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
-import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
+import { archiveFromGuide, LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
+import { railLinkCurrent, railLinks, routeSourceId, type RailLink } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
 import { useShellStore } from './store';
@@ -26,7 +27,7 @@ import { useVisibleSources } from './useVisibleSources';
 const itemClass = (active: boolean, collapsed: boolean, dim = false) =>
   cn(
     'group flex h-(--rail-item-height) items-center gap-3 rounded-md text-sm font-medium outline-offset-[-2px]',
-    'motion-safe:transition-colors motion-safe:duration-150',
+    'motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
     collapsed ? 'justify-center px-0' : 'px-3',
     active
       ? 'tuning-tick bg-selected text-fg active:bg-active'
@@ -50,18 +51,24 @@ function RailNavLink({
   tour,
   dim,
   current,
-}: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour'> & { collapsed: boolean; dim?: boolean; tour?: string; current?: boolean }) {
+  activity,
+}: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour' | 'activity'> & { collapsed: boolean; dim?: boolean; tour?: string; current?: boolean }) {
   const { t } = useTranslation('shell');
   const label = t(labelKey);
   // A rest on the link starts the page's code and first data.
   const intent = useRouteIntent(to);
+  // A row with an activity mark names itself in text, which the mark's words then join.
+  const ariaLabel = collapsed && !activity ? label : undefined;
   const content = (active: boolean) => (
     <>
       {/* One 20 px box for every leading glyph (icons and source monograms), so the labels share a column. */}
-      <span aria-hidden className={RAIL_GLYPH}>
-        <Icon size={18} className={cn(active && 'text-accent')} />
+      <span className={cn(RAIL_GLYPH, 'relative')}>
+        <Icon aria-hidden size={18} className={cn(active && 'text-accent')} />
+        {collapsed && activity && <ActivityMark kind={activity} placement="corner" />}
       </span>
-      {!collapsed && <span className="truncate">{label}</span>}
+      {collapsed ? activity && <span className="sr-only">{label}</span> : <span className="truncate">{label}</span>}
+      {!collapsed && activity && <ActivityMark kind={activity} placement="end" />}
+      {activity && <ActivityText kind={activity} />}
     </>
   );
   return (
@@ -72,7 +79,7 @@ function RailNavLink({
           to={to}
           end={end}
           data-tour={tour}
-          aria-label={collapsed ? label : undefined}
+          aria-label={ariaLabel}
           className={({ isActive }) => itemClass(isActive, collapsed, dim)}
         >
           {({ isActive }) => content(isActive)}
@@ -82,7 +89,7 @@ function RailNavLink({
           {...intent}
           to={to}
           data-tour={tour}
-          aria-label={collapsed ? label : undefined}
+          aria-label={ariaLabel}
           aria-current={current ? 'page' : undefined}
           className={itemClass(current, collapsed, dim)}
         >
@@ -95,15 +102,17 @@ function RailNavLink({
 
 /**
  * A group's small label (Watch, Library, Sources). Collapsed, the rail has no room for words:
- * the label stays for screen readers and a short rule marks the break between the groups.
+ * the label stays for screen readers and a short rule marks the break between the groups. Not a
+ * heading: it names its group (role=group, aria-labelledby), and headings here came before every
+ * page's h1 in the outline.
  */
 function GroupLabel({ id, label, collapsed, action }: { id: string; label: string; collapsed: boolean; action?: ReactNode }) {
   if (collapsed) {
     return (
       <>
-        <h2 id={id} className="sr-only">
+        <span id={id} className="sr-only">
           {label}
-        </h2>
+        </span>
         <span aria-hidden className="mx-3 my-1.5 block border-t border-divider" data-rail-group-rule="" />
         {action && <div className="flex justify-center">{action}</div>}
       </>
@@ -119,9 +128,9 @@ function GroupLabel({ id, label, collapsed, action }: { id: string; label: strin
         'after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1.5 after:bg-linear-to-b after:from-surface after:to-transparent',
       )}
     >
-      <h2 id={id} className="truncate text-caption font-medium text-fg-subtle">
+      <p id={id} className="truncate text-caption font-medium text-fg-subtle">
         {label}
-      </h2>
+      </p>
       {action}
     </div>
   );
@@ -152,9 +161,10 @@ function writeLibraryMore(open: boolean): void {
 }
 
 /**
- * The More row: a disclosure in the shape of a link row, quieter at rest (it opens links, it is
- * not a page), with a chevron that says which way it goes. Icon-only in the collapsed rail, where
- * the tooltip names it.
+ * The More row: a disclosure in the shape of a link row, in the rows' own rest tone (the dim one
+ * means a page with nothing to show yet), with a chevron that says which way it goes. Icon-only in
+ * the collapsed rail, where the tooltip names it. Folded, it carries its pages' activity mark, so
+ * a running download or recording shows without opening it.
  */
 function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; controls: string; collapsed: boolean; onToggle(): void }) {
   const { t } = useTranslation('shell');
@@ -165,18 +175,20 @@ function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; co
       <button
         type="button"
         aria-expanded={open}
-        aria-controls={controls}
-        aria-label={collapsed ? label : undefined}
+        aria-controls={open ? controls : undefined}
         onClick={onToggle}
         data-rail-more=""
-        className={cn(itemClass(false, collapsed, true), 'w-full text-start')}
+        className={cn(itemClass(false, collapsed), 'w-full text-start')}
       >
-        <span aria-hidden className={RAIL_GLYPH}>
-          {collapsed && open ? <ChevronUp size={18} /> : <Ellipsis size={18} />}
+        <span className={cn(RAIL_GLYPH, 'relative')}>
+          {collapsed && open ? <ChevronUp aria-hidden size={18} /> : <Ellipsis aria-hidden size={18} />}
+          {collapsed && !open && <ActivityMark kind="any" placement="corner" />}
         </span>
+        {collapsed && <span className="sr-only">{label}</span>}
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1 truncate">{label}</span>
+            {!open && <ActivityMark kind="any" placement="end" />}
             {/* Turned like a source entry's chevron (inline end folded, down open), so the rail's two disclosures read alike. */}
             <ChevronDown
               aria-hidden
@@ -185,6 +197,7 @@ function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; co
             />
           </>
         )}
+        {!open && <ActivityText kind="any" />}
       </button>
     </Tooltip>
   );
@@ -199,6 +212,7 @@ function RailGroup({
   dim,
   first,
   noSources,
+  pageGone,
 }: {
   id: string;
   label: string;
@@ -212,8 +226,12 @@ function RailGroup({
    * The query outlives the first add, and from then on the page is the sources' own again.
    */
   noSources?: boolean;
+  /** The page on show is of a source that is not there (SourceGuard's page): no section claims it. */
+  pageGone?: boolean;
 }) {
-  const { pathname, search } = useLocation();
+  const { pathname, search, state } = useLocation();
+  // The archive the guide opened is the guide's page here, not Live TV's.
+  const fromGuide = archiveFromGuide(pathname, state);
   const moreId = useId();
   const main = links.filter((l) => !l.more);
   const more = links.filter((l) => l.more);
@@ -238,19 +256,26 @@ function RailGroup({
         icon={l.icon}
         end={l.end}
         tour={l.tour}
+        activity={l.activity}
         collapsed={collapsed}
         // `dim` is the group's: with no sources, the rows whose pages need one.
         dim={(dim && !l.noSourceNeeded) || l.dim}
-        current={l.section ? sectionCurrent(l.section, pathname, noSources ? search : '') : undefined}
+        current={
+          l.section
+            ? !pageGone && !(fromGuide && l.section === 'live') && sectionCurrent(l.section, pathname, noSources ? search : '')
+            : fromGuide && l.to === '/epg'
+              ? true
+              : undefined
+        }
       />
     </li>
   );
   return (
     <div role="group" aria-labelledby={id} data-rail-group={id} className="flex flex-col">
       {collapsed && first ? (
-        <h2 id={id} className="sr-only">
+        <span id={id} className="sr-only">
           {label}
-        </h2>
+        </span>
       ) : (
         <GroupLabel id={id} label={label} collapsed={collapsed} />
       )}
@@ -268,7 +293,9 @@ function RailGroup({
               }}
             />
             {unfolded && (
-              <ul id={moreId} className="mt-0.5 flex flex-col gap-0.5">
+              // In the icon rail the unfolded links sit on one recessed block under their toggle, so
+              // they read as More's and folding it again does not look like rows vanishing.
+              <ul id={moreId} className={cn('mt-0.5 flex flex-col gap-0.5', collapsed && 'rounded-md bg-surface-2 py-0.5')}>
                 {more.map(item)}
               </ul>
             )}
@@ -406,7 +433,9 @@ function SourceEntry({
     if (was === 'open') trigger.click();
   }, [RailMenu]);
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, state } = useLocation();
+  // The archive the guide opened marks the guide, not the source's Live TV.
+  const linkCurrent = (l: RailLink) => railLinkCurrent(l, pathname) && !(l.id === 'live' && archiveFromGuide(pathname, state));
   // The collapsed rail's menu lists Radio only once the m3u radio probe has answered: hovering
   // or focusing the monogram starts it, so a narrow window pays for no probe it never opens.
   const [warm, setWarm] = useState(false);
@@ -467,7 +496,7 @@ function SourceEntry({
             tooltip={label}
             tooltipSide="inline-end"
             items={links.map((l) => {
-              const current = railLinkCurrent(l, pathname);
+              const current = linkCurrent(l);
               return {
                 id: l.id,
                 label: t(l.labelKey),
@@ -515,13 +544,13 @@ function SourceEntry({
       <button
         type="button"
         aria-expanded={expanded}
-        aria-controls={listId}
+        aria-controls={expanded ? listId : undefined}
         onClick={() => {
           revealOnExpand.current = !expanded;
           onToggle();
         }}
         className={cn(
-          'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
+          'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
           active ? 'text-fg hover:bg-hover active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
         )}
       >
@@ -548,7 +577,7 @@ function SourceEntry({
         <ul id={listId} className="mt-0.5 mb-1 ms-[1.375rem] flex flex-col gap-0.5 border-s border-divider ps-2">
           {links.map((l) => {
             // A movie's page and the catch-up archive count too (railLinkCurrent), which NavLink's prefix match missed.
-            const current = railLinkCurrent(l, pathname);
+            const current = linkCurrent(l);
             return (
               <li key={l.id}>
                 <SourceLink to={l.to} current={current}>
@@ -631,7 +660,7 @@ function SourceLink({ to, current, children }: { to: string; current: boolean; c
       to={to}
       aria-current={current ? 'page' : undefined}
       className={cn(
-        'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-150',
+        'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
         current ? 'tuning-tick bg-selected font-medium text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
       )}
     >
@@ -715,9 +744,26 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
 /** Where the zero-sources state already shows the add flow, the rail adds no second call to action. */
 const ONBOARDING_ROUTES = new Set(['/dashboard', '/sources']);
 
-/** Memoized (performance audit SH-1): it follows the location itself, so the shell's own re-renders pass it by. */
-export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCollapsed: boolean }) {
+/**
+ * Memoized (performance audit SH-1): it follows the location itself, so the shell's own re-renders pass it by.
+ * `autoCollapsed`: below 1100 px (RAIL_DOCK_QUERY), where the rail docks as icons and Expand opens it over the page
+ * (`peek`, the shell store's railPeek) without moving the page: a 72 px column stays in its place.
+ * `aside`: the page took the whole window (header.stepAside) and the docked column went with it;
+ * the rail shows only while open over the page, and no column is kept for it.
+ */
+export const Rail = memo(function Rail({
+  collapsed,
+  autoCollapsed,
+  peek = false,
+  aside = false,
+}: {
+  collapsed: boolean;
+  autoCollapsed: boolean;
+  peek?: boolean;
+  aside?: boolean;
+}) {
   const { t } = useTranslation('shell');
+  const setRailPeek = useShellStore((s) => s.setRailPeek);
   const sources = useVisibleSources();
   const offline = useOffline();
   const toggleRail = useShellStore((s) => s.toggleRail);
@@ -768,12 +814,52 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
     if (collapsed) void loadRailMenu().catch(() => {});
   }, [collapsed]);
 
+  // Open over the page the rail is modal (v-shell-home-01): the page behind the scrim is inert and
+  // Tab cycles inside the rail, so a keyboard user never works a page they can barely see. Escape,
+  // the scrim and Collapse close it (the Escape chain hands focus back to Expand sidebar).
+  const navRef = useRef<HTMLElement>(null);
+  // A layout effect: Hide sidebar focuses the header's Show sidebar right after the rail goes.
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const shell = nav?.parentElement;
+    if (!peek || !nav || !shell) return;
+    // Opened from the floating Expand sidebar (aside), which went as the rail came: focus takes
+    // the rail's own toggle, where it stays when the docked rail opens.
+    if (aside && (!document.activeElement || document.activeElement === document.body)) {
+      nav.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
+    }
+    const made: HTMLElement[] = [];
+    for (const el of Array.from(shell.children)) {
+      // The scrim stays live: a press on it closes the rail.
+      if (el === nav || !(el instanceof HTMLElement) || el.hasAttribute('inert') || el.hasAttribute('data-rail-scrim')) continue;
+      el.setAttribute('inert', '');
+      made.push(el);
+    }
+    return () => {
+      for (const el of made) el.removeAttribute('inert');
+    };
+  }, [peek, aside]);
+  const trapTab = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'Tab' || e.defaultPrevented) return;
+    const items = focusableIn(e.currentTarget);
+    const first = items[0];
+    const last = items.at(-1);
+    if (!first || !last) return;
+    const edge = e.shiftKey ? first : last;
+    if (document.activeElement !== edge && e.currentTarget.contains(document.activeElement)) return;
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  };
+
+  // With no sources the list itself is the add row (or the page's own onboarding).
+  const canAdd = !noSources && !(sources.isError && !offline);
   const addSource = (
-    <Tooltip content={t('addSource')} describe={false}>
+    <Tooltip content={t('addSource')} side="inline-end" describe={false}>
       <Link
         to="/sources?add=1"
         aria-label={t('addSource')}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
+        // 28 px for the mouse, so the label row keeps its height; 44 px under a finger (TOUCH_TARGET's floor).
+        className="inline-flex size-7 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors pointer-coarse:size-[calc(44rem/15)]"
       >
         <Plus aria-hidden size={16} />
       </Link>
@@ -849,130 +935,192 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const footerButton = 'text-fg-muted pointer-coarse:hidden';
 
   return (
-    <nav
-      aria-label={t('mainNavigation')}
-      data-testid="shell-rail"
-      data-collapsed={collapsed || undefined}
-      className={cn(
-        'flex h-full shrink-0 flex-col border-e border-divider bg-surface',
-        collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
-      )}
-    >
-      <div className={cn('flex h-(--header-height) shrink-0 items-center gap-2', collapsed ? 'justify-center px-2' : 'px-4')}>
-        <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5 rounded-md" aria-label={t('appName')}>
-          {/* The colour mark is the app icon: the same in every theme and accent, never tinted. */}
-          <BrandMark size={collapsed ? 32 : 28} className="shrink-0" />
-          {!collapsed && <span className="truncate font-display text-title-sm tracking-tight">{t('appName')}</span>}
-        </Link>
-      </div>
-
-      {/*
-        Two blocks that scroll apart: the Watch links stay put (scrolling on their own only when
-        the window is too short to leave the rest 10rem), and Library and the sources share the
-        rest. Opening a source's page reveals its link inside that block, so Home, Search and the
-        guide stay on screen (L3-visual-2); one shared scroller pushed them out at every laptop
-        height. Library scrolls with the sources rather than standing over them: pinned, it left
-        the sources about 10rem at 768 px, too little for one expanded source.
-      */}
-      <div className="flex min-h-0 flex-1 flex-col">
+    <>
+      {/* Open over the page: the docked column keeps its place, and a press beside the rail closes it. */}
+      {peek && !aside && <div aria-hidden className="h-full w-(--rail-width-collapsed) shrink-0 border-e border-divider bg-surface" />}
+      {peek && (
         <div
-          ref={primaryRef}
-          data-testid="rail-primary"
-          data-fade-top={primaryFade.top || undefined}
-          data-fade-bottom={primaryFade.bottom || undefined}
-          style={railFadeMask(primaryFade.top, primaryFade.bottom)}
-          className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2 pb-1', RAIL_PRIMARY_MAX)}
-        >
-          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={watch} collapsed={collapsed} first noSources={noSources} />
+          aria-hidden
+          data-rail-scrim=""
+          className="fixed inset-0 z-40 bg-scrim motion-safe:animate-fade-in"
+          onMouseDown={(e) => {
+            // The press's default would move focus to <body>.
+            e.preventDefault();
+            setRailPeek(false);
+            document.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
+          }}
+        />
+      )}
+      <nav
+        ref={navRef}
+        aria-label={t('mainNavigation')}
+        onKeyDown={peek ? trapTab : undefined}
+        data-testid="shell-rail"
+        data-collapsed={collapsed || undefined}
+        data-peek={peek || undefined}
+        className={cn(
+          'flex h-full shrink-0 flex-col border-e border-divider bg-surface',
+          collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
+          peek && 'fixed inset-y-0 start-[env(safe-area-inset-left,0px)] z-40 shadow-3',
+        )}
+      >
+        <div className={cn('flex h-(--header-height) shrink-0 items-center gap-2', collapsed ? 'justify-center px-2' : 'px-4')}>
+          <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5 rounded-md" aria-label={t('appName')}>
+            {/* The colour mark is the app icon: the same in every theme and accent, never tinted. */}
+            <BrandMark size={collapsed ? 32 : 28} className="shrink-0" />
+            {/* Open over the page the row gives the name's room to Hide sidebar; the mark and the link's name stay. */}
+            {!collapsed && !peek && <span className="truncate font-display text-title-sm tracking-tight">{t('appName')}</span>}
+          </Link>
+          {/*
+            Open over the page, the rail can also go away entirely (the header's Show sidebar brings
+            it back). A worded button up here, so the footer keeps one sidebar control: two panel
+            glyphs side by side told a touch user nothing about which closed the drawer.
+          */}
+          {peek && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                // The rail and this button go: focus moves on to the header's Show sidebar button.
+                flushSync(toggleRailHidden);
+                document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
+              }}
+              data-rail-hide=""
+              className="-me-2 ms-auto min-w-0 shrink px-2"
+            >
+              <span title={t('hideRail')} className="truncate">
+                {t('hideRail')}
+              </span>
+            </Button>
+          )}
         </div>
 
-        <div
-          ref={scrollRef}
-          data-testid="rail-scroll"
-          data-fade-top={fade.top || undefined}
-          data-fade-bottom={fade.bottom || undefined}
-          // No fade at the top: the sticky group label is that edge, and a fade would dim it.
-          style={railFadeMask(false, fade.bottom, '3rem')}
-          className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
-        >
-          {/* With no sources Library's pages open empty, but for Lists: they step back (SH-welcome-generic). */}
-          <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} />
-          <div role="group" aria-labelledby="rail-sources-heading" className="flex flex-col gap-0.5">
-            <GroupLabel
-              id="rail-sources-heading"
-              label={t('sources')}
+        {/*
+          Two blocks that scroll apart: the Watch links stay put (scrolling on their own only when
+          the window is too short to leave the rest 10rem), and Library and the sources share the
+          rest. Opening a source's page reveals its link inside that block, so Home, Search and the
+          guide stay on screen (L3-visual-2); one shared scroller pushed them out at every laptop
+          height. Library scrolls with the sources rather than standing over them: pinned, it left
+          the sources about 10rem at 768 px, too little for one expanded source.
+        */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            ref={primaryRef}
+            data-testid="rail-primary"
+            data-fade-top={primaryFade.top || undefined}
+            data-fade-bottom={primaryFade.bottom || undefined}
+            style={railFadeMask(primaryFade.top, primaryFade.bottom)}
+            className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2 pb-1', RAIL_PRIMARY_MAX)}
+          >
+            <RailGroup
+              id="rail-watch-heading"
+              label={t('navGroupWatch')}
+              links={watch}
               collapsed={collapsed}
-              action={noSources || (sources.isError && !offline) ? undefined : addSource}
+              first
+              noSources={noSources}
+              pageGone={!!activeSourceId && !!sources.data && !sources.data.some((s) => s.id === activeSourceId)}
             />
-            {sourceList}
-            {/* One source: its own row leads to the Sources page. */}
-            {!lone && (
-              <RailNavLink
-                to="/sources"
-                labelKey="manageSources"
-                icon={ListVideo}
+          </div>
+
+          <div
+            ref={scrollRef}
+            data-testid="rail-scroll"
+            data-fade-top={fade.top || undefined}
+            data-fade-bottom={fade.bottom || undefined}
+            // No fade at the top: the sticky group label is that edge, and a fade would dim it.
+            style={railFadeMask(false, fade.bottom, '3rem')}
+            className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
+          >
+            {/* With no sources Library's pages open empty, but for Lists: they step back (SH-welcome-generic). */}
+            <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} />
+            <div role="group" aria-labelledby="rail-sources-heading" className="flex flex-col gap-0.5">
+              <GroupLabel
+                id="rail-sources-heading"
+                label={t('sources')}
                 collapsed={collapsed}
-                end
-                // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.
-                current={noSources && sourcesFor(location.pathname, location.search) ? false : undefined}
+                // The icon rail has no room for a row: there the + stays beside the group's rule.
+                action={collapsed && canAdd ? addSource : undefined}
               />
-            )}
+              {sourceList}
+              {/* One source: its own row leads to the Sources page. */}
+              {!lone && (
+                <RailNavLink
+                  to="/sources"
+                  labelKey="manageSources"
+                  // Its own glyph: ListVideo is a channel list's (library-12).
+                  icon={Server}
+                  collapsed={collapsed}
+                  end
+                  // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.
+                  current={noSources && sourcesFor(location.pathname, location.search) ? false : undefined}
+                />
+              )}
+              {/* A labelled row, so adding a source reads as a control (a bare + in the label read as decoration). */}
+              {!collapsed && canAdd && <RailNavLink to="/sources?add=1" labelKey="addSource" icon={Plus} collapsed={false} current={false} />}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* One row: Settings, then the keyboard reference and the sidebar toggle as icon buttons. */}
-      <div className={cn('flex shrink-0 gap-0.5 border-t border-divider p-2', collapsed ? 'flex-col items-stretch' : 'items-center')}>
-        <div className={cn(!collapsed && 'min-w-0 flex-1')}>
-          <RailNavLink to="/settings" labelKey="navSettings" icon={SettingsIcon} collapsed={collapsed} />
+        {/* One row: Settings, then the keyboard reference and the sidebar toggle as icon buttons. */}
+        <div className={cn('flex shrink-0 gap-0.5 border-t border-divider p-2', collapsed ? 'flex-col items-stretch' : 'items-center')}>
+          <div className={cn(!collapsed && 'min-w-0 flex-1')}>
+            <RailNavLink to="/settings" labelKey="navSettings" icon={SettingsIcon} collapsed={collapsed} />
+          </div>
+          {/*
+            Keyboard-only: a phone or tablet has nothing to type the combos on (SH-touch-chrome).
+            Not in the icon-only rail either, where the footer stacks: its row went to the sources
+            on a short window, and `?`, the palette and Settings all open the same reference.
+          */}
+          {!collapsed && (
+            <IconButton
+              label={t('keyboardShortcuts')}
+              shortcut="?"
+              tooltipSide="top"
+              icon={<Keyboard aria-hidden size={18} />}
+              onClick={() => setHelpOpen(true)}
+              className={cn(footerButton, 'size-(--rail-item-height)')}
+              data-testid="rail-shortcuts"
+            />
+          )}
+          {autoCollapsed ? (
+            // Below lg the rail docks as icons and opens over the page to show its names (on a
+            // touch tablet, where no tooltip comes, the only way to read them).
+            <>
+              {/* One button that opens and closes, so focus stays on it either way. Hide sidebar is in the brand row. */}
+              <IconButton
+                label={peek ? t('collapseRail') : t('expandRail')}
+                tooltipSide={peek ? 'top' : 'inline-end'}
+                icon={
+                  peek ? (
+                    <PanelLeftClose aria-hidden size={18} className="rtl:-scale-x-100" />
+                  ) : (
+                    <PanelLeftOpen aria-hidden size={18} className="rtl:-scale-x-100" />
+                  )
+                }
+                aria-expanded={peek}
+                onClick={() => setRailPeek(!peek)}
+                data-rail-peek=""
+                className={cn('text-fg-muted', peek ? 'size-(--rail-item-height)' : 'h-(--rail-item-height) w-full')}
+              />
+            </>
+          ) : (
+            <IconButton
+              label={collapsed ? t('expandRail') : t('collapseRail')}
+              tooltipSide={collapsed ? 'inline-end' : 'top'}
+              icon={
+                collapsed ? (
+                  <PanelLeftOpen aria-hidden size={18} className="rtl:-scale-x-100" />
+                ) : (
+                  <PanelLeftClose aria-hidden size={18} className="rtl:-scale-x-100" />
+                )
+              }
+              onClick={toggleRail}
+              className={cn('text-fg-muted', collapsed ? 'h-(--rail-item-height) w-full' : 'size-(--rail-item-height)')}
+            />
+          )}
         </div>
-        {/*
-          Keyboard-only: a phone or tablet has nothing to type the combos on (SH-touch-chrome).
-          Not in the icon-only rail either, where the footer stacks: its row went to the sources
-          on a short window, and `?`, the palette and Settings all open the same reference.
-        */}
-        {!collapsed && (
-          <IconButton
-            label={t('keyboardShortcuts')}
-            shortcut="?"
-            tooltipSide="top"
-            icon={<Keyboard aria-hidden size={18} />}
-            onClick={() => setHelpOpen(true)}
-            className={cn(footerButton, 'size-(--rail-item-height)')}
-            data-testid="rail-shortcuts"
-          />
-        )}
-        {autoCollapsed ? (
-          // Below lg the rail never expands; on a narrow window its icon column takes room, so it
-          // can go away entirely. The header's Show sidebar button brings it back.
-          <IconButton
-            label={t('hideRail')}
-            tooltipSide="inline-end"
-            icon={<PanelLeftClose aria-hidden size={18} className="rtl:-scale-x-100" />}
-            onClick={() => {
-              // The rail and this button go: focus moves on to the header's Show sidebar button.
-              flushSync(toggleRailHidden);
-              document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
-            }}
-            data-rail-hide=""
-            className="h-(--rail-item-height) w-full text-fg-muted"
-          />
-        ) : (
-          <IconButton
-            label={collapsed ? t('expandRail') : t('collapseRail')}
-            tooltipSide={collapsed ? 'inline-end' : 'top'}
-            icon={
-              collapsed ? (
-                <PanelLeftOpen aria-hidden size={18} className="rtl:-scale-x-100" />
-              ) : (
-                <PanelLeftClose aria-hidden size={18} className="rtl:-scale-x-100" />
-              )
-            }
-            onClick={toggleRail}
-            className={cn('text-fg-muted', collapsed ? 'h-(--rail-item-height) w-full' : 'size-(--rail-item-height)')}
-          />
-        )}
-      </div>
-    </nav>
+      </nav>
+    </>
   );
 });

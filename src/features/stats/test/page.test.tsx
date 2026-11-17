@@ -142,7 +142,7 @@ describe('stats page', () => {
     rpc.handlers['sources.list'] = () => [];
     rpc.handlers['stats.summary'] = (raw) => h.summary((raw as { days: 7 | 30 }).days);
     open('/stats?range=30');
-    expect(await screen.findByText('Time spent on live TV, movies and series shows up here.')).toBeTruthy();
+    expect(await screen.findByText('Add a source first. Time you spend watching shows up here.')).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId('stats-add-source').textContent).toBe('Add a source'));
     expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
     expect(screen.queryByTestId('stats-watch-live')).toBeNull();
@@ -274,7 +274,8 @@ describe('stats page', () => {
     const rows = within(list).getAllByTestId('stats-channel');
     expect(rows.map((r) => r.querySelector('p')!.textContent)).toEqual(['BBC One', 'Jazz FM', 'Old Channel']);
     expect(rows[0]!.textContent).toContain('2 hr');
-    expect(rows[0]!.textContent).toContain('Home portal');
+    // One source set up: its name on every row would only repeat (library-09).
+    expect(rows[0]!.textContent).not.toContain('Home portal');
     await waitFor(() => expect(within(list).getAllByTestId('stats-play')).toHaveLength(2));
     expect(within(rows[2]!).queryByTestId('stats-play')).toBeNull();
 

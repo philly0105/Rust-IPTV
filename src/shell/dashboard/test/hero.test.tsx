@@ -377,11 +377,11 @@ describe('HeroCarousel', () => {
     const layer = hero.querySelector('[data-hero-backdrop]')!;
     fireEvent.load(layer.querySelector('img')!);
     const poster = layer.querySelector<HTMLElement>('[data-hero-poster]')!;
-    // Top 8 % plus 56 % leaves the bottom 36 % to the controls (lg:bottom-14, level with the buttons).
+    // Top 8 % plus 56 % leaves the bottom 36 % to the controls (lg:bottom-10, level with the buttons).
     expect(poster.className).toContain('top-[8%]');
     expect(poster.className).toContain('h-[56%]');
     const controls = screen.getByTestId('hero-controls');
-    expect(controls.className).toContain('lg:bottom-14');
+    expect(controls.className).toContain('lg:bottom-10');
     // Both end on the page gutter, so the poster stands flush over the controls' pill.
     expect(poster.className).toMatch(/(^| )end-\(--page-gutter\)( |$)/);
     expect(controls.className).toMatch(/(^| )lg:end-\(--page-gutter\)( |$)/);
@@ -608,11 +608,15 @@ describe('HeroCarousel', () => {
     expect(screen.queryByTestId('hero-controls')).toBeNull();
     expect(hero.dataset['rotating']).toBeUndefined();
     expect(screen.getByRole('tabpanel').getAttribute('aria-label')).toBe('1 of 1');
+    // v-shell-home-09: a phone keeps no room under the buttons for dots it does not draw.
+    expect(screen.getByRole('tabpanel').className).toContain('max-sm:pb-6');
   });
 
   it('plays a movie slide and links to its details', () => {
     const { onPlay } = renderHero([slide('a'), slide('b')]);
     const panel = screen.getByRole('tabpanel');
+    // Two slides: the room for the dots stays.
+    expect(panel.className).not.toContain('max-sm:pb-6');
     fireEvent.click(within(panel).getByRole('button', { name: 'Play' }));
     expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ key: 's1|movie|a' }));
     expect(within(panel).getByRole('link', { name: 'Details' }).getAttribute('href')).toBe('/s/s1/movie/a');

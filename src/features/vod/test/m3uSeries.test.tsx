@@ -94,7 +94,7 @@ describe('F-M3U-SERIES: detail queries by source kind', () => {
 describe('F-M3U-SERIES: SeriesDetailPage for an M3U series', () => {
   it('lists the stored seasons and plays an episode with the rest of the season and the next queued', async () => {
     renderAt('/s/src1/series/s1', route);
-    fireEvent.click(await screen.findByRole('button', { name: 'Play S01E01' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Play season 1, episode 1' }));
     await waitFor(() => expect(played).toHaveLength(1));
     expect(played[0]).toMatchObject({ ref: sref, episodeId: 'e11', sourceKind: 'm3u' });
     await waitFor(() => expect(queueIds()).toEqual(['e11', 'e12', 'e21']));

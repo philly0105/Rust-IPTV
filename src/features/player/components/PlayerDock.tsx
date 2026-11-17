@@ -10,6 +10,7 @@ import '../player.css';
 import { PHONE_QUERY } from '@/shell/navigation';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { IconButton } from '@/ui/Button';
+import { focusableIn } from '@/ui/focus';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
@@ -28,18 +29,20 @@ import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
 import { bindSettingsEvents, usePlayerSettings } from '../useSettings';
 import { retryPlayback } from './Controls';
 import { PlayerSurface } from './PlayerSurface';
-import { SleepTimerHost, ZapHeaderLine } from './lazyParts';
+import { PlayerChannelName, SleepTimerHost, ZapAnnouncer, ZapHeaderLine } from './lazyParts';
 import { useZapBannerShown, useZapHover } from './zapHooks';
 
 /** The surface follows the stores itself: a dock render (a move, the mini frame) passes it by. */
 const MemoSurface = memo(PlayerSurface);
 
 const POS_KEY = 'player.mini.pos';
+/** A phone held sideways: the window is wide but short, under a finger. */
+export const LANDSCAPE_PHONE_QUERY = '(orientation: landscape) and (max-height: 500px) and (pointer: coarse)';
 const MARGIN = 16;
 /**
  * A phone's mini player bar (below sm, over the tab bar): its height, in rem against the 15 px
  * root like the tab bar's, so it follows the UI scale and not density. While it shows,
- * `--player-bar-inset` on <html> holds it, for the page to keep its last row clear of it.
+ * `--player-bar-inset` on <html> holds it, and the shell's outlet gives up that much room above the tab bar.
  */
 export const PLAYER_BAR_HEIGHT = 'calc(64rem / 15)';
 /** A finger moved this far before the bar follows it down (px), and this far closes it. */
@@ -140,9 +143,9 @@ function RouterExpand(props: ExpandProps) {
   );
 }
 
-/** The mini header's round buttons: 28 px, 40 px under a coarse pointer (PL-TOUCH-ERGONOMICS). */
+/** The mini header's round buttons: 28 px, 44 px under a coarse pointer (PL-TOUCH-ERGONOMICS). */
 const MINI_BUTTON =
-  'inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg active:bg-active pointer-coarse:size-10';
+  'inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg active:bg-active pointer-coarse:size-[calc(44rem/15)]';
 
 function ExpandBase({ label, onExpand, stretched = false }: ExpandProps & { onExpand(): void }) {
   if (stretched) {
@@ -192,13 +195,40 @@ function selectDockItem(s: PlayerState): { present: boolean; isLive: boolean; ha
 }
 
 const selectTitle = (s: PlayerState): string | undefined => s.source?.title;
+/** The title names a channel: live, or a catch-up programme. */
+const selectIsLive = (s: PlayerState): boolean => !!s.source?.isLive || !!s.source?.catchupProgramStart;
 
-/** The mini frame's header line: the title, or during a zap its number and what airs (ZapHeaderLine). */
+/**
+ * The mini frame's header: the title, or during a zap its number and what airs (ZapHeaderLine).
+ * Under the title, quieter, what it plays (the programme on now, a game Sports started, the
+ * episode), as the phone bar's second line says it.
+ */
 function MiniTitle({ miniZap, onPointerEnter, onPointerLeave }: { miniZap: boolean; onPointerEnter(): void; onPointerLeave(): void }) {
   const title = usePlayerStore(selectTitle);
+  const isLive = usePlayerStore(selectIsLive);
+  const subtitle = usePlayerStore((s) => s.source?.subtitle);
+  const second = !miniZap && subtitle ? subtitle : undefined;
   return (
-    <span className="flex min-w-0 flex-1 text-body-sm font-medium text-fg" title={title} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
-      {miniZap && title !== undefined ? <ZapHeaderLine title={title} /> : <span className="min-w-0 truncate">{title}</span>}
+    <span
+      className={cn('flex min-w-0 flex-1 text-body-sm font-medium text-fg', second && 'flex-col')}
+      title={second ? `${title ?? ''}\n${second}` : title}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+    >
+      {miniZap && title !== undefined ? (
+        <ZapHeaderLine title={title} />
+      ) : isLive && title !== undefined ? (
+        <PlayerChannelName title={title} className={cn('min-w-0', second && 'leading-tight')} />
+      ) : (
+        <span dir="auto" className={cn('min-w-0 truncate', second && 'leading-tight')}>
+          {title}
+        </span>
+      )}
+      {second && (
+        <span dir="auto" data-testid="mini-subtitle" className="min-w-0 truncate text-caption leading-tight font-normal text-fg-muted">
+          {second}
+        </span>
+      )}
     </span>
   );
 }
@@ -206,8 +236,11 @@ function MiniTitle({ miniZap, onPointerEnter, onPointerLeave }: { miniZap: boole
 /** The phone bar's first line, after the live dot. */
 function BarTitle({ miniZap }: { miniZap: boolean }) {
   const title = usePlayerStore(selectTitle);
+  const isLive = usePlayerStore(selectIsLive);
   return miniZap && title !== undefined ? (
     <ZapHeaderLine title={title} />
+  ) : isLive && title !== undefined ? (
+    <PlayerChannelName title={title} className="min-w-0" />
   ) : (
     <span dir="auto" className="min-w-0 truncate">
       {title}
@@ -340,6 +373,78 @@ export const PlayerDock = memo(function PlayerDock() {
     const target = inPip ? pipSlotRef.current : inWindowFill ? windowSlotRef.current : inStage ? stageTarget : miniSlotRef.current;
     if (target && host.parentNode !== target) moveKeepingFocus(host, target);
   }, [inPip, inWindowFill, inStage, stageTarget, host]);
+  // Fill window covers the page, but the page stayed in the Tab order and kept the keys: focus left
+  // on a channel row moved an unseen cursor with the arrows, and Enter tuned what it reached. While
+  // the player fills the window the page under it is inert and the player holds focus; when it
+  // ends, focus goes back where it was. Dialogs and menus portal out of the shell, so they still work.
+  useEffect(() => {
+    const layer = windowSlotRef.current;
+    const shell = layer?.parentElement;
+    if (!inWindowFill || !layer || !shell) return;
+    const before = document.activeElement;
+    const made: HTMLElement[] = [];
+    for (const el of Array.from(shell.children)) {
+      if (el === layer || !(el instanceof HTMLElement) || el.inert || el.hidden) continue;
+      el.inert = true;
+      made.push(el);
+    }
+    if (!(before instanceof Node) || !host.contains(before)) host.querySelector<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
+    // Tab wraps inside the player: past its last control it went to the browser (the address bar)
+    // before it came round, one press with no focus ring anywhere.
+    const wrapTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      const stops = focusableIn(host);
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      if (!first || !last) return;
+      const at = document.activeElement;
+      if (e.shiftKey ? at === first || at === host.querySelector('[data-player-focus]') : at === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    host.addEventListener('keydown', wrapTab);
+    return () => {
+      host.removeEventListener('keydown', wrapTab);
+      for (const el of made) el.inert = false;
+      const now = document.activeElement;
+      const lost = !now || now === document.body || host.contains(now);
+      if (lost && before instanceof HTMLElement && before.isConnected && !host.contains(before)) before.focus({ preventScroll: true });
+    };
+  }, [inWindowFill, host]);
+  // Fullscreen from the page (F on a channel row) dropped focus to the body: the player takes it.
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const now = document.activeElement;
+    if (!now || !host.contains(now)) host.querySelector<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
+  }, [isFullscreen, host]);
+
+  // A phone turned sideways asks for a bigger picture: a video playing in the page's stage fills
+  // the window (Fill window), and turning it back gives the page back. Leaving Fill window by hand
+  // keeps the page until the phone turns again. Nothing playing, nothing changes.
+  const landscapePhone = useMediaQuery(LANDSCAPE_PHONE_QUERY);
+  const playingVideo = usePlayerStore((s) => s.status === 'playing' && (s.mode === 'inline' || s.mode === 'embedded-mpv'));
+  const autoFilled = useRef(false);
+  const declined = useRef(false);
+  useEffect(() => {
+    if (isWindowFilled || !autoFilled.current) return;
+    autoFilled.current = false;
+    declined.current = landscapePhone;
+  }, [isWindowFilled, landscapePhone]);
+  useEffect(() => {
+    const st = usePlayerStore.getState();
+    if (!landscapePhone) {
+      declined.current = false;
+      if (autoFilled.current && st.isWindowFilled) st.toggleWindowFill();
+      autoFilled.current = false;
+      return;
+    }
+    if (playingVideo && inStage && !pip && !st.isWindowFilled && !st.isFullscreen && !declined.current) {
+      autoFilled.current = true;
+      st.toggleWindowFill();
+    }
+  }, [landscapePhone, playingVideo, inStage, pip]);
+
   // The page showing this stream in its stage: Expand comes back to it for a stream with no page of its own.
   // Followed from the store, so a new stream (each zap) does not re-render the dock.
   useLayoutEffect(() => {
@@ -452,6 +557,19 @@ export const PlayerDock = memo(function PlayerDock() {
     };
   }, [barShown]);
 
+  // The floating mini player in a bottom corner covers the end of the page: the room it takes from
+  // the window's foot, for the shell to let a page scroll clear of it (v-shell-home-13). In the top
+  // half it covers nothing a page cannot scroll away from.
+  useLayoutEffect(() => {
+    const html = document.documentElement;
+    const height = inMini && !bar ? (miniRef.current?.offsetHeight ?? 0) : 0;
+    const low = height > 0 && pos.bottom + height / 2 < window.innerHeight / 2;
+    html.style.setProperty('--player-float-inset', low ? `${pos.bottom + height + MARGIN}px` : '0px');
+    return () => {
+      html.style.removeProperty('--player-float-inset');
+    };
+  }, [inMini, bar, pos]);
+
   /**
    * Swiping the phone bar down closes the player, as on a phone's own media bars. The bar follows
    * the finger (written to its style, so the dock does not re-render per move) and springs back
@@ -495,7 +613,11 @@ export const PlayerDock = memo(function PlayerDock() {
     <>
       {/* Fullscreen from the mini frame fills the screen: full controls, not the mini bar. */}
       {createPortal(
-        <MemoSurface compact={inMini && !isFullscreen && !inWindowFill && !inPip} thumb={barShown && !isFullscreen && !inWindowFill && !inPip} channelPanelAvailable={channelPanelAvailable} />,
+        <>
+          <MemoSurface compact={inMini && !isFullscreen && !inWindowFill && !inPip} thumb={barShown && !isFullscreen && !inWindowFill && !inPip} channelPanelAvailable={channelPanelAvailable} />
+          {/* In the host, which moves with the player: outside it, Fill window's inert page would silence it. */}
+          <ZapAnnouncer />
+        </>,
         host,
       )}
       {/* Sleep timer (C5): the one-minute warning toast. */}
@@ -542,7 +664,7 @@ export const PlayerDock = memo(function PlayerDock() {
         {!bar && (
           <div
             // touch-none: a finger on the header drags the frame instead of scrolling the page.
-            className="flex h-10 shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-divider ps-1.5 pe-1 active:cursor-grabbing pointer-coarse:h-11 pointer-coarse:ps-3"
+            className="flex h-10 shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-divider ps-1.5 pe-1 active:cursor-grabbing pointer-coarse:h-12 pointer-coarse:ps-3"
             onPointerDown={onDragStart}
             onPointerMove={onDragMove}
             onPointerUp={onDragEnd}

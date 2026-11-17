@@ -1,6 +1,6 @@
-/** /downloads: the transfer queue. Completed items leave this page for My Videos. */
+/** /downloads: the transfer queue, then the latest finished downloads. My Videos keeps every finished one. */
 
-import { Download as DownloadIcon, Eraser, Gauge, Library } from 'lucide-react';
+import { Download as DownloadIcon, Eraser, Gauge, Library, Pause } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -12,17 +12,18 @@ import { buttonClass } from '@/ui/Button';
 import { errorDescription, toast } from '@/ui';
 import { formatList } from '@/lib/intl';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useSettings, useShortcut } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useMediaQuery, useSettings, useShortcut } from '../deps';
 import { BrowseMoviesAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
-import { DOWNLOAD_ROW_HEIGHT, DownloadRow } from '../components/DownloadRow';
-import { DownloadSpeedDialog, MIB } from '../components/DownloadSpeedDialog';
+import { DownloadRow, FinishedRow, SM_QUERY, downloadRowHeight, finishedRowHeight } from '../components/DownloadRow';
+import { DownloadSpeedDialog } from '../components/DownloadSpeedDialog';
 import { FolderBar } from '../components/FolderBar';
 import { VirtualRows, type RowRenderInfo } from '../components/VirtualRows';
 import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useDownloads, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { actionsFor, buildQueueRows, queueCounts, type QueueAction, type QueueRow } from '../lib/queue';
-import { playActiveCatchupDownload } from '../lib/playDownload';
+import { formatSpeedLimit } from '../lib/format';
+import { actionsFor, buildQueueRows, downloadNames, queueCounts, type QueueAction, type QueueRow } from '../lib/queue';
+import { playActiveCatchupDownload, playDownload } from '../lib/playDownload';
 
 const HEADER_HEIGHT = 52;
 
@@ -51,10 +52,19 @@ export function DownloadsPage() {
   const [clearing, setClearing] = useState(false);
 
   const all = useMemo(() => query.data ?? [], [query.data]);
-  const rows = useMemo(() => buildQueueRows(all), [all]);
+  const wide = useMediaQuery(SM_QUERY);
+  // `wide`: a new array when the breakpoint flips, so the list measures its rows again (downloadRowHeight).
+  const rows = useMemo(() => buildQueueRows(all), [all, wide]);
   const counts = useMemo(() => queueCounts(all), [all]);
   const completedCount = useMemo(() => all.filter((d) => d.status === 'completed').length, [all]);
   const attention = useMemo(() => all.filter((d) => d.status === 'failed' || d.status === 'canceled'), [all]);
+  // Pause all while anything moves or waits its turn, else Resume all while anything is paused.
+  const bulk = useMemo(() => {
+    const running = all.filter((d) => d.status === 'downloading' || d.status === 'queued');
+    if (running.length > 0) return { action: 'pause' as const, rows: running };
+    const paused = all.filter((d) => d.status === 'paused');
+    return paused.length > 0 ? { action: 'resume' as const, rows: paused } : undefined;
+  }, [all]);
   // Every row from one source: naming it on each row says nothing.
   const mixedSources = useMemo(() => new Set(all.map((d) => d.ref.sourceId)).size > 1, [all]);
 
@@ -85,14 +95,22 @@ export function DownloadsPage() {
 
   const onPlayCatchup = useCallback((d: Download) => {
     void playActiveCatchupDownload(d).catch((err: unknown) =>
-      toast({ title: t('playFailed', { title: d.subtitle?.split(' · ')[0] || d.title }), description: errorDescription(err), variant: 'error' }),
+      toast({ title: t('playFailed', { title: downloadNames(d).title }), description: errorDescription(err), variant: 'error' }),
     );
   }, [t]);
+
+  const onPlayFinished = useCallback((d: Download) => {
+    void playDownload(d).catch((err: unknown) =>
+      toast({ title: t('playFailed', { title: downloadNames(d).title }), description: errorDescription(err), variant: 'error' }),
+    );
+  }, [t]);
+  const onRedownload = useCallback((d: Download) => void perform('redownload', d), [perform]);
 
   const runFocused = (pick: (d: Download, actions: readonly QueueAction[]) => QueueAction | undefined) => {
     const id = focusedDownloadId();
     const d = id !== undefined ? all.find((x) => x.id === id) : undefined;
-    if (!d) return;
+    // A finished row's own buttons are its actions; removing one belongs to My Videos.
+    if (!d || d.status === 'completed') return;
     const actions = actionsFor(d.status, { canReveal: isDesktop, hasFile: !!d.filePath });
     const action = pick(d, actions);
     if (action && actions.includes(action)) onAction(action, d);
@@ -109,14 +127,25 @@ export function DownloadsPage() {
   // tabs), so the header search keeps its place from page to page.
   const myVideosLabel = completedCount > 0 ? t('openMyVideosCount', { count: completedCount }) : t('openMyVideos');
   const myVideosLink = (
-    // Icon only on a phone, so the folder line keeps its room (L3-visual-6).
-    <Link to="/my-videos" className={buttonClass('ghost', 'sm', 'ms-auto shrink-0')} title={myVideosLabel} data-testid="downloads-my-videos">
+    // On a phone the folder takes its own line and the two actions the next, with short labels so
+    // they share it, their icons under the folder's: as bare glyphs they squeezed the path to
+    // "/ho… downloads" and said nothing on touch.
+    <Link
+      to="/my-videos"
+      className={buttonClass('ghost', 'sm', 'shrink-0 max-sm:-ms-3 sm:ms-auto')}
+      title={myVideosLabel}
+      aria-label={myVideosLabel}
+      data-testid="downloads-my-videos"
+    >
       <Library size={16} aria-hidden />
-      <span className="max-sm:sr-only">{myVideosLabel}</span>
+      <span className="sm:hidden">{completedCount > 0 ? myVideosLabel : t('myVideosTitle')}</span>
+      <span className="max-sm:hidden">{myVideosLabel}</span>
     </Link>
   );
   const title = t('title');
   usePageHeader(title, summary || undefined);
+  const speedText = settings.data ? (globalLimit === 0 ? t('speedUnlimited') : formatSpeedLimit(globalLimit, i18n.language)) : '…';
+  const speedButtonLabel = t('speedGlobalButton', { speed: speedText });
 
   // The download the dialog is about as the list shows it now: it may have
   // finished since the dialog opened.
@@ -150,23 +179,43 @@ export function DownloadsPage() {
       if (row.kind === 'header') {
         return (
           <SectionHeading
-            title={t(row.section === 'active' ? 'sectionActive' : 'sectionAttention')}
+            title={t(row.section === 'active' ? 'sectionActive' : row.section === 'attention' ? 'sectionAttention' : 'sectionFinished')}
             count={row.count}
-            {...(row.section === 'attention'
+            {...(row.section === 'finished'
+              ? {}
+              : row.section === 'attention'
               ? {
                   hint: t('sectionAttentionHint'),
-                  // VL-clear-finished-copy: beside the rows it removes, and named for them.
+                  // VL-clear-finished-copy: beside the rows it removes.
                   action: (
                     <Button size="sm" variant="ghost" icon={<Eraser size={16} aria-hidden />} onClick={() => setConfirm({ action: 'clear' })}>
                       {t('clearFailedDownloads')}
                     </Button>
                   ),
                 }
-              : {})}
+              : bulk
+                ? {
+                    // Both undo themselves, so neither asks first.
+                    action: (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={bulk.action === 'pause' ? <Pause size={16} aria-hidden /> : <DownloadIcon size={16} aria-hidden />}
+                        onClick={() => void Promise.all(bulk.rows.map((d) => perform(bulk.action, d)))}
+                        data-testid="downloads-bulk"
+                      >
+                        {t(bulk.action === 'pause' ? 'pauseAll' : 'resumeAll')}
+                      </Button>
+                    ),
+                  }
+                : {})}
           />
         );
       }
       const d = row.download;
+      if (row.section === 'finished') {
+        return <FinishedRow download={d} busy={pending.has(d.id)} tabbable={info.tabStop} onPlay={onPlayFinished} onRedownload={onRedownload} />;
+      }
       return (
         <DownloadRow
           download={d}
@@ -183,7 +232,7 @@ export function DownloadsPage() {
       );
     },
     // Each row subscribes to its own live sample (VD-4): a progress event re-renders that row only.
-    [mixedSources, onAction, onPlayCatchup, pending, sources, t, editSpeed, globalLimit],
+    [mixedSources, onAction, onPlayCatchup, onPlayFinished, onRedownload, pending, sources, t, editSpeed, globalLimit, bulk, perform],
   );
 
   let body;
@@ -202,21 +251,13 @@ export function DownloadsPage() {
       />
     );
   } else if (rows.length === 0) {
+    // Nothing queued and nothing saved (a finished one would be listed): the catalogue, where a download starts.
     body = (
       <EmptyState
         icon={<DownloadIcon size={28} aria-hidden />}
         title={t('queueEmptyTitle')}
-        description={completedCount > 0 ? t('queueEmptyWithLibrary', { count: completedCount }) : t('queueEmptyBody')}
-        action={
-          completedCount > 0 ? (
-            <Link to="/my-videos" className={buttonClass('primary', 'md')}>
-              {t('openMyVideos')}
-            </Link>
-          ) : (
-            // Nothing saved either: the catalogue, where a download starts.
-            <BrowseMoviesAction sources={sources} loading={sourcesLoading} />
-          )
-        }
+        description={!sourcesLoading && sources.size === 0 ? t('queueEmptyNoSources') : t('queueEmptyBody')}
+        action={<BrowseMoviesAction sources={sources} loading={sourcesLoading} />}
       />
     );
   } else {
@@ -224,13 +265,20 @@ export function DownloadsPage() {
       <VirtualRows
         rows={rows}
         label={t('queueListLabel')}
-        rowHeight={(r) => (r.kind === 'header' ? HEADER_HEIGHT : DOWNLOAD_ROW_HEIGHT)}
+        rowHeight={(r) =>
+          r.kind === 'header' ? HEADER_HEIGHT : r.section === 'finished' ? finishedRowHeight(r.download, wide) : downloadRowHeight(r.download, wide)
+        }
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         onRowKeyDown={(r, e) => {
           if (r.kind !== 'item' || e.key !== 'Enter') return;
           e.preventDefault();
           const d = r.download;
+          if (r.section === 'finished') {
+            if (d.fileAvailable === false) onRedownload(d);
+            else onPlayFinished(d);
+            return;
+          }
           const primary = actionsFor(d.status, { canReveal: isDesktop, hasFile: !!d.filePath })[0];
           if (primary) onAction(primary, d);
         }}
@@ -246,25 +294,34 @@ export function DownloadsPage() {
       <PageTitle>{title}</PageTitle>
       {/* The list's own box (-mx-2, max-w-5xl, rows padded px-2), so the folder line, the section
           headings and the rows end on one line. */}
-      <div className="-mx-2 flex min-w-0 max-w-5xl items-center gap-3 px-2">
+      <div className="-mx-2 flex min-w-0 max-w-5xl items-center gap-3 px-2 max-sm:flex-wrap max-sm:gap-y-1">
         <FolderBar pageError={query.isError} />
         {myVideosLink}
+        {/* The default speed, a rarely changed setting (also in Settings > General), as one quiet
+            button at the end of the folder line. A page that failed to load has one Retry, its
+            error state's. */}
+        {!query.isError &&
+          (settings.isError ? (
+            <Button size="sm" variant="ghost" className="shrink-0" onClick={() => void settings.refetch()}>
+              {t('speedLoadRetry')}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="shrink-0"
+              icon={<Gauge size={16} aria-hidden />}
+              disabled={!settings.data}
+              title={speedButtonLabel}
+              aria-label={speedButtonLabel}
+              onClick={() => setSpeedTarget('global')}
+              data-testid="downloads-speed"
+            >
+              <span className="sm:hidden">{t('speedInherited', { speed: speedText })}</span>
+              <span className="max-sm:hidden">{speedButtonLabel}</span>
+            </Button>
+          ))}
       </div>
-      {/* A page that failed to load has one Retry, its error state's. */}
-      {!query.isError && <div className="flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-muted">
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<Gauge size={16} aria-hidden />}
-          disabled={!settings.data}
-          onClick={() => setSpeedTarget('global')}
-        >
-          {t('speedGlobalButton', { speed: settings.data ? (globalLimit === 0 ? t('speedUnlimited') : t('speedValue', { value: (globalLimit / MIB).toLocaleString(i18n.language, { maximumFractionDigits: 6 }) })) : '…' })}
-        </Button>
-        {settings.isError ? (
-          <Button size="sm" variant="ghost" onClick={() => void settings.refetch()}>{t('speedLoadRetry')}</Button>
-        ) : <span>{t('speedGlobalSummary')}</span>}
-      </div>}
       {body}
       {speedTarget !== null && (
         <DownloadSpeedDialog
@@ -287,10 +344,10 @@ export function DownloadsPage() {
         }
         description={
           confirm?.action === 'cancel'
-            ? t('cancelConfirmBody', { title: confirm.download?.title ?? '' })
+            ? t('cancelConfirmBody', { title: confirm.download ? downloadNames(confirm.download).title : '' })
             : confirm?.action === 'clear'
               ? t('clearConfirmBody')
-              : t('removeConfirmBody', { title: confirm?.download?.title ?? '' })
+              : t('removeConfirmBody', { title: confirm?.download ? downloadNames(confirm.download).title : '' })
         }
         confirmLabel={confirm?.action === 'cancel' ? t('actionCancel') : confirm?.action === 'clear' ? t('clearFailedDownloads') : t('actionRemove')}
         onConfirm={() => void confirmAction()}

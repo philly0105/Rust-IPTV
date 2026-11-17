@@ -110,28 +110,31 @@ describe('palette ranking (L1-visual-12)', () => {
 describe('settings words (L3-app-8)', () => {
   /** The cmdk items left after typing, in order. */
   const shown = (palette: HTMLElement) => Array.from(palette.querySelectorAll('[cmdk-item]'), (el) => el.textContent ?? '');
+  /** The settings sections listed, by id ("playback" for settings.playback). */
+  const sections = (palette: HTMLElement) =>
+    Array.from(palette.querySelectorAll('[cmdk-item]'), (el) => /settings\.(\w+)$/.exec(el.getAttribute('data-value') ?? '')?.[1]).filter(Boolean);
 
   it.each([
-    ['language', 'Settings: General'],
-    ['arabic', 'Settings: General'],
-    ['theme', 'Settings: Appearance'],
-    ['dark', 'Settings: Appearance'],
-    ['pin', 'Settings: Parental controls'],
-    ['xmltv', 'Settings: TV guide'],
-    ['hotkeys', 'Settings: Shortcuts'],
+    ['language', 'general'],
+    ['arabic', 'general'],
+    ['theme', 'appearance'],
+    ['dark', 'appearance'],
+    ['pin', 'parental'],
+    ['xmltv', 'epg'],
+    ['hotkeys', 'shortcuts'],
     // Words people use for what a section holds, not only its own terms.
-    ['subtitles', 'Settings: Playback'],
-    ['captions', 'Settings: Playback'],
-    ['autoplay', 'Settings: Playback'],
-    ['dark mode', 'Settings: Appearance'],
-    ['font size', 'Settings: Appearance'],
-    ['qr code', 'Settings: Remote control'],
-    ['reset settings', 'Settings: Backup'],
-    ['time zone', 'Settings: TV guide'],
-    ['report a problem', 'Settings: About'],
-  ])("'%s' finds %s", async (query, title) => {
+    ['subtitles', 'playback'],
+    ['captions', 'playback'],
+    ['autoplay', 'playback'],
+    ['dark mode', 'appearance'],
+    ['font size', 'appearance'],
+    ['qr code', 'remote'],
+    ['reset settings', 'backup'],
+    ['time zone', 'epg'],
+    ['report a problem', 'about'],
+  ])("'%s' finds the %s section", async (query, section) => {
     const { palette } = await openPaletteWith(query);
-    await waitFor(() => expect(shown(palette).some((s) => s.includes(title))).toBe(true));
+    await waitFor(() => expect(sections(palette)).toContain(section));
   });
 
   it("'dark mode' also offers the dark theme itself", async () => {
@@ -145,19 +148,19 @@ describe('settings words (L3-app-8)', () => {
     // IPTV app, and four settings sections pushed Live TV and the search row down.
     const { palette } = await openPaletteWith('channel');
     await waitFor(() => expect(shown(palette).some((s) => s.includes('Live TV'))).toBe(true));
-    expect(shown(palette).filter((s) => s.includes('Settings:'))).toEqual([]);
+    expect(sections(palette)).toEqual([]);
   });
 
   it('the browser has no External players section to offer', async () => {
     const { palette } = await openPaletteWith('settings');
-    await waitFor(() => expect(shown(palette).some((s) => s.includes('Settings: Playback'))).toBe(true));
-    expect(shown(palette).some((s) => s.includes('Settings: External players'))).toBe(false);
+    await waitFor(() => expect(sections(palette)).toContain('playback'));
+    expect(sections(palette)).not.toContain('players');
   });
 
   it('words a section does not hold still find nothing there', async () => {
     const { palette } = await openPaletteWith('arabic');
-    await waitFor(() => expect(shown(palette).some((s) => s.includes('Settings: General'))).toBe(true));
-    expect(shown(palette).some((s) => s.includes('Settings: Appearance'))).toBe(false);
+    await waitFor(() => expect(sections(palette)).toContain('general'));
+    expect(sections(palette)).not.toContain('appearance');
   });
 
   it('in Arabic, both the Arabic and the English words find the section', async () => {
@@ -166,8 +169,8 @@ describe('settings words (L3-app-8)', () => {
     rpcMock.handlers['settings.get'] = () => settings({ language: 'ar' });
     await applyLanguage('ar');
     try {
-      const general = i18n.t('shell:settingsSection', { section: i18n.t('shell:settingsGeneral') });
-      const appearance = i18n.t('shell:settingsSection', { section: i18n.t('shell:settingsAppearance') });
+      const general = i18n.t('shell:settingsSection', { section: i18n.t('settings:sectionGeneral') });
+      const appearance = i18n.t('shell:settingsSection', { section: i18n.t('settings:sectionAppearance') });
       expect(general).not.toBe('Settings: General');
       renderRoutes(routes, '/favorites');
       await screen.findByText('favorites page');
@@ -235,7 +238,7 @@ describe('palette guide programmes (F-SEARCH-PROGRAMMES)', () => {
     const { palette, router } = await openPaletteWith('cafe');
     // The core folds diacritics ("cafe" finds "Café"): the palette keeps its answer.
     const row = await within(palette).findByText('Café Society');
-    expect(within(palette).getByText('Guide programmes')).toBeTruthy();
+    expect(within(palette).getByText('Programmes')).toBeTruthy();
     expect(rpcMock.calls.filter((c) => c.cmd === 'epg.search').map((c) => (c.args as { sourceId: string }).sourceId).sort()).toEqual(['s1', 's2']);
     fireEvent.click(row);
     await waitFor(() => expect(router.state.location.pathname).toBe('/epg'));
@@ -262,7 +265,8 @@ describe('palette library matches', () => {
 
   it("'fox' finds a channel nobody favourited and plays it, with the Search page's own request", async () => {
     const { palette } = await openPaletteWith('fox');
-    const row = await within(palette).findByText('US| FOX HD');
+    // Found by what screen readers hear: the cleaned name, the tag after it (w-a11y-03).
+    const row = await within(palette).findByText('FOX HD (US)');
     expect(within(palette).getByText('Channels')).toBeTruthy();
     expect(within(palette).getByText('Movies and series')).toBeTruthy();
     expect(within(palette).getByText('The Fox Hunt')).toBeTruthy();
@@ -270,11 +274,17 @@ describe('palette library matches', () => {
     const channels = within(palette).getByText('Channels').closest('[cmdk-group]') as HTMLElement;
     expect(channels.querySelectorAll('[cmdk-item]')).toHaveLength(4);
     const item = row.closest('[cmdk-item]') as HTMLElement;
-    expect(within(item).getByText('US| SPORTS')).toBeTruthy();
+    // The group drawn as Live TV's groups column draws it, "SPORTS" with "US" after it, and heard
+    // as "SPORTS (US)" (shell4 follow-up).
+    expect(within(item).getByText('SPORTS (US)')).toBeTruthy();
+    expect(within(item).getByTitle('US| SPORTS')).toBeTruthy();
     // Named as Live TV's rows name it: the name first, the country tag after it in its own quiet
-    // span, and the provider's name for screen readers (which the row's text stays for matching).
-    expect(within(item).getByTestId('channel-name-tag').textContent).toBe('US');
-    expect(within(item).getByText('FOX HD')).toBeTruthy();
+    // span, and the cleaned name for screen readers; data-value keeps the provider's name for matching.
+    const [tag, groupTag] = within(item).getAllByTestId('channel-name-tag');
+    expect(tag!.textContent).toBe('US');
+    expect(groupTag!.previousElementSibling!.textContent).toBe('SPORTS');
+    // Drawn as the station and its quality words ("FOX" + " HD").
+    expect(tag!.previousElementSibling!.textContent).toBe('FOX HD');
     expect(item.getAttribute('data-value')).toContain('US| FOX HD');
     // The Search page's first page (every source, 60 and the probe row), so "Search for" opens warm.
     expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toContainEqual({ query: 'fox', limit: 61 });
@@ -288,7 +298,9 @@ describe('palette library matches', () => {
     rpcMock.handlers['settings.get'] = () => settings({ stripCountryPrefix: true });
     const { palette } = await openPaletteWith('fox');
     const item = (await within(palette).findByText('FOX HD')).closest('[cmdk-item]') as HTMLElement;
-    expect(within(item).queryByTestId('channel-name-tag')).toBeNull();
+    // The one tag left is the group's, which keeps it as Live TV's groups column does.
+    expect(within(item).getAllByTestId('channel-name-tag')).toHaveLength(1);
+    expect(within(item).getByText('SPORTS (US)')).toBeTruthy();
     expect(within(item).queryByText('US| FOX HD')).toBeNull();
   });
 
@@ -314,13 +326,86 @@ describe('palette library matches', () => {
     await within(palette).findByText('NBA 05');
     await waitFor(() => {
       const first = palette.querySelector('[cmdk-item]');
-      expect(first?.textContent).toContain('US| NBA TV FHD');
+      expect(first?.textContent).toContain('NBA TV FHD (US)');
       expect(first?.getAttribute('data-selected')).toBe('true');
     });
     const headings = [...palette.querySelectorAll('[cmdk-group-heading]')].map((h) => h.textContent);
     expect(headings.indexOf('Favorites and recent')).toBeLessThan(headings.indexOf('Channels'));
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: nbaTv, title: 'US| NBA TV FHD' })));
+  });
+
+  it('a recent channel and the library channels rank above guide programmes, and Enter plays the channel (w-realdata-06)', async () => {
+    const action: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '50' };
+    const start = Date.now() + 3_600_000;
+    rpcMock.handlers['recent.list'] = (): RecentEntry[] => [{ ref: action, viewedAt: '2026-10-11T08:00:00Z', snapshot: { title: 'SKY SPORTS ACTION HD', contentType: 'live' } }];
+    rpcMock.handlers['catalog.search'] = () => ({
+      live: [{ ref: { sourceId: 's1', contentType: 'live', itemId: '51' }, name: 'SKY SPORTS ARENA', categoryId: 'c3', categoryName: 'UK| SPORTS', isRadio: false }],
+      movies: [],
+      series: [],
+    });
+    rpcMock.handlers['epg.search'] = (a) =>
+      (a as { sourceId: string }).sourceId === 's1'
+        ? [
+            {
+              ref: { sourceId: 's1', contentType: 'live', itemId: '52' },
+              channelName: 'UK| SKY SPORTS NEWS',
+              program: { channelId: 'ssn', title: 'Sky Sports News', start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() },
+            },
+          ]
+        : [];
+    const { palette, input } = await openPaletteWith('sky sports');
+    await within(palette).findByText('Sky Sports News');
+    await within(palette).findByText('SKY SPORTS ARENA');
+    await waitFor(() => {
+      const headings = [...palette.querySelectorAll('[cmdk-group-heading]')].map((h) => h.textContent);
+      expect(headings.slice(0, 3)).toEqual(['Favorites and recent', 'Channels', 'Programmes']);
+      const first = palette.querySelector('[cmdk-item]');
+      expect(first?.textContent).toContain('SKY SPORTS ACTION HD');
+      expect(first?.getAttribute('data-selected')).toBe('true');
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: action })));
+  });
+
+  it("a programme row names its channel as the channel rows do, the place tag quiet and unbracketed (w-realdata-14)", async () => {
+    const start = Date.now() + 3_600_000;
+    rpcMock.handlers['epg.search'] = (a) =>
+      (a as { sourceId: string }).sourceId === 's1'
+        ? [
+            {
+              ref: { sourceId: 's1', contentType: 'live', itemId: '60' },
+              channelName: 'CA| BLOOMBERG HD',
+              program: { channelId: 'bb', title: 'Bloomberg Markets', start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() },
+            },
+          ]
+        : [];
+    const { palette } = await openPaletteWith('bloomberg markets');
+    const row = (await within(palette).findByText('Bloomberg Markets')).closest('[cmdk-item]') as HTMLElement;
+    expect(within(row).getByTestId('channel-name-tag').textContent).toBe('CA');
+    // The name and its quality word ("BLOOMBERG", " HD") drawn as ChannelName draws them.
+    expect(within(row).getByText('BLOOMBERG')).toBeTruthy();
+    // Drawn unbracketed; screen readers hear the cleaned name with the tag in brackets (w-a11y-03).
+    expect(within(row).getByTestId('channel-name-tag').closest('[aria-hidden]')!.textContent).not.toContain('(CA)');
+    expect(within(row).getByText('BLOOMBERG HD (CA)')).toBeTruthy();
+  });
+
+  it('a title with no poster and one whose poster fails get the same initials tile (w-realdata-12)', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({
+      live: [],
+      movies: [
+        { ref: { sourceId: 's1', contentType: 'movie', itemId: '70' }, title: 'Frozen Orchard', year: 2001, categoryId: 'm1' },
+        { ref: { sourceId: 's1', contentType: 'movie', itemId: '71' }, title: 'Frozen Orchard II', year: 2004, categoryId: 'm1', posterUrl: 'https://img.example/fo2.jpg' },
+      ],
+      series: [],
+    });
+    const { palette } = await openPaletteWith('frozen orchard');
+    const bare = (await within(palette).findByText('Frozen Orchard')).closest('[cmdk-item]') as HTMLElement;
+    // No glyph tile: the initials on the title's tint, which a failed poster falls back to as well.
+    expect(bare.querySelector('[data-poster-fallback]')?.textContent).toBe('FO');
+    expect(bare.querySelector('svg')).toBeNull();
+    const withPoster = within(palette).getByText('Frozen Orchard II').closest('[cmdk-item]') as HTMLElement;
+    expect(withPoster.querySelector('img, [data-poster-placeholder]')).toBeTruthy();
   });
 
   it('a favourite the library also finds is listed once, under Favorites and recent', async () => {
@@ -394,9 +479,65 @@ describe('palette programmes on several channels', () => {
     expect(within(later).getByText('TCM')).toBeTruthy();
     expect(within(later).queryByText(/channels/)).toBeNull();
     // The search page's own limit, so its Programmes open from the cache.
-    expect(rpcMock.calls.find((c) => c.cmd === 'epg.search')?.args).toMatchObject({ limit: 50 });
+    expect(rpcMock.calls.find((c) => c.cmd === 'epg.search')?.args).toMatchObject({ limit: 200 });
     fireEvent.click(rows[0]!);
     await waitFor(() => expect(router.state.location.pathname).toBe('/epg'));
     expect((router.state.location.state as { guideHit: { ref: { itemId: string } } }).guideHit.ref.itemId).toBe('1');
+  });
+});
+
+describe('single settings, numbers and pending answers (search lane, 2026-11-16)', () => {
+  it("lists a setting by its own name with its section, and opens the group that holds it", async () => {
+    const { palette, router } = await openPaletteWith('font size');
+    const row = (await within(palette).findByText('Interface size')).closest('[cmdk-item]') as HTMLElement;
+    expect(within(row).getByText('Settings: Appearance')).toBeTruthy();
+    fireEvent.click(row);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/settings/appearance'));
+    expect(router.state.location.hash).toBe('#interface-size');
+  });
+
+  it("'password' and 'quality' find the settings that hold them", async () => {
+    const { palette, input } = await openPaletteWith('password');
+    await within(palette).findByText('Include Xtream and Stalker passwords and keys');
+    fireEvent.change(input, { target: { value: 'quality' } });
+    await within(palette).findByText('Stream format');
+  });
+
+  it('a typed channel number finds the channel at that number first among the channels', async () => {
+    const tbs: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '12' };
+    rpcMock.handlers['catalog.channelByNumber'] = (a) =>
+      (a as { sourceId: string; number: number }).sourceId === 's1' && (a as { number: number }).number === 12
+        ? { ref: tbs, name: 'US| TBS FHD', categoryId: 'c1', categoryName: 'US| ENTERTAINMENT', isRadio: false, number: 12 }
+        : null;
+    const { palette } = await openPaletteWith('12');
+    // The name as screen readers hear it, the tag after it (w-a11y-03).
+    const row = (await within(palette).findByText('TBS FHD (US)')).closest('[cmdk-item]') as HTMLElement;
+    expect(within(row).getByText('Channel 12')).toBeTruthy();
+    fireEvent.click(row);
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: tbs, isLive: true })));
+  });
+
+  it('says it is still searching while the library has not answered, then that nothing was found', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    rpcMock.handlers['catalog.search'] = () => new Promise((r) => (answer = r));
+    const { palette } = await openPaletteWith('zzqx');
+    const empty = await within(palette).findByTestId('palette-empty');
+    await waitFor(() => expect(empty.textContent).toBe('Searching'));
+    // Past the pause the library is asked; still searching until it answers.
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'catalog.search')).toBe(true));
+    expect(within(palette).getByTestId('palette-empty').textContent).toBe('Searching');
+    act(() => answer({ live: [], movies: [], series: [] }));
+    await waitFor(() => expect(within(palette).getByTestId('palette-empty').textContent).toBe('Nothing found'));
+  });
+
+  it('the empty palette lists Add source once, and the search row has no Enter glyph', async () => {
+    renderRoutes(routes, '/favorites');
+    await screen.findByText('favorites page');
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    const palette = await screen.findByTestId('command-palette');
+    await waitFor(() => expect(within(palette).getAllByText('Add source')).toHaveLength(1));
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'zzqx' } });
+    const all = (await within(palette).findByText('See all results for "zzqx"')).closest('[cmdk-item]') as HTMLElement;
+    expect(all.querySelector('svg.lucide-corner-down-left')).toBeNull();
   });
 });

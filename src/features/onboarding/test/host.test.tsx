@@ -24,7 +24,7 @@ const h = await import('./harness');
 let core = h.createCore();
 rpcMock.current = { call: (cmd, args) => core.call(cmd, args) };
 const { OnboardingHost, openTour, openWhatsNew } = await import('..');
-const { appIsIdle, START_DELAY_MS, IDLE_POLL_MS } = await import('../host');
+const { appIsIdle, START_DELAY_MS, IDLE_POLL_MS, WHATS_NEW_WINDOW_MS } = await import('../host');
 const { useOnboardingStore } = await import('../store');
 const { queryClient, rpcKey } = await import('@/api/query');
 
@@ -188,6 +188,32 @@ describe('OnboardingHost', () => {
     other.remove();
     expect(appIsIdle()).toBe(true);
     await waitFor(() => expect(tour()).toBeTruthy(), SHOW);
+  });
+
+  it("leaves What's new for the next launch when the app is busy past its first moments", async () => {
+    seed({ lastSeenVersion: '0.0.1', tourCompleted: true, sources: 1 });
+    const other = document.createElement('div');
+    other.setAttribute('aria-modal', 'true');
+    document.body.append(other);
+    try {
+      mount();
+      await sleep(WHATS_NEW_WINDOW_MS + IDLE_POLL_MS);
+    } finally {
+      other.remove();
+    }
+    await sleep(2 * IDLE_POLL_MS);
+    expect(whatsNew()).toBeNull();
+    // Not marked seen: the next launch shows it.
+    expect(core.updates()).toEqual([]);
+  }, WHATS_NEW_WINDOW_MS + 10_000);
+
+  it('waits while a video plays', async () => {
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'paused', { value: false });
+    document.body.append(video);
+    expect(appIsIdle()).toBe(false);
+    video.remove();
+    expect(appIsIdle()).toBe(true);
   });
 
   it('does not reopen the tour in the same session when storing it failed', async () => {

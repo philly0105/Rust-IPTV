@@ -6,7 +6,7 @@
  */
 
 import { useQueries, type UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
@@ -136,11 +136,13 @@ interface Prepared {
  * Matched streams per `game.key` for `games`, which should be the games on screen: the fallback searches run
  * for them. `loading` while the index, the guide window or a fallback search is still on its first answer,
  * or while the latest index and guide are being prepared for matching, unless they only refresh the last ones.
+ * `error` when part of the channel index failed (its other parts still match), `guideError` when part of the
+ * guide window did (games then match by channel names only), with `retry` to read the failed parts again.
  */
 export function useGameStreams(
   games: readonly Game[],
   enabled = true,
-): { streams: ReadonlyMap<string, StreamMatch[]>; loading: boolean } {
+): { streams: ReadonlyMap<string, StreamMatch[]>; loading: boolean; error: unknown; guideError: unknown; retry: () => void } {
   const on = enabled && games.length > 0;
   const index = useChannelIndex(on);
   const sources = useVisibleSources().data;
@@ -227,5 +229,17 @@ export function useGameStreams(
     return out;
   }, [wanted, matched, queries, searches.hits, sources, now]);
 
-  return { streams, loading: on && (!complete || !current || searches.pending) };
+  const { retry: retryIndex } = index;
+  const { retry: retryGuide } = guide;
+  const retry = useCallback(() => {
+    retryIndex();
+    retryGuide();
+  }, [retryIndex, retryGuide]);
+  return {
+    streams,
+    loading: on && (!complete || !current || searches.pending),
+    error: on ? index.error : null,
+    guideError: on ? guide.error : null,
+    retry,
+  };
 }

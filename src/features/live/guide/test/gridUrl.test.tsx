@@ -9,6 +9,7 @@ import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@te
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { itemKey, type Category, type Channel, type EpgProgram, type GuideSearchHit, type Page, type PageQuery } from '@/api/types';
+import { SEARCH_FIELD } from '@/shell/focusSearch';
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, GRID_SLOT_MIN, GRID_TRACK_BEFORE, guideDataStart, HIGHLIGHT_MS } from '../../components/EpgGridPage';
@@ -101,18 +102,44 @@ const showsLiveData = () => {
 };
 
 describe('the window in the URL', () => {
+  it('reads the window out after a jump, not while scrolling (w-a11y-08)', async () => {
+    const base = defaultStart(Date.now()) + 6 * HOUR;
+    renderGuide({ path: `/epg?source=src1&at=${base}`, routes: GRID });
+    await screen.findByText('Channel 0');
+    const label = screen.getByTestId('guide-window');
+    const announce = screen.getByTestId('guide-window-announce');
+    expect(label.querySelector('[aria-live]')).toBeNull();
+    expect(announce.getAttribute('role')).toBe('status');
+    // A scroll moves the label, silently.
+    const grid = screen.getByTestId('epg-grid');
+    const before = label.textContent;
+    act(() => {
+      grid.scrollLeft -= 200;
+      fireEvent.scroll(grid);
+    });
+    await waitFor(() => expect(label.textContent).not.toBe(before));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 500)));
+    expect(announce.textContent).toBe('');
+    // A day button is a jump: the new window is read out.
+    fireEvent.click(screen.getByRole('button', { name: 'Next day' }));
+    await waitFor(() => expect(announce.textContent).toContain(formatDay(addLocalDays(base, 1), 'en')));
+    expect(label.textContent).toContain(announce.textContent);
+  });
+
   it('stays three hours earlier when moving back from the live window', async () => {
-    const live = defaultStart(Date.now());
+    const trackStart = defaultStart(Date.now());
     renderGuide({ path: '/epg?source=src1', routes: GRID });
     await screen.findByText('Channel 0');
     const grid = screen.getByTestId('epg-grid');
     showsWindow(Number(grid.dataset.viewAt));
+    // The steps go from the slot the guide opened on, not the window's start (guide-21).
+    const live = floorLocal(Number(grid.dataset.viewAt), GRID_SLOT_MIN);
 
     fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
     expect(atOf()).toBe(live - 3 * HOUR);
     await waitFor(() => showsWindow(live - 3 * HOUR));
     expect(Number(grid.dataset.viewAt)).toBe(live - 3 * HOUR);
-    expect(grid.scrollLeft).toBe(GRID_TRACK_BEFORE / MINUTE * 5 - 3 * HOUR / MINUTE * 5);
+    expect(grid.scrollLeft).toBe((GRID_TRACK_BEFORE + live - trackStart - 3 * HOUR) / MINUTE * 5);
     await waitFor(() => expect(gridFroms()).toContain(dataFrom(live - 3 * HOUR)));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
     showsWindow(live - 3 * HOUR);
@@ -242,11 +269,11 @@ describe('search hits on the grid', () => {
     fireEvent.click(screen.getByRole('button', { name }));
   }
 
-  it('`/` focuses the search field', async () => {
+  it("the search field is the one the shell's `/` and Ctrl+F focus", async () => {
     renderGuide({ path: '/epg', routes: GRID });
     await screen.findByText('Channel 0');
-    fireEvent.keyDown(document.body, { key: '/' });
-    expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search the guide' }));
+    // The key itself is the shell's (ShellLayout, SEARCH_FIELD); the guide only marks its field.
+    expect(screen.getByRole('searchbox', { name: 'Search the guide' }).matches(SEARCH_FIELD)).toBe(true);
   });
 
   it('moves the window to the hit, switches a group without the channel to all channels, and highlights the row', async () => {

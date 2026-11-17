@@ -58,7 +58,10 @@ beforeEach(() => {
     { id: 'sports', sourceId: 'src1', contentType: 'live', name: 'Sports', hidden: false, itemCount: SPORTS.length, position: 0 } as Category,
   ];
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.removeItem('tsrust.liveRegion:src1:live');
+});
 
 describe('a whole group into a list', () => {
   const group = { sourceId: 'src1', contentType: 'live' as const, categoryId: 'sports', name: 'Sports', count: SPORTS.length };
@@ -116,6 +119,34 @@ describe('a whole group into a list', () => {
 });
 
 describe('Add channels on a list', () => {
+  it('narrows a source of country-tagged groups by Live TV\'s region pick', { timeout: 20_000 }, async () => {
+    const group = (id: string, name: string, position: number) =>
+      ({ id, sourceId: 'src1', contentType: 'live', name, hidden: false, itemCount: 5, position }) as Category;
+    rpc.handlers['catalog.categories'] = (): Category[] => [
+      group('us1', 'US| SPORTS', 0),
+      group('us2', 'US| NEWS', 1),
+      group('uk1', 'UK| SPORTS', 2),
+      group('uk2', 'UK| NEWS', 3),
+      ...Array.from({ length: 6 }, (_, i) => group(`de${i}`, `DE| KANAL ${i}`, 4 + i)),
+    ];
+    localStorage.setItem('tsrust.liveRegion:src1:live', 'UK');
+    h.installCore(rpc, [h.coreList('L1', 'Weekend', [])]);
+    renderHost();
+    act(() => openAddChannels('L1'));
+    const dialog = await screen.findByTestId('add-channels');
+    await within(dialog).findByRole('button', { name: /^News One,/ }, { timeout: 5000 });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));
+    // Live TV's pick holds here too.
+    const region = (await screen.findByTestId('scope-region', {}, { timeout: 5000 })) as HTMLSelectElement;
+    expect(region.value).toBe('UK');
+    // A group's provider name is its title (the drawn name puts the place's tag after it).
+    expect(screen.getAllByRole('option').map((o) => o.querySelector('[title]')?.getAttribute('title'))).toEqual(expect.arrayContaining(['UK| SPORTS', 'UK| NEWS']));
+    expect(screen.queryByRole('option', { name: /SPORTS \(US\)/ })).toBeNull();
+    fireEvent.change(region, { target: { value: '' } });
+    expect(await screen.findByRole('option', { name: /SPORTS \(US\)/ })).toBeTruthy();
+    expect(localStorage.getItem('tsrust.liveRegion:src1:live')).toBeNull();
+  });
+
   it('browses a group and adds or takes out a channel per press', { timeout: 20_000 }, async () => {
     const core = h.installCore(rpc, [h.coreList('L1', 'Weekend', [NEWS[0]!])]);
     renderHost();

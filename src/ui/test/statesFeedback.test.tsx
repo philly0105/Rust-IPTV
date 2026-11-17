@@ -1,0 +1,136 @@
+// @vitest-environment jsdom
+/**
+ * The kit's feedback states (states-feedback audit): busy icon buttons keep focus, Undo toasts
+ * stay long enough to reach and say how to reach them.
+ */
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import '@/i18n';
+
+import { RpcError } from '@/api/transport';
+
+import { ErrorState, IconButton, Toggle, ToastViewport, toast, useBusyButtons, useToastStore } from '..';
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  useToastStore.setState({ toasts: [] });
+});
+
+describe('IconButton loading (states-feedback-01)', () => {
+  it('spins, ignores presses and keeps focus instead of going native-disabled', () => {
+    const onClick = vi.fn();
+    const { rerender } = render(<IconButton label="Favorite" icon={<span data-testid="glyph" />} onClick={onClick} />);
+    const btn = screen.getByRole('button', { name: 'Favorite' });
+    btn.focus();
+    rerender(<IconButton label="Favorite" icon={<span data-testid="glyph" />} onClick={onClick} loading />);
+    expect(btn).toHaveProperty('disabled', false);
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.queryByTestId('glyph')).toBeNull();
+    fireEvent.click(btn);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(btn);
+  });
+});
+
+function Row({ onRemove }: { onRemove: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const busyButton = useBusyButtons(busy);
+  return (
+    <>
+      <IconButton label="Watched" icon={<span />} {...busyButton('watched', () => setBusy(true))} />
+      <IconButton label="Remove" icon={<span />} {...busyButton('remove', onRemove)} />
+    </>
+  );
+}
+
+describe('useBusyButtons', () => {
+  it('spins the pressed button only, keeps its focus, and ignores the others while busy', () => {
+    const onRemove = vi.fn();
+    render(<Row onRemove={onRemove} />);
+    const watched = screen.getByRole('button', { name: 'Watched' });
+    const remove = screen.getByRole('button', { name: 'Remove' });
+    watched.focus();
+    fireEvent.click(watched);
+    expect(watched.getAttribute('aria-busy')).toBe('true');
+    expect(remove.getAttribute('aria-busy')).toBeNull();
+    expect(remove.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(watched);
+    fireEvent.click(remove);
+    expect(onRemove).not.toHaveBeenCalled();
+  });
+});
+
+describe('toasts with an action (states-feedback-03)', () => {
+  it('stay 10 s instead of 5, and the live region says how to reach the action', () => {
+    vi.useFakeTimers();
+    render(<ToastViewport />);
+    act(() => void toast({ title: 'Removed Heat from My List', action: { label: 'Undo', onClick: () => undefined } }));
+    expect(document.querySelector('[data-toast-live="polite"]')?.textContent).toBe('Removed Heat from My List. Press F8 to reach Undo.');
+    act(() => void toast({ title: 'Saved' }));
+    act(() => vi.advanceTimersByTime(6000));
+    expect(useToastStore.getState().toasts.map((t) => t.title)).toEqual(['Removed Heat from My List']);
+    act(() => vi.advanceTimersByTime(4500));
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
+  it('reads a description that ends a sentence with one period before the hint, not "source.. Press"', () => {
+    render(<ToastViewport />);
+    act(
+      () =>
+        void toast({
+          title: 'Switched to FOX (Backup) (US)',
+          description: 'FOX HD (US) stopped working on its source.',
+          action: { label: 'Undo', onClick: () => undefined },
+        }),
+    );
+    expect(document.querySelector('[data-toast-live="polite"]')?.textContent).toBe(
+      'Switched to FOX (Backup) (US). FOX HD (US) stopped working on its source. Press F8 to reach Undo.',
+    );
+  });
+});
+
+describe('ErrorState in the browser (states-feedback-09)', () => {
+  it('says to reload the page for a library error, not to restart an app or restore a backup', () => {
+    render(<ErrorState error={new RpcError('db', 'database is locked')} title="Couldn't load favorites" />);
+    expect(screen.getByRole('heading').textContent).toBe("Couldn't load favorites");
+    expect(screen.getByText('Reload the page. If it keeps happening, restart the Tsrust server.')).toBeTruthy();
+  });
+});
+
+describe('Toggle on touch (round 1 follow-up)', () => {
+  it('toggles from a tap on its description, and only from the switch with a mouse', () => {
+    const onChange = vi.fn();
+    const coarse = { matches: true };
+    vi.stubGlobal('matchMedia', () => coarse);
+    try {
+      render(<Toggle checked={false} onChange={onChange} label="Refresh automatically" description="Every day at 4:00" />);
+      fireEvent.click(screen.getByText('Every day at 4:00'));
+      expect(onChange).toHaveBeenLastCalledWith(true);
+      fireEvent.click(screen.getByRole('switch'));
+      expect(onChange).toHaveBeenCalledTimes(2);
+      coarse.matches = false;
+      fireEvent.click(screen.getByText('Every day at 4:00'));
+      expect(onChange).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('gives a switch with no visible label a 44 px square around it that toggles on a tap', () => {
+    const onChange = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    try {
+      render(<Toggle checked onChange={onChange} hideLabel label="Record Match of the Day" />);
+      const row = screen.getByRole('switch', { name: 'Record Match of the Day' }).parentElement!;
+      expect(row.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+      fireEvent.click(row);
+      expect(onChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

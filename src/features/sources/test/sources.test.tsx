@@ -168,6 +168,21 @@ describe('Add source flow sends the exact C4 args', () => {
     }
   });
 
+  it('puts the progress in place of the fields while the import runs, and brings them back after', async () => {
+    let fail: (e: unknown) => void = () => undefined;
+    rpcMock.handlers['sources.add'] = () => new Promise((_, reject) => (fail = reject));
+    await openAdd();
+    type(/^Playlist URL/, 'http://lists.example.com/tv.m3u');
+    // Enter in the field submits; the field leaves, and focus stays in the dialog.
+    fireEvent.submit(within(dialog()).getByLabelText(/^Playlist URL/, { selector: 'input' }).closest('form')!);
+    const progress = await screen.findByTestId('add-source-progress');
+    expect(within(dialog()).queryByLabelText(/^Playlist URL/, { selector: 'input' })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(progress));
+    fail(new RpcError('timeout', 'operation timed out'));
+    await screen.findByTestId('add-source-error');
+    expect((within(dialog()).getByLabelText(/^Playlist URL/, { selector: 'input' }) as HTMLInputElement).value).toBe('http://lists.example.com/tv.m3u');
+  });
+
   it('shows the server error with a next step', async () => {
     rpcMock.handlers['sources.add'] = () => {
       throw new RpcError('auth', 'Bad credentials');
@@ -198,6 +213,24 @@ describe('Sources page states', () => {
     renderAt(routes(), '/sources');
     await screen.findByTestId('sources-onboarding');
     for (const id of ['onboard-m3u', 'onboard-xtream', 'onboard-stalker']) expect(screen.getByTestId(id)).toBeTruthy();
+  });
+
+  it("opened from a tile, focuses that kind's address field and closes on Escape", async () => {
+    // The page keeps the dialog mounted on Xtream while closed: the M3U and Stalker tiles must
+    // not leave focus on an Xtream field that unmounts (it fell to <body>, out of Escape's reach).
+    for (const [tile, field] of [
+      ['onboard-m3u', /^Playlist URL/],
+      ['onboard-stalker', /^Portal URL/],
+    ] as const) {
+      rpcMock.handlers['sources.list'] = () => [];
+      renderAt(routes(), '/sources');
+      fireEvent.click(await screen.findByTestId(tile));
+      const input = within(dialog()).getByLabelText(field, { selector: 'input' });
+      expect(document.activeElement).toBe(input);
+      fireEvent.keyDown(input, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      cleanup();
+    }
   });
 
   it('asks for the kind only when the dialog opens without one', async () => {
@@ -328,6 +361,24 @@ describe('Guide (EPG) loads after add and edit', () => {
     fireEvent.click(screen.getByTestId('edit-source-save'));
     await waitFor(() => expect(rpcMock.callsOf('sources.update')).toEqual([{ id: 'a', patch: { epg: { manualUrls: [added] } } }]));
     await waitFor(() => expect(rpcMock.callsOf('epg.refresh')).toEqual([{ url: added }]));
+  });
+
+  it('edit: each guide URL says how it last loaded', async () => {
+    const ok = 'http://epg.example.com/ok.xml';
+    const bad = 'http://epg.example.com/bad.xml';
+    rpcMock.handlers['sources.list'] = () => [makeSource('a', { epg: { detectedUrls: [ok], manualUrls: [bad], disabledUrls: [] } })];
+    rpcMock.handlers['epg.sources'] = () => [
+      { url: ok, status: 'ok', lastFetchAt: new Date(Date.now() - 2 * 3600_000).toISOString(), programCount: 9356, channelCount: 10, enabled: true, origin: 'source' },
+      { url: bad, status: 'error', error: 'HTTP 404 Not Found', programCount: 0, channelCount: 0, enabled: true, origin: 'source' },
+    ];
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Guide' }));
+    const lines = await screen.findAllByTestId('epg-link-status');
+    expect(lines.map((l) => l.textContent?.replace(/·, /g, ' · '))).toEqual([
+      'Guide loaded · 2 hours ago · 9,356 programmes',
+      "Couldn't load the guide · HTTP 404 Not Found",
+    ]);
   });
 
   it('edit: the guide time shift is saved with the guide links; blank removes it', async () => {

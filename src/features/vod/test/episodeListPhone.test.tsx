@@ -5,7 +5,7 @@
 // text (a 112 px row with an empty strip under the thumbnail); they end the row's one
 // line, and a phone row is 84 px. In that row the facts above the title keep to one line
 // (code, runtime, Now playing, the downloaded icon), so a long title still fits.
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useEffect, useRef, useState } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter } from 'react-router';
@@ -13,7 +13,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Download, Episode, PlaybackPosition } from '@/api/types';
 
-import { EpisodeList } from '../components/detail/EpisodeList';
+import { EpisodeList, SeasonTabs } from '../components/detail/EpisodeList';
 import { i18n, installDomStubs } from './harness';
 
 vi.mock('@/api/transport', async (importOriginal) => ({
@@ -172,11 +172,12 @@ describe('episode rows on a phone (L3-visual-7)', () => {
     expect(within(rows[1]!).getByRole('button', { name: 'Resume S01E02 Short, 37% watched, Downloaded' })).toBeTruthy();
   });
 
-  it('keeps Watched, the percent and Downloaded in words in the facts from sm up', async () => {
+  it('keeps the percent and Downloaded in words in the facts from sm up; Watched is the tick and the toggle (vod-detail-15)', async () => {
     await atSm(async () => {
       renderList({ positions: watchedAndResumed, downloads: bothDownloaded });
       const rows = await screen.findAllByTestId('episode-row');
-      expect(within(rows[0]!).getByTestId('episode-watched').textContent).toBe('Watched');
+      expect(within(rows[0]!).queryByTestId('episode-watched')).toBeNull();
+      expect(within(rows[0]!).getByTestId('episode-watched-chip')).toBeTruthy();
       expect(within(rows[1]!).getByText('37% watched')).toBeTruthy();
       expect(within(rows[1]!).getByTestId('episode-offline').textContent).toBe('Downloaded');
       expect(within(rows[1]!).getByRole('button', { name: 'Resume S01E02 Short, 37% watched, Downloaded' })).toBeTruthy();
@@ -196,5 +197,63 @@ describe('episode rows on a phone (L3-visual-7)', () => {
     renderList({ canDownload: false, withMenu: false });
     expect(await screen.findAllByTestId('episode-row')).toHaveLength(2);
     expect(screen.queryAllByTestId('episode-actions')).toHaveLength(0);
+  });
+
+  it('keeps the download control one width in every state, so the watched ticks line up (vod-detail-02, -03)', async () => {
+    const queued: Download = { ...done(1, 'e1'), status: 'queued', bytesDownloaded: 0, totalBytes: 1000 };
+    const paused: Download = { ...done(2, 'e2'), status: 'paused', bytesDownloaded: 300, totalBytes: 1000 };
+    renderList({ downloads: new Map([['e1', queued], ['e2', paused]]) });
+    const rows = await screen.findAllByTestId('episode-row');
+    // Queued waits under a clock, with no "0%": it is not a stalled transfer.
+    const q = within(rows[0]!).getByRole('link', { name: `Queued S01E01 ${LONG}` });
+    expect(q.textContent).toBe('');
+    expect(q.querySelector('.lucide-clock')).toBeTruthy();
+    // Paused is a state, not a Pause button.
+    const p = within(rows[1]!).getByRole('link', { name: 'Download paused S01E02 Short' });
+    expect(p.querySelector('.lucide-circle-pause')).toBeTruthy();
+    for (const control of [q, p]) expect(control.className.split(' ')).toContain('w-14');
+  });
+
+  it('draws a finished download as the file on disk, not a second green tick', async () => {
+    renderList({ downloads: bothDownloaded });
+    const rows = await screen.findAllByTestId('episode-row');
+    const link = within(rows[0]!).getByRole('link', { name: `Downloaded S01E01 ${LONG}` });
+    expect(link.querySelector('.lucide-hard-drive-download')).toBeTruthy();
+    expect(link.className).not.toContain('text-success');
+    expect(link.className.split(' ')).toContain('w-14');
+  });
+
+  it('turns more than eight seasons into one dropdown a mouse can reach (vod-detail-12)', () => {
+    const seasons = (n: number) => Array.from({ length: n }, (_, i) => ({ number: i + 1, episodes: [episode(1, 'One'), episode(2, 'Two')] }));
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <I18nextProvider i18n={i18n}>
+        <SeasonTabs seasons={seasons(8)} value={2} onChange={onChange} />
+      </I18nextProvider>,
+    );
+    expect(screen.getAllByRole('tab')).toHaveLength(8);
+    rerender(
+      <I18nextProvider i18n={i18n}>
+        <SeasonTabs seasons={seasons(12)} value={2} onChange={onChange} />
+      </I18nextProvider>,
+    );
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    const select = screen.getByRole('combobox', { name: 'Seasons' }) as HTMLSelectElement;
+    expect(select.value).toBe('2');
+    expect(select.options[1]!.textContent).toBe('Season 2 · 2 episodes');
+    fireEvent.change(select, { target: { value: '11' } });
+    expect(onChange).toHaveBeenCalledWith(11);
+  });
+});
+
+describe('realdata-16: an episode without a still', () => {
+  beforeAll(installDomStubs);
+  afterEach(cleanup);
+
+  it('shows its number on a neutral tile instead of initials tinted from its title', async () => {
+    renderList();
+    const tiles = await screen.findAllByTestId('episode-number-tile');
+    expect(tiles.map((t) => t.textContent)).toEqual(['E1', 'E2']);
+    expect(document.querySelector('[data-testid="episode-thumb"] [data-poster-fallback]')).toBeNull();
   });
 });

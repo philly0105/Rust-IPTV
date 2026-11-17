@@ -10,8 +10,8 @@
   "tourBack": "Terug",
   "tourSkip": "Rondleiding overslaan",
   "tourDone": "Klaar",
-  "tourHintSearch": "Zoeken",
-  "tourHintPalette": "Opdrachten",
+  "tourHintSearch": "Op deze pagina zoeken",
+  "tourHintPalette": "Alles doorzoeken",
   "tourHintShortcuts": "Sneltoetsen",
   "whatsNewTitle": "Wat is er nieuw",
   "whatsNewVersion": "Versie {{version}}",
@@ -81,7 +81,8 @@
   "noteGuideSmoothTitle": "Een soepelere gids",
   "noteGuideSmoothText": "De gids scrolt soepel bij veel zenders en vult gaten in XMLTV-gegevens aan met de eigen gids van je Xtream-account.",
   "tourCoachTitle": "Je bron is klaar",
-  "tourCoachText": "Zoeken vindt zenders, films en series in al je bronnen. Het opdrachtenpalet brengt je overal anders heen.",
+  "tourCoachText": "Alles doorzoeken vindt zenders, films en series in al je bronnen en opent elke pagina of instelling.",
+  "tourCoachTextTouch": "Zoeken vindt zenders, films en series in al je bronnen.",
   "tourShowAround": "Rondleiding",
   "tourGotIt": "Begrepen"
 }

@@ -139,7 +139,7 @@ describe("a channel menu's header", () => {
     expect(tag.textContent).toBe('US');
     // The name leads, the tag follows it.
     expect(tag.previousElementSibling?.textContent).toBe('ESPN2 FHD');
-    expect(header.querySelector('.sr-only')?.textContent).toBe('US| ESPN2 FHD');
+    expect(header.querySelector('.sr-only')?.textContent).toBe('ESPN2 FHD (US)');
     expect(header.textContent).toContain('NFL Live');
   });
 
@@ -189,11 +189,12 @@ describe("Live's channel menu (LG-13)", () => {
   it('a touch screen reaches the group menu by a long press or its ⋮ button; the link itself only navigates', async () => {
     renderAt('/s/src1/live', LIVE);
     const group = await screen.findByRole('link', { name: /^News/ });
-    // The link navigates: no popup is announced on it. The ⋮ beside it (touch only) has the menu.
+    // The link navigates: no popup is announced on it. The ⋮ beside it has the menu: always shown
+    // on touch, on hover or keyboard focus with a mouse (w-walkthrough-12).
     expect(group.hasAttribute('aria-haspopup')).toBe(false);
     const button = screen.getByRole('button', { name: 'Group options' });
     expect(button.getAttribute('aria-haspopup')).toBe('menu');
-    expect(button.className).toContain('pointer-coarse:inline-flex');
+    expect(button.className).toContain('pointer-coarse:opacity-100');
     fireEvent.click(button);
     expect(await screen.findByRole('menu', { name: 'News' })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole('menu', { name: 'News' }), { key: 'Escape' });

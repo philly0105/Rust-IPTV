@@ -5,17 +5,18 @@
  */
 
 import { k } from '../lib/keys';
-import { Heart } from 'lucide-react';
-import { useCallback, useMemo, useState, type DragEvent } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router';
+import { ArrowDown, ArrowUp, Heart } from 'lucide-react';
+import { lazy, Suspense, useCallback, useMemo, useState, type DragEvent } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
-import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, TEXT_LINK, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
+import { BrowseAction, PageTitle, SectionHeading, useFocusWhenEmptied } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -31,7 +32,10 @@ import {
   withPositions,
   type FavoriteRow,
 } from '../lib/favorites';
-import { SourceGoneError, openEntry, relativeTime } from '../lib/open';
+import { addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../lib/entryMenu';
+import { SourceGoneError, openEntry, relativeTime, spokenEntryTitle } from '../lib/open';
+
+const EntryChannelMenu = lazy(() => import('../components/EntryChannelMenu').then((m) => ({ default: m.EntryChannelMenu })));
 
 const HEADER_HEIGHT = 56;
 /**
@@ -57,6 +61,7 @@ export function FavoritesPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  const { stripCountryPrefix } = useDisplayPrefs();
   // Add a source's dialog is open: the no-source line stays with it (see BrowseAction).
   const adding = useNoSourcesAdding();
   const args = useMemo(() => (sourceId ? { sourceId } : {}), [sourceId]);
@@ -66,6 +71,10 @@ export function FavoritesPage() {
   // An empty page may be the Live TV quality filter's doing: it leaves out the channels it hides.
   const quality = useLiveQuality();
   const [drag, setDrag] = useState<{ key: string; over?: { key: string; where: 'before' | 'after' } } | null>(null);
+  const [menu, setMenu] = useState<EntryMenuRequest | null>(null);
+  // The channel menu's code (Live TV's menu, lists, multi-view, edits) loads with the first menu.
+  const [menuUsed, setMenuUsed] = useState(false);
+  if (menu && !menuUsed) setMenuUsed(true);
 
   const entries = useMemo(() => sortFavorites(query.data ?? []), [query.data]);
   const rows = useMemo(() => buildFavoriteRows(entries, search), [entries, search]);
@@ -117,7 +126,7 @@ export function FavoritesPage() {
         try {
           await rpc('favorites.remove', { ref: entry.ref });
           toast({
-            title: t('favoriteRemoved', { title: entry.snapshot.title }),
+            title: t('favoriteRemoved', { title: spokenEntryTitle(entry.ref, entry.snapshot.title, stripCountryPrefix) }),
             variant: 'info',
             action: {
               label: t('undo'),
@@ -137,7 +146,7 @@ export function FavoritesPage() {
         }
       });
     },
-    [args, entries, run, sourceId, t, toast],
+    [args, entries, run, sourceId, stripCountryPrefix, t, toast],
   );
 
   const open = useCallback(
@@ -145,14 +154,38 @@ export function FavoritesPage() {
       // Channel up/down then walks this page's favorites in their order.
       openEntry(entry.ref, entry.snapshot, sources.get(entry.ref.sourceId), navigate, args).catch((err: unknown) => {
         toast({
-          title: t('openFailed', { title: entry.snapshot.title }),
+          title: t('openFailed', { title: spokenEntryTitle(entry.ref, entry.snapshot.title, stripCountryPrefix) }),
           description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
           variant: 'error',
         });
       });
     },
-    [args, navigate, sources, t, toast],
+    [args, navigate, sources, stripCountryPrefix, t, toast],
   );
+
+  /** A channel's menu is Live TV's (library-04), with this page's moves among Organize. */
+  const openChannelMenu = (row: Extract<FavoriteRow, { kind: 'item' }>, pos: { x: number; y: number }) => {
+    const e = row.entry;
+    const moves = !search;
+    setMenu({
+      pos,
+      ref: e.ref,
+      snapshot: e.snapshot,
+      nowTitle: nowOn.get(itemKey(e.ref))?.title,
+      onPlay: () => open(e),
+      removeFavorite: () => remove(e),
+      organize: moves
+        ? [
+            { id: 'up', label: t('rowMoveUp'), icon: <ArrowUp className="size-4" />, disabled: row.indexInGroup === 0, onSelect: () => move(e.ref, row.indexInGroup - 1) },
+            { id: 'down', label: t('rowMoveDown'), icon: <ArrowDown className="size-4" />, disabled: row.indexInGroup >= row.groupSize - 1, onSelect: () => move(e.ref, row.indexInGroup + 1) },
+          ]
+        : [],
+    });
+  };
+  const closeMenu = useCallback(() => setMenu(null), []);
+  // A movie or series row's own menu, opened from the keyboard at the row (w-a11y-10).
+  const [rowMenu, setRowMenu] = useState<{ key: string; pos: { x: number; y: number } } | null>(null);
+  const closeRowMenu = useCallback(() => setRowMenu(null), []);
 
   const moveFocused = (delta: -1 | 1) => {
     const key = focusedRowKey();
@@ -165,7 +198,9 @@ export function FavoritesPage() {
 
   const title = source ? t('sourceFavoritesTitle', { source: source.name }) : t('favoritesTitle');
   // An empty page says so itself; "0 favorites" above it adds nothing (as on My Videos).
-  const subtitle = query.data && entries.length > 0 ? t('favoritesCount', { count: entries.length }) : undefined;
+  // After the count, what the page is for (library-01): Favorites, My List, the channel lists and
+  // Recently watched sit side by side in the rail, and one-word names did not tell them apart.
+  const subtitle = query.data && entries.length > 0 ? `${t('favoritesCount', { count: entries.length })} · ${t('favoritesLead')}` : t('favoritesLead');
   // The page search only once there is something to search: over an empty list the header keeps
   // its usual Search everything. While the list loads it stays, so a full list does not swap it.
   const searchable = !query.data || entries.length > 0 || search !== '';
@@ -202,6 +237,8 @@ export function FavoritesPage() {
   const renderRow = (row: FavoriteRow) => {
     if (row.kind === 'header') return <SectionHeading title={t(k('group', row.group))} count={row.count} />;
     const e = row.entry;
+    // Read aloud: a channel's cleaned name ("BBC Two (UK)"), not the provider's "UK| BBC Two".
+    const spoken = spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix);
     const isDragTarget = drag?.over?.key === row.key && drag.key !== row.key;
     return (
       <div className="h-full" data-entry-key={row.key}>
@@ -212,11 +249,15 @@ export function FavoritesPage() {
           showSource={!sourceId && namesSources}
           now={nowOn.get(itemKey(e.ref))}
           time={t('addedAgo', { time: relativeTime(e.addedAt, i18n.language) })}
-          removeLabel={t('removeFavorite', { title: e.snapshot.title })}
+          removeLabel={t('removeFavorite', { title: spoken })}
+          spokenTitle={spoken}
           menuRemoveLabel={t('removeFromFavorites')}
           busy={pending.has(refKey(e.ref))}
           onOpen={() => open(e)}
           onRemove={() => remove(e)}
+          onChannelMenu={e.ref.contentType === 'live' || e.ref.contentType === 'radio' ? (pos) => openChannelMenu(row, pos) : undefined}
+          menuAt={rowMenu?.key === row.key ? rowMenu.pos : null}
+          onMenuClose={closeRowMenu}
           reorder={
             search
               ? undefined
@@ -237,15 +278,27 @@ export function FavoritesPage() {
     );
   };
 
+  useFocusWhenEmptied(query.isSuccess && entries.length === 0);
+
   let body;
   if (query.isLoading) body = <EntryRowsSkeleton />;
-  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  else if (query.isError) body = <ErrorState error={query.error} title={t('favoritesLoadFailed')} onRetry={() => void query.refetch()} />;
   else if (entries.length === 0)
     body = (
       <EmptyState
         icon={<Heart size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
-        description={sourceId ? t('favoritesEmptySourceBody') : (sources.size === 0 || adding) && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
+        description={
+          !sourceId && (sources.size === 0 || adding) && !sourcesLoading ? (
+            t('emptyNoSourcesBody')
+          ) : (
+            <>
+              {sourceId ? t('favoritesEmptySourceBody') : t('favoritesEmptyBody')}{' '}
+              {/* A movie for later belongs in My List (library-01): the two sit side by side in the rail. */}
+              <Trans t={t} i18nKey="favoritesEmptyMyList" components={{ mylist: <Link to="/my-list" className={TEXT_LINK} /> }} />
+            </>
+          )
+        }
         action={
           <>
             <BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />
@@ -281,12 +334,22 @@ export function FavoritesPage() {
         listClassName="max-w-4xl"
         onRowKeyDown={(r, e) => {
           if (r.kind !== 'item') return;
+          const channel = r.entry.ref.contentType === 'live' || r.entry.ref.contentType === 'radio';
           if (e.key === 'Enter') {
             e.preventDefault();
             open(r.entry);
           } else if (e.key === 'Delete') {
             e.preventDefault();
             remove(r.entry);
+          } else if (isMenuKey(e)) {
+            e.preventDefault();
+            const box = (e.target as HTMLElement).getBoundingClientRect();
+            const pos = { x: box.left + 16, y: box.bottom - 8 };
+            if (channel) openChannelMenu(r, pos);
+            else setRowMenu({ key: r.key, pos });
+          } else if (channel && isAddToListKey(e)) {
+            e.preventDefault();
+            addEntryToList(r.entry.ref, r.entry.snapshot);
           }
         }}
       />
@@ -295,7 +358,14 @@ export function FavoritesPage() {
   return (
     <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="favorites-page">
       <PageTitle>{title}</PageTitle>
+      {/* The header's purpose line, which a phone's header has no room for. */}
+      {entries.length > 0 ? <p className="mb-2 text-body-sm text-fg-muted md:hidden">{t('favoritesLead')}</p> : null}
       {body}
+      {menuUsed ? (
+        <Suspense fallback={null}>
+          <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
+        </Suspense>
+      ) : null}
     </Page>
   );
 }

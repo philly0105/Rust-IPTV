@@ -165,13 +165,24 @@ describe('Live TV quality picker', () => {
     expect(patches()).toEqual([]);
   });
 
+  it('a list it filters says so in words over the rows, with one press to show every quality (walkthrough-02)', async () => {
+    stored = settings({ liveMinQuality: 'fhd' });
+    renderAt('/s/src1/live', LIVE);
+    await screen.findByText('Channel 0');
+    const bar = await screen.findByTestId('live-quality-bar');
+    expect(bar.textContent).toContain('Only 1080p+ channels');
+    fireEvent.click(within(bar).getByRole('button', { name: 'Show all qualities' }));
+    await waitFor(() => expect(patches()).toEqual([{ liveMinQuality: null }]));
+    await waitFor(() => expect(screen.queryByTestId('live-quality-bar')).toBeNull());
+  });
+
   it('is not on Radio, which is never filtered', async () => {
     stored = settings({ liveMinQuality: 'fhd' });
     rpcMock.handlers['catalog.categories'] = () => [];
     rpcMock.handlers['catalog.channels'] = serve([]);
     renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
+    // A source without radio gets one page-level empty state (live-22), with no filter in it.
     expect(await screen.findByText('No radio stations in this source')).toBeTruthy();
-    expect(screen.getByRole('searchbox', { name: 'Search stations' })).toBeTruthy();
     expect(screen.queryByTestId('live-quality-filter')).toBeNull();
     expect(screen.queryByText('No channels match the quality filter')).toBeNull();
   });

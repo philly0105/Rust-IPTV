@@ -23,10 +23,15 @@ export const CARD_ROOT = 'group/card outline-none focus-visible:outline-none foc
 /** The artwork frame: rest, hover, focus-visible and pressed states. */
 export const CARD_ART =
   'relative overflow-hidden rounded-lg shadow-1 ring-1 ring-edge ' +
-  'motion-safe:transition-[translate,scale,box-shadow] motion-safe:duration-150 motion-safe:ease-out ' +
+  'motion-safe:transition-[translate,scale,box-shadow] motion-safe:duration-(--duration-fast) motion-safe:ease-enter ' +
   'group-hover/card:shadow-2 group-hover/card:ring-border motion-safe:group-hover/card:-translate-y-0.5 ' +
   'group-focus-visible/card:ring-2 group-focus-visible/card:ring-focus group-focus-visible/card:shadow-[0_0_0_6px_var(--color-glow)] ' +
   'motion-safe:group-active/card:translate-y-0 motion-safe:group-active/card:scale-[0.98] group-active/card:shadow-1';
 
-/** The keyboard cursor of a listbox grid (aria-activedescendant) resting on this card. */
-export const CARD_ART_CURSOR = 'ring-2 ring-focus shadow-[0_0_0_6px_var(--color-glow)]';
+/**
+ * The keyboard cursor of a listbox grid (aria-activedescendant) resting on this card. Forced
+ * colours drop the ring's box-shadow and outline only the focused listbox, so the card takes a
+ * Highlight outline there (w-a11y-06).
+ */
+export const CARD_ART_CURSOR =
+  'ring-2 ring-focus shadow-[0_0_0_6px_var(--color-glow)] forced-colors:outline-2 forced-colors:outline-offset-2 forced-colors:outline-[Highlight]';

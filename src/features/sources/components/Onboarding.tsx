@@ -64,6 +64,9 @@ export function SourceKindTiles({ onPick, className }: { onPick: (kind: SourceKi
   );
 }
 
+/** The lead for the section whose rail row led here (`/sources?for=`). */
+const LEAD_FOR: Partial<Record<string, string>> = { live: 'onboardLeadLive', movies: 'onboardLeadMovies', series: 'onboardLeadSeries' };
+
 function TileArrow({ className }: { className?: string }) {
   return (
     <ArrowRight
@@ -80,9 +83,10 @@ function TileArrow({ className }: { className?: string }) {
 /**
  * First-run empty state: the three ways to add a source, plus backup restore. A large empty state
  * takes the headline size (display is for hero and detail titles), and on a wide page the block
- * sits at the optical centre of the window rather than at its top.
+ * sits at the optical centre of the window rather than at its top. Reached from the rail's Live
+ * TV, Movies or Series row (`section`), the lead says that section needs a source first.
  */
-export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
+export function Onboarding({ onPick, section }: { onPick: (kind: SourceKind) => void; section?: string | null }) {
   const { t } = useTranslation('sources');
   return (
     <section
@@ -96,7 +100,7 @@ export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
         <h2 id="sources-onboarding-title" className="text-headline text-fg">
           {t('onboardTitle')}
         </h2>
-        <p className="text-body text-fg-muted">{t('onboardLead')}</p>
+        <p className="text-body text-fg-muted">{t(LEAD_FOR[section ?? ''] ?? 'onboardLead')}</p>
       </div>
 
       <SourceKindTiles onPick={onPick} />

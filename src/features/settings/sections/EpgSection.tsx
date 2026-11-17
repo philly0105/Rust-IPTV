@@ -8,7 +8,7 @@ import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import type { EpgProgressEvent, EpgSourceStatus, EpgViewMode, Settings } from '@/api/types';
 
-import { Badge, Button, Dialog, ErrorState, IconButton, Input, MetaLine, SkeletonList, Switch, useToast, errorDescription, type BadgeVariant } from '@/ui';
+import { Badge, Button, Dialog, ErrorState, IconButton, Input, MetaLine, SkeletonList, Switch, Tooltip, useToast, errorDescription, type BadgeVariant } from '@/ui';
 import { absoluteTime, formatCount, relativeTime } from '../../sources/lib/format';
 import { redactText, redactUrl } from '../../sources/lib/redact';
 import { CommitInput, Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
@@ -60,9 +60,9 @@ function GuideStatusRow({
   return (
     <li className="flex items-start gap-3 px-4 py-3" data-testid="epg-status-row" data-status={status}>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <label htmlFor={`${id}-switch`} className="truncate text-body font-medium text-fg text-match-parent" dir="auto" data-testid="epg-status-origin">
+        <span className="truncate text-body font-medium text-fg text-match-parent" dir="auto" data-testid="epg-status-origin">
           {origin}
-        </label>
+        </span>
         <MetaLine
           id={`${id}-state`}
           // A phone-width column stacks state, counts and age, so no separator hangs at a line end.
@@ -100,13 +100,16 @@ function GuideStatusRow({
           onClick={onRefresh}
           data-testid="epg-status-refresh"
         />
-        <Switch
-          id={`${id}-switch`}
-          checked={enabled}
-          onCheckedChange={onEnabled}
-          aria-describedby={`${id}-state ${id}-url`}
-          data-testid="epg-status-switch"
-        />
+        {/* Named for what it does, not only whose guide it is (the row's title already says that). */}
+        <Tooltip content={t('epgUseGuide', { name: origin })} describe={false}>
+          <Switch
+            checked={enabled}
+            onCheckedChange={onEnabled}
+            aria-label={t('epgUseGuide', { name: origin })}
+            aria-describedby={`${id}-state ${id}-url`}
+            data-testid="epg-status-switch"
+          />
+        </Tooltip>
       </div>
     </li>
   );
@@ -226,6 +229,106 @@ export function EpgSection({ settings, update }: SectionProps) {
 
   return (
     <SettingsSection title={t('sectionEpg')} testId="settings-epg">
+      {/* settings-06: what people come here for first (layout, time shift), then each guide's
+          state, then the extra XMLTV addresses most never need, then the danger zone. */}
+      <SettingsGroup title={t('epgDisplayGroup')}>
+        <SettingsRow label={t('epgViewMode')} description={t('epgViewModeHint')}>
+          {({ id }) => (
+            <Segmented<EpgViewMode>
+              id={id}
+              label={t('epgViewMode')}
+              value={settings.epgViewMode}
+              options={[
+                { value: 'timeline', label: t('epgViewTimeline') },
+                { value: 'list', label: t('epgViewList') },
+              ]}
+              onChange={(epgViewMode) => void update({ epgViewMode })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label={t('epgOffset')} description={t('epgOffsetHint')} error={offsetError ? t(offsetError) : null}>
+          {({ id, describedBy, invalid }) => (
+            <div className="flex items-center gap-2">
+              <CommitInput
+                id={id}
+                describedBy={describedBy}
+                invalid={invalid}
+                type="text"
+                // Not "numeric": phone keypads for it have no minus sign, and the shift can be negative.
+                inputMode="text"
+                value={String(offset)}
+                className="w-24 text-end tabular-nums"
+                onError={setOffsetError}
+                validate={(v) => {
+                  const r = validateEpgOffset(v);
+                  return r.ok ? null : r.error;
+                }}
+                onCommit={(v) => {
+                  const r = validateEpgOffset(v);
+                  if (r.ok) void update({ epgOffsetMinutes: r.minutes });
+                }}
+                testId="input-epgOffsetMinutes"
+              />
+              <span className="text-sm text-fg-muted">{t('epgOffsetUnit')}</span>
+            </div>
+          )}
+        </SettingsRow>
+        {/* guide: Xtream short-EPG fallback. */}
+        <SwitchRow
+          label={t('epgShortFallback')}
+          description={t('epgShortFallbackHint')}
+          checked={settings.epgShortFallback !== false}
+          onChange={(epgShortFallback) => void update({ epgShortFallback })}
+          testId="toggle-epgShortFallback"
+        />
+      </SettingsGroup>
+
+      <SettingsGroup
+        title={t('epgStatus')}
+        actions={
+          <Button size="sm" variant="secondary" icon={<RefreshCw aria-hidden className="size-4" />} onClick={() => void refresh()} data-testid="epg-refresh-all">
+            {t('epgRefreshAll')}
+          </Button>
+        }
+      >
+        {statuses.isPending ? (
+          <div className="p-4">
+            <SkeletonList rows={3} />
+          </div>
+        ) : statuses.isError ? (
+          <ErrorState error={statuses.error} onRetry={() => void statuses.refetch()} />
+        ) : statuses.data.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-fg-muted">{t('epgStatusEmpty')}</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-divider" aria-label={t('epgStatus')}>
+            {statuses.data.map((s) => {
+              const ev = live[s.url];
+              const fetching = s.status === 'fetching' || Boolean(ev && ev.phase !== 'done' && ev.phase !== 'error');
+              const status = fetching ? 'fetching' : s.status;
+              const origin = s.origin === 'settings' ? t('epgFromSettings') : (sourceNames.get(s.sourceId ?? '') ?? t('epgFromSource'));
+              return (
+                <GuideStatusRow
+                  key={s.url}
+                  url={s.url}
+                  origin={origin}
+                  status={status}
+                  counts={
+                    ev && fetching
+                      ? t('epgProgramsSoFar', { count: ev.programs, value: formatCount(ev.programs, lang) })
+                      : t('epgCounts', { programs: formatCount(s.programCount, lang), channels: formatCount(s.channelCount, lang) })
+                  }
+                  fetchedAt={s.lastFetchAt}
+                  error={s.error && !fetching ? epgErrorText(s.error, t, lang) : null}
+                  enabled={s.enabled}
+                  onEnabled={(v) => void setEnabled(s.url, v)}
+                  onRefresh={() => void refresh(s.url)}
+                />
+              );
+            })}
+          </ul>
+        )}
+      </SettingsGroup>
+
       <SettingsGroup title={t('epgGlobalUrls')} description={t('epgGlobalUrlsHint')}>
         {settings.epgUrls.length === 0 ? (
           <p className="px-4 py-4 text-sm text-fg-muted">{t('epgGlobalEmpty')}</p>
@@ -283,104 +386,6 @@ export function EpgSection({ settings, update }: SectionProps) {
         </div>
       </SettingsGroup>
 
-      <SettingsGroup
-        title={t('epgStatus')}
-        actions={
-          <Button size="sm" variant="secondary" icon={<RefreshCw aria-hidden className="size-4" />} onClick={() => void refresh()} data-testid="epg-refresh-all">
-            {t('epgRefreshAll')}
-          </Button>
-        }
-      >
-        {statuses.isPending ? (
-          <div className="p-4">
-            <SkeletonList rows={3} />
-          </div>
-        ) : statuses.isError ? (
-          <ErrorState error={statuses.error} onRetry={() => void statuses.refetch()} />
-        ) : statuses.data.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-fg-muted">{t('epgStatusEmpty')}</p>
-        ) : (
-          <ul className="flex flex-col divide-y divide-divider" aria-label={t('epgStatus')}>
-            {statuses.data.map((s) => {
-              const ev = live[s.url];
-              const fetching = s.status === 'fetching' || Boolean(ev && ev.phase !== 'done' && ev.phase !== 'error');
-              const status = fetching ? 'fetching' : s.status;
-              const origin = s.origin === 'settings' ? t('epgFromSettings') : (sourceNames.get(s.sourceId ?? '') ?? t('epgFromSource'));
-              return (
-                <GuideStatusRow
-                  key={s.url}
-                  url={s.url}
-                  origin={origin}
-                  status={status}
-                  counts={
-                    ev && fetching
-                      ? t('epgProgramsSoFar', { count: ev.programs, value: formatCount(ev.programs, lang) })
-                      : t('epgCounts', { programs: formatCount(s.programCount, lang), channels: formatCount(s.channelCount, lang) })
-                  }
-                  fetchedAt={s.lastFetchAt}
-                  error={s.error && !fetching ? epgErrorText(s.error, t, lang) : null}
-                  enabled={s.enabled}
-                  onEnabled={(v) => void setEnabled(s.url, v)}
-                  onRefresh={() => void refresh(s.url)}
-                />
-              );
-            })}
-          </ul>
-        )}
-      </SettingsGroup>
-
-      <SettingsGroup title={t('epgDisplayGroup')}>
-        <SettingsRow label={t('epgViewMode')} description={t('epgViewModeHint')}>
-          {({ id }) => (
-            <Segmented<EpgViewMode>
-              id={id}
-              label={t('epgViewMode')}
-              value={settings.epgViewMode}
-              options={[
-                { value: 'timeline', label: t('epgViewTimeline') },
-                { value: 'list', label: t('epgViewList') },
-              ]}
-              onChange={(epgViewMode) => void update({ epgViewMode })}
-            />
-          )}
-        </SettingsRow>
-        <SettingsRow label={t('epgOffset')} description={t('epgOffsetHint')} error={offsetError ? t(offsetError) : null}>
-          {({ id, describedBy, invalid }) => (
-            <div className="flex items-center gap-2">
-              <CommitInput
-                id={id}
-                describedBy={describedBy}
-                invalid={invalid}
-                type="text"
-                // Not "numeric": phone keypads for it have no minus sign, and the shift can be negative.
-                inputMode="text"
-                value={String(offset)}
-                className="w-24 text-end tabular-nums"
-                onError={setOffsetError}
-                validate={(v) => {
-                  const r = validateEpgOffset(v);
-                  return r.ok ? null : r.error;
-                }}
-                onCommit={(v) => {
-                  const r = validateEpgOffset(v);
-                  if (r.ok) void update({ epgOffsetMinutes: r.minutes });
-                }}
-                testId="input-epgOffsetMinutes"
-              />
-              <span className="text-sm text-fg-muted">{t('epgOffsetUnit')}</span>
-            </div>
-          )}
-        </SettingsRow>
-        {/* guide: Xtream short-EPG fallback. */}
-        <SwitchRow
-          label={t('epgShortFallback')}
-          description={t('epgShortFallbackHint')}
-          checked={settings.epgShortFallback !== false}
-          onChange={(epgShortFallback) => void update({ epgShortFallback })}
-          testId="toggle-epgShortFallback"
-        />
-      </SettingsGroup>
-
       {/* The same danger zone as Reset settings in Backup and storage: one name, one row, and a
           secondary button that opens the danger confirm. The solid red is kept for the confirm, so
           the page's loudest button is never one click from losing data. */}
@@ -395,7 +400,7 @@ export function EpgSection({ settings, update }: SectionProps) {
               onClick={() => setClearOpen(true)}
               data-testid="epg-clear-all"
             >
-              {t('epgClearButton')}
+              {t('epgClearAction')}
             </Button>
           )}
         </SettingsRow>

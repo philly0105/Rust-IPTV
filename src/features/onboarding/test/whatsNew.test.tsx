@@ -80,6 +80,14 @@ describe("What's new", () => {
     expect(close.textContent).toContain('Got it');
   });
 
+  it('opened at startup, puts focus on the notes, not on Got it with its ring', async () => {
+    open({ since: '0.0.1', auto: true });
+    const close = await screen.findByTestId('whats-new-close');
+    await waitFor(() => expect(document.activeElement?.getAttribute('tabindex')).toBe('-1'));
+    expect(dialog().contains(document.activeElement)).toBe(true);
+    expect(close.hasAttribute('data-autofocus')).toBe(false);
+  });
+
   it('stores the running version when closed with Got it', async () => {
     const onClose = open({ since: '0.0.1', auto: true });
     // The host opens it only once the version is known; wait for the list like it would.

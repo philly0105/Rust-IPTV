@@ -96,6 +96,24 @@ describe('the row menu (F-GUIDE-MENU)', () => {
     await waitFor(() => expect(useToastStore.getState().toasts.at(-1)?.title).toBe('Added Channel 2 to favorites'));
   });
 
+  it('shows the new favorite state at once and sends one toggle while it is in flight (states-feedback-14)', async () => {
+    rpc.handlers['favorites.contains'] = () => [];
+    let answer: (v: { isFavorite: boolean }) => void = () => undefined;
+    rpc.handlers['favorites.toggle'] = () => new Promise((resolve) => (answer = resolve));
+    await openGuide();
+    fireEvent.contextMenu(await screen.findByText('Channel 2'));
+    await waitFor(() => expect(item('Add to favorites').hasAttribute('disabled')).toBe(false));
+    fireEvent.click(item('Add to favorites'));
+    // Reopened before the core answers: the menu already says it is a favorite, and a second
+    // press does not send a toggle that could cross the first.
+    fireEvent.contextMenu(await screen.findByText('Channel 2'));
+    fireEvent.click(await within(menu()).findByRole('menuitem', { name: 'Remove from favorites' }));
+    expect(rpc.of('favorites.toggle')).toHaveLength(1);
+    act(() => answer({ isFavorite: true }));
+    await waitFor(() => expect(useToastStore.getState().toasts.at(-1)?.title).toBe('Added Channel 2 to favorites'));
+    expect(rpc.of('favorites.toggle')).toHaveLength(1);
+  });
+
   it('offers removal for a favorite, and opens guide matching for the row’s channel', async () => {
     rpc.handlers['favorites.contains'] = (a) => (a as { refs: ItemRef[] }).refs;
     await openGuide();
@@ -117,11 +135,11 @@ describe('the no-data notice (F-GUIDE-NOMATCH)', () => {
     expect(await screen.findByRole('dialog', { name: 'Guide data for Channel 0' })).toBeTruthy();
   });
 
-  it('without any guide programmes, still asks for an XMLTV address', async () => {
+  it('without any guide programmes, still asks for a guide', async () => {
     rpc.handlers['epg.sources'] = () => [{ url: 'http://x/epg.xml', status: 'ok', programCount: 0, channelCount: 0, enabled: true, origin: 'settings' }];
     await openGuide();
     const notice = await screen.findByTestId('guide-no-data');
-    await waitFor(() => expect(notice.textContent).toContain('Add an XMLTV address'));
+    await waitFor(() => expect(notice.textContent).toContain('Add a guide'));
     // LG-10: no guide at all is an empty state with the way to add one, not a pill at the foot.
     expect(within(notice).getByRole('link', { name: 'Add guide' }).getAttribute('href')).toBe('/settings/epg');
   });
@@ -180,7 +198,7 @@ describe('favorites and list views (F-GUIDE-CONVENIENCES)', () => {
     await openGuide();
     // All channels, then the views (favorites, each list) under their heading, then the groups.
     fireEvent.click(group());
-    expect(screen.getAllByRole('option').map((o) => o.textContent).slice(0, 3)).toEqual(['All channels', 'Favorites', 'List: Picks']);
+    expect(screen.getAllByRole('option').map((o) => o.textContent).slice(0, 4)).toEqual(['All channels', 'With guide data', 'Favorites', 'List: Picks']);
     fireEvent.click(screen.getByRole('option', { name: 'Favorites' }));
     await waitFor(() => expect(router.location?.search).toContain('view=favorites'));
     expect(rpc.of('favorites.list')).toContainEqual({ sourceId: 'src1' });
@@ -225,5 +243,23 @@ describe('a programme opened from the global search or the palette (F-SEARCH-PRO
     expect(link.to).toBe(`/epg?source=src1&at=${start}`);
     act(() => void router.navigate!(link.to, { state: link.state }));
     await waitFor(() => expect(document.querySelector('[data-channel-row="6"]')?.hasAttribute('data-highlighted')).toBe(true));
+  });
+
+  it('opens the programme’s detail on its cell, marked, as a click on the cell would (walkthrough-06)', async () => {
+    const start = Math.floor(Date.now() / 1_800_000) * 1_800_000 + 3_600_000;
+    rpc.handlers['epg.grid'] = (a) =>
+      Object.fromEntries(
+        (a as { refs: ItemRef[] }).refs.map((r) => [
+          key(r),
+          r.itemId === 'c6' ? [{ channelId: 'c6', title: 'Late news', start: new Date(start).toISOString(), end: new Date(start + 1_800_000).toISOString() }] : [],
+        ]),
+      );
+    await openGuide();
+    const link = guideHitLink(hit('Late news', start, start + 1_800_000, { ref: CHANNELS[6]!.ref, channelName: 'Channel 6' }));
+    act(() => void router.navigate!(link.to, { state: link.state }));
+    const popover = await screen.findByTestId('program-popover');
+    expect(within(popover).getByText('Late news')).toBeTruthy();
+    const cell = document.querySelector<HTMLElement>('[data-cell-row="6"]')!;
+    expect(cell.hasAttribute('data-selected')).toBe(true);
   });
 });

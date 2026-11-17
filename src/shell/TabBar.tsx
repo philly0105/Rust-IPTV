@@ -11,11 +11,11 @@
  * bar itself (data-toast-avoid, ui/Toast.tsx) and lifts above it, as above the mini player.
  *
  * The tabs carry short labels of their own (tabHome, tabLive, tabGuide): a fifth of a 360 px
- * phone holds about eleven letters at the tab's text size, and the rail's longer names were cut
- * off in German, Greek, Polish and Belarusian.
+ * phone holds about ten letters at the tab's text size (the 12 px caption), and the rail's longer
+ * names were cut off in German, Greek, Polish and Belarusian.
  */
 
-import { CalendarRange, ChevronRight, House, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
+import { CalendarRange, ChevronRight, House, Menu as MenuIcon, Plus, Search, Server, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
@@ -23,7 +23,9 @@ import { Link, NavLink, useLocation } from 'react-router';
 import type { Source } from '@/api/types';
 import { cn, Dialog, SourceMonogram } from '@/ui';
 
+import { ActivityMark, ActivityText } from './activityMarks';
 import {
+  archiveFromGuide,
   isLiveRoute,
   LIBRARY_LINKS,
   liveTabTarget,
@@ -55,19 +57,29 @@ interface Tab {
 
 const tabClass = (active: boolean) =>
   cn(
-    'relative flex h-full w-full flex-col items-center justify-center gap-1 rounded-md px-1 text-2xs font-medium outline-offset-[-2px] select-none',
+    // No side padding and a slightly tight track: the 12 px labels keep a fifth of a 390 px phone for
+    // their words ("Περισσότερα", "Guía de TV"), and a longer one ends in an ellipsis.
+    'relative flex h-full w-full flex-col items-center justify-center gap-1 rounded-md text-caption font-medium tracking-tight outline-offset-[-2px] select-none',
     'motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
     // The current tab: the accent tick along the bar's top edge, an accent icon and full text.
     active
-      ? 'text-fg before:absolute before:inset-x-[30%] before:top-0 before:h-0.5 before:rounded-b-full before:bg-accent'
+      ? 'text-fg before:absolute before:inset-x-[30%] before:top-0 before:h-0.5 before:rounded-b-full before:bg-accent-mark'
       : 'text-fg-muted active:bg-active',
   );
+
+/** The route is of a source the loaded list does not have. */
+function sourceGone(sources: readonly Source[] | undefined, pathname: string): boolean {
+  const id = routeSourceId(pathname);
+  return !!id && !!sources && !sources.some((s) => s.id === id);
+}
 
 /** The bar. Rendered by the shell below sm only. */
 export const TabBar = memo(function TabBar() {
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();
-  const { pathname, search, key } = useLocation();
+  const { pathname, search, key, state } = useLocation();
+  // The archive the guide opened is the guide's page here, not Live TV's.
+  const fromGuide = archiveFromGuide(pathname, state);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreOpenRef = useRef(moreOpen);
   moreOpenRef.current = moreOpen;
@@ -100,13 +112,17 @@ export const TabBar = memo(function TabBar() {
       to: live ?? noSourcesTarget('live'),
       label: t('tabLive'),
       icon: Tv,
-      active: isLiveRoute(pathname) || sourcesFor(pathname, forSearch) === 'live',
+      // Not on the page of a source that is not there (SourceGuard's page), which no tab stands for.
+      active: (isLiveRoute(pathname) && !fromGuide && !sourceGone(sources.data, pathname)) || sourcesFor(pathname, forSearch) === 'live',
       tour: 'live',
     },
-    { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
+    { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') || fromGuide },
     { id: 'search', to: '/search', label: t('navSearch'), icon: Search, active: pathname === '/search', tour: 'search' },
   ];
-  const moreActive = !tabs.some((tab) => tab.active);
+  // The page on show lives in the sheet: More is the current tab. It keeps its own icon and name
+  // ("More" fits every locale; a page's name was cut to "Recently wat…" and hid the way into the
+  // sheet). A page in no tab and no tile (a 404, a source's search) marks no tab.
+  const moreActive = !tabs.some((tab) => tab.active) && !sourceGone(sources.data, pathname) && inSheet(sources.data, pathname, forSearch);
 
   return (
     <nav
@@ -133,12 +149,17 @@ export const TabBar = memo(function TabBar() {
             onClick={() => setMoreOpen(true)}
             className={tabClass(moreActive)}
           >
-            <MenuIcon aria-hidden size={22} className={cn('shrink-0', moreActive && 'text-accent')} />
+            <span className="relative shrink-0">
+              <MenuIcon aria-hidden size={22} className={cn(moreActive && 'text-accent')} />
+              {/* Downloads and Scheduled live in the sheet: a running download or recording shows here. */}
+              <ActivityMark kind="any" placement="corner" />
+            </span>
             <span className="max-w-full truncate">{t('tabMore')}</span>
+            <ActivityText kind="any" />
           </button>
         </li>
       </ul>
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} search={forSearch} />
+      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} search={forSearch} fromGuide={fromGuide} />
     </nav>
   );
 });
@@ -182,6 +203,16 @@ function sheetWatchLinks(sources: readonly Source[] | undefined, pathname: strin
   });
 }
 
+/**
+ * The page on show has an entry in the sheet: a Watch tile, a Library tile, the Sources page or
+ * Settings, by the rules that mark them current in the sheet.
+ */
+function inSheet(sources: readonly Source[] | undefined, pathname: string, search: string): boolean {
+  if (sheetWatchLinks(sources, pathname, search).some((l) => l.active)) return true;
+  const under = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+  return LIBRARY_LINKS.some((l) => under(l.to)) || pathname === '/sources' || under('/settings');
+}
+
 /** One square tile of the sheet's Watch and Library grids. */
 function SheetTile({ to, label, icon: Icon, active }: { to: string; label: string; icon: LucideIcon; active: boolean }) {
   return (
@@ -218,6 +249,7 @@ function MoreSheet({
   sources,
   pathname,
   search,
+  fromGuide,
 }: {
   open: boolean;
   onClose: () => void;
@@ -225,6 +257,8 @@ function MoreSheet({
   pathname: string;
   /** The query only while there are no sources (TabBar's forSearch), else empty. */
   search: string;
+  /** The page is the archive the guide opened: a source's Live TV does not claim it. */
+  fromGuide: boolean;
 }) {
   const { t } = useTranslation('shell');
   // On the Sources page a Movies or Series tile led to, that tile is current, not Manage sources.
@@ -309,7 +343,7 @@ function MoreSheet({
                   {railLinks(s, { hasRadio: (s.radioCount ?? 0) > 0 })
                     .filter((l) => l.id !== 'favorites' && l.id !== 'recent')
                     .map((l) => {
-                    const active = railLinkCurrent(l, pathname);
+                    const active = railLinkCurrent(l, pathname) && !(fromGuide && l.id === 'live');
                     return (
                       <li key={l.id}>
                         <NavLink
@@ -335,7 +369,7 @@ function MoreSheet({
       <ul className="flex flex-col gap-0.5 border-t border-divider pt-3">
         {(
           [
-            ...(lone ? [] : [{ to: '/sources', label: t('manageSources'), icon: ListVideo }]),
+            ...(lone ? [] : [{ to: '/sources', label: t('manageSources'), icon: Server }]),
             { to: '/settings', label: t('navSettings'), icon: SettingsIcon },
           ] as const
         ).map(({ to, label, icon: Icon }) => (

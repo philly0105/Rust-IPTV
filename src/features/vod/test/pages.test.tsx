@@ -4,6 +4,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { rpcKey } from '@/api/query';
 import type { Category, Page, PageQuery, SeriesDetail, TmdbMovie, VodDetail, VodItem } from '@/api/types';
+import { downloadToastId } from '@/features/library/lib/queue';
+import { useToastStore } from '@/ui';
 
 import { CORNER_TOUCH_INERT } from '../components/PosterCard';
 import { ActorPage } from '../pages/ActorPage';
@@ -339,10 +341,12 @@ describe('MovieDetailPage', () => {
     expect(await screen.findByRole('button', { name: 'Resume from 12:34' })).toBeTruthy();
     const actor = await screen.findByRole('link', { name: /Timothee Chalamet/ });
     expect(actor.getAttribute('href')).toBe(`/s/src1/actor/${ACTOR_ID}`);
-    // The other copy is listed under the hero and offered in the More menu, beside Start over (VL-hero-actions).
+    // The other copy is listed under the hero and offered in the More menu (VL-hero-actions); Start
+    // over has its own button beside Resume (vod-detail-07).
     expect(await screen.findByTestId('vod-other-sources')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy();
     const menu = await openHeroMenu();
-    expect(within(menu).getByRole('menuitem', { name: 'Start over' })).toBeTruthy();
+    expect(within(menu).queryByRole('menuitem', { name: 'Start over' })).toBeNull();
     expect(within(menu).getByRole('menuitem', { name: '1 other source' })).toBeTruthy();
     expect(callsOf('tmdb.movie')[0]!.args).toMatchObject({ title: 'Dune: Part Two', year: 2007 });
   });
@@ -385,7 +389,8 @@ describe('MovieDetailPage', () => {
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Dune: Part Two']);
     // The header right above it names the section, not the title a second time; the window keeps the title.
     const { useShellStore } = await import('@/shell/store');
-    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Movies', documentTitle: 'Dune: Part Two' }));
+    // Back stays, so leaving the page keeps playback going in the mini player (PV-10).
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Movies', documentTitle: 'Dune: Part Two', back: { onClick: expect.any(Function) } }));
     act(() => {
       fireEvent.keyDown(document.body, { key: 'Escape' });
     });
@@ -448,10 +453,11 @@ describe('SeriesDetailPage', () => {
     rpcMock.handlers['tmdb.tv'] = () => null;
     renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
     await screen.findByRole('heading', { name: 'Severance', level: 1 });
-    expect(await screen.findByRole('button', { name: 'Resume S01E02' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Resume season 1, episode 2' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Season 1/ })).toBeTruthy();
     // Phone-sized here: the row's facts leave the percent to the thumbnail's bar, and its play button says it.
-    expect(screen.getByRole('button', { name: 'Resume S01E02 Episode 1.2, 20% watched' })).toBeTruthy();
+    // The episode Resume points at is marked Up next (vod-detail-06).
+    expect(screen.getByRole('button', { name: 'Resume S01E02 Episode 1.2, Up next, 20% watched' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: /Season 2/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Play S02E01 Episode 2.1' }));
     await waitFor(() => expect(played).toHaveLength(1));
@@ -459,7 +465,7 @@ describe('SeriesDetailPage', () => {
     // Watching, the stage's bar names the series; the header names the section, the window the series.
     await screen.findByTestId('player-stage');
     const { useShellStore } = await import('@/shell/store');
-    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Series', documentTitle: 'Severance' }));
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Series', documentTitle: 'Severance', back: { onClick: expect.any(Function) } }));
   });
 });
 
@@ -490,7 +496,7 @@ describe('ActorPage', () => {
   it('explains that TMDB is off', async () => {
     rpcMock.handlers['settings.get'] = () => settings();
     renderAt('/s/src1/actor/5', [{ path: '/s/:sourceId/actor/:personId', element: <ActorPage /> }]);
-    await screen.findByText('TMDB metadata is off');
+    await screen.findByText('TMDB is off');
     expect(callsOf('tmdb.person')).toHaveLength(0);
   });
 });
@@ -572,7 +578,7 @@ describe('SearchPage', () => {
 
   it('asks for a query when there is none', async () => {
     renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
-    await screen.findByText('Search every source');
+    await screen.findByText('Search everything');
     expect(callsOf('catalog.search')).toHaveLength(0);
   });
 });
@@ -598,6 +604,8 @@ describe('Downloads of M3U movies and whole seasons', () => {
       headers: { referrer: 'http://ref.example/', userAgent: 'Row/1' },
       fileNameHint: 'Heat.mkv',
     });
+    // The queued toast takes the download's own id, so its Downloaded toast replaces it (v-phone-14).
+    await waitFor(() => expect(useToastStore.getState().toasts.some((x) => x.id === downloadToastId(1))).toBe(true));
   });
 
   it('refuses an M3U movie that streams as an HLS playlist', async () => {
@@ -873,7 +881,7 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       renderAt('/search?q=news', [{ path: '/search', element: <SearchPage /> }]);
       fireEvent.click(await screen.findByRole('tab', { name: /Channels/ }));
       await screen.findByText('News 1');
-      const img = within(screen.getByTestId('vod-search-channels')).getByRole('img', { name: 'News 1' });
+      const img = within(screen.getByTestId('vod-search-channels')).getByRole('button', { name: /News 1/ }).querySelector('img')!;
       // At the logo's 45 px width (P2-GRID-2), which the cache serves from its 64 px copy.
       expect(img.getAttribute('src')).toBe(`/api/img?url=${encodeURIComponent('http://192.168.1.5/logo.png')}&sourceId=src1&w=64`);
     });
@@ -894,6 +902,9 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
         return { live: [], movies: all.filter((m) => !sourceId || m.ref.sourceId === sourceId).slice(0, limit), series: [] };
       };
       rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
+      // The guide answers with nothing: a failed guide search keeps a Programmes tab (with its
+      // error), which would open the page on Top results instead of the movies' own grid.
+      rpcMock.handlers['epg.search'] = () => [];
       renderAt('/search?q=movie', [{ path: '/search', element: <SearchPage /> }]);
       // Chips count from the one all-sources search (L2-perf-desktop-11): each source holds 30 of
       // its 60 capped rows, a lower bound, so "30+". No source is searched alone to count it.
@@ -918,7 +929,8 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
 
       // "Show more" steps the facet's own search, and its chip becomes exact.
       fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 200' }));
-      await screen.findByRole('tab', { name: /Movies\s*100$/ });
+      // A 200-row answer folds and renders slowly on a loaded machine: past the 1 s default here.
+      await screen.findByRole('tab', { name: /Movies\s*100$/ }, { timeout: 15000 });
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 201 });
       expect(within(screen.getByRole('group', { name: 'Filter by source' })).getByRole('button', { name: /Beta Portal\s*100$/ })).toBeTruthy();
     });

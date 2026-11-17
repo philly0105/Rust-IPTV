@@ -5,18 +5,19 @@
  */
 
 import { k } from '../lib/keys';
-import { History, Trash } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { History, Trash, Trash2 } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, usePlayerStore, useToast, errorDescription } from '../deps';
-import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
+import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading, useFocusWhenEmptied } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton, type EntryResume } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -24,7 +25,8 @@ import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
 import { formatClock } from '../lib/format';
-import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
+import { addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../lib/entryMenu';
+import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition, spokenEntryTitle } from '../lib/open';
 import {
   buildRecentRows,
   collectHistory,
@@ -37,6 +39,8 @@ import {
   type PositionCalls,
   type RecentRow,
 } from '../lib/recent';
+
+const EntryChannelMenu = lazy(() => import('../components/EntryChannelMenu').then((m) => ({ default: m.EntryChannelMenu })));
 
 const positionCalls: PositionCalls = {
   forSeries: (a) => rpc('positions.forSeries', a),
@@ -62,6 +66,7 @@ export function RecentPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  const { stripCountryPrefix } = useDisplayPrefs();
   // Add a source's dialog is open: the no-source line stays with it (see BrowseAction).
   const adding = useNoSourcesAdding();
   const args = useMemo(() => (sourceId ? { sourceId, limit: RECENT_LIMIT } : { limit: RECENT_LIMIT }), [sourceId]);
@@ -72,6 +77,14 @@ export function RecentPage() {
   const [search, setSearch] = useUrlSearch();
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [menu, setMenu] = useState<EntryMenuRequest | null>(null);
+  // The channel menu's code (Live TV's menu, lists, multi-view, edits) loads with the first menu.
+  const [menuUsed, setMenuUsed] = useState(false);
+  if (menu && !menuUsed) setMenuUsed(true);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  // A movie or series row's own menu, opened from the keyboard at the row (w-a11y-10).
+  const [rowMenu, setRowMenu] = useState<{ key: string; pos: { x: number; y: number } } | null>(null);
+  const closeRowMenu = useCallback(() => setRowMenu(null), []);
   // An empty history may be the Live TV quality filter's doing: it leaves out the channels it hides.
   const quality = useLiveQuality();
 
@@ -104,7 +117,7 @@ export function RecentPage() {
         try {
           await rpc('recent.remove', { ref: e.ref });
           toast({
-            title: t('recentRemoved', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
+            title: t('recentRemoved', { title: spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix) }),
             variant: 'info',
             action: {
               label: t('undo'),
@@ -123,20 +136,20 @@ export function RecentPage() {
         }
       });
     },
-    [run, t, toast],
+    [run, stripCountryPrefix, t, toast],
   );
 
   const open = useCallback(
     (e: { ref: RecentEntry['ref']; snapshot: RecentEntry['snapshot'] }) => {
       openEntry(e.ref, e.snapshot, sources.get(e.ref.sourceId), navigate).catch((err: unknown) => {
         toast({
-          title: t('openFailed', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
+          title: t('openFailed', { title: spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix) }),
           description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
           variant: 'error',
         });
       });
     },
-    [navigate, sources, t, toast],
+    [navigate, sources, stripCountryPrefix, t, toast],
   );
 
   // Continue means resume: play from the saved spot (the dashboard rail does
@@ -162,7 +175,7 @@ export function RecentPage() {
       const removed = await removeContinueCard(p, positionCalls);
       const label = p.snapshot ? snapshotTitle(p.ref, p.snapshot.title).title : '';
       toast({
-        title: t('continueRemoved', { title: label }),
+        title: t('progressCleared', { title: label }),
         variant: 'info',
         action: {
           label: t('undo'),
@@ -233,7 +246,8 @@ export function RecentPage() {
   const searchable = !query.data || count > 0 || search !== '';
   usePageHeader(
     title,
-    query.data && count > 0 ? t('recentCount', { count }) : undefined,
+    // After the count, what the page is for (library-01), as on Favorites and My List.
+    query.data && count > 0 ? `${t('recentCount', { count })} · ${t('recentLead')}` : t('recentLead'),
     headerActions,
     searchable ? { value: search, onChange: setSearch, placeholder: t('searchRecent') } : undefined,
   );
@@ -262,11 +276,23 @@ export function RecentPage() {
     };
   };
 
+  /** A channel's menu is Live TV's (library-04), with Remove from history among Organize. */
+  const openChannelMenu = (e: RecentEntry, pos: { x: number; y: number }) =>
+    setMenu({
+      pos,
+      ref: e.ref,
+      snapshot: e.snapshot,
+      nowTitle: nowOn.get(itemKey(e.ref))?.title,
+      onPlay: () => activate(e),
+      organize: [{ id: 'remove-history', label: t('removeFromHistory'), icon: <Trash2 className="size-4" />, danger: true, onSelect: () => remove(e) }],
+    });
+  const isChannel = (e: RecentEntry) => e.ref.contentType === 'live' || e.ref.contentType === 'radio';
+
   const renderRow = (row: RecentRow) => {
     if (row.kind === 'header') return <SectionHeading title={t(k('bucket', row.bucket))} count={row.count} />;
     const e = row.entry;
     const key = `${e.ref.sourceId}|${e.ref.contentType}|${e.ref.itemId}`;
-    const title = snapshotTitle(e.ref, e.snapshot.title).title;
+    const title = spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix);
     return (
       <EntryRow
         entryRef={e.ref}
@@ -276,18 +302,24 @@ export function RecentPage() {
         now={nowOn.get(itemKey(e.ref))}
         time={relativeTime(e.viewedAt, i18n.language)}
         removeLabel={t('removeRecent', { title })}
+        spokenTitle={title}
         menuRemoveLabel={t('removeFromHistory')}
         busy={pending.has(key)}
         resume={resumeOf(e, title)}
         onOpen={() => activate(e)}
         onRemove={() => remove(e)}
+        onChannelMenu={isChannel(e) ? (pos) => openChannelMenu(e, pos) : undefined}
+        menuAt={rowMenu?.key === row.key ? rowMenu.pos : null}
+        onMenuClose={closeRowMenu}
       />
     );
   };
 
+  useFocusWhenEmptied(query.isSuccess && count === 0);
+
   let body;
   if (query.isLoading) body = <EntryRowsSkeleton />;
-  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  else if (query.isError) body = <ErrorState error={query.error} title={t('recentLoadFailed')} onRetry={() => void query.refetch()} />;
   else if (count === 0)
     body = (
       <EmptyState
@@ -334,6 +366,15 @@ export function RecentPage() {
           } else if (ev.key === 'Delete') {
             ev.preventDefault();
             remove(r.entry);
+          } else if (isMenuKey(ev)) {
+            ev.preventDefault();
+            const box = (ev.target as HTMLElement).getBoundingClientRect();
+            const pos = { x: box.left + 16, y: box.bottom - 8 };
+            if (isChannel(r.entry)) openChannelMenu(r.entry, pos);
+            else setRowMenu({ key: r.key, pos });
+          } else if (isChannel(r.entry) && isAddToListKey(ev)) {
+            ev.preventDefault();
+            addEntryToList(r.entry.ref, r.entry.snapshot);
           }
         }}
       />
@@ -342,6 +383,8 @@ export function RecentPage() {
   return (
     <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="recent-page">
       <PageTitle>{title}</PageTitle>
+      {/* The header's purpose line, which a phone's header has no room for. */}
+      {count > 0 ? <p className="mb-2 text-body-sm text-fg-muted md:hidden">{t('recentLead')}</p> : null}
       {phone && count > 0 && !query.isLoading && !query.isError ? (
         <div className="mb-2 flex min-h-8 items-center justify-between gap-3" data-testid="recent-phone-bar">
           <p className="min-w-0 truncate text-sm tabular-nums text-fg-muted">{t('recentCount', { count })}</p>
@@ -351,6 +394,11 @@ export function RecentPage() {
         </div>
       ) : null}
       {body}
+      {menuUsed ? (
+        <Suspense fallback={null}>
+          <EntryChannelMenu request={menu} sources={sources} onClose={closeMenu} />
+        </Suspense>
+      ) : null}
       <ConfirmDialog
         open={confirmClear}
         onClose={() => setConfirmClear(false)}
@@ -359,6 +407,8 @@ export function RecentPage() {
         title={t('clearHistoryTitle')}
         description={source ? t('clearHistorySourceBody', { source: source.name }) : t('clearHistoryBody')}
         confirmLabel={t('clearHistory')}
+        // Cancel, as Watch stats' Clear stats and the app's other confirms say it.
+        cancelLabel={t('common:cancel')}
         onConfirm={() => void clearAll()}
       />
     </Page>

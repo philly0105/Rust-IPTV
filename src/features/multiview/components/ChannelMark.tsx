@@ -37,8 +37,8 @@ export function ChannelMark({
       data-tint={showImage ? undefined : tint}
       className={cn(
         'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm font-display text-[0.6875rem] font-semibold tracking-wide',
-        // Fixed plates, not theme surfaces: the wall is dark in every theme.
-        showImage ? 'bg-[#161d2a] ring-1 ring-white/6 ring-inset' : themed ? TINT_THEME : 'text-white',
+        // The logo plate, not a theme surface: the wall is dark in every theme.
+        showImage ? 'bg-(--color-logo-plate-dark) ring-1 ring-white/6 ring-inset' : themed ? TINT_THEME : 'text-white',
         className,
       )}
       style={showImage ? undefined : themed ? tintVars(name) : { background: monogramFill(name) }}

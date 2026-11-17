@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react';
-import type { ComponentPropsWithRef, ReactNode, Ref } from 'react';
+import { useState, type ComponentPropsWithRef, type MouseEvent, type ReactNode, type Ref } from 'react';
 
 import { cn } from './cn';
 import { useMergedRef, useTooltip, withTooltipProps, type TooltipPlacement, type TooltipTone } from './Tooltip';
@@ -24,7 +24,7 @@ export interface ButtonProps extends ComponentPropsWithRef<'button'> {
 const base =
   'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium select-none ' +
   'disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ' +
-  'motion-safe:transition-[color,background-color,border-color,opacity,translate] motion-safe:duration-150 ' +
+  'motion-safe:transition-[color,background-color,border-color,opacity,translate] motion-safe:duration-(--duration-fast) ' +
   // Pressed: a step darker than hover (per variant below) and, with motion allowed, a one-pixel push.
   'motion-safe:active:translate-y-px disabled:active:translate-y-0 aria-disabled:active:translate-y-0';
 
@@ -32,9 +32,12 @@ const base =
 export const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   // The solid accent pair: bright amber with ink text in dark and light alike (tokens.css). A disabled
   // primary turns neutral rather than a half-transparent amber that reads as olive. Its shadow-1 would
-  // replace the base focus glow, so focus draws the glow itself (DS-FOCUS).
+  // replace the base focus glow, so focus draws the glow itself (DS-FOCUS). In light the bright fill
+  // is 1.5 to 2.2:1 on a white panel and the shadow faint, so an inset hairline in the mark tone
+  // gives it an edge, as the slider thumb and the on switch have.
   primary:
     'bg-accent-solid text-accent-solid-fg shadow-1 hover:bg-accent-solid-hover active:bg-accent-solid-pressed active:shadow-none ' +
+    'light:not-disabled:ring-1 light:not-disabled:ring-inset light:not-disabled:ring-accent-mark/45 ' +
     'focus-visible:shadow-[0_0_0_4px_var(--color-glow)] disabled:bg-surface-3 disabled:text-fg-subtle disabled:shadow-none disabled:opacity-100',
   // A filled surface with the quiet container edge; the 3:1 border belongs to form controls only.
   secondary: 'bg-surface-2 text-fg border border-edge hover:bg-surface-3 active:bg-pressed',
@@ -48,15 +51,17 @@ const variants = BUTTON_VARIANTS;
 
 /**
  * Touch screens (pointer: coarse) get a 44 px floor (DS-TOUCH-TARGETS), written against the
- * 15 px root so it follows the UI scale but not compact density: a finger does not shrink.
+ * 15 px root so it follows the UI scale but not compact density: a finger does not shrink. Every
+ * size takes it, lg too (h-12 is 39 px in compact). Spacing utilities are not a floor: size-11
+ * is 41 px on the 15 px root, not 44.
  */
 export const TOUCH_TARGET = 'pointer-coarse:min-h-[calc(44rem/15)]';
-const TOUCH_TARGET_SQUARE = 'pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]';
+export const TOUCH_TARGET_SQUARE = 'pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]';
 
 const sizes: Record<ButtonSize, string> = {
   sm: cn('h-8 px-3 text-sm', TOUCH_TARGET),
   md: cn('h-10 px-4 text-sm', TOUCH_TARGET),
-  lg: 'h-12 px-6 text-base',
+  lg: cn('h-12 px-6 text-base', TOUCH_TARGET),
 };
 
 export function buttonClass(variant: ButtonVariant = 'secondary', size: ButtonSize = 'md', className?: string): string {
@@ -120,6 +125,12 @@ export interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, '
   tooltipSide?: TooltipPlacement;
   /** `glass` over video and artwork (the player, multi-view, the hero). */
   tooltipTone?: TooltipTone;
+  /**
+   * As Button's: a spinner in place of the icon, aria-busy, and activation ignored. Uses
+   * aria-disabled rather than native `disabled`, which would blur the focused button and drop a
+   * keyboard or remote user's focus to the page while the call runs.
+   */
+  loading?: boolean;
 }
 
 /**
@@ -132,7 +143,7 @@ export const GHOST_ICON = 'text-fg-muted hover:text-fg active:text-fg';
 const iconSizes: Record<ButtonSize, string> = {
   sm: cn('h-8 w-8', TOUCH_TARGET_SQUARE),
   md: cn('h-10 w-10', TOUCH_TARGET_SQUARE),
-  lg: 'h-12 w-12',
+  lg: cn('h-12 w-12', TOUCH_TARGET_SQUARE),
 };
 
 /**
@@ -150,8 +161,10 @@ export function IconButton({
   shortcut,
   tooltipSide,
   tooltipTone,
+  loading = false,
   type = 'button',
   ref,
+  onClick,
   ...rest
 }: IconButtonProps) {
   const content = tooltip === undefined ? label : tooltip;
@@ -179,12 +192,40 @@ export function IconButton({
           pressed && 'bg-selected text-fg',
           className,
         )}
+        aria-disabled={loading || undefined}
+        aria-busy={loading || undefined}
         {...rest}
         {...withTooltipProps(rest, triggerProps, mergedRef)}
+        onClick={(e) => {
+          if (loading) {
+            e.preventDefault();
+            return;
+          }
+          onClick?.(e);
+        }}
       >
-        {icon}
+        {loading ? <LoaderCircle aria-hidden size={size === 'lg' ? 18 : 16} className="motion-safe:animate-spin" /> : icon}
       </button>
       {tip}
     </>
   );
+}
+
+/**
+ * Props for a row of icon buttons that share one busy flag (the row's call is running): the
+ * button whose press started it shows the spinner, the others ignore presses, and none takes
+ * native `disabled`, which would blur the pressed button and drop a keyboard or remote user's
+ * focus to the page. Spread `busyButton('remove', onRemove)` on each IconButton.
+ */
+export function useBusyButtons(busy: boolean) {
+  const [started, setStarted] = useState<string | null>(null);
+  return (name: string, onClick: (e: MouseEvent<HTMLButtonElement>) => void) => ({
+    loading: busy && started === name,
+    'aria-disabled': busy || undefined,
+    onClick: (e: MouseEvent<HTMLButtonElement>) => {
+      if (busy) return;
+      setStarted(name);
+      onClick(e);
+    },
+  });
 }

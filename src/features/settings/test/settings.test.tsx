@@ -184,7 +184,7 @@ describe('Downloads folder (web build)', () => {
     const shown = await screen.findByTestId('downloads-dir-path');
     await waitFor(() => expect(shown.textContent).toBe('C:/Users/me/AppData/Roaming/tsrust-iptv/downloads'));
     expect(shown.tagName).toBe('OUTPUT');
-    expect(screen.getByText('Downloads are saved to this folder on the server. To move it, start the server with a different IPTV_DATA_DIR.')).toBeTruthy();
+    expect(screen.getByText('Downloads are saved in this folder on the server. Whoever runs the server can change it.')).toBeTruthy();
     expect(screen.queryByTestId('input-downloadsDir')).toBeNull();
     expect(screen.queryByTestId('downloads-dir-choose')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Use default' })).toBeNull();
@@ -200,23 +200,23 @@ describe('Downloads folder (web build)', () => {
     renderAt(settingsRoutes, '/settings/general');
     const err = await screen.findByTestId('downloads-dir-error');
     fail = false;
-    fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(err).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.getByTestId('downloads-dir-path').textContent).toBe('E:/dl'));
   });
 });
 
-describe('Connections per download', () => {
+describe('Download speed-up (connections per download)', () => {
   it('offers 1 or Auto for each source and saves the sources set to 1', async () => {
     rpcMock.handlers['sources.list'] = () => [makeSource('a', { name: 'Northwind' }), makeSource('b', { name: 'Harbor' })];
     current = settings({ downloadSingleConnection: ['b'] });
     renderAt(settingsRoutes, '/settings/general');
-    const northwind = await screen.findByRole('radiogroup', { name: 'Connections per download from Northwind' });
-    const harbor = screen.getByRole('radiogroup', { name: 'Connections per download from Harbor' });
+    const northwind = await screen.findByRole('radiogroup', { name: 'Download speed-up for Northwind' });
+    const harbor = screen.getByRole('radiogroup', { name: 'Download speed-up for Harbor' });
     expect(within(northwind).getByRole('radio', { name: 'Auto' }).getAttribute('aria-checked')).toBe('true');
-    expect(within(harbor).getByRole('radio', { name: '1' }).getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(within(northwind).getByRole('radio', { name: '1' }));
+    expect(within(harbor).getByRole('radio', { name: 'Off' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(within(northwind).getByRole('radio', { name: 'Off' }));
     await waitFor(() => expect(rpcMock.callsOf('settings.update').at(-1)).toEqual({ patch: { downloadSingleConnection: ['b', 'a'] } }));
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Connections per download from Harbor' })).getByRole('radio', { name: 'Auto' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Download speed-up for Harbor' })).getByRole('radio', { name: 'Auto' }));
     await waitFor(() => expect(rpcMock.callsOf('settings.update').at(-1)).toEqual({ patch: { downloadSingleConnection: ['a'] } }));
   });
 });
@@ -252,7 +252,7 @@ describe('Section-level error states', () => {
     renderAt(settingsRoutes, '/settings/playback');
     const err = await screen.findByTestId('player-caps-error');
     fail = false;
-    fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(err).getByRole('button', { name: 'Try again' }));
     expect((await screen.findByTestId('select-livePlayer') as HTMLSelectElement).querySelector('option[value="embedded-mpv"]')).toBeTruthy();
   });
 
@@ -265,7 +265,7 @@ describe('Section-level error states', () => {
     renderAt(settingsRoutes, '/settings/remote');
     const err = await screen.findByTestId('remote-status-error');
     fail = false;
-    fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(err).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.queryByTestId('remote-status-error')).toBeNull());
   });
 });

@@ -2,18 +2,18 @@ import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
   CalendarX2,
+  ChevronDown,
   CircleCheck,
   Clapperboard,
+  FolderOpen,
   FolderX,
-  Info,
-  Play,
   RotateCw,
   SearchX,
   SlidersHorizontal,
   Star,
   TriangleAlert,
 } from 'lucide-react';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
@@ -22,17 +22,18 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type ItemRef, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 
-import { useMyListMenuItem } from '@/features/mylist/hooks/useMyListMenuItem';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
-import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMenu';
 import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useShortcut } from '@/shell';
+import { SearchEverythingLink } from '@/shell/SearchEverythingLink';
 
 import { GridMyListProvider, PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
+import { CategoryPickerDialog } from '../components/CategoryPickerDialog';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { DecadeChips, YearRangeFields, useYearFilter } from '../components/VodFilterBar';
 import { preloadDetailChunk, usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
-import { usePlayTitle, type PlayTarget } from '../hooks/usePlayTitle';
+import { usePosterMenu } from '../hooks/usePosterMenu';
+import { useLongPress } from '@/features/live/hooks/useLongPress';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
@@ -61,9 +62,11 @@ import {
   type VodKind,
   type VodSortKey,
 } from '../lib/paging';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
 import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, Toggle, Tooltip, VirtualGrid, buttonClass, cn, filterChipClass, type VirtualItemState } from '@/ui';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -133,6 +136,8 @@ interface GridCellProps {
   gridFocused: boolean;
   resume: Map<string, number>;
   locks: VodLocks;
+  /** The category's own language: its posters leave out a badge that every one of them would carry (realdata-22). */
+  quietLanguage: string | undefined;
 }
 
 /**
@@ -140,7 +145,7 @@ interface GridCellProps {
  * stay loaded. Memoised on stable props (L2-vod-1): a scroll re-renders only the cells it mounts,
  * not every cell on screen, and a page's arrival re-renders only that page's cells.
  */
-const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFocused, resume, locks }: GridCellProps) {
+const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFocused, resume, locks, quietLanguage }: GridCellProps) {
   const page = pageOf(index, pageSize);
   const q = useVodPage(input, page, usePageOpen(page));
   const item = q.data?.items[index - page * pageSize];
@@ -159,6 +164,7 @@ const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFo
       resume={resume}
       watched={watched.has(itemKey(item.ref))}
       locked={locks.itemLocked(item)}
+      quietLanguage={quietLanguage}
     />
   );
 });
@@ -171,6 +177,7 @@ const GridPoster = memo(function GridPoster({
   resume,
   watched,
   locked,
+  quietLanguage,
 }: {
   item: VodItem | SeriesItem;
   sourceKind: SourceKind;
@@ -179,12 +186,17 @@ const GridPoster = memo(function GridPoster({
   resume: Map<string, number>;
   watched: boolean;
   locked: boolean;
+  quietLanguage: string | undefined;
 }) {
   const prefetch = useMemo<PrefetchTarget>(
     () => ({ ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl }),
     [item, sourceKind],
   );
   const myList = useMemo(() => myListTarget(item), [item]);
+  const language = useMemo(() => {
+    const lang = itemLanguage(item.title, item.categoryName);
+    return lang?.code === quietLanguage ? undefined : lang;
+  }, [item, quietLanguage]);
   // C4: the keyboard cursor moves aria-activedescendant, not focus, so a cursor that rests on a
   // poster for 120 ms warms its detail page the way a resting pointer does.
   usePrefetchOnRest(active && gridFocused ? prefetch : null);
@@ -200,7 +212,7 @@ const GridPoster = memo(function GridPoster({
       rating={item.rating}
       progress={watched ? undefined : resume.get(resumeKey(item.ref))}
       watched={watched}
-      language={itemLanguage(item.title, item.categoryName)}
+      language={language}
       // C3: the saved marker and pointer toggle on the corner; S toggles it from the keyboard.
       myList={myList}
       prefetch={prefetch}
@@ -235,6 +247,98 @@ function RatingFloorChip({ setting, on, onChange, className }: { setting: number
     </Tooltip>
   );
 }
+
+/** The search field's narrowest width beside the chips (the old sm:w-56). */
+const SEARCH_MIN_W = 224;
+/** The field's start padding with the glyph (ps-9), its end padding with and without the key hint (pe-16, pe-3), and its border. */
+const SEARCH_CHROME_W = 36 + 2;
+const SEARCH_HINT_PAD = 64;
+const SEARCH_PLAIN_PAD = 12;
+
+/**
+ * Whether the grid toolbar's row holds every decade chip beside the controls with the whole search
+ * placeholder (v-vod-03), and whether the field has room for its Ctrl+F hint too. Measured, not a
+ * breakpoint: the chips' width follows the library (8 decades with thousands each on a big one)
+ * and the placeholder's the language. The hint goes first, then the chips take their own line.
+ * `deps` changes whenever the row's content does (chips loaded, placeholder, rating chip).
+ */
+function useToolbarFit(rowRef: RefObject<HTMLDivElement | null>, deps: string) {
+  const [fit, setFit] = useState({ chipsInline: false, hint: false, searchWidth: 0 });
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const measure = () => {
+      // Not laid out (a hidden page, tests): keep the stacked toolbar.
+      if (!row.clientWidth) return;
+      const chipsWrap = row.querySelector<HTMLElement>('[data-toolbar-chips]');
+      const input = row.querySelector<HTMLInputElement>('input[data-page-search]');
+      const field = input?.parentElement;
+      let placeholderW = 0;
+      if (input) {
+        const ctx = document.createElement('canvas').getContext('2d');
+        if (ctx) {
+          ctx.font = getComputedStyle(input).font;
+          placeholderW = Math.ceil(ctx.measureText(input.placeholder).width);
+        }
+      }
+      const plainW = Math.max(SEARCH_MIN_W, placeholderW + SEARCH_CHROME_W + SEARCH_PLAIN_PAD);
+      const hintW = Math.max(SEARCH_MIN_W, placeholderW + SEARCH_CHROME_W + SEARCH_HINT_PAD);
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      // The other controls of the row keep their width wherever the chips go.
+      let others = 0;
+      let items = 0;
+      for (const el of row.children) {
+        if (!(el instanceof HTMLElement) || el === chipsWrap || el === field || !el.offsetParent || getComputedStyle(el).position === 'absolute') continue;
+        others += el.offsetWidth;
+        items++;
+      }
+      // The chips' own width: their row's scrollWidth is its box's when they have room to spare.
+      let chips = 0;
+      const chipRow = chipsWrap?.offsetParent ? chipsWrap.firstElementChild : null;
+      if (chipRow instanceof HTMLElement && chipRow.children.length) {
+        const cs = getComputedStyle(chipRow);
+        chips = (parseFloat(cs.columnGap) || 0) * (chipRow.children.length - 1);
+        for (const chip of chipRow.children) chips += (chip as HTMLElement).offsetWidth;
+      }
+      // What is left for the field with the chips inline (gaps between the controls, the chips and the field).
+      const room = row.clientWidth - others - chips - gap * (items + (chips ? 1 : 0) + (field ? 1 : 0) - 1);
+      const chipsInline = chips > 0 && (!field || room >= plainW);
+      const hint = chipsInline ? room >= hintW : (field?.offsetWidth ?? 0) >= hintW;
+      const searchWidth = chipsInline ? (hint ? hintW : plainW) : 0;
+      setFit((f) => (f.chipsInline === chipsInline && f.hint === hint && f.searchWidth === searchWidth ? f : { chipsInline, hint, searchWidth }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(row);
+    // The field grows when the chips leave the row, and the hint waits for that width.
+    const field = row.querySelector('input[data-page-search]')?.parentElement;
+    if (field) ro.observe(field);
+    let live = true;
+    // Webfonts change the chips' and the placeholder's widths once they load.
+    void document.fonts?.ready.then(() => live && measure());
+    return () => {
+      live = false;
+      ro.disconnect();
+    };
+  }, [rowRef, deps]);
+  return fit;
+}
+
+/**
+ * A grid card's caption at 100 %: the 8 px gap, two title lines (13.5/18.56) and the year line
+ * (16), so a title that wraps keeps its year inside the cell and every row has the same gap.
+ */
+const GRID_CAPTION_HEIGHT = 62;
+
+/** Space above the first row, inside the scroller: room for its hover lift and focus glow. */
+const GRID_PADDING_TOP = 16;
+
+/**
+ * The grid's listbox. The keyboard cursor's ring on the card shows where focus is; the listbox
+ * draws a ring of its own only while it has focus and no cursor, so one focus never shows two rings.
+ * Its end room grows to the floating mini player's height over the window's foot (VirtualGrid).
+ */
+const GRID_CLASS = 'rounded-md pb-[max(--spacing(8),var(--player-float-inset,0px))] outline-none focus-visible:shadow-none [&:not([aria-activedescendant])]:focus-visible:ring-2 [&:not([aria-activedescendant])]:focus-visible:ring-focus';
 
 /** Below this many titles a category drops its decade chips and its search field. */
 const FEW_TITLES = 12;
@@ -380,11 +484,18 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const categoryMissing = categoryId !== ALL_CATEGORIES && cats.isSuccess && !category;
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
+  // Under Movies, "Movies | Action" reads "Action" (the grid's accessible name keeps the provider's),
+  // and "EN | ACTION" reads "ACTION (EN)", as plain text writes a group's tag: the name first.
+  const shownName = categoryId === ALL_CATEGORIES ? categoryName : plainChannelName(sectionlessCategoryName(categoryName, kind), false);
+  // "EN | ACTION": every poster would carry the same EN badge and "English" in its caption, which
+  // the title already says (realdata-22). A title in another language than its category keeps it.
+  const quietLanguage = categoryId !== ALL_CATEGORIES && category ? itemLanguage('', category.name)?.code : undefined;
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   // One string for the page h1 and the shell header title (C16), so they always agree. The shell
   // header shows it; the page's h1 is for assistive technology only, so the title shows once.
-  const pageTitle = categoryName || (kind === 'movie' ? t('movies') : t('series'));
-  const countText = firstReady ? t('titleCount', { count: total, formatted: fmt.format(total) }) : undefined;
+  const pageTitle = shownName || (kind === 'movie' ? t('movies') : t('series'));
+  // A zero is left out: the empty state under it already says nothing is here.
+  const countText = firstReady && total > 0 ? t('titleCount', { count: total, formatted: fmt.format(total) }) : undefined;
   // The source's name only when there are others to tell it from; with one, the count alone.
   const sourceName = useShowSourceName() ? source.data?.name : undefined;
 
@@ -396,6 +507,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     [pageTitle, sourceName, countText],
   );
   const locks = useVodLocks(sourceId, kind);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Phones: sort, years and Hide watched fold behind one Filters button, so the grid starts under the search row.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersId = useId();
@@ -415,9 +527,19 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   // A small category (a row or two of posters) needs no decade chips and no search of its own:
   // they were most of the page for five titles. Counted from the category itself, so the toolbar
   // does not change as filters narrow the grid, and kept while one of them is in use.
-  const fewTitles = category !== undefined && category.itemCount < FEW_TITLES;
+  // All movies and All series have no category row: there the shown categories' titles count, as
+  // on the landing (a Stalker portal that counts none keeps its tools).
+  const allCount = useMemo(
+    () => (categoryId === ALL_CATEGORIES ? cats.data?.reduce((n, c) => n + (c.hidden ? 0 : Math.max(0, c.itemCount)), 0) || undefined : undefined),
+    [categoryId, cats.data],
+  );
+  const fewTitles = (category?.itemCount ?? allCount ?? Infinity) < FEW_TITLES;
   const showChips = !fewTitles || yearFiltered;
   const showSearch = !fewTitles || searchDraft !== '';
+  // The header's field searches everything; this one says what it narrows.
+  const searchPlaceholder = categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('searchAllMovies') : t('searchAllSeries')) : t('searchInCategory');
+  const toolbarRowRef = useRef<HTMLDivElement>(null);
+  const fit = useToolbarFit(toolbarRowRef, `${showChips}|${showSearch}|${yearFilter.loading}|${yearFilter.chips.length}|${ratingFilterSet}|${searchPlaceholder}`);
 
   const sortOptions = VOD_SORT_KEYS.map((k) => ({ value: k, label: t(`sort_${k}`) }));
   const coverWidth = useCoverWidth(settings.coverSize);
@@ -532,48 +654,36 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     }
   });
 
-  // A poster's menu (right click, Shift+F10, the context-menu key): open it, or My List.
-  const [menu, setMenu] = useState<{ pos: { x: number; y: number }; item: VodItem | SeriesItem; index: number } | null>(null);
-  const closeMenu = useCallback(() => setMenu(null), []);
-  const myListItem = useMyListMenuItem(menu ? { ref: menu.item.ref, snapshot: myListTarget(menu.item).snapshot } : null);
-  // L4-vod-4: the menu also plays the title (resuming like the detail page's Play) and marks it watched.
-  const menuTitle = useMemo(() => (menu ? [menu.item] : undefined), [menu]);
-  const menuWatched = useWatchedKeys(menuTitle).has(menu ? itemKey(menu.item.ref) : '');
-  const play = usePlayTitle();
-  const playFromMenu = (item: VodItem | SeriesItem, index: number) => {
-    // A series has no single thing to play from here: its details pick the episode.
-    if (item.ref.contentType !== 'movie' || !input) return openTitle(item.ref, index);
-    const target: PlayTarget = { ref: item.ref, sourceKind: input.sourceKind, title: item.title, categoryId: item.categoryId };
-    if (item.posterUrl) target.posterUrl = item.posterUrl;
-    void play(target);
-  };
-  const menuItems: MenuItem[] = menu
-    ? [
-        { id: 'play', label: t('play'), icon: <Play aria-hidden className="size-4" />, onSelect: () => playFromMenu(menu.item, menu.index) },
-        { id: 'open', label: t('openDetails'), icon: <Info aria-hidden className="size-4" />, onSelect: () => openTitle(menu.item.ref, menu.index) },
-        ...(myListItem ? [myListItem] : []),
-        {
-          id: 'watched',
-          label: menuWatched ? t('markUnwatched') : t('markWatched'),
-          icon: <CircleCheck aria-hidden className="size-4" />,
-          onSelect: () => void toggleWatched(menu.item.ref),
-        },
-      ]
-    : [];
+  // A poster's menu (right click, Shift+F10, the context-menu key, a long press): Play or Resume,
+  // details, My List and watched, the same menu as the landing's rails.
+  const posterMenu = usePosterMenu({ sourceKind: input?.sourceKind, resume, openDetails: openTitle });
+  const openMenu = (item: VodItem | SeriesItem, index: number, pos: { x: number; y: number }) =>
+    posterMenu.open(
+      { ref: item.ref, name: item.titleBase || item.title, title: item.title, year: item.year, posterUrl: item.posterUrl, categoryId: item.categoryId },
+      index,
+      pos,
+    );
+  // iOS fires no contextmenu on a long press: a timer opens the menu there (Android gets both, to the same effect).
+  const longPress = useLongPress((x, y) => {
+    const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>('[role="option"]');
+    const index = Number(cell?.dataset.index);
+    const item = cell && gridWrapRef.current?.contains(cell) && Number.isInteger(index) ? itemAt(index) : undefined;
+    if (item) openMenu(item, index, { x, y });
+  });
   const onGridContextMenu = (e: MouseEvent<HTMLDivElement>) => {
     const cell = (e.target as HTMLElement).closest<HTMLElement>('[role="option"]');
     const index = Number(cell?.dataset.index);
     const item = cell && Number.isInteger(index) ? itemAt(index) : undefined;
     if (!item) return;
     e.preventDefault();
-    setMenu({ pos: { x: e.clientX, y: e.clientY }, item, index });
+    openMenu(item, index, { x: e.clientX, y: e.clientY });
   };
   const openCursorMenu = () => {
     const at = activeCell();
     const item = at ? itemAt(at.index) : undefined;
     if (!at || !item) return;
     const r = at.cell.getBoundingClientRect();
-    setMenu({ pos: { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 120) }, item, index: at.index });
+    openMenu(item, at.index, { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 120) });
   };
   useShortcut('shift+f10', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
   useShortcut('contextmenu', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
@@ -599,16 +709,26 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           resume={resume}
           watched={watchedKeys.has(itemKey(item.ref))}
           locked={locks.itemLocked(item)}
+          quietLanguage={quietLanguage}
         />
       ) : null,
-    [sourceKind, gridFocused, resume, watchedKeys, locks],
+    [sourceKind, gridFocused, resume, watchedKeys, locks, quietLanguage],
   );
   const renderPagedCell = useCallback(
     (i: number, _index: number, state: VirtualItemState) =>
       input ? (
-        <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={state.active && gridFocused} resume={resume} locks={locks} />
+        <GridCell
+          input={input}
+          index={i}
+          pageSize={pageSize}
+          active={state.active}
+          gridFocused={state.active && gridFocused}
+          resume={resume}
+          locks={locks}
+          quietLanguage={quietLanguage}
+        />
       ) : null,
-    [input, pageSize, gridFocused, resume, locks],
+    [input, pageSize, gridFocused, resume, locks, quietLanguage],
   );
 
   return (
@@ -618,13 +738,32 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         {/*
           VL-grid-toolbars: one toolbar under the header, one hairline. Back, the decade chips, the
           rating floor, search and sort share a row; From/To and Hide watched wait behind Filters,
-          whose badge counts what is on. Below sm the row wraps: the search takes a line, and the
-          sort and the chips move into the Filters panel.
+          whose badge counts what is on. Where the row has no room for every chip beside the
+          controls and the whole search placeholder (useToolbarFit, v-vod-03), the chips take a line
+          of their own under the controls and the search grows to fill the row; the field's Ctrl+F
+          hint shows only while the placeholder still fits beside it. Below sm the row wraps: the
+          search takes a line, and the sort and the chips move into the Filters panel.
         */}
         <div className="flex flex-col gap-2 border-b border-divider px-(--page-gutter) py-2.5" data-testid="vod-grid-toolbar">
-          <div className="flex flex-wrap items-center gap-2">
+          <div
+            ref={toolbarRowRef}
+            className="flex flex-wrap items-center gap-2"
+            style={fit.searchWidth ? ({ '--vod-search-w': `${fit.searchWidth}px` } as CSSProperties) : undefined}
+          >
             <BackButton to={backHref} label={kind === 'movie' ? t('movies') : t('series')} className="-ms-2" />
             <h1 className="sr-only">{pageTitle}</h1>
+            {/* Another category without going back to the landing (Netflix's Genres, Plex's library menu). */}
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              onClick={() => setPickerOpen(true)}
+              className={buttonClass('ghost', 'sm', 'shrink-0')}
+              data-testid="vod-category-picker"
+            >
+              <FolderOpen aria-hidden size={16} />
+              <span className="max-sm:sr-only">{t('categories')}</span>
+              <ChevronDown aria-hidden size={14} className="text-fg-muted max-sm:hidden" />
+            </button>
             {/* The shell header carries the count from md up; below it the header has room for the title only. */}
             {countText && (
               <span title={countText} className="tabular min-w-0 flex-1 truncate text-sm text-fg-subtle sm:hidden">
@@ -632,7 +771,11 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               </span>
             )}
             {/* Mounted from the first frame (L2-vod-5): its placeholder chips hold the row while the source loads. */}
-            <div id={`${filtersId}-chips`} className={cn('min-w-0 sm:flex-1', 'max-sm:order-3 max-sm:basis-full', !filtersOpen && 'max-sm:hidden')}>
+            <div
+              id={`${filtersId}-chips`}
+              data-toolbar-chips=""
+              className={cn('min-w-0', fit.chipsInline ? 'flex-1' : 'order-3 basis-full empty:hidden', !filtersOpen && 'max-sm:hidden')}
+            >
               {sourceId && !source.isError && showChips && <DecadeChips filter={yearFilter} />}
             </div>
             {ratingFilterSet && (
@@ -648,8 +791,11 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 value={searchDraft}
                 onChange={setSearchDraft}
                 size="sm"
-                className="w-full max-sm:order-1 sm:w-56"
-                placeholder={t('searchInCategory')}
+                className={cn('w-full max-sm:order-1', fit.chipsInline ? 'sm:w-(--vod-search-w)' : 'sm:w-56 sm:flex-1')}
+                placeholder={searchPlaceholder}
+                // Ctrl+F and "/" land here (the shell's page-search rule), and the field shows the key.
+                data-page-search=""
+                shortcut={fit.hint ? 'mod+f' : undefined}
                 onSubmit={focusGrid}
                 onKeyDown={(e) => {
                   // ArrowDown leaves the search box for the posters.
@@ -706,13 +852,19 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         {/* Right clicks bubble here from the grid's options; so do focus changes (React's focusin/focusout). */}
         <div
           ref={gridWrapRef}
+          // The shell's skip link lands on the grid, past the toolbar and its filters.
+          data-skip-target=""
           aria-busy={refreshing || undefined}
           data-refreshing={refreshing || undefined}
           className={cn(
-            'min-h-0 flex-1 px-(--page-gutter) pt-4 motion-safe:transition-opacity motion-safe:duration-200',
+            // The grid keeps that space inside its scroller instead (GRID_PADDING_TOP).
+            'min-h-0 flex-1 px-(--page-gutter) pt-4 has-[[role=listbox]]:pt-0 motion-safe:transition-opacity motion-safe:duration-200',
             refreshing && 'motion-safe:opacity-60 motion-safe:delay-150',
+            // A long press opens the poster's menu: no link preview or text selection on touch.
+            'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]',
           )}
           onContextMenu={onGridContextMenu}
+          {...longPress}
           onFocus={(e) => setGridFocused(e.target.getAttribute('role') === 'listbox')}
           onBlur={(e) => {
             if (e.target.getAttribute('role') === 'listbox') setGridFocused(false);
@@ -740,7 +892,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               }}
             />
           ) : !input || (clientFiltered ? inOrder.isPending || (filteredItems.length === 0 && !filteredDone) : first.isPending) ? (
-            <SkeletonGrid count={18} minColumnWidth={coverWidth} />
+            <SkeletonGrid count={18} minColumnWidth={coverWidth} captionHeight={GRID_CAPTION_HEIGHT} />
           ) : total === 0 ? (
             // The search query is the narrowest thing the user typed, so it names the empty result
             // first; clearing it falls through to the rating, year and watched states below.
@@ -751,9 +903,12 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 title={<span title={echoQuery(search) !== search ? search : undefined}>{t('noSearchMatchTitle', { query: echoQuery(search) })}</span>}
                 description={t('noSearchMatchHint')}
                 action={
-                  <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
-                    {t('clearSearch')}
-                  </button>
+                  <>
+                    <SearchEverythingLink query={search} size="sm" />
+                    <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
+                      {t('clearSearch')}
+                    </button>
+                  </>
                 }
               />
             ) : filtered ? (
@@ -824,7 +979,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 ) : undefined
               }
               onSelect={(item, index) => openTitle(item.ref, index)}
-              className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              captionHeight={GRID_CAPTION_HEIGHT}
+              paddingStart={GRID_PADDING_TOP}
+              className={GRID_CLASS}
             />
           ) : (
             <PageGateProvider value={pageGate}>
@@ -847,12 +1004,24 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                   if (!item) return retryPageOf(i);
                   openTitle(item.ref, i);
                 }}
-                className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                captionHeight={GRID_CAPTION_HEIGHT}
+                paddingStart={GRID_PADDING_TOP}
+                className={GRID_CLASS}
               />
             </PageGateProvider>
           )}
         </div>
-        <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu ? menu.item.titleBase || menu.item.title : ''} onClose={closeMenu} />
+        {posterMenu.element}
+        <CategoryPickerDialog
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          kind={kind}
+          categories={cats.data}
+          currentId={categoryId}
+          hrefFor={(id) => `${backHref}/c/${encodeURIComponent(id)}`}
+          state={location.state}
+          locked={locks.categoryLocked}
+        />
       </div>
     </GridMyListProvider>
   );

@@ -417,12 +417,14 @@ describe('list page', () => {
     // With the column folded away (or a drawer, below 1024 px) the header carries it.
     fireEvent.click(screen.getByRole('button', { name: 'Hide lists' }));
     expect(screen.queryByTestId('lists-section')).toBeNull();
-    await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[title="Manage lists"]')).toBeTruthy());
+    // Found by its name: the button no longer repeats its label as a native title (9a5ddbaf).
+    await waitFor(() => expect(within(render(<>{useShellStore.getState().header!.actions}</>).container).queryByRole('button', { name: 'Manage lists' })).toBeTruthy());
     const folded = render(<>{useShellStore.getState().header!.actions}</>).container;
     // Folded away on a wide page it keeps its label (on a phone the lists are a drawer, where it
     // is a bare gear: see the narrow-page test below).
     const manage = within(folded).getByRole('button', { name: 'Manage lists' });
     expect(manage.textContent).toBe('Manage lists');
+    expect(manage.hasAttribute('title')).toBe(false);
     expect(manage.className.split(' ')).not.toContain('w-8');
     fireEvent.click(manage);
     expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
@@ -489,7 +491,7 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
       }
     });
 
-  it('keeps the lists out of a page narrower than 66rem, behind the bar toggle, even on a wide window', async () => {
+  it('keeps the lists out of a page narrower than 79rem, behind the bar toggle, even on a wide window', async () => {
     // The harness answers every min-width query as matching (a wide window); the page itself is
     // 776 px wide, as beside the expanded rail in a 1024 px window, where three columns pushed the
     // stage off the page's end.
@@ -512,7 +514,12 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
     fireEvent.click(manage);
     expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
     act(() => useListsDialogs.setState({ dialog: null }));
-    fireEvent.click(screen.getByRole('button', { name: 'Show lists' }));
+    // The way to the other lists names the list that is open (library-03).
+    // Read as a screen reader reads it: jsdom's name drops the space after the sr-only "Show lists:".
+    const toggle = screen.getByTestId('lists-toggle');
+    expect(toggle.textContent).toBe('Show lists: Sports');
+    expect(toggle.getAttribute('aria-haspopup')).toBe('dialog');
+    fireEvent.click(toggle);
     const drawer = await screen.findByTestId('lists-drawer');
     expect(within(drawer).getByRole('link', { name: /Kids/ })).toBeTruthy();
     // Escape closes it.
@@ -525,11 +532,28 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
     stubLiveExtras();
     h.renderAt('/lists/L1', routes);
     await waitFor(() => expect(rows()).toHaveLength(1));
-    // jsdom's root is 16 px, so 66rem is 1056 px (990 px at the app's 15 px root).
-    reportPageWidth(1100);
+    // jsdom's root is 16 px, so 79rem is 1264 px (1185 px at the app's 15 px root).
+    reportPageWidth(1300);
     expect(screen.getByTestId('lists-section')).toBeTruthy();
     expect(screen.queryByTestId('lists-drawer')).toBeNull();
     expect(screen.getByRole('button', { name: 'Hide lists' })).toBeTruthy();
+  });
+
+  it('stacks the stage over the channels in a window held upright, with the lists in the drawer, as Live does', async () => {
+    const real = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ ...real(query), matches: query.includes('min-width') || query.includes('portrait') })) as typeof window.matchMedia;
+    try {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+      stubLiveExtras();
+      h.renderAt('/lists/L1', routes);
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      reportPageWidth(1300);
+      expect(screen.queryByTestId('lists-section')).toBeNull();
+      expect(screen.getByTestId('list-stage-section').className).toContain('md:order-first');
+      expect(screen.getByTestId('list-page').className).toContain('md:landscape:flex-row');
+    } finally {
+      window.matchMedia = real;
+    }
   });
 });
 
@@ -551,6 +575,17 @@ describe('/lists', () => {
     fireEvent.change(within(create).getByLabelText('New list name'), { target: { value: 'Sports' } });
     fireEvent.click(within(create).getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(h.location.current).toBe('/lists/new1'));
+  });
+
+  it('with no source, asks for one first instead of offering an empty list (v-vod-13)', async () => {
+    h.installCore(rpc, []);
+    rpc.handlers['sources.list'] = () => [];
+    stubLiveExtras();
+    h.renderAt('/lists', routes, <ListsDialogHost />);
+    expect(await screen.findByTestId('lists-no-sources')).toBeTruthy();
+    expect(screen.getByText(/Add a source first/)).toBeTruthy();
+    expect(screen.getByTestId('no-sources-add')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Create list' })).toBeNull();
   });
 });
 
@@ -588,12 +623,54 @@ describe('Home rails', () => {
       },
     ]);
     const sports = await screen.findByTestId('dashboard-rail-list-L1');
-    fireEvent.contextMenu(await within(sports).findByRole('button', { name: /CNN/ }), { clientX: 40, clientY: 40 });
+    // The card itself, not its visible "More actions for CNN" button beside it.
+    fireEvent.contextMenu(await within(sports).findByRole('button', { name: /^Play.*CNN/ }), { clientX: 40, clientY: 40 });
     const menu = await screen.findByRole('menu');
     expect(within(menu).getByRole('menuitem', { name: /Add to list/ })).toBeTruthy();
+    // The list's rail offers to take the channel out of the list.
+    expect(within(menu).getByRole('menuitem', { name: 'Remove from this list' })).toBeTruthy();
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^Play/ }));
     await waitFor(() => expect(played.map((p) => p.channel.name)).toEqual(['CNN']));
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });
+  });
+
+  // v-shell-home-08: with one source, its name under a card with nothing on air read like a programme.
+  it('names the source under a card with nothing on only when there are two or more sources', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [CNN], { onDashboard: true })]);
+    h.renderAt('/dashboard', [{ path: '/dashboard', element: <CustomListRails /> }]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    expect(await within(sports).findByText('Backup list')).toBeTruthy();
+  });
+
+  it('with one source, a card with nothing on says Live TV, as the other Home rails do', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [CNN], { onDashboard: true })]);
+    rpc.handlers['sources.list'] = () => [h.SOURCES[1]!];
+    h.renderAt('/dashboard', [{ path: '/dashboard', element: <CustomListRails /> }]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    expect(await within(sports).findByText('Live TV')).toBeTruthy();
+    expect(within(sports).queryByText('Backup list')).toBeNull();
+  });
+
+  it('names a provider-prefixed channel the cleaned way to screen readers and in its removal toast', async () => {
+    const TWO = h.channel('4', 'UK| BBC Two');
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [TWO], { onDashboard: true })]);
+    rpc.handlers['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    rpc.handlers['channels.edits'] = () => [];
+    h.renderAt('/dashboard', [
+      {
+        path: '/dashboard',
+        element: (
+          <ChannelMenuHost>
+            <CustomListRails />
+          </ChannelMenuHost>
+        ),
+      },
+    ]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    const card = await within(sports).findByRole('button', { name: /^Play BBC Two \(UK\)/ });
+    fireEvent.contextMenu(card, { clientX: 40, clientY: 40 });
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Remove from this list' }));
+    await waitFor(() => expect(h.lastToast()?.title).toBe('Removed BBC Two (UK) from Sports'));
   });
 
   it('leaves out the channels of a source in its delete-undo window, and brings them back on Undo', async () => {

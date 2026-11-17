@@ -8,7 +8,7 @@ import { makeSource, rpcMock, settings } from './harness';
 
 // BOOT-1: main.tsx starts the router at the startup target, so a cold start at `/` renders the
 // target page in its first render instead of the index route and a redirect.
-const env = vi.hoisted(() => ({ desktop: false, indexRenders: 0, prefetched: [] as string[] }));
+const env = vi.hoisted(() => ({ desktop: false, indexRenders: 0, prefetched: [] as string[], slowPage: Promise.resolve() }));
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -45,6 +45,8 @@ vi.mock('@/routes', async () => {
         // Lazy like the real Home: the first render waits for its module.
         { path: 'dashboard', lazy: async () => ({ Component: page('home page') }) },
         { path: 'sources', Component: page('sources page') },
+        // A page whose code is still on its way when the user presses its link.
+        { path: 'slow', lazy: async () => (await env.slowPage, { Component: page('slow page') }) },
         { path: 'favorites', Component: page('favorites page') },
         { path: 'search', Component: page('search page') },
         { path: 's/:sourceId/movies', Component: page('movies page') },
@@ -80,6 +82,8 @@ beforeEach(() => {
   rpcMock.handlers['sources.list'] = () => [makeSource('s1')];
   rpcMock.handlers['lists.list'] = () => [{ id: 'l1', name: 'L', count: 0 }];
   rpcMock.handlers['settings.update'] = (a) => settings((a as { patch: Partial<Settings> }).patch);
+  localStorage.clear();
+  env.slowPage = Promise.resolve();
   const root = document.createElement('div');
   root.id = 'root';
   document.body.appendChild(root);
@@ -108,6 +112,14 @@ describe('BOOT-1: the router starts at the startup target', () => {
     expect(window.location.pathname).toBe('/dashboard');
     expect(env.indexRenders).toBe(0);
     expect(window.history.length).toBe(before);
+  });
+
+  it("opens Home's welcome, not the saved screen, when the server has no source (w-walkthrough-03)", async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ startupBehavior: 'restore-last-view', lastRoute: '/favorites' });
+    rpcMock.handlers['sources.list'] = () => [];
+    await boot('/', 'home page');
+    expect(window.location.pathname).toBe('/dashboard');
+    expect(env.indexRenders).toBe(0);
   });
 
   it('opens Sources when Home is off and nothing is saved', async () => {
@@ -166,6 +178,34 @@ describe('BOOT-1: the router starts at the startup target', () => {
     expect(await screen.findByText('favorites page')).toBeTruthy();
     expect(window.location.pathname).toBe('/favorites');
     expect(window.history.length).toBe(before);
+  });
+
+  it('restores this browser\'s own last screen before the server\'s, which another device wrote', async () => {
+    localStorage.setItem('tsrust.lastRoute', '/favorites');
+    rpcMock.handlers['settings.get'] = () => settings({ startupBehavior: 'restore-last-view', lastRoute: '/search' });
+    await boot('/', 'favorites page');
+    expect(window.location.pathname).toBe('/favorites');
+  });
+
+  it('never overrides a page the user opened while startup still waited for the settings', async () => {
+    let answer!: (s: Settings) => void;
+    rpcMock.handlers['settings.get'] = () => new Promise<Settings>((r) => (answer = r));
+    let loaded!: () => void;
+    env.slowPage = new Promise<void>((r) => (loaded = r));
+    window.history.replaceState(null, '', '/');
+    vi.resetModules();
+    await act(async () => {
+      await import('@/main');
+    });
+    expect(await screen.findByTestId('startup-pending', undefined, { timeout: 3000 })).toBeTruthy();
+    // The press starts the page's code; the settings answer before it is in.
+    const { appRouter } = await import('@/App');
+    await act(async () => void appRouter().navigate('/slow'));
+    await act(async () => answer(settings({ startupBehavior: 'restore-last-view', lastRoute: '/favorites' })));
+    await act(async () => loaded());
+    expect(await screen.findByText('slow page')).toBeTruthy();
+    expect(window.location.pathname).toBe('/slow');
+    expect(screen.queryByText('favorites page')).toBeNull();
   });
 
   it('starts at `/` when settings fail, and StartupRedirect falls back to Home', async () => {

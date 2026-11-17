@@ -350,6 +350,8 @@ export function useShellEvents(): void {
     // removed and added again under a new id): a toast about a source that no longer exists
     // stayed on screen across every page (L3-desktop-9).
     const failedImports = new Set<string>();
+    // Sources whose run the user asked to stop from the import toast (its Cancel import).
+    const cancelAsked = new Set<string>();
     offs.push(
       queryClient.getQueryCache().subscribe((event) => {
         if (failedImports.size === 0 || event.type !== 'updated' || event.query.queryKey[0] !== 'sources.list') return;
@@ -367,6 +369,8 @@ export function useShellEvents(): void {
       onAppEvent('import.progress', (p: ImportProgressEvent) => {
         const tr = tRef.current;
         const id = `import-${p.sourceId}`;
+        // A run that ended forgets its Cancel request, so the next run's toast offers Cancel again.
+        if (p.phase === 'done' || p.phase === 'error' || p.phase === 'cancelled') cancelAsked.delete(p.sourceId);
         // Any newer event for the source replaces or dismisses its error toast; an error adds it back below.
         failedImports.delete(p.sourceId);
         const onSources = isSourcesRoute(pathRef.current);
@@ -423,6 +427,26 @@ export function useShellEvents(): void {
           description: importProgressText(p, source?.kind, phaseLabel, langRef.current, tr),
           // A saving step is a wait with no meaningful count: the bar runs indeterminate.
           progress: p.total && p.total > 0 && !importSaveStep(p) ? { value: p.done, max: p.total } : {},
+          // Cancel where the user is looking, as the source's card offers it; the toast closes on
+          // the press and the 'cancelled' phase answers with "Import cancelled". Not offered
+          // again while that request is out.
+          action: cancelAsked.has(p.sourceId)
+            ? undefined
+            : {
+                label: tr('sources:cancelImport'),
+                onClick: () => {
+                  cancelAsked.add(p.sourceId);
+                  rpc('sources.cancelImport', { id: p.sourceId })
+                    .then((running) => {
+                      // Nothing was running (it had just finished): the toast may offer it again.
+                      if (!running) cancelAsked.delete(p.sourceId);
+                    })
+                    .catch(() => {
+                      cancelAsked.delete(p.sourceId);
+                      toast({ variant: 'error', title: tr('sources:cancelFailed') });
+                    });
+                },
+              },
         });
       }),
     );
@@ -518,7 +542,31 @@ function routePathname(route: string | undefined): string | undefined {
 }
 
 /**
- * Persists the current route, query included, as settings.lastRoute.
+ * This browser's own last screen. settings.lastRoute is one value per server, written by whichever
+ * browser moved last, so a phone opened where the desktop had been; startup reads this first and
+ * the server's value only on a device that has none yet.
+ */
+const LAST_ROUTE_KEY = 'tsrust.lastRoute';
+
+export function localLastRoute(): string | undefined {
+  try {
+    return localStorage.getItem(LAST_ROUTE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function rememberLastRoute(path: string): void {
+  try {
+    localStorage.setItem(LAST_ROUTE_KEY, path);
+  } catch {
+    // storage blocked: the server's value stands in
+  }
+}
+
+/**
+ * Persists the current route, query included, in this browser (localLastRoute) and as
+ * settings.lastRoute, the fallback for a device with no memory of its own.
  *
  * A new screen (pathname) is saved after a debounce. A query-only change on
  * the same screen (typing a search's ?q=, a filter) is not timed at all: each
@@ -527,9 +575,9 @@ function routePathname(route: string | undefined): string | undefined {
  */
 export function useLastRoutePersistence(enabled: boolean, initial: string | undefined): void {
   const location = useLocation();
-  const saved = useRef<string | undefined>(initial);
+  const saved = useRef<string | undefined>(localLastRoute() ?? initial);
   useEffect(() => {
-    saved.current = initial;
+    saved.current = localLastRoute() ?? initial;
   }, [initial]);
   useEffect(() => {
     if (!enabled) return;
@@ -541,6 +589,7 @@ export function useLastRoutePersistence(enabled: boolean, initial: string | unde
       if (!pending) return;
       pending = false;
       saved.current = path;
+      rememberLastRoute(path);
       rpc('settings.update', { patch: { lastRoute: path } })
         .then((s) => queryClient.setQueryData(rpcKey('settings.get'), s))
         .catch(() => {

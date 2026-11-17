@@ -10,8 +10,8 @@
   "tourBack": "Voltar",
   "tourSkip": "Pular tour",
   "tourDone": "Concluído",
-  "tourHintSearch": "Pesquisar",
-  "tourHintPalette": "Comandos",
+  "tourHintSearch": "Pesquisar nesta página",
+  "tourHintPalette": "Pesquisar em tudo",
   "tourHintShortcuts": "Atalhos",
   "whatsNewTitle": "Novidades",
   "whatsNewVersion": "Versão {{version}}",
@@ -81,7 +81,8 @@
   "noteGuideSmoothTitle": "Um guia mais fluido",
   "noteGuideSmoothText": "O guia de TV rola suavemente com muitos canais e preenche lacunas nas listagens XMLTV com o guia da sua própria conta Xtream.",
   "tourCoachTitle": "Sua fonte está pronta",
-  "tourCoachText": "A busca encontra canais, filmes e séries em todas as suas fontes. A paleta de comandos leva você a qualquer outro lugar.",
+  "tourCoachText": "“Pesquisar em tudo” encontra canais, filmes e séries em todas as suas fontes e abre qualquer página ou configuração.",
+  "tourCoachTextTouch": "A busca encontra canais, filmes e séries em todas as suas fontes.",
   "tourShowAround": "Fazer o tour",
   "tourGotIt": "Entendi"
 }

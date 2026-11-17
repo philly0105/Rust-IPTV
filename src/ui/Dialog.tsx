@@ -4,6 +4,7 @@ import {
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
@@ -58,12 +59,38 @@ export interface DialogProps {
 }
 
 /**
- * The sheet's panel below sm. Its height cap can be overridden through `className` (`max-sm:max-h-…`).
- * The cap leaves room above it for the toast stack, which moves to the top edge while a dialog
- * is open on a phone (see Toast.tsx), so a toast never covers the sheet's title.
+ * The sheet's panel below sm. Its height cap can be overridden through `className` (`max-sm:max-h-…`;
+ * subtract `var(--kb-inset,0px)` there too). The cap leaves room above it for the toast stack, which
+ * moves to the top edge while a dialog is open on a phone (see Toast.tsx), so a toast never covers
+ * the sheet's title. The sheet stands on the on-screen keyboard (`--kb-inset`, useKeyboardInset).
  */
 const SHEET =
-  'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:max-w-none max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[env(safe-area-inset-bottom,0px)] max-sm:[--dialog-gutter:1rem]';
+  'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-[var(--kb-inset,0px)] max-sm:max-w-none max-sm:max-h-[calc(100dvh-var(--kb-inset,0px)-max(1.5rem,var(--toast-reserve,0px)))] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[env(safe-area-inset-bottom,0px)] max-sm:[--dialog-gutter:1rem]';
+
+/**
+ * How much of the layout viewport's bottom the on-screen keyboard covers, while `active`. iPhone
+ * Safari does not shrink the layout viewport for the keyboard, so a sheet fixed to the bottom edge
+ * sat under it, its footer (Add source, Save) out of reach while typing. Android Chrome resizes the
+ * layout viewport itself (interactive-widget in index.html), so there this stays 0, as it does on a
+ * desktop and while the page is pinch-zoomed.
+ */
+function useKeyboardInset(active: boolean): number {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const vv = typeof window === 'undefined' ? null : window.visualViewport;
+    if (!active || !vv) return;
+    const update = () => setInset(vv.scale > 1.01 ? 0 : Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      setInset(0);
+    };
+  }, [active]);
+  return inset;
+}
 
 /** Whether a dialog is a sheet below sm when its caller does not say (see `DialogProps.sheet`). */
 function sheetByDefault(size: DialogSize, headerless: boolean): boolean {
@@ -194,6 +221,7 @@ export function Dialog({
   const asSheet = !drawer && (sheet ?? sheetByDefault(size, !!(hideTitle && hideClose)));
   const { t } = useTranslation('common');
   const toastReserve = useToastReserve((s) => s.px);
+  const keyboardInset = useKeyboardInset(open && asSheet);
   const panelRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const { present, closing } = usePresence(open, layerRef);
@@ -341,9 +369,9 @@ export function Dialog({
         drawer
           ? 'items-stretch justify-end'
           : // Below sm, start under the toast stack when it is taller than the 8vh gap (toastReserveFor).
-            'items-start justify-center overflow-y-auto p-6 pt-[8vh] max-sm:pt-[max(8vh,var(--toast-reserve,0px))] motion-safe:transition-[padding-top] motion-safe:duration-150',
+            'items-start justify-center overflow-y-auto p-6 pt-[8vh] max-sm:pt-[max(8vh,var(--toast-reserve,0px))] motion-safe:transition-[padding-top] motion-safe:duration-(--duration-fast)',
       )}
-      style={drawer ? undefined : ({ '--toast-reserve': `${toastReserve}px` } as CSSProperties)}
+      style={drawer ? undefined : ({ '--toast-reserve': `${toastReserve}px`, '--kb-inset': `${keyboardInset}px` } as CSSProperties)}
       onKeyDown={onKeyDown}
     >
       <div

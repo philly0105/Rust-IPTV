@@ -14,6 +14,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { queryClient } from '@/api/query';
 import common from '@/i18n/en/common.json';
 import { joinList } from '@/shell/dashboard/cards';
+import { useToastStore } from '@/ui/Toast';
 import type { Category, Channel, EpgNowNext, Page, PageQuery } from '@/api/types';
 
 import { CategorySidebar } from '../components/CategorySidebar';
@@ -133,7 +134,12 @@ const list = () => screen.getByTestId('channel-list');
 const rowButton = (i: number) => document.querySelector<HTMLButtonElement>(`[data-testid="channel-list"] [data-row-index="${i}"]`);
 const rowStar = (i: number) => rowButton(i)!.parentElement!.querySelector<HTMLButtonElement>('button[aria-pressed]')!;
 const calls = (cmd: string) => rpcMock.calls.filter((c) => c.cmd === cmd);
-const toasts = () => (console.info as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[1]));
+// The page's own toasts (the fake `useToast` logs them) and the shared ones: favourite toggles go
+// through `toggleFavoriteWithUndo`, which raises its toasts on `@/ui/Toast` directly.
+const toasts = () => [
+  ...(console.info as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[1])),
+  ...useToastStore.getState().toasts.map((t) => String(t.title)),
+];
 
 beforeAll(() => {
   installDomStubs();
@@ -148,6 +154,7 @@ beforeEach(() => {
   fakes.usePlayerStore.setState({ source: undefined, zapContext: undefined });
   fakes.recorded.playItem.length = 0;
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  useToastStore.getState().clear();
 });
 afterEach(() => {
   cleanup();
@@ -185,7 +192,7 @@ describe('favorites from the list', () => {
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
     fireEvent.click(rowStar(1));
-    await waitFor(() => expect(toasts()).toContain('Could not add the favorite'));
+    await waitFor(() => expect(toasts()).toContain('Couldn\'t add the favorite'));
     await waitFor(() => expect(rowStar(1).getAttribute('aria-pressed')).toBe('false'));
   });
 
@@ -212,7 +219,7 @@ describe('context menu', () => {
     const menu = await screen.findByRole('menu');
     expect(within(menu).queryByRole('menuitem', { name: 'Add or remove favorite' })).toBeNull();
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Remove from favorites' }));
-    await waitFor(() => expect(toasts()).toContain('Could not remove the favorite'));
+    await waitFor(() => expect(toasts()).toContain('Couldn\'t remove the favorite'));
 
     fireEvent.contextMenu(rowButton(3)!.parentElement!, { clientX: 40, clientY: 40 });
     expect(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Add to favorites' })).toBeTruthy();
@@ -297,7 +304,8 @@ describe('groups sidebar', () => {
   it('arrow keys move between groups with one tab stop; Home goes to All channels', () => {
     renderIn('/', [{ path: '/', element: sidebar(cats) }]);
     const links = () => [...document.querySelectorAll<HTMLElement>('[data-cat-index]')];
-    expect(links().filter((l) => l.tabIndex === 0 && l.dataset.catIndex !== 'all')).toHaveLength(1);
+    // One stop for the whole column, All channels included (a11y-keyboard-04): the open link, All here.
+    expect(links().filter((l) => l.tabIndex === 0).map((l) => l.dataset.catIndex)).toEqual(['all']);
     fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filter groups' }), { key: 'ArrowDown' });
     expect(document.activeElement?.textContent).toContain('Group 0');
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
@@ -338,13 +346,13 @@ describe('groups sidebar', () => {
         regionScope="src1:live"
       />
     );
-    // A row reads its name, then its channel count.
+    // A row's provider name: the link's title (the drawn name puts the place's tag after it).
     const names = () =>
-      [...document.querySelectorAll<HTMLElement>('[data-cat-index]')].map((l) => l.textContent?.replace(/\d+$/, '')).filter((n) => n?.includes('|'));
+      [...document.querySelectorAll<HTMLElement>('[data-cat-index]')].map((l) => l.getAttribute('title')).filter((n) => n?.includes('|'));
     renderIn('/', [{ path: '/', element: withScope() }]);
     const picker = screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement;
     // Most groups first; a tag on one group only (DE) is not offered.
-    expect([...picker.options].map((o) => o.textContent)).toEqual(['All regions', 'US · 3', 'UK · 2']);
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['All', 'US · United States · 3 groups', 'UK · United Kingdom · 2 groups']);
     fireEvent.change(picker, { target: { value: 'UK' } });
     expect(names()).toEqual(['UK| SPORT', 'UK| NEWS']);
     expect(localStorage.getItem('tsrust.liveRegion:src1:live')).toBe('UK');
@@ -443,7 +451,7 @@ describe('groups drawer below 1024 px', () => {
     rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: 200 }), cat(2, { name: 'US| SPORTS', itemCount: 200 })];
     renderIn('/s/src1/live/g2', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
     await screen.findByText('Channel 0');
-    const toggle = await screen.findByRole('button', { name: /^Groups:\s*US\| SPORTS$/ });
+    const toggle = await screen.findByRole('button', { name: /^Groups:\s*SPORTS \(US\)$/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     // A long name truncates the label, never the icon.
     expect(toggle.querySelector('.lucide-list-tree')?.getAttribute('class')).toContain('shrink-0');
@@ -451,8 +459,8 @@ describe('groups drawer below 1024 px', () => {
     // button room for a long name. Its accessible name still says what it searches.
     const field = screen.getByRole('searchbox', { name: 'Search channels' });
     expect(field.getAttribute('placeholder')).toBe('Search');
-    // The field keeps room for that whole word; the name is what gives way.
-    expect(field.parentElement?.className).toContain('min-w-32');
+    // The field keeps room for that whole word, measured in the page's language; the name is what gives way.
+    expect(field.parentElement?.className).toContain('min-w-[calc(var(--search-text,3.5rem)+4.5rem+2px)]');
     fireEvent.click(toggle);
     const drawer = await screen.findByTestId('groups-drawer');
     expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
@@ -468,7 +476,7 @@ describe('groups drawer below 1024 px', () => {
     await screen.findByText('Channel 0');
     expect(screen.getByRole('button', { name: 'Show groups' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Groups:/ })).toBeNull();
-    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in US| SPORTS');
+    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in SPORTS (US)');
     tablet.mockRestore();
   });
 });
@@ -502,7 +510,7 @@ describe('groups drawer on a narrow page (beside the expanded rail)', () => {
       }
     });
 
-  it('keeps the groups out of a page narrower than 66rem, behind the toolbar toggle, even on a wide window', async () => {
+  it('keeps the groups out of a page narrower than 79rem, behind the toolbar toggle, even on a wide window', async () => {
     // The harness answers every min-width query as matching (a wide window); the page itself is
     // 776 px wide, as beside the expanded rail in a 1024 px window.
     renderIn('/s/src1/live', LIVE);
@@ -528,7 +536,7 @@ describe('groups drawer on a narrow page (beside the expanded rail)', () => {
   it('shows the groups as a column once the page has room for them', async () => {
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
-    reportPageWidth(1100);
+    reportPageWidth(1300);
     expect(screen.getByRole('navigation', { name: 'Groups' })).toBeTruthy();
     expect(screen.queryByTestId('groups-drawer')).toBeNull();
     expect(screen.getByRole('button', { name: 'Hide groups' })).toBeTruthy();
@@ -595,8 +603,9 @@ describe('channel logos in reused rows', () => {
   });
 
   it('initials keep whole characters (emoji, astral letters)', () => {
+    // A leading emoji is decoration, not an initial (realdata-05).
     const { container } = render(<ChannelLogo name="🎵 Music" />);
-    expect(container.textContent).toBe('🎵M');
+    expect(container.textContent).toBe('MU');
     const { container: c2 } = render(<ChannelLogo name="𝔸𝔹ℂ" />);
     expect(Array.from(c2.textContent ?? '')).toHaveLength(2);
     expect(c2.textContent).not.toMatch(/[\uD800-\uDFFF](?![\uDC00-\uDFFF])/u);
@@ -865,7 +874,10 @@ describe('guide grid', () => {
     await screen.findByText('Channel 0');
     const visibleAt = () => Number(screen.getByTestId('epg-grid').dataset.viewAt);
     await waitFor(() => expect(visibleAt()).toBeGreaterThan(0));
-    const first = defaultStart(Date.now());
+    // The day steps go from the slot the guide opens on (now's half hour), not the window's
+    // start half an hour before it (guide-21).
+    const first = visibleAt();
+    expect(first).toBe(defaultStart(Date.now()) + 30 * MINUTE);
 
     fireEvent.click(screen.getByRole('button', { name: 'Next day' }));
     await waitFor(() => expect(visibleAt()).toBe(addLocalDays(first, 1)));
@@ -895,10 +907,11 @@ describe('guide grid', () => {
     const cell = cells[0]!;
     const text = within(cell).getByTestId('cell-text');
     // Native sticky positioning holds the title at the visible edge; the programme clips it
-    // when the cell ends, with no per-scroll width calculation.
+    // when the cell ends. At rest the cut title is narrowed to what shows of its cell, so it
+    // ends in an ellipsis rather than losing its first letters (guide-01); no width per scroll frame.
     expect(text.className).toContain('sticky');
     expect(parseFloat(text.style.insetInlineStart)).toBeGreaterThan(0);
-    expect(text.style.maxWidth).toBe('');
+    expect(text.style.maxWidth).toMatch(/^\d+px$/);
     // The guide's pickers (LG-11): same accessible name, with a chevron like the kit Select's. One
     // source here, so the group picker leads (the source picker shows only with a choice).
     const group = screen.getByRole('combobox', { name: 'Group' });
@@ -1057,8 +1070,12 @@ describe('guide grid (round 2)', () => {
     fireEvent.click(cells[0]!);
     const pop = await screen.findByTestId('program-popover');
     expect(pop.textContent).not.toContain('·');
-    // joinList: each part bidi-isolated, joined by the locale's separator (", " in English).
-    expect(pop.querySelector('p')!.textContent).toMatch(/^⁨Channel 0⁩, ⁨.+⁩$/);
+    // Each part bidi-isolated (the name by ChannelName's dir="auto", the time in a bdi), joined by
+    // the locale's separator (", " in English).
+    const line = pop.querySelector('p')!;
+    expect(line.textContent).toMatch(/^Channel 0, .+$/);
+    expect(line.querySelector('[dir="auto"]')!.textContent).toBe('Channel 0');
+    expect(line.querySelector('bdi')).toBeTruthy();
   });
 });
 
@@ -1164,7 +1181,7 @@ describe('Live context menu: Copy stream address (round 2)', () => {
     desktop.value = true;
     try {
       menu = await openMenu(4);
-      fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play in MPV' }));
+      fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play in mpv' }));
       await waitFor(() => expect(calls('parental.check')).toHaveLength(2));
       await new Promise((r) => setTimeout(r, 50));
       expect(writeText).not.toHaveBeenCalled();
@@ -1179,7 +1196,7 @@ describe('Live context menu: Copy stream address (round 2)', () => {
     renderIn('/s/src1/live', LIVE);
     const menu = await openMenu(4);
     // Server mode: the core answers `unsupported` for external players, so they are not offered.
-    expect(within(menu).queryByRole('menuitem', { name: 'Play in MPV' })).toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Play in mpv' })).toBeNull();
     expect(within(menu).queryByRole('menuitem', { name: 'Play in VLC' })).toBeNull();
     expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
   });
@@ -1197,7 +1214,7 @@ describe('guide ribbon follows the list it came from (round 3)', () => {
     // The idle card and the ribbon follow the cursor together; the card's Play starts it, so the
     // ribbon leaves its own Watch live out.
     await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain(`Channel ${row}`));
-    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
+    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Selected');
     expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe(`Play Channel ${row}`);
     expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();
   };

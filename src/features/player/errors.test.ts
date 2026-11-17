@@ -113,11 +113,12 @@ describe('copy that names only the ways out the screen offers (PL-ERROR-DEAD-END
     ];
     for (const [cls, message, hint] of cases) {
       expect(errorCopyKeys(cls, { message, external: 'none' }).hint).toBe(hint);
+      // A browser that can hand out the link names no external player either (walkthrough-12).
+      expect(errorCopyKeys(cls, { message, external: 'link' }).hint).toBe(hint);
       expect(strings[hint], hint).toBeTruthy();
-      expect(strings[hint]).not.toMatch(/MPV|VLC|external player/);
-      // The desktop app (MPV, VLC) and a shareable link keep the hints that name them.
+      expect(strings[hint]).not.toMatch(/mpv|VLC|external player/i);
+      // The desktop app (MPV, VLC) keeps the hints that name them.
       expect(errorCopyKeys(cls, { message, external: 'app' }).hint).not.toBe(hint);
-      expect(errorCopyKeys(cls, { message, external: 'link' }).hint).not.toBe(hint);
     }
     // Hints that name no external player are the same everywhere.
     expect(errorCopyKeys('auth', { external: 'none' }).hint).toBe('errorAuth');

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CatalogSearchResult } from '@/api/rpc';
-import type { Source } from '@/api/types';
+import type { Channel, Source } from '@/api/types';
 
 import { targetIndex } from '../lib/gridNav';
 import {
@@ -11,6 +11,7 @@ import {
   normalizeQuery,
   previewGroups,
   previewMatches,
+  rankChannels,
   searchTerms,
   sourceFacets,
   splitStalkerResults,
@@ -39,7 +40,7 @@ describe('groupSearchResults', () => {
     ]);
     const live = groups[1]!.hits[0]!;
     expect(live.href).toBeUndefined();
-    expect(live.meta).toBe('101  Movies');
+    expect(live.meta).toBeUndefined();
     expect(live.sourceKind).toBe('xtream');
   });
 
@@ -144,5 +145,42 @@ describe('L3-vod-5: narrowing the results on screen to a longer query', () => {
     ];
     expect(previewGroups(groups, searchTerms('the'))).toEqual([{ kind: 'movies', hits: [hit('The Rover')] }]);
     expect(previewGroups(groups, searchTerms('zzz'))).toBe(groups);
+  });
+});
+
+describe('rankChannels (realdata-08)', () => {
+  const ch = (itemId: string, name: string, categoryName?: string, sourceId = 'a'): Channel =>
+    ({ ref: { sourceId, contentType: 'live', itemId }, name, categoryId: 'g', categoryName, isRadio: false }) as Channel;
+  const answer = [
+    ch('1', '####### ESPN+ #######', 'US| ESPN+ PPV'),
+    ch('2', 'PK: ESPN', 'ALL CHANNELS | EVERYTHING'),
+    ch('3', 'BR: ESPN2', 'BR| GENERAL'),
+    ch('4', 'US: ESPN2 ᴴᴰ', 'ALL CHANNELS | EVERYTHING'),
+    ch('5', 'KR: ESPN HD'),
+    ch('6', 'ESPN HD', 'US| SPORTS'),
+    ch('7', '===== NFL =====', 'US| SPORTS'),
+  ];
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it('drops provider heading rows, then puts the user region and whole-word names first, the core order otherwise', () => {
+    vi.stubGlobal('navigator', { ...navigator, language: 'en-US' });
+    // US by tag or group: the whole word first; then the whole word elsewhere; then the rest in the core's order.
+    expect(rankChannels(answer, 'espn').map((c) => c.ref.itemId)).toEqual(['6', '4', '2', '5', '3']);
+  });
+
+  it("follows the region picked in a source's Live TV groups over the browser's", () => {
+    vi.stubGlobal('navigator', { ...navigator, language: 'en-US' });
+    localStorage.setItem('tsrust.liveRegion:a:live', 'BR');
+    expect(rankChannels(answer, 'espn').map((c) => c.ref.itemId)).toEqual(['3', '2', '5', '6', '4']);
+  });
+
+  it('keeps the core order without a region, and Search never lists a heading row', () => {
+    vi.stubGlobal('navigator', { ...navigator, language: 'xx' });
+    expect(rankChannels(answer, 'espn2').map((c) => c.ref.itemId)).toEqual(['3', '4', '2', '5', '6']);
+    const groups = groupSearchResults({ result: { live: answer, movies: [], series: [] }, sources });
+    expect(groups[0]!.hits.map((h) => h.ref.itemId)).toEqual(['2', '3', '4', '5', '6']);
   });
 });

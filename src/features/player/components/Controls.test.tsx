@@ -78,6 +78,31 @@ describe('Controls options menu', () => {
     expect(menu()).toBeNull();
   });
 
+  it('shows Audio track even with one track, disabled and saying so; with a choice it opens the list', () => {
+    render(<Controls variant="overlay" visible />);
+    openMenu();
+    const single = screen.getByRole('menuitem', { name: /audio track/i }) as HTMLButtonElement;
+    expect(single.disabled).toBe(true);
+    expect(single.textContent).toContain('Only one');
+    act(() => {
+      useMediaStore.setState({
+        tracks: {
+          ...useMediaStore.getState().tracks,
+          audio: [
+            { id: '0', label: 'English', selected: true },
+            { id: '1', label: 'Spanish', selected: false },
+          ],
+        },
+      });
+    });
+    const choice = screen.getByRole('menuitem', { name: /audio track/i }) as HTMLButtonElement;
+    expect(choice.disabled).toBe(false);
+    expect(choice.textContent).toContain('English');
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Spanish' }));
+    expect(commands.setAudio).toHaveBeenCalledWith('1');
+  });
+
   it.each(['dock', 'overlay'] as const)('%s: choosing a speed sets the rate and closes the menu', (variant) => {
     render(<Controls variant={variant} visible />);
     openMenu();
@@ -87,6 +112,36 @@ describe('Controls options menu', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: '1.5x' }));
     expect(commands.setRate).toHaveBeenCalledWith(1.5);
     expect(menu()).toBeNull();
+  });
+
+  it('a catch-up programme offers its channel live; a movie does not (PV-12)', () => {
+    const { rerender } = render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Watch live' })).toBeNull();
+    act(() => {
+      usePlayerStore.setState({
+        source: {
+          url: 'http://v/archive.ts?utc=1&lutc=2',
+          kind: 'direct',
+          title: 'ESPN HD',
+          isLive: false,
+          isRadio: false,
+          ref: { sourceId: 's1', contentType: 'live', itemId: 'c1' },
+          catchupProgramStart: '2026-11-16T10:00:00Z',
+        },
+        durationSeconds: undefined,
+      });
+    });
+    rerender(<Controls variant="overlay" visible />);
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeTruthy();
+  });
+
+  it('a list submenu opens on its current choice (PV-16)', () => {
+    render(<Controls variant="overlay" visible />);
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
+    const current = document.activeElement;
+    expect(current?.getAttribute('role')).toBe('menuitemradio');
+    expect(current?.getAttribute('aria-checked')).toBe('true');
   });
 
   it.each(['dock', 'overlay'] as const)('%s: the close button closes the menu from any view', (variant) => {
@@ -131,6 +186,42 @@ describe('Controls options menu', () => {
     expect(menu()).toBeNull();
   });
 
+  it('ArrowRight opens a submenu row, ArrowLeft goes back to that row (v-player-08)', () => {
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    const speed = screen.getByRole('menuitem', { name: /playback speed/i });
+    expect(speed.getAttribute('aria-haspopup')).toBe('menu');
+    // A row that opens nothing is not marked as a submenu.
+    expect(screen.getByRole('menuitem', { name: /audio track/i }).hasAttribute('aria-haspopup')).toBe(false);
+    act(() => speed.focus());
+    fireEvent.keyDown(speed, { key: 'ArrowRight' });
+    expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('speed');
+    expect(document.activeElement?.textContent).toBe('Normal');
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+    expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('root');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /playback speed/i }));
+    // ArrowLeft at the root leaves the menu as it is.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+    expect(menu()).toBeTruthy();
+  });
+
+  it('in a right-to-left language ArrowLeft opens the submenu', () => {
+    const was = document.documentElement.dir;
+    document.documentElement.dir = 'rtl';
+    try {
+      render(<Controls variant="dock" visible />);
+      openMenu();
+      const speed = screen.getByRole('menuitem', { name: /playback speed/i });
+      act(() => speed.focus());
+      fireEvent.keyDown(speed, { key: 'ArrowRight' });
+      expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('root');
+      fireEvent.keyDown(speed, { key: 'ArrowLeft' });
+      expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('speed');
+    } finally {
+      document.documentElement.dir = was;
+    }
+  });
+
   it('leaves Sync out while nothing in it can be changed, and the browser has no audio row (PL-SYNC-DEAD-ROW)', () => {
     render(<Controls variant="dock" visible />);
     openMenu();
@@ -144,7 +235,7 @@ describe('Controls options menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /^sync/i }));
     expect(screen.getByTestId('sync-sub')).toBeTruthy();
     expect(screen.queryByTestId('sync-audio')).toBeNull();
-    expect(screen.queryByText('Audio delay works only in the MPV player')).toBeNull();
+    expect(screen.queryByText('Audio delay works only in the mpv player')).toBeNull();
   });
 
   it('a view with nothing to focus keeps focus in the menu on Back, and Escape only leaves the view', async () => {
@@ -446,7 +537,7 @@ describe('Controls live status', () => {
     expect(screen.getByTestId('live-dot').className).not.toMatch(/bg-live|animate/);
     expect(screen.queryByRole('button', { name: 'Play' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(commands.retry).toHaveBeenCalledTimes(1);
     expect(usePlayerStore.getState().status).toBe('loading');
     expect(usePlayerStore.getState().error).toBeUndefined();
@@ -468,7 +559,7 @@ describe('Controls live status', () => {
   it('a failed movie offers Retry in the play spot of the dock bar too', () => {
     act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 500' }));
     render(<Controls variant="dock" visible />);
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(commands.retry).toHaveBeenCalledTimes(1);
   });
 
@@ -479,7 +570,7 @@ describe('Controls live status', () => {
     });
     render(<Controls variant="overlay" visible />);
     // The panel has Retry; the bar has no second one, no volume for nothing, no "No signal" under "did not play".
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
     expect(screen.queryByRole('button', { name: /mute/i })).toBeNull();
     expect(screen.queryByTestId('live-badge')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
@@ -558,17 +649,27 @@ describe('Controls for fullscreen live TV', () => {
     expect(screen.getByRole('button', { name: 'Open channel list' })).toBeTruthy();
   });
 
-  it('not outside fullscreen, nor for a movie: the page has its list beside the stage', () => {
+  it("a page's stage keeps channel up and down but not the channel list (the page has it beside the stage)", () => {
     act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: false, durationSeconds: undefined }));
-    const { unmount } = render(<Controls variant="overlay" visible />);
-    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByRole('button', { name: 'Previous channel' }).getAttribute('aria-keyshortcuts')).toBe('PageUp');
+    expect(screen.getByRole('button', { name: 'Next channel' }).getAttribute('aria-keyshortcuts')).toBe('PageDown');
     expect(screen.queryByRole('button', { name: 'Open channel list' })).toBeNull();
+  });
+
+  it('not for a movie, nor in the mini player', () => {
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: false, durationSeconds: undefined }));
+    const { unmount } = render(<Controls variant="overlay" visible compact />);
+    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
     unmount();
     act(() => usePlayerStore.setState({ source: { url: 'http://v/movie.mp4', kind: 'direct', title: 'Movie', isLive: false, isRadio: false }, isFullscreen: true }));
     render(<Controls variant="overlay" visible />);
     expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
   });
 });
+
+/** A named menu row's label, without its key caps. */
+const rowName = (b: Element): string | null | undefined => b.querySelector('.flex-1')?.textContent;
 
 describe('Controls in a narrow player', () => {
   let restore: () => void = () => undefined;
@@ -585,13 +686,17 @@ describe('Controls in a narrow player', () => {
   it('keeps the core controls in the row and moves the rest into the options menu', () => {
     render(<Controls variant="overlay" visible />);
     for (const name of ['Pause', 'Mute', 'Playback options', 'Fullscreen']) expect(screen.getByRole('button', { name })).toBeTruthy();
-    for (const name of ['Back 10 seconds', 'Picture in picture']) expect(screen.queryByRole('button', { name })).toBeNull();
+    for (const name of ['Back 10 seconds', 'Picture in picture', 'Fill window']) expect(screen.queryByRole('button', { name })).toBeNull();
     expect(screen.queryByTestId('volume-readout')).toBeNull();
 
     openMenu();
     const moved = screen.getByTestId('moved-controls');
-    const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
-    expect(names).toEqual(['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture']);
+    const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map(rowName);
+    expect(names).toEqual(['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture', 'Fill window']);
+    // Named rows under the settings, with their keys: focus opens on the first setting (v-player-04).
+    expect(screen.getByRole('menuitemcheckbox', { name: /stream info/i }).compareDocumentPosition(moved) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /^subtitles/i }));
+    expect(screen.getByRole('menuitem', { name: /fill window/i }).getAttribute('aria-keyshortcuts')).toBe('Shift+F');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Picture in picture' }));
     expect(commands.togglePip).toHaveBeenCalledTimes(1);
     expect(menu()).toBeNull();
@@ -604,8 +709,18 @@ describe('Controls in a narrow player', () => {
     expect(screen.getByRole('button', { name: 'Open channel list' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
     openMenu();
-    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
     expect(names.slice(0, 2)).toEqual(['Previous channel', 'Next channel']);
+  });
+
+  it("a narrow stage bar drops channel up and down first, and leaves them out of the menu", () => {
+    const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: false, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
+    openMenu();
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
+    expect(names).not.toContain('Next channel');
   });
 
   it("a narrow fullscreen bar's channel list steps aside while the volume slider is out, from right of the volume", () => {
@@ -679,8 +794,8 @@ describe('Controls in a narrow player', () => {
       expect(screen.getByRole('button', { name: 'Forward 10 seconds' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
       openMenu();
-      const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
-      expect(names).toEqual(['Picture in picture']);
+      const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
+      expect(names).toEqual(['Picture in picture', 'Fill window']);
     })();
   });
 
@@ -746,8 +861,22 @@ describe('Controls in a narrow player', () => {
     restore();
     render(<Controls variant="overlay" visible />);
     for (const name of ['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture']) expect(screen.getByRole('button', { name })).toBeTruthy();
+    // Fill window names its key, as Fullscreen does.
+    expect(screen.getByRole('button', { name: 'Fill window' }).getAttribute('aria-keyshortcuts')).toBe('Shift+F');
     openMenu();
     expect(screen.queryByTestId('moved-controls')).toBeNull();
+  });
+
+  it('in fullscreen the bar has no Fill window, and a window-filled bar keeps its way out', () => {
+    restore();
+    act(() => usePlayerStore.setState({ isFullscreen: true }));
+    const { unmount } = render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Fill window' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeTruthy();
+    unmount();
+    act(() => usePlayerStore.setState({ isFullscreen: false, isWindowFilled: true }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByRole('button', { name: 'Exit window fill' })).toBeTruthy();
   });
 });
 
@@ -955,6 +1084,20 @@ describe('Controls on a short player (review: the scrim darkened most of a phone
 });
 
 describe('Controls seek row in a right-to-left language (review: times swapped against the fill)', () => {
+  it('keeps the transport buttons left to right beside it, and mirrors the rest of the bar (v-themes-locales-10)', () => {
+    act(() => usePlayerStore.setState({ queue: [{ url: 'http://v/a.mp4', kind: 'direct', title: 'A', isLive: false, isRadio: false }, usePlayerStore.getState().source!, { url: 'http://v/b.mp4', kind: 'direct', title: 'B', isLive: false, isRadio: false }] }));
+    render(
+      <div dir="rtl">
+        <Controls variant="overlay" visible />
+      </div>,
+    );
+    const transport = document.querySelector('[data-transport]')!;
+    expect(transport.getAttribute('dir')).toBe('ltr');
+    expect(Array.from(transport.querySelectorAll('[data-ctl]'), (b) => b.getAttribute('data-ctl'))).toEqual(['prev', 'play', 'next', 'back10', 'fwd10']);
+    // Volume, options and fullscreen follow the page's direction.
+    expect(screen.getByRole('button', { name: 'Mute' }).closest('[dir]')!.getAttribute('dir')).toBe('rtl');
+  });
+
   it('lays the times and the bar out left to right, as the fill grows', () => {
     render(
       <div dir="rtl">

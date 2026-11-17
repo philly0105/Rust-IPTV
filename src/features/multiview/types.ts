@@ -12,6 +12,11 @@ export interface MultiviewChannelInput {
   logo?: string;
   number?: number;
   categoryId?: string;
+  /**
+   * What the tile shows on (the matchup of a Sports card): event channels are often named only
+   * "NFL 02". The tile keeps it until its channel is replaced.
+   */
+  caption?: string;
 }
 
 /** `1x2`: two side by side. `2x2`: a grid of four. `1+3`: one large and three small. */

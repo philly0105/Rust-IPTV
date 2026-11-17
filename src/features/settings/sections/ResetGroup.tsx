@@ -51,7 +51,7 @@ export function ResetGroup({ update }: { update: (patch: SettingsPatch) => Promi
       <SettingsRow label={t('resetButton')} description={t('resetHint')}>
         {({ id, describedBy }) => (
           <Button id={id} aria-describedby={describedBy} variant="secondary" icon={<RotateCcw aria-hidden size={16} />} onClick={() => setOpen(true)} data-testid="settings-reset">
-            {t('resetButton')}
+            {t('resetAction')}
           </Button>
         )}
       </SettingsRow>

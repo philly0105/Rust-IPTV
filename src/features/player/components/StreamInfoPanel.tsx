@@ -16,14 +16,19 @@ export const STATS_POLL_MS = 1000;
  * open and is not mounted while closed, so a closed panel costs nothing. Over embedded mpv it
  * is cut out of the native video (`data-mpv-overlay` plus `data-mpv-reserved`).
  */
-export function StreamInfoPanel({ className }: { className?: string }) {
+export function StreamInfoPanel({ className, big = false, columns = false }: { className?: string; big?: boolean; columns?: boolean }) {
   const open = useStreamInfoStore((s) => s.open);
   const hasSource = usePlayerStore((s) => !!s.source);
   if (!open || !hasSource) return null;
-  return <OpenPanel className={className} />;
+  return <OpenPanel className={className} big={big} columns={columns} />;
 }
 
-function OpenPanel({ className }: { className?: string }) {
+/**
+ * `big`: fullscreen and Fill window, read from further away, with the room to show whole values.
+ * `columns`: a wide, short player (the Live page's stage), where one column of rows would scroll:
+ * the rows run on into a second column instead.
+ */
+function OpenPanel({ className, big, columns }: { className?: string | undefined; big: boolean; columns: boolean }) {
   const { t, i18n } = useTranslation('player');
   const url = usePlayerStore((s) => s.source?.url ?? '');
   const [stats, setStats] = useState<StreamStats | null>(null);
@@ -55,7 +60,8 @@ function OpenPanel({ className }: { className?: string }) {
       onDoubleClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       className={cn(
-        'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-30 w-64 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-on-glass motion-safe:animate-pop-in',
+        'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-30 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-on-glass motion-safe:animate-pop-in',
+        big ? 'w-96' : columns ? 'w-[30rem]' : 'w-64',
         className,
       )}
     >
@@ -66,18 +72,25 @@ function OpenPanel({ className }: { className?: string }) {
             type="button"
             aria-label={t('streamInfoClose')}
             onClick={() => useStreamInfoStore.setState({ open: false })}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-10"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-[calc(44rem/15)]"
           >
             <X className="size-4" aria-hidden />
           </button>
         </Tooltip>
       </header>
       {stats ? (
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-3 py-2.5 text-caption">
+        <dl
+          className={cn(
+            'px-3 py-2.5',
+            columns ? 'columns-2 gap-x-6 *:mb-1 *:flex *:break-inside-avoid *:justify-between *:gap-3' : 'grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1',
+            big ? 'text-body-sm' : 'text-caption',
+          )}
+        >
           {statsRows(stats, url, t, i18n.language).map(([label, value]) => (
-            <div key={label} className="contents">
+            <div key={label} className={columns ? undefined : 'contents'}>
               <dt className="player-on-glass-muted">{label}</dt>
-              <dd className="truncate text-end font-mono tabular-nums" title={value} dir="auto">
+              {/* A long value (the decoder's state, a server address) wraps rather than losing its end. */}
+              <dd className="text-end font-mono tabular-nums [overflow-wrap:anywhere]" dir="auto">
                 {value}
               </dd>
             </div>

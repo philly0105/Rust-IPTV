@@ -377,7 +377,11 @@ describe('ParentalSection', () => {
     given({ pin: PIN });
     core.lock(late);
     renderUi(<Section />, queryClient);
-    fireEvent.click(await screen.findByTestId('parental-turn-off'));
+    const turnOff = await screen.findByTestId('parental-turn-off');
+    // A secondary button in the danger zone at the end; the PIN confirm keeps the solid red.
+    expect(turnOff.closest('[data-settings-group]')?.getAttribute('data-tone')).toBe('danger');
+    expect(turnOff.className).not.toContain('bg-danger-solid');
+    fireEvent.click(turnOff);
     const dialog = await screen.findByRole('dialog', { name: 'Turn off parental controls?' });
     enterPin(dialog, '9999', 'Turn off');
     expect(await within(dialog).findByTestId('pin-error')).toBeTruthy();

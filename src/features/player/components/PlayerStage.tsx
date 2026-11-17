@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 
 import { cn } from '../cn';
-import { pushStageTarget } from '../stage';
+import { pushStageTarget, setStageEndedAction, type StageEndedAction } from '../stage';
 import { registerStage, usePlayerStore } from '../store';
 import { ExternalStage } from './ExternalStage';
 
@@ -15,6 +15,8 @@ export interface PlayerStageProps {
    * (PL-DUPLICATE-CHROME); fullscreen still shows it, since the page's heading is gone there.
    */
   showTitle?: boolean;
+  /** Offered beside Replay once the item finished here (a detail page: back to its hero). */
+  endedAction?: StageEndedAction;
 }
 
 /**
@@ -22,14 +24,29 @@ export interface PlayerStageProps {
  * the dock moves the running player here (dock 'stage'); on unmount it falls back to the mini player.
  * The slot is black and letterboxes; size it from the parent (e.g. `aspect-video` or a fixed height).
  */
-export function PlayerStage({ className, children, showTitle = true }: PlayerStageProps) {
+export function PlayerStage({ className, children, showTitle = true, endedAction }: PlayerStageProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // The latest action, read when it is used: the page passes a new object on every render.
+  const endedRef = useRef(endedAction);
+  endedRef.current = endedAction;
+  const hasEndedAction = !!endedAction;
   const active = usePlayerStore((s) => !!s.source && s.mode !== 'external');
   const external = usePlayerStore((s) => !!s.source && s.mode === 'external');
   // Layout effect: the cleanup must run before React detaches this div (see stage.ts setRehome).
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    setStageEndedAction(
+      el,
+      hasEndedAction
+        ? {
+            get label() {
+              return endedRef.current?.label ?? '';
+            },
+            onClick: () => endedRef.current?.onClick(),
+          }
+        : undefined,
+    );
     const unTarget = pushStageTarget(el);
     const unStage = registerStage();
     return () => {

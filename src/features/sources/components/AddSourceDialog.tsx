@@ -8,6 +8,7 @@ import type { SourcesAddArgs } from '@/api/rpc';
 import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 import type { Source, SourceKind } from '@/api/types';
 
+import { formatList, intlLocale, numberFormat } from '@/lib/intl';
 import { sourceHomePath } from '@/shell/railLinks';
 import { Button, Dialog, Input, Tabs, Toggle, useToast } from '@/ui';
 import {
@@ -34,6 +35,7 @@ import {
 } from '../lib/progress';
 import { flushPendingRemovals, isRemovalPending, removeOnUnload, scheduleRemoval } from '../lib/pendingRemoval';
 import { redactText } from '../lib/redact';
+import { SOURCE_ERROR_KEYS, classifySourceError } from '../lib/sourceError';
 import { useFocusInvalid } from '../lib/useFocusInvalid';
 import { useAutoRefreshHint } from '../lib/useAutoRefreshHint';
 import { useNextFrame } from '../lib/useNextFrame';
@@ -88,14 +90,26 @@ export function draftHost(d: SourceDraft): string | undefined {
 
 /**
  * The name an add uses when the optional Name field is left empty: the one the current address or
- * file suggests, or `pasted` for a pasted playlist, which has neither.
+ * file suggests, or `pasted` for a pasted playlist, which has neither. A name another source already
+ * has (`taken`, any case) gets the first free number, "sports (2)", so the rail never lists two
+ * sources that read the same.
  */
-export function defaultName(d: SourceDraft, pasted: string): string {
-  if (d.kind === 'xtream') return suggestName(d.xtream.serverUrl);
-  if (d.kind === 'stalker') return suggestName(d.stalker.portalUrl);
-  if (d.m3u.origin === 'url') return suggestName(d.m3u.url);
-  if (d.m3u.origin === 'file') return suggestName(d.m3u.filePath || d.m3u.fileName);
-  return pasted;
+export function defaultName(d: SourceDraft, pasted: string, taken: readonly string[] = []): string {
+  const name =
+    d.kind === 'xtream'
+      ? suggestName(d.xtream.serverUrl)
+      : d.kind === 'stalker'
+        ? suggestName(d.stalker.portalUrl)
+        : d.m3u.origin === 'url'
+          ? suggestName(d.m3u.url)
+          : d.m3u.origin === 'file'
+            ? suggestName(d.m3u.filePath || d.m3u.fileName)
+            : pasted;
+  const used = new Set(taken.map((n) => n.trim().toLocaleLowerCase()));
+  if (!name || !used.has(name.toLocaleLowerCase())) return name;
+  let n = 2;
+  while (used.has(`${name} (${n})`.toLocaleLowerCase())) n++;
+  return `${name} (${n})`;
 }
 
 /** The kind's name, for the import heading while the source has no name yet. */
@@ -117,7 +131,7 @@ export function AddSourceDialog({
   /** `first`: the list was empty when the add started (SS-6: the host opens the new source). */
   onAdded?: (source: Source, first: boolean) => void;
 }) {
-  const { t } = useTranslation('sources');
+  const { t, i18n } = useTranslation('sources');
   const navigate = useNavigate();
   const { toast } = useToast();
   useImportProgressFeed();
@@ -158,16 +172,15 @@ export function AddSourceDialog({
    */
   const claimRef = useRef<{ failedId: string | null; knownAtSubmit: Set<string> | null }>({ failedId: null, knownAtSubmit: null });
 
-  // Reset whenever the dialog opens with a (possibly new) initial request.
+  // Reset whenever the dialog opens with a (possibly new) initial request. The state resets while
+  // rendering, so the form is the requested kind on the dialog's first open render: the Dialog
+  // focuses that kind's address field. Reset in an effect, a host that keeps the dialog mounted
+  // (the Sources page) had the previous kind's field focused, then unmounted, and focus fell to
+  // <body>, out of reach of Escape and the focus trap.
   const initialKey = JSON.stringify(initial ?? null);
-  useEffect(
-    () => () => {
-      runRef.current += 1;
-    },
-    [open, initialKey],
-  );
-  useEffect(() => {
-    if (!open) return;
+  const [openedFor, setOpenedFor] = useState<string | null>(open ? initialKey : null);
+  if (open && openedFor !== initialKey) {
+    setOpenedFor(initialKey);
     setDraft(initialDraft(initial));
     setErrors({});
     setNameTouched(Boolean(initial?.name));
@@ -177,6 +190,17 @@ export function AddSourceDialog({
     setIdsAtSubmit([]);
     setFailed(null);
     setCancelled(false);
+  } else if (!open && openedFor !== null) {
+    setOpenedFor(null);
+  }
+  useEffect(
+    () => () => {
+      runRef.current += 1;
+    },
+    [open, initialKey],
+  );
+  useEffect(() => {
+    if (!open) return;
     cancelIdRef.current = null;
     claimRef.current = { failedId: null, knownAtSubmit: null };
   }, [open, initialKey]);
@@ -191,6 +215,12 @@ export function AddSourceDialog({
 
   const sources = useRpcQuery('sources.list', undefined, { enabled: open });
   const knownIds = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
+  // Names the default name must not repeat: not the failed source a retry reuses, nor, while an add
+  // runs, the source it just created (the list refetches mid-import).
+  const takenNames = useMemo(
+    () => (sources.data ?? []).filter((s) => s.id !== failed?.id && (!submitting || idsAtSubmit.includes(s.id))).map((s) => s.name),
+    [sources.data, failed?.id, submitting, idsAtSubmit],
+  );
   const newProgress = useNewSourceProgress(idsAtSubmit, startedAt);
   const retryProgress = useSourceProgress(failed?.id);
   const progress = failed ? retryProgress : newProgress;
@@ -229,8 +259,12 @@ export function AddSourceDialog({
   }, [submitting]);
 
   // On a short window the progress (and its Cancel) sits below the fold: bring it into view as the run starts.
+  // Enter in a field starts the run, and the fields step aside: focus goes to the progress rather
+  // than fall to <body>, out of reach of Escape and the focus trap.
   useEffect(() => {
     if (!submitting) return;
+    const panel = bodyRef.current?.closest<HTMLElement>('[role="dialog"]');
+    if (panel && !panel.contains(document.activeElement)) progressRef.current?.focus({ preventScroll: true });
     scrollFrame(() => progressRef.current?.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }));
   }, [submitting, scrollFrame]);
 
@@ -268,7 +302,7 @@ export function AddSourceDialog({
     setSubmitError(null);
     setCancelled(false);
     cancelIdRef.current = null;
-    const named = draft.name.trim() ? draft : { ...draft, name: defaultName(draft, t('originPasted')) };
+    const named = draft.name.trim() ? draft : { ...draft, name: defaultName(draft, t('originPasted'), takenNames) };
     const built = buildAddArgs(named, { isDesktop });
     // An empty Name is optional: it takes the address's name. With no address yet there is none to
     // take, and the address's own error already says what is missing, so Name is not marked too.
@@ -294,12 +328,23 @@ export function AddSourceDialog({
       const guides = enabledEpgUrls(source.epg);
       if (guides.length > 0) void refreshGuides(guides);
       await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('epg.')]);
-      // Every item the import counted, radio included, so the toast agrees with the progress bar.
-      const total = source.channelCount + (source.radioCount ?? 0) + source.movieCount + source.seriesCount;
+      // What arrived, per kind (radio included, as on the progress bar): "109 channels, 20 movies
+      // and 3 series" says whether the channels came, which an item total did not.
+      const radio = source.radioCount ?? 0;
+      const counts =
+        formatList(
+          [
+            source.channelCount > 0 && t('shell:countChannels', { count: source.channelCount }),
+            radio > 0 && t('live:stationCount', { count: radio, formatted: numberFormat(intlLocale(i18n.language)).format(radio) }),
+            source.movieCount > 0 && t('shell:countMovies', { count: source.movieCount }),
+            source.seriesCount > 0 && t('shell:countSeries', { count: source.seriesCount }),
+          ],
+          i18n.language,
+        ) || t('shell:countChannels', { count: 0 });
       toast({
         variant: 'success',
         title: t('addedTitle', { name: source.name }),
-        description: t(guides.length > 0 ? 'addedDescriptionGuide' : 'addedDescription', { count: total }),
+        description: t(guides.length > 0 ? 'addedDescriptionGuide' : 'addedDescription', { counts }),
         // A source without live channels (VOD only) opens on its movies or series.
         action: { label: t('open'), onClick: () => navigate(sourceHomePath(source)) },
       });
@@ -424,6 +469,15 @@ export function AddSourceDialog({
   // The source a refused add duplicates: the error offers to open or refresh it instead.
   const duplicateId = submitError ? duplicateSourceId(submitError) : null;
   const duplicateName = duplicateId && submitError ? (sources.data?.find((s) => s.id === duplicateId)?.name ?? duplicateSourceName(submitError)) : null;
+  // What failed, as the source card says it (naming the host), in place of a summary and a hint
+  // that repeated the field's error. Errors the app does not recognise keep the summary and hint.
+  const submitInfo = submitError && !duplicateId ? classifySourceError(submitError.message, submitError.code) : null;
+  const submitCause =
+    submitInfo && submitInfo.kind !== 'unknown'
+      ? t(submitInfo.kind === 'auth' ? `sourceErrorAuth_${draft.kind}` : SOURCE_ERROR_KEYS[submitInfo.kind], {
+          host: submitInfo.host ?? draftHost(draft) ?? t('sourceErrorHostFallback'),
+        })
+      : null;
   // Leaving the page closes the dialog. Not through onClose: the host clears its `?add` params with a
   // navigation of its own, which would cancel this one. Replace, so Back does not reopen the dialog.
   const openDuplicate = (id: string) => {
@@ -523,8 +577,9 @@ export function AddSourceDialog({
           disabled={submitting}
           maxLength={120}
           // The name a submit uses when this is left empty, as a placeholder so it never lands in the middle of
-          // what the user is typing.
-          placeholder={defaultName(draft, t('originPasted')) || t('sourceNamePlaceholder')}
+          // what the user is typing. None before there is an address: an invented example name read
+          // as the one the source would get.
+          placeholder={defaultName(draft, t('originPasted'), takenNames) || undefined}
           value={draft.name}
           // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
           onFocus={(e) => {
@@ -593,7 +648,10 @@ export function AddSourceDialog({
             <Tabs items={kinds} value={draft.kind} label={t('sourceType')} onChange={(id) => setKind(id as SourceKind)} />
           </div>
 
-          {draft.kind === 'm3u' ? (
+          {/* While the import runs the fields step aside (they come back as they were when it ends):
+              a disabled copy of the form pushed the progress, the one thing to watch, under a
+              phone's footer. The progress heading names the source, its line the host. */}
+          {!submitting && draft.kind === 'm3u' ? (
             <M3uForm
               mode="add"
               autoFocusAddress
@@ -610,7 +668,7 @@ export function AddSourceDialog({
               }}
             />
           ) : null}
-          {draft.kind === 'xtream' ? (
+          {!submitting && draft.kind === 'xtream' ? (
             <XtreamForm
               value={draft.xtream}
               onChange={(xtream) => setDraft((d) => ({ ...d, xtream }))}
@@ -622,7 +680,7 @@ export function AddSourceDialog({
               showHeaders={false}
             />
           ) : null}
-          {draft.kind === 'stalker' ? (
+          {!submitting && draft.kind === 'stalker' ? (
             <StalkerForm
               value={draft.stalker}
               onChange={(stalker) => setDraft((d) => ({ ...d, stalker }))}
@@ -635,24 +693,33 @@ export function AddSourceDialog({
             />
           ) : null}
 
-          {nameField}
+          {submitting ? null : (
+            <>
+              {nameField}
 
-          <Toggle
-            checked={draft.autoRefresh && !isTextOrigin}
-            disabled={submitting || isTextOrigin}
-            onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
-            label={t('autoRefresh')}
-            description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
-          />
+              <Toggle
+                checked={draft.autoRefresh && !isTextOrigin}
+                disabled={isTextOrigin}
+                onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
+                label={t('autoRefresh')}
+                description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
+              />
 
-          <HeadersFields value={draft[draft.kind].headers} onChange={setHeaders} errors={errors} prefix={`${draft.kind}.headers`} disabled={submitting} />
+              <HeadersFields value={draft[draft.kind].headers} onChange={setHeaders} errors={errors} prefix={`${draft.kind}.headers`} />
+            </>
+          )}
 
           {submitting ? (
-            <div ref={progressRef} className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4" data-testid="add-source-progress">
+            <div
+              ref={progressRef}
+              tabIndex={-1}
+              className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4 outline-none"
+              data-testid="add-source-progress"
+            >
               <p className="flex items-center gap-2 text-body-sm font-medium text-fg">
                 <LoaderCircle aria-hidden size={16} className="shrink-0 text-accent motion-safe:animate-spin" />
                 <span className="min-w-0 truncate" dir="auto">
-                  {t('importingTitle', { name: draft.name.trim() || defaultName(draft, t('originPasted')) || t(KIND_NAME[draft.kind]) })}
+                  {t('importingTitle', { name: draft.name.trim() || defaultName(draft, t('originPasted'), takenNames) || t(KIND_NAME[draft.kind]) })}
                 </span>
               </p>
               <ImportProgressView
@@ -687,8 +754,17 @@ export function AddSourceDialog({
                 ) : (
                   <>
                     <p className="font-medium text-fg">{t('addFailed')}</p>
-                    <p className="text-fg">{t(summaryKey(submitError))}</p>
-                    <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                    {submitCause ? (
+                      // The source card's wording: one line that names the host and what to check.
+                      <p className="text-fg" data-testid="add-source-error-message">
+                        {submitCause}
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-fg">{t(summaryKey(submitError))}</p>
+                        <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                      </>
+                    )}
                     {failed ? (
                       <p className="text-fg-muted" data-testid="add-source-retry-note">
                         {t('addRetryNote', { name: failed.name })}

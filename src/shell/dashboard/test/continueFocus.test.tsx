@@ -72,8 +72,12 @@ function home() {
   };
   rpcMock.reset();
   const h = rpcMock.handlers;
-  h['settings.get'] = () => settings();
-  h['settings.update'] = (a) => settings((a as { patch: object }).patch);
+  // No hero: it would hold all three titles, and Continue watching would go (home-08). An update
+  // (the shell saves the last route on a timer) patches these settings, as the core does: a reset
+  // to the defaults brought the hero back mid-test and took the rail, and the focused card, away.
+  let current = settings({ dashboardRails: { ...settings().dashboardRails, hero: false } });
+  h['settings.get'] = () => current;
+  h['settings.update'] = (a) => (current = { ...current, ...(a as { patch: object }).patch });
   h['sources.list'] = () => [makeSource('s1', { name: 'Night Portal' })];
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['positions.continueWatching'] = () => rows;

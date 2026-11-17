@@ -10,8 +10,8 @@
   "tourBack": "返回",
   "tourSkip": "跳过导览",
   "tourDone": "完成",
-  "tourHintSearch": "搜索",
-  "tourHintPalette": "命令",
+  "tourHintSearch": "搜索此页面",
+  "tourHintPalette": "搜索全部内容",
   "tourHintShortcuts": "快捷键",
   "whatsNewTitle": "新功能",
   "whatsNewVersion": "版本 {{version}}",
@@ -81,7 +81,8 @@
   "noteGuideSmoothTitle": "更流畅的节目指南",
   "noteGuideSmoothText": "频道很多时节目指南也能流畅滚动，并用你 Xtream 账户自带的节目指南补全 XMLTV 节目单中的空缺。",
   "tourCoachTitle": "播放源已就绪",
-  "tourCoachText": "搜索可在所有播放源中查找频道、电影和剧集。其他任何地方都可通过命令面板前往。",
+  "tourCoachText": "“搜索全部内容”可在所有播放源中查找频道、电影和剧集，还能打开任何页面或设置。",
+  "tourCoachTextTouch": "搜索可在所有播放源中查找频道、电影和剧集。",
   "tourShowAround": "带我看看",
   "tourGotIt": "知道了"
 }

@@ -233,8 +233,8 @@ export function hintWithoutOthers(key: string, others: boolean | undefined): str
 /**
  * i18n keys (namespace `player`) for a class: the headline and what to do next. `params`
  * (account: the connection counts) go to both keys when present. `external`: where an
- * undecodable stream can go (`ExternalRoute`); with `none`, hints that name MPV or VLC give way to
- * the browser's own. `others`: whether the screen offers the channel's other sources; false
+ * undecodable stream can go (`ExternalRoute`); in a browser (`none`, `link`), hints that name MPV
+ * or VLC give way to the browser's own. `others`: whether the screen offers the channel's other sources; false
  * drops "try another source" from the hints that suggest it (unknown keeps it).
  */
 export function errorCopyKeys(
@@ -247,7 +247,9 @@ export function errorCopyKeys(
   },
 ): { title: string; hint: string; params?: Record<string, number> } {
   const keys = copyKeysFor(cls, input);
-  const browser = input?.external === 'none' ? (WITHOUT_EXTERNAL[keys.hint] ?? keys.hint) : keys.hint;
+  // A browser names no external player, whether or not it can hand out the link (the screen's
+  // Copy stream link says what it is for): only the desktop app launches one.
+  const browser = input?.external === 'none' || input?.external === 'link' ? (WITHOUT_EXTERNAL[keys.hint] ?? keys.hint) : keys.hint;
   const hint = hintWithoutOthers(browser, input?.others);
   return hint === keys.hint ? keys : { ...keys, hint };
 }

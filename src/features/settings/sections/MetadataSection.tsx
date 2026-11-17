@@ -1,16 +1,20 @@
-import { CircleAlert, CircleCheck, PlugZap, Trash2 } from 'lucide-react';
+import { CircleAlert, CircleCheck, ExternalLink, PlugZap, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 
-import { Button, Select, useToast, errorDescription } from '@/ui';
+import { Button, Select, buttonClass, useToast, errorDescription } from '@/ui';
 import { SecretInput } from '../../sources/components/SecretInput';
 import { SettingsGroup, SettingsNote, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { TMDB_LANGUAGES } from '../lib/languages';
+import { openExternal } from '../lib/links';
 import { tmdbPatch } from '../lib/patch';
 import type { SectionProps } from './types';
+
+/** TMDB's API settings, where a signed-in account gets its free key. */
+const TMDB_KEY_URL = 'https://www.themoviedb.org/settings/api';
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; ok: boolean; message?: string; error?: unknown };
 
@@ -117,6 +121,18 @@ export function MetadataSection({ settings, update }: SectionProps) {
                   {t('tmdbTest')}
                 </Button>
               </div>
+              {/* Where the key comes from, one press away (TMDB's API settings page; it asks to sign in first). */}
+              <a
+                href={TMDB_KEY_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={openExternal}
+                className={buttonClass('ghost', 'sm', 'self-start')}
+                data-testid="tmdb-get-key"
+              >
+                <ExternalLink aria-hidden className="size-4" />
+                {t('tmdbGetKey')}
+              </a>
               {test.status === 'done' ? (
                 <div aria-live="polite" className="flex items-start gap-1.5 text-body-sm" data-testid="tmdb-test-result">
                   {test.ok ? <CircleCheck aria-hidden size={16} className="mt-0.5 shrink-0 text-success" /> : <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-danger" />}

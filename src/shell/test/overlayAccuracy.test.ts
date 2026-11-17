@@ -57,6 +57,16 @@ describe('shortcut overlay accuracy', () => {
     expect(DOCUMENTED_SHORTCUTS.some((d) => d.combo === 's' && d.area === 'Playback' && d.descKey === 'player:screenshot')).toBe(true);
   });
 
+  it("documents the guide grid's own keys and Home's rail jumps under their areas (a11y-keyboard-10)", () => {
+    const has = (combo: string, area: string) => DOCUMENTED_SHORTCUTS.some((d) => d.combo === combo && d.area === area);
+    for (const c of ['arrowup', 'arrowleft', 'pageup', 'home', 'mod+home', 'end', 'enter', 'shift+f10', 'contextmenu']) expect(has(c, 'Guide'), c).toBe(true);
+    for (const c of ['arrowup', 'arrowdown']) expect(has(c, 'Home'), c).toBe(true);
+    expect(SHORTCUT_AREA_KEYS['Home']).toBeDefined();
+    // The guide's grid keys are read from the grid's own handler.
+    const grid = read('src/features/live/components/EpgGridPage.tsx');
+    for (const key of ["'PageDown'", "'Home'", "'End'", 'e.ctrlKey || e.metaKey', "'ContextMenu'"]) expect(grid).toContain(key);
+  });
+
   it('says list reordering keys work in the dialogs that bind them (wiring-r1 F3)', () => {
     // SortableList (the Alt+arrow handler) is only used by these two dialogs, not by the list page.
     const users = ['ManageListsDialog.tsx', 'EditItemsDialog.tsx'];
@@ -69,6 +79,15 @@ describe('shortcut overlay accuracy', () => {
     for (const d of rows) {
       expect(shell[d.descKey], d.descKey).toContain(lists.manageLists);
       expect(shell[d.descKey], d.descKey).toContain(lists.editChannels);
+    }
+  });
+
+  it('says "item", not "channel", for the row menu on pages that list movies too (library3 follow-up)', () => {
+    const shell = JSON.parse(read('src/i18n/en/shell.json')) as Record<string, string>;
+    for (const area of ['Favorites', 'Recently watched']) {
+      const rows = DOCUMENTED_SHORTCUTS.filter((d) => d.area === area && (d.combo === 'shift+f10' || d.combo === 'contextmenu'));
+      expect(rows, area).toHaveLength(2);
+      for (const d of rows) expect(shell[d.descKey], area).toBe('Open the menu for the focused item');
     }
   });
 

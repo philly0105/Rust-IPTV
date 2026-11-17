@@ -1,13 +1,56 @@
 import { Plus, Trash2 } from 'lucide-react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { EpgLinks } from '@/api/types';
+import { useRpcQuery } from '@/api/query';
+import type { EpgLinks, EpgSourceStatus } from '@/api/types';
 import { parseGuideShift } from '@/lib/guideShift';
 
-import { Badge, Button, IconButton, Input, Toggle } from '@/ui';
+import { Badge, Button, IconButton, Input, MetaLine, Toggle } from '@/ui';
 import { addManualEpgUrl, epgRows, removeManualEpgUrl, setEpgUrlEnabled } from '../lib/epgLinks';
-import { redactUrl } from '../lib/redact';
+import { absoluteTime, formatCount, relativeTime } from '../lib/format';
+import { redactText, redactUrl } from '../lib/redact';
 import { Field } from './Field';
+
+/** When a guide URL last loaded and how many programmes it had, or why it failed; nothing before its first load. */
+function GuideStatusLine({ status }: { status: EpgSourceStatus | undefined }) {
+  const { t, i18n } = useTranslation('sources');
+  if (!status) return null;
+  if (status.status === 'fetching') return <MetaLine as="span" items={[t('guideLoading')]} data-testid="epg-link-status" />;
+  if (status.status === 'error') {
+    const why = status.error ? redactText(status.error) : undefined;
+    return (
+      <MetaLine
+        as="span"
+        className="text-danger"
+        items={[
+          t('guideFailed'),
+          why ? (
+            <span className="block max-w-80 truncate" title={why}>
+              {why}
+            </span>
+          ) : null,
+        ]}
+        data-testid="epg-link-status"
+        data-status="error"
+      />
+    );
+  }
+  if (status.status !== 'ok') return null;
+  const when = relativeTime(status.lastFetchAt, i18n.language);
+  return (
+    <MetaLine
+      as="span"
+      items={[
+        t('guideDone'),
+        when ? <span title={absoluteTime(status.lastFetchAt, i18n.language)}>{when}</span> : null,
+        t('guidePrograms', { count: status.programCount, value: formatCount(status.programCount, i18n.language) }),
+      ]}
+      data-testid="epg-link-status"
+      data-status="ok"
+    />
+  );
+}
 
 /** The shift field's text for stored links: blank for none. */
 export function shiftTextOf(links: EpgLinks): string {
@@ -46,6 +89,9 @@ export function EpgLinksEditor({
   // The links take the typed text only while it is a valid shift.
   const shiftValid = parseGuideShift(shiftText) !== null;
   const rows = epgRows(value);
+  // How each guide URL last loaded, from the guide's own records (none yet for a URL just added).
+  const statuses = useRpcQuery('epg.sources', undefined);
+  const statusByUrl = useMemo(() => new Map((statuses.data ?? []).map((st) => [st.url, st])), [statuses.data]);
 
   const add = () => {
     const r = addManualEpgUrl(value, pendingUrl);
@@ -74,8 +120,9 @@ export function EpgLinksEditor({
                   <span className={`truncate font-mono text-sm ${row.enabled ? 'text-fg' : 'text-fg-subtle line-through'}`} title={shown} data-testid="epg-link-url">
                     {shown}
                   </span>
-                  <span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <Badge>{row.origin === 'detected' ? t('epgDetected') : t('epgManual')}</Badge>
+                    <GuideStatusLine status={statusByUrl.get(row.url)} />
                   </span>
                 </div>
                 <div className="shrink-0">

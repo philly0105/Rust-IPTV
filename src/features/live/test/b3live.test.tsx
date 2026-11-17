@@ -16,7 +16,8 @@ import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING } from '../components/ChannelRo
 import { EpgGridPage } from '../components/EpgGridPage';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { LivePage } from '../components/LivePage';
-import { installDomStubs, makeChannel, renderAt, settings } from './harness';
+import { HOUR, MINUTE } from '../lib/epgTime';
+import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -226,6 +227,8 @@ describe('Live list: states', () => {
     await screen.findByText('Channel 0');
     fireEvent.change(searchBox(), { target: { value: 'zzz' } });
     expect(await screen.findByText('No channels match "zzz"', undefined, { timeout: 4000 })).toBeTruthy();
+    // Or the search of everything, which looks in the other sources and the guide too.
+    expect(screen.getByTestId('search-everything-for').getAttribute('href')).toBe('/search?q=zzz');
     // The empty state's button (the input's own X is the first one).
     fireEvent.click(screen.getAllByRole('button', { name: 'Clear search' }).at(-1)!);
     await waitFor(() => expect(within(list()).getByText('Channel 0')).toBeTruthy(), { timeout: 4000 });
@@ -272,15 +275,40 @@ describe('Live list: states', () => {
   });
 });
 
+describe('Live list: a number typed (v-live-10)', () => {
+  it('names the number over the first match when that is the channel, instead of a card repeating it', async () => {
+    rpcMock.handlers['catalog.channelByNumber'] = () => makeChannel(5);
+    renderAt('/s/src1/live', ROUTE);
+    fireEvent.change(searchBox(), { target: { value: '5' } });
+    const caption = await screen.findByTestId('group-caption');
+    expect(caption.textContent).toBe('Channel 5 · News');
+    expect(caption.closest('[role="listitem"]')?.getAttribute('data-index')).toBe('0');
+    expect(screen.queryByTestId('live-number-hit')).toBeNull();
+  });
+
+  it('a channel not leading the matches keeps its card, in the number and logo columns of the rows', async () => {
+    rpcMock.handlers['catalog.channelByNumber'] = () => makeChannel(4);
+    renderAt('/s/src1/live', ROUTE);
+    fireEvent.change(searchBox(), { target: { value: '5' } });
+    const hit = await screen.findByTestId('live-number-hit');
+    expect(hit.firstElementChild?.textContent).toBe('5');
+    expect(hit.firstElementChild?.className).toContain('w-[var(--num-w');
+    await within(list()).findByText('Channel 5');
+    expect(within(list()).queryByText('Channel 5 · News')).toBeNull();
+  });
+});
+
 describe('Live list: keyboard', () => {
-  it('"/" jumps to search; Escape clears it, a second Escape returns to the list cursor', async () => {
+  it('the search field is the page search ("/" and Ctrl+F); Escape clears it, a second Escape returns to the list cursor', async () => {
     renderAt('/s/src1/live', ROUTE);
     await screen.findByText('Channel 0');
     rowButton(0)!.focus();
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     await waitFor(() => expect(cursorIndex()).toBe(1));
 
-    fireEvent.keyDown(window, { key: '/', code: 'Slash' });
+    // The shell's "/" and Ctrl+F focus the page's data-page-search field (shell tests cover the keys).
+    expect(searchBox().hasAttribute('data-page-search')).toBe(true);
+    searchBox().focus();
     expect(document.activeElement).toBe(searchBox());
     fireEvent.change(searchBox(), { target: { value: 'abc' } });
     fireEvent.keyDown(searchBox(), { key: 'Escape' });
@@ -454,7 +482,7 @@ describe('Guide ribbon and guide page states', () => {
     rpcMock.handlers['sources.list'] = () => [];
     renderAt('/epg', [{ path: '/epg', element: <EpgGridPage /> }]);
     expect(await screen.findByText('No sources yet')).toBeTruthy();
-    expect(screen.getByText('Add a source to see its TV guide.')).toBeTruthy();
+    expect(screen.getByText('Add a source first. Its TV guide shows up here.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Add a source' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
     cleanup();
@@ -477,6 +505,17 @@ describe('Empty groups and group filter', () => {
     const title = await screen.findByText('This group has no channels');
     const link = within(title.parentElement!).getByRole('link', { name: 'All channels' });
     expect(link.getAttribute('href')).toBe('/s/src1/live');
+  });
+
+  it('a link to a group that no longer exists says the group is gone (v-live-13)', async () => {
+    rpcMock.handlers['catalog.channels'] = serve([]);
+    renderAt('/s/src1/live/doesnotexist', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
+    const title = await screen.findByText('That group is gone');
+    expect(screen.getByText('It may have been hidden or removed by the provider.')).toBeTruthy();
+    expect(screen.queryByText('This group has no channels')).toBeNull();
+    const state = title.parentElement!;
+    expect(within(state).getByRole('link', { name: 'All channels' }).getAttribute('href')).toBe('/s/src1/live');
+    expect(within(state).getByRole('button', { name: 'Manage visible groups…' })).toBeTruthy();
   });
 
   it('a group filter with no match offers Clear search; Escape clears too', () => {
@@ -507,6 +546,85 @@ describe('Empty groups and group filter', () => {
     fireEvent.keyDown(box, { key: 'Escape' });
     expect(box.value).toBe('');
     expect(screen.getByText('News')).toBeTruthy();
+  });
+
+  it('a group filter with no match takes the text over to the channel search (w-walkthrough-07)', () => {
+    const cats: Category[] = [{ id: 'g1', sourceId: 'src1', contentType: 'live', name: 'News', hidden: false, itemCount: 3, position: 0 }];
+    const onSearchChannels = vi.fn();
+    renderAt('/', [
+      {
+        path: '/',
+        element: (
+          <CategorySidebar
+            categories={cats}
+            hiddenCount={0}
+            isLoading={false}
+            error={null}
+            onRetry={() => undefined}
+            hrefFor={(id) => `/s/src1/live${id ? `/${id}` : ''}`}
+            onManage={() => undefined}
+            totalLabel="All channels"
+            onSearchChannels={onSearchChannels}
+          />
+        ),
+      },
+    ]);
+    const box = screen.getByRole('searchbox', { name: 'Filter groups' }) as HTMLInputElement;
+    fireEvent.change(box, { target: { value: ' espn ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search channels for "espn"' }));
+    expect(onSearchChannels).toHaveBeenCalledWith('espn');
+    // The groups come back: the filter is spent.
+    expect(box.value).toBe('');
+    expect(screen.getByText('News')).toBeTruthy();
+  });
+
+  it('a group row has its options button for a mouse too, shown on hover or keyboard focus (w-walkthrough-12)', () => {
+    const cats: Category[] = [{ id: 'g1', sourceId: 'src1', contentType: 'live', name: 'News', hidden: false, itemCount: 3, position: 0 }];
+    const onGroupMenu = vi.fn();
+    renderAt('/', [
+      {
+        path: '/',
+        element: (
+          <CategorySidebar
+            categories={cats}
+            hiddenCount={0}
+            isLoading={false}
+            error={null}
+            onRetry={() => undefined}
+            hrefFor={(id) => `/s/src1/live${id ? `/${id}` : ''}`}
+            onManage={() => undefined}
+            totalLabel="All channels"
+            onGroupMenu={onGroupMenu}
+          />
+        ),
+      },
+    ]);
+    const button = screen.getByRole('button', { name: 'Group options' });
+    // Not display:none with a fine pointer (it measured 0x0): it fades in over the row's end.
+    expect(button.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(button.className).toContain('group-hover/grp:opacity-100');
+    expect(button.className).toContain('group-has-[:focus-visible]/grp:opacity-100');
+    expect(button.parentElement!.className).toContain('group/grp');
+    fireEvent.click(button);
+    expect(onGroupMenu).toHaveBeenCalledWith(expect.objectContaining({ x: expect.any(Number) }), cats[0]);
+  });
+
+  it('from an open group, the filter text searches All channels in the channel search field', async () => {
+    rpcMock.handlers['catalog.channels'] = serve(Array.from({ length: 30 }, (_, i) => makeChannel(i)));
+    renderAt('/s/src1/live/g1', [
+      { path: '/s/:sourceId/live/:categoryId', element: <LivePage /> },
+      { path: '/s/:sourceId/live', element: <LivePage /> },
+    ]);
+    await screen.findByText('Channel 0');
+    const box = screen.getByRole('searchbox', { name: 'Filter groups' });
+    fireEvent.change(box, { target: { value: 'Channel 17' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search channels for "Channel 17"' }));
+    await waitFor(() => expect(searchBox().value).toBe('Channel 17'));
+    await waitFor(() => expect(screen.queryByText('Channel 0')).toBeNull());
+    expect(screen.getByText('Channel 17')).toBeTruthy();
+    // All channels is the open view now, not the group.
+    expect(screen.getByRole('link', { name: /All channels/ }).getAttribute('aria-current')).toBe('page');
+    await waitFor(() => expect(document.activeElement).toBe(searchBox()));
   });
 });
 
@@ -540,5 +658,20 @@ describe('Live list: density and UI scale', () => {
     act(() => setUiScaleState(1.25, 'comfortable'));
     await waitFor(() => expect(rowSlot(0)?.style.height).toBe(`${scaleRowPx(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, 1.25, 'comfortable')}px`));
     expect(groupSlot(0)?.style.height).toBe('45px');
+  });
+});
+
+describe('Up next in a gap in the guide (live3 follow-up)', () => {
+  it('does not list again the programme the Now card already shows as up next', async () => {
+    const now = Date.now();
+    // A gap past the timeline's end: the card rests on "Off Air", the list starts after it.
+    rpcMock.handlers['epg.programs'] = () => [program('Off Air', now + 6 * HOUR, now + 6 * HOUR + 10 * MINUTE), program('Classic Sitcom Marathon', now + 7 * HOUR, now + 8 * HOUR)];
+    renderAt('/', [
+      { path: '/', element: <EpgRibbon channel={makeChannel(1)} sourceKind="xtream" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} details /> },
+    ]);
+    const list = await screen.findByTestId('up-next', {}, { timeout: 10_000 });
+    expect(screen.getByTestId('ribbon-header').textContent).toContain('Off Air');
+    expect(within(list).getByText('Classic Sitcom Marathon')).toBeTruthy();
+    expect(within(list).queryByText('Off Air')).toBeNull();
   });
 });

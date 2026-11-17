@@ -120,8 +120,8 @@ describe('the hero title on a phone', () => {
 });
 
 describe('the hero action row', () => {
-  it("draws its icon buttons, My List and the More menu in the text buttons' rounded square", async () => {
-    // A saved spot puts Start over in More, so the menu trigger is in the row too.
+  it("draws Start over, its icon buttons and My List in the text buttons' rounded square, with no More for nothing", async () => {
+    // A saved spot puts Start over beside Resume (vod-detail-07); More had nothing else to hold, so it is gone.
     rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 1200, durationSeconds: 3600, updatedAt: 'x', watched: false });
     renderAt('/s/src1/movie/m7', detailRoute);
     const resume = await screen.findByRole('button', { name: 'Resume from 20:00' });
@@ -130,11 +130,11 @@ describe('the hero action row', () => {
     // My List's label comes from the mylist namespace, not loaded here: its test id names it.
     expect(buttons.map((b) => b.dataset['testid'] ?? b.getAttribute('aria-label'))).toEqual([
       null,
+      'vod-start-over',
       'mylist-button',
       'vod-favorite-button',
       'vod-watched-button',
       'vod-download-button',
-      'More actions',
     ]);
     for (const b of buttons) {
       expect(b.className, b.getAttribute('aria-label') ?? '').toContain('rounded-md');

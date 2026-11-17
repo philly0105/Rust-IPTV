@@ -35,6 +35,8 @@ export interface MyListCardProps {
   /** What the bar stands for: "12 minutes left", or the episode a series resumes. */
   progressLabel?: string | undefined;
   onRemove: (entry: WatchlistEntry) => void;
+  /** The title's menu at `pos` (library-05): a right click, or the long press a phone turns into one. */
+  onMenu?: ((entry: WatchlistEntry, pos: { x: number; y: number }) => void) | undefined;
 }
 
 /**
@@ -45,7 +47,7 @@ export interface MyListCardProps {
 const REVEAL =
   'pointer-coarse:hidden pointer-fine:opacity-0 pointer-fine:group-hover/card:opacity-100 pointer-fine:in-focus-visible:opacity-100 pointer-fine:focus-visible:opacity-100 motion-safe:transition-opacity';
 
-function MyListCardImpl({ entry, busy, progress, progressLabel, onRemove }: MyListCardProps) {
+function MyListCardImpl({ entry, busy, progress, progressLabel, onRemove, onMenu }: MyListCardProps) {
   const { t, i18n } = useTranslation('mylist');
   const { ref, snapshot, watched } = entry;
   const title = snapshotTitle(ref, snapshot.title).title;
@@ -59,6 +61,14 @@ function MyListCardImpl({ entry, busy, progress, progressLabel, onRemove }: MyLi
       data-testid="mylist-card"
       data-content-type={ref.contentType}
       data-watched={watched || undefined}
+      onContextMenu={
+        onMenu
+          ? (e) => {
+              e.preventDefault();
+              onMenu(entry, { x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
     >
       <div className={CARD_ART}>
         {/* The frame's ring is the edge; the poster's own hairline would double it. */}

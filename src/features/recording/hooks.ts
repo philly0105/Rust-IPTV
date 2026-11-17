@@ -6,6 +6,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 import { create } from 'zustand';
 
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
@@ -119,6 +120,7 @@ export function useCancelPending(id: string | undefined): boolean {
 export function useScheduleActions() {
   const { t } = useTranslation('live');
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const toggleReminder = useCallback(
     async ({ ref, channelName, program }: ProgrammeTarget, existing?: Reminder): Promise<void> => {
@@ -149,10 +151,13 @@ export function useScheduleActions() {
         });
         const name = args.program?.title ?? args.channelName;
         toast({
-          variant: 'success',
+          // A warning that some streams may fail is not a success (the toast has no warning tone).
+          variant: res.warning ? 'info' : 'success',
           title: res.recording.status === 'recording' || Date.parse(res.recording.start) <= Date.now() ? t('recordingStarted', { title: name }) : t('recordingScheduled', { title: name }),
           description: res.warning ? t('recordConnectionWarning', { overlapping: res.warning.overlapping, max: res.warning.maxConnections }) : undefined,
           duration: res.warning ? 10_000 : undefined,
+          // Scheduled sits under More: say where the recording now is, as a queued download does.
+          action: { label: t('openScheduled'), onClick: () => void navigate('/scheduled') },
         });
         return true;
       } catch (e) {
@@ -164,7 +169,7 @@ export function useScheduleActions() {
         void invalidate('recordings.');
       }
     },
-    [t, toast],
+    [t, toast, navigate],
   );
 
   /**
@@ -227,14 +232,21 @@ export function useRuleIndex(): ReadonlyMap<RuleKey, RecordingRule> {
 
 /** Add, pause/resume and remove series rules, with their toasts. Each resolves true on success. */
 export function useRuleActions() {
-  const { t } = useTranslation('guide');
+  // live: the toast's "See schedule", worded once for Record and Record series.
+  const { t } = useTranslation(['guide', 'live']);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const addRule = useCallback(
     async (args: { ref: ItemRef; channelName: string; title: string }): Promise<boolean> => {
       try {
         const rule = await rpc('recordings.addRule', args);
-        toast({ variant: 'success', title: t('seriesAdded', { title: rule.title }), description: t('seriesAddedHint', { n: rule.upcoming }) });
+        toast({
+          variant: 'success',
+          title: t('seriesAdded', { title: rule.title }),
+          description: t('seriesAddedHint', { n: rule.upcoming }),
+          action: { label: t('live:openScheduled'), onClick: () => void navigate('/scheduled') },
+        });
         return true;
       } catch (e) {
         const err = RpcError.from(e);
@@ -248,7 +260,7 @@ export function useRuleActions() {
         void invalidate('recordings.');
       }
     },
-    [t, toast],
+    [t, toast, navigate],
   );
 
   const setRuleEnabled = useCallback(

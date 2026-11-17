@@ -5,7 +5,9 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router';
 
-import { Button, EmptyState, ErrorState, Skeleton, useShell } from '../deps';
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
+
+import { Button, EmptyState, ErrorState, Page, Skeleton, useShell, useVisibleSources } from '../deps';
 import { useLists } from '../hooks/useLists';
 import { listPath } from '../paths';
 import { openCreateList } from '../store';
@@ -14,6 +16,10 @@ export function ListsIndexPage() {
   const { t, i18n } = useTranslation('lists');
   const lists = useLists();
   const shell = useShell();
+  const sources = useVisibleSources();
+  // The no-source state stays while its add dialog is open: the new source is listed before its
+  // import runs, and leaving the state then would close the dialog mid-import.
+  const adding = useNoSourcesAdding();
 
   useEffect(() => {
     shell.setHeader({ title: t('title') });
@@ -23,16 +29,22 @@ export function ListsIndexPage() {
   if (first) return <Navigate to={listPath(first.id)} replace />;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-y-auto bg-bg p-6" data-testid="lists-index">
+    // Under the header like the other Library pages' empty states (library-13), not centred in the
+    // window, so moving between them does not make the content jump.
+    <Page width="default" className="flex min-w-0 flex-col" data-testid="lists-index">
       <h1 className="sr-only">{t('title')}</h1>
       {lists.error ? (
         <ErrorState error={lists.error} title={t('loadFailed')} hint={t('localDataHint')} onRetry={() => void lists.refetch()} />
-      ) : !lists.data ? (
+      ) : !lists.data || sources.isLoading ? (
         <div className="flex w-full max-w-md flex-col gap-3" role="status" aria-busy="true" aria-label={t('loading')}>
           <Skeleton className="h-6 w-40" />
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
         </div>
+      ) : sources.data?.length === 0 || adding ? (
+        // A list holds channels, so with no source there is nothing to put in one yet: the same
+        // message and ways forward as the other Library pages.
+        <NoSourcesState icon={<ListVideo className="size-7" />} title={t('emptyTitle')} description={t('emptyNoSources')} stateTestId="lists-no-sources" />
       ) : (
         <EmptyState
           icon={<ListVideo className="size-7" />}
@@ -45,6 +57,6 @@ export function ListsIndexPage() {
           }
         />
       )}
-    </div>
+    </Page>
   );
 }

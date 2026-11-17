@@ -35,10 +35,11 @@ export interface MyListButtonProps {
   snapshot: ItemSnapshot;
   /**
    * `button`: the labelled detail-page button. `icon`: the frosted poster corner. `round`: the
-   * detail hero's icon button (VL-hero-actions), with the state as its tooltip. It keeps the kit's
-   * rounded square, as the hero's other icon buttons and Play beside them do.
+   * icon button of the row under the player (VL-hero-actions), with the state as its tooltip.
+   * `hero`: the detail hero's, labelled "My List" from sm and a square on a phone, where the
+   * hero's caption names it. Both keep the kit's rounded square, as Play beside them does.
    */
-  variant?: 'icon' | 'button' | 'round';
+  variant?: 'icon' | 'button' | 'round' | 'hero';
   /** Height of the `button` variant, matching the detail page's other actions. Default `lg`. */
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -172,12 +173,47 @@ function MyListButtonBody({
     );
   }
 
+  if (variant === 'hero') {
+    // From sm the button says "My List" beside the bookmark, so it is not one of two look-alike
+    // save glyphs next to Favorite's heart (library-02); on a phone it is a square like the tiles
+    // around it, whose caption names it. The name keeps the title and the tooltip says what a press does.
+    return (
+      <Tooltip content={hint}>
+        <Button
+          size={size}
+          variant="secondary"
+          aria-label={t('toggleLabel', { title })}
+          icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} className={cn(loading && 'motion-safe:animate-pulse')} />}
+          aria-pressed={pressed}
+          aria-busy={busy}
+          aria-disabled={loading || undefined}
+          tabIndex={tabIndex}
+          onClick={onClick}
+          data-testid="mylist-button"
+          data-variant="hero"
+          data-state={status}
+          data-in-list={inList || undefined}
+          // Saved reads as pressed (the neutral selected fill), not amber, as on the round variant.
+          className={cn(
+            size === 'lg' ? 'max-sm:w-12' : size === 'md' ? 'max-sm:w-10' : 'max-sm:w-8',
+            'max-sm:px-0',
+            inList && 'bg-selected text-fg',
+            (pending || loading) && 'cursor-progress',
+            className,
+          )}
+        >
+          <span className="max-sm:hidden">{t('buttonLabel')}</span>
+        </Button>
+      </Tooltip>
+    );
+  }
+
   return (
     <Tooltip content={hint}>
       <Button
         size={size}
         variant="secondary"
-        icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} className={cn(inList && 'text-accent')} />}
+        icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} />}
         // Spinner in place of the glyph, aria-disabled and aria-busy while the list loads.
         loading={loading}
         aria-pressed={pressed}
@@ -188,7 +224,8 @@ function MyListButtonBody({
         data-variant="button"
         data-state={status}
         data-in-list={inList || undefined}
-        className={cn(inList && 'border-accent/70', (pending || loading) && 'cursor-progress', className)}
+        // Saved is a state, not an action: the neutral selected fill, as the round variant draws it.
+        className={cn(inList && 'bg-selected text-fg', (pending || loading) && 'cursor-progress', className)}
       >
         {t('buttonLabel')}
       </Button>

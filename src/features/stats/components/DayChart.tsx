@@ -154,7 +154,7 @@ export function DayChart({ days, today }: DayChartProps) {
             className="pointer-events-none absolute inset-x-0 border-t border-divider"
             style={{ bottom: `${(s / scale.top) * 100}%` }}
           >
-            <span className="absolute end-full top-0 me-2 -translate-y-1/2 whitespace-nowrap text-[11px] tabular-nums text-fg-subtle">{tick(s)}</span>
+            <span className="absolute end-full top-0 me-2 -translate-y-1/2 whitespace-nowrap text-caption tabular-nums text-fg-subtle">{tick(s)}</span>
           </div>
         ))}
         <div
@@ -214,7 +214,7 @@ export function DayChart({ days, today }: DayChartProps) {
           // Measures the short names at the selected (semibold) weight; no height, so it never adds scroll.
           <span
             ref={probeRef}
-            className="pointer-events-none invisible absolute start-0 top-0 flex h-0 w-max flex-col overflow-hidden whitespace-nowrap text-[11px] font-semibold tabular-nums"
+            className="pointer-events-none invisible absolute start-0 top-0 flex h-0 w-max flex-col overflow-hidden whitespace-nowrap text-caption font-semibold tabular-nums"
             data-testid="stats-day-probe"
           >
             {weekdays.map((w, i) => (
@@ -226,7 +226,7 @@ export function DayChart({ days, today }: DayChartProps) {
           <span
             key={d.day}
             className={cn(
-              'min-w-0 flex-1 overflow-visible whitespace-nowrap text-center text-[11px] tabular-nums',
+              'min-w-0 flex-1 overflow-visible whitespace-nowrap text-center text-caption tabular-nums',
               i === index || d.day === today ? 'font-semibold text-fg' : 'text-fg-subtle',
             )}
           >

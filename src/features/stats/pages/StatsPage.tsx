@@ -19,7 +19,7 @@ import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/component
 import { DayChart, LIVE_FILL, VOD_FILL } from '../components/DayChart';
 import { StatsSkeleton } from '../components/StatsSkeleton';
 import { TopChannels, TopTitles } from '../components/TopList';
-import { Button, Dialog, EmptyState, ErrorState, Page, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources, errorDescription } from '../deps';
+import { Button, Dialog, EmptyState, ErrorState, Page, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useDisplayPrefs, useToast, useVisibleSources, errorDescription } from '../deps';
 import { useClearStats, useMonthHasData, useWatchStats } from '../hooks/useWatchStats';
 import { rangeTotals } from '../lib/chart';
 import { formatWatchTime } from '../lib/format';
@@ -56,6 +56,7 @@ export function StatsPage() {
   const { query, today } = useWatchStats(range);
   const data = query.data;
   const sources = useVisibleSources();
+  const { stripCountryPrefix } = useDisplayPrefs();
   // The no-source state stays while its add dialog is open: the new source is listed before its
   // import runs, and leaving the state then would close the dialog mid-import.
   const adding = useNoSourcesAdding();
@@ -90,7 +91,6 @@ export function StatsPage() {
       onError: (err) => toast({ variant: 'error', title: t('clearFailed'), description: errorDescription(err) }),
     });
 
-  const time = (s: number) => formatWatchTime(s, lang);
   // With nothing watched in either range, 7 days and 30 days would only switch between two empty
   // pages, so the range goes. It goes only once both are known to be empty, in the same frame the
   // skeleton turns into the empty state: it stays while the page loads and while an empty week
@@ -110,7 +110,7 @@ export function StatsPage() {
     body =
       !olderData && (sources.data?.length === 0 || adding) ? (
         // Nothing to watch yet either: the state every page shows until a source exists.
-        <NoSourcesState icon={<ChartColumn />} title={t('emptyTitle')} description={t('emptyMonth')} testId="stats-add-source" />
+        <NoSourcesState icon={<ChartColumn />} title={t('emptyTitle')} description={t('emptyNoSources')} testId="stats-add-source" />
       ) : (
         <EmptyState
           icon={<ChartColumn size={28} aria-hidden />}
@@ -131,6 +131,12 @@ export function StatsPage() {
       );
   } else {
     const split = rangeTotals(data.days);
+    // The tiles add up (library-16): rounded each on its own, "3 min" read as "3 min" live plus
+    // "28 sec" of movies. Under ten minutes every tile keeps its seconds; above that, live is what
+    // the rounded total leaves after the rounded movies and series.
+    const precise = data.totalSeconds < 600;
+    const part = (s: number) => formatWatchTime(s, lang, { seconds: precise });
+    const liveShown = precise || split.vod < 60 || split.live < 60 ? split.live : Math.max(0, Math.round(data.totalSeconds / 60) - Math.round(split.vod / 60)) * 60;
     // KPI tiles (critique: stats): the total leads, then the split (which doubles as the chart's
     // legend) and the daily average, each a number with its label rather than one long sentence.
     // From lg one row across the page, the total a little wider and the other three equal (the
@@ -140,9 +146,9 @@ export function StatsPage() {
       <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_repeat(3,minmax(0,1fr))]" data-testid="stats-kpis">
         <div className={tile} data-testid="stats-total">
           {/* Read as one sentence ("3 hr 20 min watched in the last 7 days"); drawn as a number over its label. */}
-          <span className="sr-only">{t(range === 7 ? 'totalWeek' : 'totalMonth', { time: time(data.totalSeconds) })}</span>
-          <span aria-hidden className="text-headline tabular-nums text-fg sm:text-[calc(36rem/15)]">
-            {time(data.totalSeconds)}
+          <span className="sr-only">{t(range === 7 ? 'totalWeek' : 'totalMonth', { time: part(data.totalSeconds) })}</span>
+          <span aria-hidden className="text-headline tabular-nums text-fg">
+            {part(data.totalSeconds)}
           </span>
           <span aria-hidden className="text-body-sm text-fg-muted">
             {t(range === 7 ? 'kpiWeek' : 'kpiMonth')}
@@ -154,19 +160,19 @@ export function StatsPage() {
               <span aria-hidden className={cn('size-2.5 rounded-[3px]', LIVE_FILL)} />
               {t('live')}
             </span>{' '}
-            <span className="text-title tabular-nums text-fg">{time(split.live)}</span>
+            <span className="text-title tabular-nums text-fg">{part(liveShown)}</span>
           </li>
           <li className={tile}>
             <span className="flex items-center gap-2 text-body-sm text-fg-muted">
               <span aria-hidden className={cn('size-2.5 rounded-[3px]', VOD_FILL)} />
               {t('vod')}
             </span>{' '}
-            <span className="text-title tabular-nums text-fg">{time(split.vod)}</span>
+            <span className="text-title tabular-nums text-fg">{part(split.vod)}</span>
           </li>
         </ul>
         <div className={cn(tile, 'sm:col-span-2 lg:col-span-1')} data-testid="stats-average">
           <span className="text-body-sm text-fg-muted">{t('dailyAverage')}</span>{' '}
-          <span className="text-title tabular-nums text-fg">{time(Math.round(data.totalSeconds / Math.max(1, data.days.length)))}</span>
+          <span className="text-title tabular-nums text-fg">{part(Math.round(data.totalSeconds / Math.max(1, data.days.length)))}</span>
         </div>
       </div>
     );
@@ -174,8 +180,8 @@ export function StatsPage() {
       <div className="flex flex-col gap-8">
         <DayChart days={data.days} today={today} />
         <div className="grid gap-8 md:grid-cols-2">
-          <TopChannels items={data.topChannels} canPlay={(item) => sourceById.has(item.ref.sourceId)} onPlay={play} />
-          <TopTitles items={data.topTitles} />
+          <TopChannels items={data.topChannels} canPlay={(item) => sourceById.has(item.ref.sourceId)} onPlay={play} showSource={sourceById.size > 1} stripCountryPrefix={stripCountryPrefix} />
+          <TopTitles items={data.topTitles} showSource={sourceById.size > 1} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divider pt-4">
           <p className="text-sm text-fg-subtle">{t('localNote')}</p>

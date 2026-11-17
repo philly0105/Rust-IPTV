@@ -2,7 +2,7 @@
 
 import { k } from '../lib/keys';
 import { Clapperboard, Film, Pause, Radio, Tv } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -70,6 +70,11 @@ export interface ConfirmDialogProps {
   title: string;
   description: ReactNode;
   confirmLabel: string;
+  /**
+   * The way out. "Keep" by default, for a confirm whose action is itself a cancel ("Cancel this
+   * download?"); a clear names its own action, so it takes the app's usual "Cancel".
+   */
+  cancelLabel?: string;
   danger?: boolean;
   busy?: boolean;
   children?: ReactNode;
@@ -77,7 +82,7 @@ export interface ConfirmDialogProps {
   onClose: () => void;
 }
 
-export function ConfirmDialog({ open, title, description, confirmLabel, danger, busy, children, onConfirm, onClose }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, description, confirmLabel, cancelLabel, danger, busy, children, onConfirm, onClose }: ConfirmDialogProps) {
   const { t } = useTranslation('library');
   return (
     <Dialog
@@ -89,7 +94,7 @@ export function ConfirmDialog({ open, title, description, confirmLabel, danger, 
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            {t('keep')}
+            {cancelLabel ?? t('keep')}
           </Button>
           <Button variant={danger ? 'danger' : 'primary'} loading={busy} onClick={onConfirm}>
             {confirmLabel}
@@ -158,6 +163,24 @@ export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string
     );
   }
   return <NoSourcesActions testId="library-empty-add-source" />;
+}
+
+/**
+ * Removing the last row of Favorites or Recently watched (Delete, the row's remove button) swaps the
+ * list for the empty state, and focus, which sat in a row, would drop to <body>. When that happens
+ * focus moves to the empty state's {@link BrowseAction}, else to the page (#main).
+ */
+export function useFocusWhenEmptied(empty: boolean): void {
+  const was = useRef(empty);
+  useEffect(() => {
+    const before = was.current;
+    was.current = empty;
+    if (!empty || before) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active.isConnected) return;
+    const action = document.querySelector<HTMLElement>('[data-testid="library-empty-browse"], [data-testid="library-empty-add-source"]');
+    (action ?? document.getElementById('main'))?.focus();
+  }, [empty]);
 }
 
 /**

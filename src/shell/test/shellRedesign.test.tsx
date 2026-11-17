@@ -77,14 +77,14 @@ let matchMedia: typeof window.matchMedia;
 function media(...queries: string[]) {
   window.matchMedia = ((query: string) => ({ ...matchMedia(query), matches: queries.includes(query) })) as typeof window.matchMedia;
 }
-const PHONE = ['(max-width: 639px)', '(max-width: 1023px)'];
+const PHONE = ['(max-width: 639px)', '(max-width: 1099px)'];
 
 beforeAll(installDomStubs);
 beforeEach(() => {
   matchMedia = window.matchMedia;
   handlers();
   localStorage.clear();
-  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false });
+  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false, railPeek: false });
   useToastStore.setState({ toasts: [] });
 });
 afterEach(() => {
@@ -109,12 +109,12 @@ describe('rail (SH-rail-ia)', () => {
       'Multi-view',
     ]);
     // On Favorites the less used pages stay folded under More, which opens them in place.
-    expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual(['My List', 'Favorites', 'Lists', 'Recently watched']);
+    expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual(['My List', 'Favorites', 'Channel lists', 'Recently watched']);
     fireEvent.click(within(group('Library')).getByRole('button', { name: 'More' }));
     expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual([
       'My List',
       'Favorites',
-      'Lists',
+      'Channel lists',
       'Recently watched',
       'Downloads',
       'My videos',
@@ -146,7 +146,9 @@ describe('rail (SH-rail-ia)', () => {
     expect(screen.queryByRole('button', { name: /Only One/ })).toBeNull();
     // It stands for Manage sources, which no longer has a row of its own.
     const sources = screen.getByRole('group', { name: 'Sources' });
-    expect(within(sources).getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/sources?add=1', '/sources']);
+    // Then Add source, a labelled row at the end of the group (walkthrough-18).
+    expect(within(sources).getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/sources', '/sources?add=1']);
+    expect(within(sources).getByRole('link', { name: 'Add source' }).textContent).toBe('Add source');
     const watch = screen.getByRole('group', { name: 'Watch' });
     expect(within(watch).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live');
     // Radio was the one link of the source's own that no Watch or Library row had: it follows Live TV.
@@ -167,7 +169,7 @@ describe('rail (SH-rail-ia)', () => {
     const dimmed = (name: string) => within(nav).getByRole('link', { name }).className.includes('text-fg-subtle');
     // (Favorites is the page on show, so it wears the current mark instead.)
     for (const name of ['My List', 'Recently watched', 'TV guide', 'Multi-view']) expect(dimmed(name), name).toBe(true);
-    for (const name of ['Lists', 'Home', 'Sports']) expect(dimmed(name), name).toBe(false);
+    for (const name of ['Channel lists', 'Home', 'Sports']) expect(dimmed(name), name).toBe(false);
     // Live TV, Movies and Series step back too, and lead to the Sources page, as the phone tab does.
     const watch = within(nav).getByRole('group', { name: 'Watch' });
     for (const name of ['Live TV', 'Movies', 'Series']) {
@@ -200,6 +202,8 @@ describe('rail at laptop heights (stage 2)', () => {
     expect(within(library).queryByRole('button', { name: 'Library' })).toBeNull();
     const more = within(library).getByRole('button', { name: 'More' });
     expect(more.getAttribute('aria-expanded')).toBe('false');
+    // Folded, it names no list: the list is not in the page (w-a11y-11).
+    expect(more.hasAttribute('aria-controls')).toBe(false);
     expect(within(library).getByRole('link', { name: 'My List' })).toBeTruthy();
     expect(within(library).queryByRole('link', { name: 'Downloads' })).toBeNull();
     fireEvent.click(more);
@@ -273,7 +277,7 @@ describe('rail at laptop heights (stage 2)', () => {
     expect(within(nav).getByRole('link', { name: 'My List' })).toBeTruthy();
     expect(within(nav).queryByRole('link', { name: 'Downloads' })).toBeNull();
     const more = within(nav).getByRole('button', { name: 'More' });
-    expect(more.textContent).toBe('');
+    expect(more.querySelector('.truncate')).toBeNull();
     fireEvent.click(more);
     expect(within(nav).getByRole('link', { name: 'Downloads' })).toBeTruthy();
     expect(within(nav).getByRole('link', { name: 'Watch stats' })).toBeTruthy();
@@ -338,9 +342,11 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     const { router } = renderRoutes(routes(), '/s/s2/movies');
     const bar = await screen.findByTestId('tab-bar');
     await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s2/live'));
-    // Movies of a source is under More.
+    // Movies of a source is under More: the tick in the mark tone, and the tab keeps its own name.
     const more = within(bar).getByRole('button', { name: 'More' });
-    expect(more.className).toContain('before:bg-accent');
+    expect(more.className).toContain('before:bg-accent-mark');
+    expect(more.querySelector('.truncate')?.textContent).toBe('More');
+    expect(more.getAttribute('aria-current')).toBe('true');
     fireEvent.click(more);
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     expect(more.getAttribute('aria-expanded')).toBe('true');
@@ -368,6 +374,62 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
   });
 });
 
+describe('activity marks for downloads and recordings', () => {
+  const running = () => {
+    rpcMock.handlers['downloads.list'] = () => [{ id: 1, status: 'downloading', createdAt: '2026-01-01', updatedAt: '2026-01-01', title: 'A' }];
+    rpcMock.handlers['recordings.list'] = () => [{ id: 'r1', status: 'recording', start: '2026-01-01T00:00:00Z', end: '2026-01-01T01:00:00Z' }];
+  };
+
+  it('marks the folded More row and, unfolded, the Downloads and Scheduled rows', async () => {
+    running();
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const more = await within(nav).findByRole('button', { name: 'More, 1 downloading, Recording now' });
+    expect(more.querySelector('[data-activity-mark="any"]')).not.toBeNull();
+    fireEvent.click(more);
+    await within(nav).findByRole('link', { name: 'Downloads, 1 downloading' });
+    expect(within(nav).getByRole('link', { name: 'Scheduled, Recording now' })).toBeTruthy();
+    // Unfolded, the rows carry the mark and More no longer repeats it.
+    expect(within(nav).getByRole('button', { name: 'More' }).querySelector('[data-activity-mark]')).toBeNull();
+  });
+
+  it('marks the phone More tab', async () => {
+    running();
+    media(...PHONE);
+    renderRoutes(routes(), '/dashboard');
+    const bar = await screen.findByTestId('tab-bar');
+    await within(bar).findByRole('button', { name: 'More, 1 downloading, Recording now' });
+  });
+
+  it('shows nothing while nothing runs', async () => {
+    rpcMock.handlers['downloads.list'] = () => [];
+    rpcMock.handlers['recordings.list'] = () => [];
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'downloads.list')).toBe(true));
+    expect(within(nav).getByRole('button', { name: 'More' }).querySelector('[data-activity-mark]')).toBeNull();
+  });
+});
+
+describe('phone tab bar on a page in no tab and no tile', () => {
+  it('marks no tab, and More keeps its own name', async () => {
+    media(...PHONE);
+    renderRoutes(routes(), '/s/s1/search');
+    const bar = await screen.findByTestId('tab-bar');
+    const more = await within(bar).findByRole('button', { name: 'More' });
+    expect(more.getAttribute('aria-current')).toBeNull();
+    expect(within(bar).queryAllByRole('link').filter((l) => l.getAttribute('aria-current'))).toEqual([]);
+  });
+
+  it('marks More on the settings pages, under its own name', async () => {
+    media(...PHONE);
+    renderRoutes([{ ...routes()[0]!, children: [...routes()[0]!.children, { path: 'settings/*', element: <Page>settings page</Page> }] }], '/settings/playback');
+    const bar = await screen.findByTestId('tab-bar');
+    const more = await within(bar).findByRole('button', { name: 'More' });
+    expect(more.getAttribute('aria-current')).toBe('true');
+  });
+});
+
 describe('phone tab bar with no sources', () => {
   it('Live TV leads to the Sources page and stays the current tab there', async () => {
     media(...PHONE);
@@ -379,9 +441,9 @@ describe('phone tab bar with no sources', () => {
     fireEvent.click(live);
     await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
     expect(live.getAttribute('aria-current')).toBe('page');
-    expect(within(bar).getByRole('button', { name: 'More' }).getAttribute('aria-current')).toBeNull();
+    expect(within(bar).getByRole('button', { name: /More$/ }).getAttribute('aria-current')).toBeNull();
     // Nor does the sheet's Manage sources row say it is current, as it is not drawn so.
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     const manage = within(sheet).getByRole('link', { name: 'Manage sources' });
     expect(manage.getAttribute('aria-current')).toBeNull();
@@ -395,7 +457,7 @@ describe('phone More sheet with one source', () => {
     handlers([makeSource('s1', { name: 'Night Portal', radioCount: 4 })]);
     const { router } = renderRoutes(routes(), '/s/s1/series');
     const bar = await screen.findByTestId('tab-bar');
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     const watch = within(sheet).getByRole('region', { name: 'Watch' });
     await waitFor(() => expect(within(watch).getAllByRole('link').map((l) => l.textContent)).toEqual(['Radio', 'Movies', 'Series', 'Sports', 'Multi-view']));
@@ -415,7 +477,7 @@ describe('phone More sheet with one source', () => {
     handlers([makeSource('s1', { name: 'Night Portal' })]);
     renderRoutes(routes(), '/s/s1/movie/9');
     const bar = await screen.findByTestId('tab-bar');
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     const watch = within(sheet).getByRole('region', { name: 'Watch' });
     const movies = await within(watch).findByRole('link', { name: 'Movies' });
@@ -454,7 +516,7 @@ describe('the Sources page a Watch row led to, once a source exists', () => {
     const bar = await screen.findByTestId('tab-bar');
     await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live'));
     expect(currentLinks(bar)).toEqual([]);
-    const more = within(bar).getByRole('button', { name: 'More' });
+    const more = within(bar).getByRole('button', { name: /More$/ });
     expect(more.getAttribute('aria-current')).toBe('true');
     fireEvent.click(more);
     const sheet = await screen.findByRole('dialog', { name: 'More' });
@@ -465,7 +527,7 @@ describe('the Sources page a Watch row led to, once a source exists', () => {
     media(...PHONE);
     renderRoutes(routes(), '/sources?for=movies');
     const bar = await screen.findByTestId('tab-bar');
-    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(bar).getByRole('button', { name: /More$/ }));
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     await within(sheet).findByRole('list', { name: 'Backup' });
     expect(currentLinks(sheet)).toEqual([within(sheet).getByRole('link', { name: 'Manage sources' })]);
@@ -491,7 +553,8 @@ describe('palette and shortcut reference polish', () => {
     expect(within(palette).getByText('Switch to light theme')).toBeTruthy();
     expect(within(palette).queryByText('Settings: Recording')).toBeNull();
     fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'recording' } });
-    expect(await within(palette).findByText('Settings: Recording')).toBeTruthy();
+    // The section, and as their detail the single settings it holds ("Recordings folder").
+    expect((await within(palette).findAllByText('Settings: Recording')).length).toBeGreaterThan(0);
     expect(within(palette).queryByText('Recent channels')).toBeNull();
   });
 

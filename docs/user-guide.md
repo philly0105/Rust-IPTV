@@ -16,7 +16,7 @@ This guide covers the desktop app for Windows and macOS and the same interface i
 - [Multi-view](#multi-view)
 - [Recording and reminders](#recording-and-reminders)
 - [Downloads](#downloads)
-- [My List, custom lists and watch stats](#my-list-custom-lists-and-watch-stats)
+- [My List, favorites, channel lists and watch stats](#my-list-favorites-channel-lists-and-watch-stats)
 - [Parental controls](#parental-controls)
 - [Remote control](#remote-control)
 - [Phones and touch screens](#phones-and-touch-screens)
@@ -68,18 +68,22 @@ Removing a source hides it and shows an Undo toast. The source is deleted 8 seco
 - A channel played from Favorites zaps through your favorites in their order.
 - In fullscreen live TV, the control bar has Previous channel and Next channel buttons and a channel list button beside play. The channel list also opens with C, or by resting the pointer on the left edge (right in Arabic). On a phone, Previous and Next channel move into Playback options when the bar has no room for them, and so does picture-in-picture while a channel plays in portrait.
 - When a live channel stops working, the player switches to the same channel on another of your sources and says so, with Undo. The player's settings menu lists "Alternate sources" for the channel and can pin a preferred source. Settings > Playback > "Switch live channels to another source".
-- The groups sit in a column beside the channel list when the window has room for it. On a narrower window (a tablet, or a window under about 1240 px beside the full side rail) they open as a panel from the button at the start of the channel list's toolbar (Ctrl+B), so the channel list and the player keep their width.
+- The groups sit in a column beside the channel list when the window has room for it and the picture keeps about 580 px. On a narrower window (a tablet, a laptop, or a window under about 1440 px beside the full side rail) they open as a panel from the button at the start of the channel list's toolbar (Ctrl+B), so the channel list and the player keep their width. A tablet held upright, or any window taller than wide, shows the player over the channel list at full width, as on a phone.
+- Left and Right arrows move between the group column and the channel list (in Arabic the other way round), so a remote with arrows and OK reaches both. The pinned views, All channels and the groups are a single Tab stop.
+- A search on All channels shows each channel's group before what is on, so feeds with the same name tell apart. A search inside a group that finds nothing offers "Search all channels", which runs the same search on All channels. A groups filter that matches no group offers to search the channels for the same text. Typing a channel number in the search shows that channel above the results.
+- A group's menu (right-click, long press, or its ⋮, shown when the pointer is on the row, while it has keyboard focus, and always on touch) has "Hide group", with Undo, and "Manage visible groups…". Manage visible groups has the region picker too; while a filter or a region narrows it, its buttons read "Show these" and "Hide these".
+- Provider heading rows ("#### PRIME ####") show as quiet headings in the channel list, not as channels; the arrows pass over them.
 - A country tag at the start of a channel's name ("US| ESPN HD") is shown after the name, small and quiet, so the list leads with what tells channels apart. Only short capital codes move: "NBA: Lakers vs Celtics" and "Sky Sports | Main Event" read as written, and group names keep their tag in front. "Hide country tags in channel names" in Settings removes it from channel names altogether.
-- When most of a source's groups start with a country tag ("US| Sports", "UK: News"), a region picker beside "Groups" shows one country's groups at a time, each tag with its number of groups. The filter field searches inside the picked region, the group you have open stays listed, and the app remembers the region for each source.
+- When most of a source's groups start with a country tag ("US| Sports", "UK: News"), a region picker beside "Groups" shows one country's groups at a time, each tag with its number of groups and, for a country code, the country's name. The filter field searches inside the picked region, the group you have open stays listed, and the app remembers the region for each source. The region narrows the group list only: All channels and its search still cover every region, and a line under the search says so.
 - M3U channels with ClearKey DRM (`#KODIPROP` `inputstream.adaptive.license_type=clearkey` and `license_key`, as Kodi and IPTVnator read them) play DASH streams in the built-in player, which takes the keys. The MPV and VLC players cannot, so those channels always use the built-in player.
 
 ### Renaming and hiding channels
 
-Right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels" under the group list shows them and brings them back, and its "Reset all edits" gives every channel of the source its provider's name back and unhides everything. The provider's catalog is never changed, so edits survive refreshes.
+Right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels", with Favorites and Recently watched at the top of the group list, shows them and brings them back, and its "Reset all edits" gives every channel of the source its provider's name back and unhides everything. The provider's catalog is never changed, so edits survive refreshes.
 
 ### Filtering by quality
 
-The Channel quality button (an HD icon) at the end of the channel list's toolbar, after the search field, hides channels below a picture quality. Pick "Any quality" (the default), "HD (720p) and up", "Full HD (1080p) and up" or "4K only". The button is filled while a minimum is set.
+The Channel quality button (an HD icon) at the end of the channel list's toolbar, after the search field, hides channels below a picture quality. Pick "Any quality" (the default), "HD (720p) and up", "Full HD (1080p) and up" or "4K only". While a minimum is set the button shows it ("720p+", "1080p+" or "4K"), and a line over the channels says so ("Only 1080p+ channels") with "Show all qualities" beside it, which turns the filter off in one press.
 
 The quality comes from the channel name your provider gives: SD, 480p or 576p count as SD; HD or 720p as HD; FHD, Full HD or 1080p as Full HD; UHD, Ultra HD, 4K, 8K or 2160p as 4K ("8K EXCLUSIVE", which some providers write on every event channel, counts as no tag). A tag in front of the name counts too, so "4K-DE - Das Erste" is 4K and "UK HD | Sky" is HD. When a name has several, the highest counts. A name you gave a channel with Rename does not change its quality. Channels whose name has no quality tag still show. To hide them too, turn on "Hide channels with no quality tag" in the same panel; it works only while a minimum is set. Radio stations have no picture and are never filtered, so the Radio page has no quality button.
 
@@ -88,7 +92,7 @@ The filter applies wherever live channels appear: the channel list and the group
 ## TV guide
 
 - The time window is part of the URL, so Back and Forward step through it and a link opens the same window. T, or the window label, jumps to a date and time.
-- The search box in the header (/ or Ctrl+F; on a phone, the search icon at the top) searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. Global search (Ctrl+F) and the command palette find programmes too, and open the guide at the one you pick.
+- The search box in the header (/ or Ctrl+F; on a phone, the search icon at the top) searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. The Search page (Ctrl+F on a page without a search box of its own) and the command palette find programmes too, and open the guide at the one you pick.
 - "Record series" on a search hit records every airing of that title on that channel (XMLTV programmes only: the provider's own guide cannot feed a rule). Library > Scheduled lists the rules, which can be paused or removed.
 - The group menu also shows your favorites or a custom list, the zoom buttons (or Ctrl+scroll over the grid) change the time scale, and a row's right-click menu has "Match guide channel" and the favorite toggle.
 - When an Xtream channel has nothing in the XMLTV guide, the app shows the provider's own now and next, marked "From the provider's guide". Turn it off in Settings > Guide.
@@ -180,15 +184,30 @@ See [recording.md](architecture/recording.md).
 - Downloads go to `downloads/` in the app data folder unless you choose another downloads folder. In the browser they always go to `<data dir>/downloads` on the server.
 - My videos plays what you downloaded, also offline. The Downloads page and My videos have their own keys; see [Keyboard shortcuts](#keyboard-shortcuts).
 
-## My List, custom lists and watch stats
+## My List, favorites, channel lists and watch stats
+
+Four places in the side rail's Library keep things for you. Which one?
+
+- My List: movies and series to watch later, in the order you choose.
+- Favorites: channels, movies and series you come back to (the heart).
+- Channel lists: your own groups of live channels, such as Sports or Kids.
+- Recently watched: everything you played, newest first, kept for you.
 
 ### My List
 
 My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. It opens as posters; the View switch turns it into a ranked list, and the app remembers the choice. Reorder it by dragging or with the arrow buttons in the list, or with Alt+Up/Down in either view, mark movies watched with W, and remove the focused title with Delete.
 
-### Custom lists
+### Favorites
 
-Custom lists hold live channels from any of your sources. Press L on a channel or choose "Add to list…" in its right-click menu. Lists are in the side rail (`/lists`) and at the top of the live group sidebar, and a channel played from a list zaps through the list in its order (Page Up / Page Down). Manage lists renames, reorders (also with Alt+Up/Down) and deletes them with Undo, and a list can show as a rail on the dashboard. A channel the provider drops stays in the list, marked unavailable. Channels the [quality filter](#filtering-by-quality) hides leave the list until you change the filter; a list that shows nothing while the filter is on says the filter may be hiding channels and offers "Show all qualities".
+Favorites (`/favorites`) hold the channels, movies and series you mark with the heart: on a channel's row or menu, on a title's page, or with S on a channel in Live TV. They are grouped into live and radio, movies and series; reorder each group by dragging, with the arrows on a row, or with Alt+Up/Down, and remove one with Delete or its menu (Undo brings it back). A channel's menu here is the one Live TV has, so you can add a favourite to a channel list or to multi-view from here. A source's own favorites are at `/s/<source>/favorites`.
+
+### Recently watched
+
+Recently watched (`/recent`) lists every channel, movie and episode you played, newest first, grouped by day. A movie or series you stopped part way shows where it stopped and how much is left, and pressing it resumes; its menu opens the title's page or clears the progress. Remove one entry with Delete or its menu, or empty the whole history with Clear history (it asks first, and Undo brings it back).
+
+### Channel lists
+
+Channel lists hold live channels from any of your sources. Press L on a channel or choose "Add to list…" in its right-click menu. Lists are in the side rail (`/lists`) and at the top of the live group sidebar, and a channel played from a list zaps through the list in its order (Page Up / Page Down). Manage lists renames, reorders (also with Alt+Up/Down) and deletes them with Undo, and a list can show as a rail on the dashboard. A channel the provider drops stays in the list, marked unavailable. Channels the [quality filter](#filtering-by-quality) hides leave the list until you change the filter; a list that shows nothing while the filter is on says the filter may be hiding channels and offers "Show all qualities".
 
 ### Watch stats
 
@@ -206,7 +225,7 @@ To use a phone, turn on "Allow phones on this network" under Settings > Remote (
 
 ## Phones and touch screens
 
-Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists Movies, Series, Sports and Multi-view first, then the Library pages, your sources and Settings. The theme switch is then in Settings > Appearance and the command palette. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
+Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists Movies, Series, Sports and Multi-view first, then the Library pages, your sources and Settings. The theme switch is then in Settings > Appearance. The Search tab also finds settings by name ("subtitles", "font size", "pin") below its results. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
 
 ## Appearance, language and startup
 
@@ -225,7 +244,7 @@ Press `?` in the app for the full list. The main ones:
 | Keys | Action |
 | --- | --- |
 | Ctrl+K | Command palette |
-| Ctrl+F | Global search |
+| Ctrl+F or / | Search this page (Live TV's channels, a category, the guide, My List...), or everything on a page without its own search |
 | Ctrl+R | Recently watched (desktop app; in a browser it reloads the page) |
 | Ctrl+Shift+L | Switch light / dark theme |
 | Ctrl+Alt+L | Lock parental controls now (while an unlock is running) |
@@ -233,7 +252,6 @@ Press `?` in the app for the full list. The main ones:
 | F11 | Fullscreen: the player while something plays, otherwise the whole app |
 | ? | Shortcut help |
 | Ctrl+B | Toggle the live TV group sidebar |
-| / | Focus the live TV channel search (in the TV guide: the programme search) |
 | T | Jump to a date and time (TV guide) |
 | 0-9 | Type a channel number to zap; Enter zaps at once instead of waiting |
 | Page Up / Page Down | Previous / next channel (live TV; from a custom list, the list's order) |
@@ -292,7 +310,7 @@ Space, the arrows and Page Up / Page Down control the player while it is expande
 
 ## Movie and series details from TMDB
 
-Movie and series pages can show plots, cast, trailers, ratings, artwork, similar titles, and actor pages from TMDB. This is off by default. Turn it on in Settings > Metadata and enter your own API key there, or put `TMDB_API_KEY=...` in a `.env` file in the app data folder or the working directory (see `.env.example`). A key saved in Settings wins over the `.env` file. Results are cached in SQLite.
+Movie and series pages can show plots, cast, trailers, ratings, artwork, similar titles, and actor pages from TMDB. This is off by default. Turn it on in Settings > Posters and details and enter your own API key there, or put `TMDB_API_KEY=...` in a `.env` file in the app data folder or the working directory (see `.env.example`). A key saved in Settings wins over the `.env` file. Results are cached in SQLite.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 
@@ -327,7 +345,7 @@ The server keeps its database, logs, image cache and downloads (recordings inclu
 
 ### mpv not found
 
-Embedded playback needs mpv. Without it the app says so once ("MPV wasn't found") and plays streams in the built-in player for the rest of the session. On Windows, put `mpv.exe` in `vendor/mpv/` or install mpv with WinGet, scoop or choco and restart the app, or set its path in Settings > External players, which makes the next stream try mpv again. On macOS, run `brew install mpv` and restart the app; embedded mpv there loads Homebrew's `libmpv`, so the path setting does not change it. When mpv is found but fails to start, the notice offers "Try MPV again".
+Embedded playback needs mpv. Without it the app says so once ("mpv wasn't found") and plays streams in the built-in player for the rest of the session. On Windows, put `mpv.exe` in `vendor/mpv/` or install mpv with WinGet, scoop or choco and restart the app, or set its path in Settings > External players, which makes the next stream try mpv again. On macOS, run `brew install mpv` and restart the app; embedded mpv there loads Homebrew's `libmpv`, so the path setting does not change it. When mpv is found but fails to start, the notice offers "Try mpv again".
 
 ### The window opens off-screen
 

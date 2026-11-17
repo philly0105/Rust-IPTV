@@ -41,11 +41,12 @@ export function PreviewPanel({ state }: { state: PreviewState }) {
         ) : (
           <div className="flex flex-col gap-3">
             <p className="flex items-baseline gap-2">
-              <span className="font-display text-2xl font-semibold tabular-nums text-fg" data-testid="preview-channel-count">
+              <span className="font-display text-title tabular-nums text-fg" data-testid="preview-channel-count">
                 {formatCount(state.preview.channelCount, i18n.language)}
               </span>
               <span className="text-sm text-fg-muted">
-                {t('previewChannels', { count: state.preview.channelCount })}
+                {/* The noun alone: the number is the large figure before it. */}
+                {t('statChannels', { count: state.preview.channelCount })}
                 {state.truncated ? ` ${t('previewTruncated')}` : ''}
               </span>
             </p>

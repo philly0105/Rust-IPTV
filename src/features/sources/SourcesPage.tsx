@@ -8,24 +8,24 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw, type CallOptions } from '@/api/transport';
-import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
+import { DEFAULT_SETTINGS, type RpcErrorCode, type Source, type SourceKind } from '@/api/types';
 import { HiddenChannelsDialog } from '@/features/channeledit';
 import { useStable } from '@/features/live/guide/useStable';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
 import { Badge, Button, Dialog, EmptyState, ErrorState, IconButton, Menu, Page, Select, Skeleton, TEXT_LINK, Tooltip, useToast, errorDescription, type MenuItem } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
-import { sourceHomePath } from '@/shell/railLinks';
+import { sourceBasePath, sourceHomePath } from '@/shell/railLinks';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
 import { RemoveAllDialog } from './components/RemoveAllDialog';
-import { SourceCard, statColumnsOf, type StatKey } from './components/SourceCard';
+import { SourceCard, sourceHost, statColumnsOf, type StatKey } from './components/SourceCard';
 import { ViewPopover } from './components/ViewPopover';
 import { newlyEnabledEpgUrls, refreshGuides, useGuideProgressFeed } from './lib/epgRefresh';
-import { nextStepKey, summaryKey } from './lib/errors';
+import { claimImportErrors, importErrorCode, nextStepKey, summaryKey } from './lib/errors';
 import {
   DEFAULT_VIEW,
   KIND_FILTERS,
@@ -45,6 +45,7 @@ import { isRemovalPending, scheduleRemoval, usePendingRemovals } from './lib/pen
 import { beginImport, cancelImport, isRunningPhase, useImportProgressFeed, useImportProgressStore, wasCancelled } from './lib/progress';
 import { formatCount } from './lib/format';
 import { redactText } from './lib/redact';
+import { SOURCE_ERROR_KEYS, classifySourceError } from './lib/sourceError';
 import { dropSourcesFromLists } from './lib/userLists';
 import { applyOrder, moveItem } from './lib/reorder';
 import { useNextFrame } from './lib/useNextFrame';
@@ -56,6 +57,12 @@ const COMPACT_MAX = 2;
 
 /** How one refresh ended: `failed` includes an import that finished with `lastError`. */
 type RefreshOutcome = 'ok' | 'failed' | 'cancelled';
+
+/**
+ * What a failed refresh reports: the error's class, and the core's text when there is one. `stored`:
+ * the code the source itself stored with that text (what its card classifies by).
+ */
+type ErrLike = { code: RpcErrorCode; message?: string; stored?: RpcErrorCode | null };
 
 function SourcesSkeleton() {
   return (
@@ -175,14 +182,35 @@ export function SourcesPage() {
   // `&from=<path>`: the page that sent the user here to add a source. No page in the app sends it
   // now (Home's first-run welcome opens the dialog in place and does the same itself), but a link
   // can. After a successful add they go back there, to the content they came for. The very first
-  // source opens on its own content instead (SS-6): its channels are one click from playing.
+  // source opens on its own content instead (SS-6), from wherever the add started: its channels
+  // are one click from playing. Sent by the rail's Movies or Series row (`?for=`), it opens on
+  // that section when the source has it.
   const returnTo = safeReturnPath(params.get('from'));
+  const forSection = params.get('for');
   const addedRef = useRef<{ source: Source; first: boolean } | null>(null);
+  const addOpen = addInitial !== undefined;
+  const addWasOpen = useRef(addOpen);
+  useEffect(() => {
+    const was = addWasOpen.current;
+    addWasOpen.current = addOpen;
+    if (!was || addOpen) return;
+    // Opened by a link from another page or the palette, the dialog has no opener here to give
+    // focus back to, so focus stays in the closing panel and then drops to <body>: the page's Add
+    // (or the first kind tile) takes it instead. This runs after the Dialog's own restore.
+    const active = document.activeElement;
+    if (active && active !== document.body && active.id !== 'main' && !active.closest('[role="dialog"]')) return;
+    document.querySelector<HTMLElement>('[data-testid="sources-add"], [data-testid="sources-onboarding"] button')?.focus({ preventScroll: true });
+  }, [addOpen]);
   const closeAdd = () => {
     const added = addedRef.current;
-    if (added && returnTo && added.first) {
+    if (added && added.first) {
       addedRef.current = null;
-      navigate(sourceHomePath(added.source), { replace: true });
+      const s = added.source;
+      const section =
+        (forSection === 'movies' && s.movieCount > 0) || (forSection === 'series' && s.seriesCount > 0)
+          ? `${sourceBasePath(s.id)}/${forSection}`
+          : sourceHomePath(s);
+      navigate(section, { replace: true });
       return;
     }
     if (added && returnTo) {
@@ -207,8 +235,46 @@ export function SourcesPage() {
 
   const setCache = (list: Source[]) => queryClient.setQueryData(rpcKey('sources.list'), list);
 
-  const refreshOne = async (s: Source): Promise<RefreshOutcome> => {
+  /**
+   * The toast for one failed refresh: the source card's own sentence for the error (what failed and
+   * what to check, naming the host), and Try again. The card under it keeps Check settings.
+   */
+  const refreshFailed = (s: Source, err: ErrLike) => {
+    // Classified as the card under it classifies the same failure, so both say the same sentence.
+    const info = classifySourceError(err.message ?? '', err.stored === undefined ? err.code : (err.stored ?? undefined));
+    let description: string;
+    if (info.kind !== 'unknown') {
+      description = t(info.kind === 'auth' ? `sourceErrorAuth_${s.kind}` : SOURCE_ERROR_KEYS[info.kind], {
+        host: info.host ?? sourceHost(s) ?? t('sourceErrorHostFallback'),
+      });
+    } else {
+      // Unknown failures keep the core's text: the generic summary would hide the only detail.
+      const what = err.code === 'internal' ? redactText(err.message ?? '') : t(summaryKey(err));
+      description = `${what} ${t(nextStepKey(err, s.kind))}`;
+    }
+    toast({
+      variant: 'error',
+      title: t('refreshFailedTitle', { name: s.name }),
+      description,
+      action: { label: t('tryAgain'), onClick: () => void refreshOne(s) },
+    });
+  };
+
+  // The page reports its own refreshes' failures (one toast per Refresh, one summary for Refresh
+  // all), so the shell's "didn't import" toast does not repeat them. A run stays claimed a moment
+  // after its reply, for an import event that arrives after it.
+  const ownRuns = useRef(new Map<string, number>());
+  useEffect(() => claimImportErrors((id) => ownRuns.current.has(id)), []);
+  const releaseRun = (id: string) => {
+    const left = (ownRuns.current.get(id) ?? 1) - 1;
+    if (left > 0) ownRuns.current.set(id, left);
+    else ownRuns.current.delete(id);
+  };
+
+  /** `quiet`: Refresh all reports the run as a whole, so a failure comes back instead of a toast. */
+  const refreshOne = async (s: Source, quiet = false): Promise<{ outcome: RefreshOutcome; err?: ErrLike }> => {
     setRefreshing((prev) => new Set(prev).add(s.id));
+    ownRuns.current.set(s.id, (ownRuns.current.get(s.id) ?? 0) + 1);
     beginImport(s.id);
     try {
       const updated = await rpc('sources.refresh', { id: s.id });
@@ -218,29 +284,22 @@ export function SourcesPage() {
       // A re-import can detect guide links that were not there before (new url-tvg, changed Xtream login).
       const guides = newlyEnabledEpgUrls(s.epg, updated.epg);
       if (guides.length > 0) void refreshGuides(guides);
-      return updated.lastError ? 'failed' : 'ok';
+      if (!updated.lastError) return { outcome: 'ok' };
+      const err = { code: importErrorCode(updated.lastError, updated.lastErrorCode), message: updated.lastError, stored: updated.lastErrorCode ?? null };
+      if (!quiet) refreshFailed(s, err);
+      return { outcome: 'failed', err };
     } catch (e) {
       const err = RpcError.from(e);
       // A cancelled refresh is what the user asked for: the card shows it, no error toast.
       if (wasCancelled(s.id, err)) {
         void invalidate('sources.');
-        return 'cancelled';
+        return { outcome: 'cancelled' };
       }
-      // Unknown failures keep the core's text: the generic summary would hide the only detail.
-      const what = err.code === 'internal' ? redactText(err.message) : t(summaryKey(err));
-      toast({
-        variant: 'error',
-        title: t('refreshFailedTitle', { name: s.name }),
-        description: `${what} ${t(nextStepKey(err, s.kind))}`,
-        // Bad credentials or a wrong address will fail the same way again: send the user to the settings.
-        action:
-          err.code === 'auth' || err.code === 'not_found' || err.code === 'invalid'
-            ? { label: t('checkSettings'), onClick: () => openEdit(s) }
-            : { label: t('tryAgain'), onClick: () => void refreshOne(s) },
-      });
+      if (!quiet) refreshFailed(s, err);
       void invalidate('sources.');
-      return 'failed';
+      return { outcome: 'failed', err };
     } finally {
+      window.setTimeout(() => releaseRun(s.id), 2000);
       setRefreshing((prev) => {
         const next = new Set(prev);
         next.delete(s.id);
@@ -251,12 +310,14 @@ export function SourcesPage() {
 
   // Pasted and uploaded playlists are included: the core re-imports their stored text (no network),
   // which is how they pick up new import rules such as series grouping (FW-M3U-SERIES-MIGRATION).
+  // The run ends with one toast: the failed source's own (naming it, with its way to fix it) when
+  // one failed, else a count.
   const refreshAll = async () => {
     const targets = sources;
     if (targets.length === 0 || stopAllRef.current) return;
     const run = { stopped: false, currentId: null as string | null };
     stopAllRef.current = run;
-    let failed = 0;
+    const failures: { source: Source; err: ErrLike }[] = [];
     let refreshed = 0;
     try {
       // One at a time: imports hold a write transaction each, and portals rate-limit.
@@ -268,9 +329,9 @@ export function SourcesPage() {
         if (isRunningPhase(useImportProgressStore.getState().bySource[s.id]?.phase)) continue;
         setRefreshAllStep({ current: i + 1, total: targets.length });
         run.currentId = s.id;
-        const outcome = await refreshOne(s);
+        const { outcome, err } = await refreshOne(s, true);
         run.currentId = null;
-        if (outcome === 'failed') failed += 1;
+        if (outcome === 'failed') failures.push({ source: s, err: err ?? { code: 'internal' } });
         else if (outcome === 'ok') refreshed += 1;
       }
     } finally {
@@ -278,7 +339,9 @@ export function SourcesPage() {
       setRefreshAllStep(null);
       setStoppingAll(false);
     }
+    const failed = failures.length;
     if (run.stopped) toast({ variant: 'info', title: t('refreshAllStopped', { done: refreshed, count: targets.length }) });
+    else if (failed === 1) refreshFailed(failures[0]!.source, failures[0]!.err);
     else if (failed > 0) toast({ variant: 'error', title: t('refreshAllPartial', { failed, count: failed + refreshed }) });
     // Every one cancelled or removed on the way: the cards already say so.
     else if (refreshed > 0) toast({ variant: 'success', title: t('refreshAllDone', { count: refreshed }) });
@@ -425,7 +488,6 @@ export function SourcesPage() {
         void invalidate('sources.');
       },
     });
-    setAnnouncement(t('removedAnnouncement', { name: target.name }));
     nextFrame(() => {
       const cards = listRef.current?.querySelectorAll<HTMLElement>('[data-source-id]') ?? [];
       const card = [...cards].find((el) => el.dataset.sourceId === neighbour);
@@ -536,8 +598,8 @@ export function SourcesPage() {
   useEffect(() => {
     setHeader({
       title: t('title'),
-      // The count as a bare number beside the title, as PageHeader shows one; none while empty.
-      subtitle: hasSources ? formatCount(sources.length, i18n.language) : undefined,
+      // The count with its noun, as every header's scope reads ("3 sources"); none while empty.
+      subtitle: hasSources ? t('sourceCount', { count: sources.length }) : undefined,
       // On a phone the page's actions are header buttons, so the cards start right under the header
       // (no full-width Add bar above them). Wider windows keep them in the toolbar.
       actions:
@@ -634,7 +696,7 @@ export function SourcesPage() {
   let body: ReactNode;
   if (query.isPending) body = <SourcesSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  else if (sources.length === 0) body = <Onboarding onPick={(kind) => openAdd(kind)} />;
+  else if (sources.length === 0) body = <Onboarding section={forSection} onPick={(kind) => openAdd(kind)} />;
   else
     body = (
       <div className="flex flex-col gap-4">
@@ -734,7 +796,7 @@ export function SourcesPage() {
       {body}
 
       <AddSourceDialog
-        open={addInitial !== undefined}
+        open={addOpen}
         initial={addInitial}
         onClose={closeAdd}
         onAdded={(source, first) => {

@@ -1,5 +1,6 @@
 {
-  "title": "Lijsten",
+  "title": "Zenderlijsten",
+  "lead": "Je eigen groepen kanalen",
   "newList": "Nieuwe lijst",
   "newListName": "Naam van nieuwe lijst",
   "createList": "Lijst maken",
@@ -17,6 +18,7 @@
   "localDataHint": "Lijsten worden door de app bewaard. Probeer het opnieuw, of start de app opnieuw als het blijft mislukken.",
   "emptyTitle": "Nog geen lijsten",
   "emptyHint": "Groepeer kanalen uit elke bron, zoals Sport of Kinderen.",
+  "emptyNoSources": "Voeg eerst een bron toe. Groepeer daarna de kanalen in lijsten, zoals Sport of Kinderen.",
   "sidebarEmpty": "Groepeer kanalen uit elke bron.",
   "channelCount_one": "{{formatted}} kanaal",
   "channelCount_other": "{{formatted}} kanalen",

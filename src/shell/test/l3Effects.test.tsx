@@ -102,6 +102,24 @@ describe('import toast saving steps', () => {
   });
 });
 
+describe('import toast Cancel (states-feedback-13)', () => {
+  it('cancels the import from the toast, and is not offered again while the request is out', async () => {
+    mountEvents();
+    let answer: (running: boolean) => void = () => undefined;
+    rpcMock.handlers['sources.cancelImport'] = () => new Promise<boolean>((r) => (answer = r));
+    progress({ sourceId: 's1', phase: 'fetching', done: 10, total: 100 });
+    const action = importToast()?.action;
+    expect(action?.label).toBe('Cancel import');
+    act(() => action?.onClick());
+    expect(rpcMock.calls.filter((c) => c.cmd === 'sources.cancelImport').map((c) => c.args)).toEqual([{ id: 's1' }]);
+    progress({ sourceId: 's1', phase: 'fetching', done: 20, total: 100 });
+    expect(importToast()?.action).toBeUndefined();
+    await act(async () => answer(true));
+    progress({ sourceId: 's1', phase: 'cancelled', done: 20 });
+    expect(importToast()?.title).toBe('Import of Night Portal cancelled');
+  });
+});
+
 describe('sticky import-error toasts', () => {
   it('leave once their source is removed, and only theirs', () => {
     mountEvents();

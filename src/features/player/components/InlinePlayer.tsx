@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { proxiedUrl, isDesktop, rpc } from '@/api/transport';
 import { itemKey, type PlayerSource } from '@/api/types';
 import { redactText } from '@/features/sources/lib/redact';
+import { plainChannelName } from '@/lib/channelName';
 
 import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { useToast } from '@/ui/Toast';
@@ -24,7 +25,7 @@ import {
 } from '../engines';
 import { afterPaint } from '../enginePreload';
 import { NO_VIDEO_MESSAGE } from '../errors';
-import { useAlternatesStore } from '../failover';
+import { failoverOriginTitle, useAlternatesStore } from '../failover';
 import { bindInlineExtras } from '../inlineExtras';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
 import { noteEngineError, tryAnotherSource, useReconnectStore } from '../reconnect';
@@ -38,6 +39,7 @@ import {
   reportProgress,
   reportStatus,
   reportVolume,
+  resumeFits,
   retryResolve,
   setController,
   usePlayerStore,
@@ -48,6 +50,7 @@ import { usePlayerSettings } from '../useSettings';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { ErrorActions, rawTsHintKey } from './ErrorActions';
 import { glassButton } from './glassButton';
+import { PlayerChannelName } from './lazyParts';
 
 /** Stable identity for "the same media": a source swap with the same url keeps the engine. */
 function mediaKey(s: PlayerSource | undefined): string {
@@ -289,7 +292,7 @@ export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className
       const s = usePlayerStore.getState().source;
       if (engineRef.current?.resumes) return;
       if (s && !s.isLive && s.resumeSeconds && (s.kind === 'direct' || s.kind === 'file')) {
-        if (el.duration && s.resumeSeconds < (s.durationSeconds ?? el.duration) - 2) {
+        if (el.duration && resumeFits(s.resumeSeconds, s.durationSeconds ?? el.duration)) {
           const landed = engineRef.current?.seekTo?.(s.resumeSeconds);
           if (landed === undefined || landed === false) el.currentTime = s.resumeSeconds;
         }
@@ -626,6 +629,22 @@ function ErrorOverlay({
   // Raw TS only fails for lack of MSE when mpegts.js could not run at all.
   const isRawTs = !!source && looksLikeMpegTs(source) && !mseSupported();
   const hint = isRawTs ? t(rawTsHintKey(source, settings, view.external, view.others)) : view.hint;
+  // Live failover moved here from the channel the user picked, and this copy failed too: name both,
+  // without blaming either source (the cause may be this browser). Read as the error shows; the
+  // switch was made before this copy failed.
+  const [switchedFrom] = useState(() => failoverOriginTitle(source));
+  const switchedText =
+    switchedFrom && source && t('liveFailoverBothFailed', { channel: switchedFrom, backup: plainChannelName(source.title, false) });
+  const switchedLine = switchedText && (
+    <p
+      dir="auto"
+      data-testid="error-failover"
+      className={cn('max-w-full text-on-glass-muted', tight ? 'truncate text-caption' : 'text-body-sm text-pretty')}
+      title={tight ? switchedText : undefined}
+    >
+      {switchedText}
+    </p>
+  );
 
   if (compact) {
     return (
@@ -701,12 +720,17 @@ function ErrorOverlay({
       <div className={cn('m-auto flex w-full max-w-md flex-col items-center text-center', tight ? 'gap-2' : 'gap-4')}>
         {tight ? (
           <>
-            {/* A short player hides its title bar over an error: name what failed here, which
-                matters most after an automatic switch to another copy. */}
-            {source?.title && (
-              <p dir="auto" data-testid="error-item" className="-mb-1 max-w-full truncate text-caption text-on-glass-muted" title={source.title}>
-                {source.title}
-              </p>
+            {switchedLine}
+            {/* A short player hides its title bar over an error: name what failed here (the line
+                above already names it after an automatic switch to another copy). */}
+            {source?.title && !switchedLine && (
+              source.isLive || source.catchupProgramStart ? (
+                <PlayerChannelName testId="error-item" title={source.title} glass className="-mb-1 max-w-full text-caption text-on-glass-muted" />
+              ) : (
+                <p dir="auto" data-testid="error-item" className="-mb-1 max-w-full truncate text-caption text-on-glass-muted" title={source.title}>
+                  {source.title}
+                </p>
+              )
             )}
             <h2 className="flex max-w-full items-center gap-2 text-body-sm font-medium" title={message ? `${view.title}: ${message}` : undefined}>
               <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
@@ -718,6 +742,7 @@ function ErrorOverlay({
             <span aria-hidden className="flex size-14 items-center justify-center rounded-full bg-white/8 ring-1 ring-white/15">
               <AlertTriangle className="size-6 text-warning" />
             </span>
+            {switchedLine}
             <h2 className="text-title-sm text-balance">{view.title}</h2>
           </>
         )}

@@ -139,6 +139,15 @@ describe('fullscreen channel panel keyboard (L3-player-6)', () => {
     expect(pagesAsked()).not.toContain(1);
   });
 
+  it('is opaque glass, so the title and the bar under it never print through (v-player-01)', async () => {
+    play(250);
+    mount();
+    await waitFor(() => expect(focusedName()).toContain('Channel 250'));
+    const panel = screen.getByRole('complementary');
+    expect(panel.className.split(' ')).toEqual(expect.arrayContaining(['player-glass-strong', 'player-sheet']));
+    expect(panel.className).not.toContain('glass-blur');
+  });
+
   it('arrows, Page Up/Down, Home and End walk the rows; Up from the top goes to the search field and Down comes back', async () => {
     play(5);
     mount();
@@ -319,8 +328,8 @@ describe('fullscreen channel panel names (round 5)', () => {
     expect(tag.textContent).toBe('US');
     expect(tag.previousElementSibling!.textContent).toMatch(/^Channel \d+$/);
     expect(tag.className).toContain('text-on-glass-muted');
-    // The option is still named by the provider's name.
-    expect(tag.closest('[role=option]')!.textContent).toContain('US| Channel');
+    // The option is named as plain text names the channel.
+    expect(tag.closest('[role=option]')!.textContent).toMatch(/Channel \d+ \(US\)/);
   });
 
   it('leaves the tag out with "Hide country tags" on', async () => {

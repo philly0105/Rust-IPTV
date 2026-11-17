@@ -2,6 +2,7 @@ import { configure, act, cleanup, fireEvent, screen, waitFor, within } from '@te
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FavoriteEntry, PlaybackPosition, RecentEntry, VodItem } from '@/api/types';
+import { focusableIn } from '@/ui';
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from './harness';
 
@@ -66,9 +67,9 @@ vi.mock('@/features/player', () => ({
   ExternalPlaybackFooter: () => null,
 }));
 
-const { ShellLayout } = await import('../ShellLayout');
+const { ROUTE_ANNOUNCE_DELAY_MS, ShellLayout } = await import('../ShellLayout');
 const { shellRoutes } = await import('../routes');
-const { useShell, useShellStore } = await import('../store');
+const { useShell, useShellHeader, useShellStore } = await import('../store');
 const { sharedRailError } = await import('../dashboard/DashboardPage');
 const { RpcError } = await import('@/api/transport');
 const { useEffect, useState } = await import('react');
@@ -141,7 +142,7 @@ beforeEach(() => {
   baseHandlers();
   playerMock.playItem.mockClear();
   events.clear();
-  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false });
+  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false, railPeek: false });
   useThemeStore.setState({ theme: 'dark' });
   useToastStore.setState({ toasts: [] });
   localStorage.clear();
@@ -281,11 +282,12 @@ describe('ShellLayout', () => {
     const palette = await screen.findByTestId('command-palette');
     const input = within(palette).getByPlaceholderText('Type a command or search');
     fireEvent.change(input, { target: { value: 'zzqx nothing' } });
-    // Nothing else matches: one quiet line says so, just above the search row (not a tall block).
+    // Nothing else matches: one quiet line says so, just above the search row (not a tall block),
+    // once the library and the guide have answered; until then it says they are still searching.
     const empty = await within(palette).findByTestId('palette-empty');
-    expect(empty.textContent).toBe('No matching commands');
+    await waitFor(() => expect(empty.textContent).toBe('Nothing found'));
     expect(empty.className).not.toMatch(/\bpy-10\b/);
-    fireEvent.click(await within(palette).findByText('Search for "zzqx nothing"'));
+    fireEvent.click(await within(palette).findByText('See all results for "zzqx nothing"'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
     expect(router.state.location.search).toBe('?q=zzqx%20nothing');
   });
@@ -300,10 +302,10 @@ describe('ShellLayout', () => {
     expect(overlay.querySelector('[data-combo="mod+k"]')).toBeTruthy();
     fireEvent.change(within(overlay).getByRole('searchbox', { name: 'Filter shortcuts' }), { target: { value: 'volume' } });
     expect(within(overlay).getByText('Volume up')).toBeTruthy();
-    expect(within(overlay).queryByText('Open the command palette')).toBeNull();
+    expect(within(overlay).queryByText('Search everything, or run a command')).toBeNull();
     // First Escape clears the filter, the second closes the overlay.
     fireEvent.keyDown(document.activeElement ?? window, { key: 'Escape' });
-    expect(within(overlay).getByText('Open the command palette')).toBeTruthy();
+    expect(within(overlay).getByText('Search everything, or run a command')).toBeTruthy();
     fireEvent.keyDown(document.activeElement ?? window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByTestId('shortcut-overlay')).toBeNull());
   });
@@ -399,7 +401,7 @@ describe('ShellLayout', () => {
     expect(useToastStore.getState().toasts.some((t) => t.id === 'import-claimed')).toBe(false);
     release();
     act(() => emit({ sourceId: 'claimed', phase: 'error', done: 0, message: 'HTTP 404 not found' }));
-    expect(useToastStore.getState().toasts.find((t) => t.id === 'import-claimed')?.description).toMatch(/^The server has no playlist at that address\./);
+    expect(useToastStore.getState().toasts.find((t) => t.id === 'import-claimed')?.description).toMatch(/^The address wasn't found on the server\./);
   });
 });
 
@@ -438,7 +440,7 @@ describe('phone layout (below 1024 px)', () => {
   const narrowWindow = (narrow: boolean) => {
     window.matchMedia = ((query: string) => ({
       ...matchMedia(query),
-      matches: narrow && query === '(max-width: 1023px)',
+      matches: narrow && query === '(max-width: 1099px)',
     })) as typeof window.matchMedia;
   };
   beforeEach(() => {
@@ -448,15 +450,78 @@ describe('phone layout (below 1024 px)', () => {
     window.matchMedia = matchMedia;
   });
 
-  it('the rail can be hidden and shown again, and focus moves to the button that brings it back', async () => {
+  it('the icon rail opens over the page with its names, and closes on a link, Escape or a press beside it', async () => {
     narrowWindow(true);
+    act(() => useShellStore.setState({ railPeek: false }));
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(nav.getAttribute('data-collapsed')).toBe('true');
+    // Docked, the footer offers Expand; Hide comes with the open rail.
+    expect(within(nav).queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
+    const expand = within(nav).getByRole('button', { name: 'Expand sidebar' });
+    fireEvent.click(expand);
+    // The same rail, now labelled and over the page, with the button kept under focus.
+    expect(nav.getAttribute('data-peek')).toBe('true');
+    expect(nav.getAttribute('data-collapsed')).toBeNull();
+    expect(nav.className).toContain('fixed');
+    expect(within(nav).getByText('Favorites')).toBeTruthy();
+    expect(expand.getAttribute('aria-label') ?? expand.textContent).toContain('Collapse sidebar');
+    expect(expand.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(nav.getAttribute('data-peek')).toBeNull();
+
+    fireEvent.click(expand);
+    fireEvent.mouseDown(document.querySelector('[data-rail-scrim]')!);
+    expect(nav.getAttribute('data-peek')).toBeNull();
+
+    fireEvent.click(expand);
+    fireEvent.click(within(nav).getByRole('link', { name: 'Recently watched' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
+    await waitFor(() => expect(nav.getAttribute('data-peek')).toBeNull());
+  });
+
+  it('the open rail holds focus: the page behind is inert, Tab cycles inside, Escape hands focus back to Expand', async () => {
+    narrowWindow(true);
+    act(() => useShellStore.setState({ railPeek: false }));
     renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
-    // Below lg the rail never expands: its toggle hides it instead.
-    expect(within(nav).queryByRole('button', { name: 'Expand sidebar' })).toBeNull();
+    const expand = within(nav).getByRole('button', { name: 'Expand sidebar' });
+    expand.focus();
+    fireEvent.click(expand);
+    const header = screen.getByTestId('shell-header');
+    expect(header.closest('[inert]')).not.toBeNull();
+    expect(document.getElementById('main')!.closest('[inert]')).not.toBeNull();
+    expect(nav.closest('[inert]')).toBeNull();
+    // Collapse sidebar is the rail's last control: Tab wraps to its first, Shift+Tab back.
+    const items = focusableIn(nav);
+    expect(items.at(-1)).toBe(expand);
+    fireEvent.keyDown(expand, { key: 'Tab' });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0]!, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(expand);
+    // From a link inside, Escape closes it and focus goes back to the button that opened it.
+    const recent = within(nav).getByRole('link', { name: 'Recently watched' });
+    recent.focus();
+    // The focus moves above show and hide tooltips; let them settle as a real key press would.
+    await act(async () => {});
+    fireEvent.keyDown(recent, { key: 'Escape' });
+    await waitFor(() => expect(nav.getAttribute('data-peek')).toBeNull());
+    expect(document.activeElement).toBe(expand);
+    expect(header.closest('[inert]')).toBeNull();
+  });
+
+  it('the rail can be hidden from the open rail and shown again, and focus moves to the button that brings it back', async () => {
+    narrowWindow(true);
+    act(() => useShellStore.setState({ railPeek: false }));
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
 
+    fireEvent.click(within(nav).getByRole('button', { name: 'Expand sidebar' }));
     fireEvent.click(within(nav).getByRole('button', { name: 'Hide sidebar' }));
     expect(screen.queryByRole('navigation', { name: 'Main navigation' })).toBeNull();
     const show = screen.getByRole('button', { name: 'Show sidebar' });
@@ -465,7 +530,9 @@ describe('phone layout (below 1024 px)', () => {
 
     fireEvent.click(show);
     const back = screen.getByRole('navigation', { name: 'Main navigation' });
-    expect(document.activeElement).toBe(within(back).getByRole('button', { name: 'Hide sidebar' }));
+    // Back docked, not open: focus lands on Expand.
+    expect(back.getAttribute('data-peek')).toBeNull();
+    expect(document.activeElement).toBe(within(back).getByRole('button', { name: 'Expand sidebar' }));
     expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
     expect(localStorage.getItem('tsrust.railHidden')).toBe('0');
   });
@@ -479,6 +546,95 @@ describe('phone layout (below 1024 px)', () => {
     expect(within(nav).getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy();
     expect(within(nav).queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
+  });
+});
+
+describe('route announcements and the skip link', () => {
+  function Titled({ title, children }: { title: string; children?: React.ReactNode }) {
+    useShellHeader({ title }, [title]);
+    return <Page>{children}</Page>;
+  }
+  const titledRoutes = () => [
+    {
+      path: '/',
+      element: <ShellLayout />,
+      children: [
+        { path: 'favorites', element: <Titled title="Favorites">favorites page</Titled> },
+        {
+          path: 'settings',
+          element: (
+            <Titled title="Settings">
+              <a href="/settings/player">section nav</a>
+              <div data-skip-target="first">
+                <label>
+                  Language
+                  <select defaultValue="en">
+                    <option value="en">English</option>
+                  </select>
+                </label>
+                <button type="button" tabIndex={0}>
+                  later segment
+                </button>
+              </div>
+            </Titled>
+          ),
+        },
+        {
+          path: 'recent',
+          element: (
+            <Titled title="Recently watched">
+              <div data-skip-target="" tabIndex={-1}>
+                <button type="button" tabIndex={-1}>
+                  first row
+                </button>
+                <button type="button" tabIndex={0}>
+                  current row
+                </button>
+              </div>
+            </Titled>
+          ),
+        },
+      ],
+    },
+  ];
+  const settle = () => act(() => new Promise((r) => setTimeout(r, ROUTE_ANNOUNCE_DELAY_MS + 50)));
+
+  it('names the page a link opened, but not the first page or a page Back returned to', async () => {
+    const { router } = renderRoutes(titledRoutes(), '/favorites');
+    await screen.findByText('favorites page');
+    const region = document.querySelector('[data-route-announcer]')!;
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    await settle();
+    expect(region.textContent).toBe('');
+    await act(() => router.navigate('/recent'));
+    await waitFor(() => expect(region.textContent).toBe('Recently watched'));
+    // Focus stays where it was: the announcement does the telling.
+    await act(() => router.navigate(-1));
+    await screen.findByText('favorites page');
+    await settle();
+    expect(region.textContent).toBe('');
+  });
+
+  it("the skip link lands on the item of the page's marked target that takes Tab, and adds no history entry", async () => {
+    const { router } = renderRoutes(titledRoutes(), '/recent');
+    await screen.findByText('current row');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'current row' }));
+    expect(router.state.location.hash).toBe('');
+  });
+
+  it('a region of plain controls hands the skip link its first control', async () => {
+    renderRoutes(titledRoutes(), '/settings');
+    await screen.findByText('later segment');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Language' }));
+  });
+
+  it('without a marked target the skip link focuses main', async () => {
+    renderRoutes(titledRoutes(), '/favorites');
+    await screen.findByText('favorites page');
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(document.getElementById('main'));
   });
 });
 
@@ -503,8 +659,9 @@ describe('DashboardPage', () => {
     const hero = await screen.findByTestId('dashboard-hero');
     expect(within(hero).getByText('The Long Signal')).toBeTruthy();
     expect(within(hero).getByText('60 minutes left')).toBeTruthy();
-    expect(await screen.findByTestId('dashboard-rail-continue-watching')).toBeTruthy();
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    // The one title in progress is the hero's slide, so Continue watching does not repeat it (home-08).
+    expect(screen.queryByTestId('dashboard-rail-continue-watching')).toBeNull();
     expect(within(live).getByText('Harbor News')).toBeTruthy();
     expect(await within(live).findByText('Morning Bulletin')).toBeTruthy();
     // The cards show titles and times only, so the programme descriptions stay off the wire (L3-serve-ui-8).
@@ -697,10 +854,18 @@ describe('DashboardPage', () => {
     renderRoutes(routes(), '/dashboard');
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
     const first = await within(live).findByRole('button', { name: 'Play Harbor News' });
+    // A rail below with cards.
+    await within(await screen.findByTestId('dashboard-rail-favorite-vod')).findByText('Quiet Coast');
     first.focus();
     fireEvent.keyDown(first, { key: 'ArrowDown' });
-    const recentRail = screen.getByTestId('dashboard-rail-recent-live');
-    expect(recentRail.contains(document.activeElement)).toBe(true);
+    // The next rail down with cards.
+    const rails = [...document.querySelectorAll('[data-dash-rail]')];
+    expect(rails.indexOf(document.activeElement!.closest('[data-dash-rail]')!)).toBeGreaterThan(rails.indexOf(live));
+    // Toward the inline start on a rail's first card: the app rail's link to Home.
+    first.focus();
+    fireEvent.keyDown(first, { key: 'ArrowLeft' });
+    expect(document.activeElement?.closest('[data-testid="shell-rail"]')).toBeTruthy();
+    expect(document.activeElement?.getAttribute('aria-current')).toBe('page');
   });
 });
 
@@ -712,8 +877,10 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'));
     expect(useThemeStore.getState().theme).toBe('light');
     await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'settings.update' && JSON.stringify(c.args).includes('"theme":"light"'))).toBe(true));
+    // Back to what the OS shows (dark here) is Match system again, not a fixed Dark.
     key('L', { code: 'KeyL', ctrlKey: true, shiftKey: true });
-    await waitFor(() => expect(useThemeStore.getState().theme).toBe('dark'));
+    await waitFor(() => expect(useThemeStore.getState().theme).toBe('system'));
+    expect(document.documentElement.dataset['theme']).toBe('dark');
   });
 
   it('F8 jumps into the toast stack, Escape dismisses and returns focus', async () => {
@@ -819,7 +986,7 @@ describe('polish pass (B7)', () => {
     act(() => useShellStore.getState().setPaletteOpen(true));
     const palette = await screen.findByTestId('command-palette');
     fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'navx' } });
-    expect(await within(palette).findByText('Search for "navx"')).toBeTruthy();
+    expect(await within(palette).findByText('See all results for "navx"')).toBeTruthy();
     expect(within(palette).queryByText('Favorites')).toBeNull();
   });
 
@@ -833,7 +1000,8 @@ describe('polish pass (B7)', () => {
     const palette = await screen.findByTestId('command-palette');
     const input = within(palette).getByPlaceholderText('Type a command or search');
     fireEvent.change(input, { target: { value: 'recording' } });
-    expect(await within(palette).findByText('Settings: Recording')).toBeTruthy();
+    // The section, and as their detail the single settings it holds ("Recordings folder").
+    expect((await within(palette).findAllByText('Settings: Recording')).length).toBeGreaterThan(0);
     fireEvent.change(input, { target: { value: 'scheduled' } });
     expect(await within(palette).findByText('Scheduled')).toBeTruthy();
   });
@@ -843,10 +1011,12 @@ describe('polish pass (B7)', () => {
     await screen.findByText('favorites page');
     act(() => useShellStore.getState().setHelpOpen(true));
     const overlay = await screen.findByTestId('shortcut-overlay');
-    for (const combo of ['c', 'pageup', 'pagedown', 'mod+b', 'digit', '/']) expect(overlay.querySelector(`[data-combo="${combo}"]`), combo).toBeTruthy();
+    for (const combo of ['c', 'pageup', 'pagedown', 'mod+b', 'digit']) expect(overlay.querySelector(`[data-combo="${combo}"]`), combo).toBeTruthy();
+    // Ctrl+F and "/" are one rule everywhere (this page's search, or everything): one row.
+    const searchRow = [...overlay.querySelectorAll('[data-combos]')].find((el) => el.getAttribute('data-combos')!.split(' ').includes('/'));
+    expect(searchRow?.getAttribute('data-combos')!.split(' ')).toContain('mod+f');
     expect(within(overlay).getByText('Back 10 seconds')).toBeTruthy();
     expect(within(overlay).getByText('Exit picture in picture')).toBeTruthy();
-    expect(within(overlay).getByText('Search channels')).toBeTruthy();
     // Enter and Down do the same there: one row with both keys.
     const toList = within(overlay).getAllByText('In the search box: move to the list');
     expect(toList).toHaveLength(1);
@@ -928,7 +1098,9 @@ describe('B7 shell fixes', () => {
     h['recent.list'] = () => [];
     h['catalog.recentlyAdded'] = () => new Promise(() => {});
     renderRoutes(routes(), '/dashboard');
-    await screen.findByTestId('dashboard-rail-recent-sources');
+    // Your sources, the last rail, waits behind the pending one; the other rails have answered.
+    await screen.findByTestId('dashboard');
+    await waitFor(() => expect(['favorites.list', 'recent.list', 'catalog.recentlyAdded'].every((cmd) => rpcMock.calls.some((c) => c.cmd === cmd))).toBe(true));
     await act(() => new Promise((r) => setTimeout(r, 20)));
     expect(screen.queryByText('Nothing to show yet')).toBeNull();
     cleanup();
@@ -989,9 +1161,13 @@ describe('B7 shell fixes', () => {
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     const btn = await within(nav).findByRole('button', { name: /Broken One.*The last refresh failed/ });
     expect(nav.querySelector('span[aria-label]')).toBeNull();
+    // Folded, it names no list (the list is not in the page); open, the list it names (w-a11y-11).
+    if (btn.getAttribute('aria-expanded') !== 'true') {
+      expect(btn.hasAttribute('aria-controls')).toBe(false);
+      fireEvent.click(btn);
+    }
     const controls = btn.getAttribute('aria-controls')!;
     expect(controls).not.toMatch(/\s/);
-    if (btn.getAttribute('aria-expanded') !== 'true') fireEvent.click(btn);
     expect(document.getElementById(controls)).toBeTruthy();
     cleanup();
     act(() => useShellStore.setState({ railCollapsed: true }));
@@ -1057,10 +1233,12 @@ describe('B7 shell fixes', () => {
       const nav = screen.getByRole('navigation', { name: 'Main navigation' });
       await within(nav).findByText('Night Portal');
       expect(within(nav).queryByText('Backup 1')).toBeNull();
-      const sourcesRail = await screen.findByTestId('dashboard-rail-recent-sources');
-      expect(within(sourcesRail).queryByText('Backup 1')).toBeNull();
+      // One source left: no Your sources rail (its one tile would repeat the app rail's row).
+      await screen.findByTestId('dashboard-rail-live-favorites');
+      expect(screen.queryByTestId('dashboard-rail-recent-sources')).toBeNull();
       act(() => usePendingRemovals.setState({ ids: new Set() }));
       expect(await within(nav).findByText('Backup 1')).toBeTruthy();
+      expect(within(await screen.findByTestId('dashboard-rail-recent-sources')).getByText('Backup 1')).toBeTruthy();
     } finally {
       act(() => usePendingRemovals.setState({ ids: new Set() }));
     }
@@ -1217,7 +1395,7 @@ describe('B7 review round 2', () => {
     queryClient.clear();
     rpcMock.handlers['favorites.list'] = () => new Promise((r) => (resolve = r));
     renderRoutes(routes(), '/dashboard');
-    await screen.findByTestId('dashboard-rail-continue-watching');
+    await screen.findByTestId('dashboard-hero');
     expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull();
     expect(screen.queryByTestId('dashboard-rail-favorite-vod')).toBeNull();
     // Rails below the still-loading favorites wait for it (round 3 hold rule), then appear.
@@ -1238,9 +1416,10 @@ describe('B7 review round 2', () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const src = readFileSync(join(__dirname, '..', 'dashboard', 'DashboardRail.tsx'), 'utf8');
-    // The two scroll arrows; the hand-built heading row's See all takes the kit's SEE_ALL_LINK,
-    // which carries the pressed state for it and for SectionHeader's link.
-    expect(src.match(/active:text-accent-pressed/g)).toHaveLength(2);
+    // The two scroll arrows share STEP_BUTTON; the hand-built heading row's See all takes the kit's
+    // SEE_ALL_LINK, which carries the pressed state for it and for SectionHeader's link.
+    expect(src.match(/active:text-accent-pressed/g)).toHaveLength(1);
+    expect(src.match(/className=\{STEP_BUTTON\}/g)).toHaveLength(2);
     expect(src).toContain('className={cn(SEE_ALL_LINK');
     const { SEE_ALL_LINK } = await import('@/ui');
     expect(SEE_ALL_LINK).toContain('active:text-accent-pressed');
@@ -1413,7 +1592,7 @@ describe('Run 3 onboarding wiring', () => {
       window.matchMedia = stubbed;
     });
     const setNarrow = (narrow: boolean) => {
-      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: narrow && query === '(max-width: 1023px)' })) as typeof window.matchMedia;
+      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: narrow && query === '(max-width: 1099px)' })) as typeof window.matchMedia;
     };
 
     it('from lg up the page search field holds it', async () => {
@@ -1441,7 +1620,7 @@ describe('Run 3 onboarding wiring', () => {
     });
 
     it('on a phone the tab bar Search tab holds it, and the header has no search, palette or theme button', async () => {
-      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: query === '(max-width: 639px)' || query === '(max-width: 1023px)' })) as typeof window.matchMedia;
+      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: query === '(max-width: 639px)' || query === '(max-width: 1099px)' })) as typeof window.matchMedia;
       renderRoutes(routes(<SearchFieldPage />), '/favorites');
       await screen.findByText('favorites page');
       const search = document.querySelectorAll('[data-tour="search"]');
@@ -1600,7 +1779,7 @@ describe('L2 shell header', () => {
     fireEvent.click(trigger);
     const palette = await screen.findByTestId('command-palette');
     fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'harbor' } });
-    fireEvent.click(await within(palette).findByText('Search for "harbor"'));
+    fireEvent.click(await within(palette).findByText('See all results for "harbor"'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
     expect(router.state.location.search).toBe('?q=harbor');
 
@@ -1712,6 +1891,8 @@ describe('F11 (L2-desktop-8)', () => {
 
 describe('dashboard base titles (L2-visual-3)', () => {
   it('Continue watching and favourite VOD cards drop the provider tags an old snapshot still carries', async () => {
+    // No hero: the one title in progress would be its slide, and Continue watching would go (home-08).
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false } });
     rpcMock.handlers['positions.continueWatching'] = (): PlaybackPosition[] => [
       { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('|EN| 4K - Night Train [MULTI-SUB] (2019)') },
     ];
@@ -1727,7 +1908,7 @@ describe('dashboard base titles (L2-visual-3)', () => {
     expect(within(vod).getByText('Quiet Coast')).toBeTruthy();
     // The stripped year moves under the title.
     expect(within(vod).getByText('2021')).toBeTruthy();
-    // A channel's prefix is part of its name and stays.
-    expect(within(await screen.findByTestId('dashboard-rail-live-favorites')).getByText('US: Harbor News')).toBeTruthy();
+    // A channel's prefix is part of its name and stays (after it, as plain text says it, for screen readers).
+    expect(within(await screen.findByTestId('dashboard-rail-live-favorites')).getByText('Harbor News (US)')).toBeTruthy();
   });
 });

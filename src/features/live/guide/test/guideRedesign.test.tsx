@@ -141,12 +141,22 @@ describe('genre buckets (CB-GUIDE-GENRE)', () => {
     expect(within(chips).getByRole('button', { name: 'Sports' }).getAttribute('aria-pressed')).toBe('true');
     await waitFor(() => expect(within(movie).queryByTestId('cell-genre')).toBeNull());
     expect(movie.className).toContain('text-fg-subtle');
+    // A cell of another genre stays a (faint) box: a guide without genre tags would otherwise
+    // lose every cell edge (guide-05).
+    // Its edge is half strength in light, and a matching cell there is the white panel, so the
+    // two do not read alike (v-guide-02).
+    expect(movie.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-bg', 'inset-ring', 'inset-ring-edge/50', 'dark:inset-ring-edge']));
+    expect(screen.queryByTestId('guide-genre-hint')).toBeNull();
     expect(within(sports).getByTestId('cell-genre')).toBeTruthy();
+    expect(sports.className.split(/\s+/)).toContain('bg-surface');
     // Remembered for the next visit; pressing the chosen chip again shows everything.
     expect(localStorage.getItem('guide.genreFilter')).toBe('sports');
     fireEvent.click(within(chips).getByRole('button', { name: 'Sports' }));
     await waitFor(() => expect(within(movie).getByTestId('cell-genre')).toBeTruthy());
     expect(localStorage.getItem('guide.genreFilter')).toBeNull();
+    // A genre with nothing in view says so on screen, not only to screen readers.
+    fireEvent.click(within(chips).getByRole('button', { name: 'Series & shows' }));
+    expect((await screen.findByTestId('guide-genre-hint')).textContent).toBe("Nothing in view is tagged Series & shows. Many guides don't tag genres.");
   });
 
   it('names each cell’s genre and says what a filter did, for screen readers (review round 2)', async () => {
@@ -324,9 +334,17 @@ describe('the channel column names a channel as Live TV does (round 5)', () => {
     const row = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
     const tag = within(row).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
-    expect(tag.previousElementSibling!.textContent).toBe('Channel 0');
+    // Running text over two lines (v-guide-11): the tag follows the name after an ordinary space,
+    // so a wrapped tag starts flush, and stays with the quality words in a no-wrap tail.
+    const drawn = tag.closest<HTMLElement>('[aria-hidden]')!;
+    expect(drawn.textContent).toBe('Channel 0 US');
+    expect(drawn.className).toContain('line-clamp-2');
+    expect(drawn.querySelector('[dir="auto"]')!.textContent).toBe('Channel 0');
+    expect(tag.parentElement!.className).toContain('whitespace-nowrap');
     expect(tag.className).toContain('text-fg-subtle');
     expect(row.title).toBe('Play US| Channel 0');
+    // Screen readers hear the cleaned name, as toasts give it (w-a11y-03); the tooltip keeps the provider's.
+    expect(screen.getByRole('button', { name: /Channel 0 \(US\)/ })).toBe(row);
   });
 
   it('leaves the tag out with "Hide country tags" on', async () => {
@@ -364,13 +382,14 @@ describe('the preview band (CB-GUIDE-PREVIEW)', () => {
 
     // The toggle's name says what a press does, with no pressed or expanded state beside it.
     const toggle = screen.getByTestId('guide-preview-toggle');
-    expect(toggle.getAttribute('aria-label')).toBe('Hide preview');
+    // By name: the other label sits invisible beside it, holding the button's width (v-guide-13).
+    expect(screen.getByRole('button', { name: 'Hide preview' })).toBe(toggle);
     expect(toggle.hasAttribute('aria-pressed')).toBe(false);
     expect(toggle.hasAttribute('aria-expanded')).toBe(false);
     fireEvent.click(toggle);
     expect(screen.queryByTestId('guide-preview')).toBeNull();
     expect(localStorage.getItem('guide.preview')).toBe('0');
-    expect(screen.getByTestId('guide-preview-toggle').getAttribute('aria-label')).toBe('Show preview');
+    expect(screen.getByRole('button', { name: 'Show preview' })).toBe(screen.getByTestId('guide-preview-toggle'));
   });
 
   it('starts hidden on a window under 1000 px tall until the user opens it (review round 2)', async () => {
@@ -481,11 +500,11 @@ describe('the ruler and the row menu (stage 2)', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
     expect(within(menu).getByRole('menuitem', { name: 'Match guide channel' })).toBeTruthy();
     // The desktop app offers the external players here too, as on Live.
-    expect(within(menu).getByRole('menuitem', { name: 'Play in MPV' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: 'Play in mpv' })).toBeTruthy();
     expect(within(menu).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
   });
 
-  it.each(['MPV', 'VLC'] as const)('opens a past programme’s timeshift URL in %s', async (player) => {
+  it.each(['mpv', 'VLC'] as const)('opens a past programme’s timeshift URL in %s', async (player) => {
     const start = Date.now() - 2 * HOUR;
     const past = program('Yesterday news', start, start + HOUR);
     rpc.handlers['sources.list'] = () => [{ id: 'src1', kind: 'xtream', name: 'Demo', channelCount: CHANNELS.length }];

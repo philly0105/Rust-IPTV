@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { EllipsisVertical, Heart, History, Lock } from 'lucide-react';
-import { memo, type MouseEvent, type ReactElement } from 'react';
+import { memo, type HTMLAttributes, type MouseEvent, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
@@ -9,9 +9,9 @@ import { IconButton } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
 import { useLongPress } from '../hooks/useLongPress';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, plainChannelName, separatorLabel } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
-import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNowNext } from '../lib/epgTime';
+import { formatClock, hasUsableArchive, isValidProgram, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 
 /**
@@ -53,6 +53,19 @@ export interface ChannelRowProps {
   guideUnavailable?: boolean;
   /** Parental Ask mode: the channel asks for the PIN, so the row carries a lock and keeps its programmes back. */
   locked?: boolean;
+  /**
+   * The list mixes groups (a search across All channels): ChannelList captions each run of rows
+   * from one group, which is what tells a dozen "ESPN HD" feeds apart; the row names its group to
+   * screen readers and, without a programme, says there is no guide rather than repeat the group.
+   */
+  showGroup?: boolean;
+  /**
+   * The group the list is open on. Its rows without a programme say there is no guide instead of
+   * repeating the group's name, which the header and the group column already show.
+   */
+  groupId?: string;
+  /** The list is the Favorites view: every row is one, so the heart mark says nothing. */
+  hideFavoriteMark?: boolean;
   onActivate(index: number, how: 'click' | 'double' | 'key'): void;
   onToggleFavorite(channel: Channel, favorite: boolean): void;
   onContextMenu(e: MouseEvent, channel: Channel, index: number): void;
@@ -63,11 +76,18 @@ export interface ChannelRowProps {
   onMenuAt?(at: { x: number; y: number }, channel: Channel, index: number): void;
 }
 
+/**
+ * The number column: 26 px, or as many digits as the list's highest number has when ChannelList
+ * sets `--num-w` (a source numbered to 57,000 spilled "57012" past the row's padding). In `ch` of
+ * the number's own tabular figures, so every row's logo stays on one line.
+ */
+export const NUMBER_WIDTH = 'w-[var(--num-w,1.75rem)] min-w-7';
+
 /** Same columns and height as a loaded row, so nothing moves when the data lands. */
 export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
   return (
     <div className={`flex h-full items-center gap-3 ps-3 pe-3 ${pulse ? 'motion-safe:animate-pulse' : ''}`} aria-hidden>
-      <span className="h-3 w-7 shrink-0 rounded-xs bg-surface-3" />
+      <span className={`h-3 shrink-0 rounded-xs bg-surface-3 ${NUMBER_WIDTH}`} />
       <span className="size-10 shrink-0 rounded-md bg-surface-3" />
       <span className="flex flex-1 flex-col gap-1.5">
         <span className="h-3 w-2/5 rounded-xs bg-surface-3" />
@@ -92,6 +112,8 @@ interface RowLanguage {
   t: TFunction<'live'>;
   /** `listSeparator` of the UI language: between the parts of the row button's name. */
   separator: string;
+  /** The UI language, for the clock of a programme still to come. */
+  language: string;
 }
 
 /**
@@ -107,6 +129,8 @@ interface RowText {
   removeFavorite: string;
   channelMenu: string;
   guideNotAnswering: string;
+  noGuide: string;
+  upNext: string;
   archive: string;
   archiveIcon: ReactElement;
   /** Plural texts by key and count, filled as rows ask for them. */
@@ -125,6 +149,8 @@ function rowText(t: TFunction<'live'>): RowText {
       removeFavorite: t('removeFavorite'),
       channelMenu: t('channelMenu'),
       guideNotAnswering: t('guideNotAnswering'),
+      noGuide: t('noGuideShort'),
+      upNext: t('upNext'),
       archive: t('archive'),
       archiveIcon: <History size={12} aria-label={t('archive')} data-testid="row-archive" />,
       counted: new Map(),
@@ -165,8 +191,31 @@ const MENU_ICON = <EllipsisVertical size={16} />;
 /** A channel row that reads the UI language itself; ChannelList's rows take the list's (ListChannelRow). */
 export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const { t, i18n } = useTranslation('live');
-  return <ListChannelRow {...props} t={t} separator={listSeparator(i18n.language)} />;
+  return <ListChannelRow {...props} t={t} separator={listSeparator(i18n.language)} language={i18n.language} />;
 });
+
+/**
+ * A quiet caption on the names' line, the number and logo columns kept empty: a provider's heading
+ * row, and the group over a run of search results (v-live-02).
+ */
+export function RowCaption({
+  label,
+  compact,
+  station,
+  className,
+  ...rest
+}: { label: string; compact?: boolean; station?: boolean; className?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'children'>) {
+  return (
+    <div className={cn('flex items-end gap-3 ps-2.5 pe-3', className)} {...rest}>
+      {/* In the number's font: its width is in ch, so another font set the caption off the names (v-live-08). */}
+      <span aria-hidden className={cn('shrink-0 font-numeric text-sm', NUMBER_WIDTH)} />
+      {compact ? null : <span aria-hidden className="shrink-0" style={{ width: station ? 44 : 40 }} />}
+      <span dir="auto" title={label} className="min-w-0 truncate text-caption font-semibold tracking-wide text-fg-subtle uppercase">
+        {label}
+      </span>
+    </div>
+  );
+}
 
 /**
  * A row of ChannelList. The list hands it `t` and the separator (P2-LIVE-3): `useTranslation` per
@@ -179,6 +228,22 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
     if (channel) props.onMenuAt?.({ x, y }, channel, index);
   });
   if (!channel) return <RowSkeleton />;
+  if (isSeparatorName(channel.name)) {
+    // A provider's heading ("#### PRIME ᴿᴬᵂ ####") is no channel: a quiet label over the names it
+    // heads, in the row's slot so the list keeps one height. Not playable and passed by the arrows;
+    // a right click or a long press still reaches its menu (Hide).
+    return (
+      <RowCaption
+        label={separatorLabel(channel.name)}
+        compact={compact}
+        station={props.station}
+        className="h-full touch-manipulation pb-2 select-none [-webkit-touch-callout:none]"
+        onContextMenu={(e) => props.onContextMenu(e, channel, index)}
+        data-testid="row-separator"
+        {...longPress}
+      />
+    );
+  }
 
   const locked = props.locked ?? false;
   // A locked channel's programme titles wait for the PIN, like its stream.
@@ -189,7 +254,14 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
   const archive = hasUsableArchive(channel, props.sourceKind);
   const name = displayChannelName(channel.name, props.stripPrefix);
   const left = cur ? minutesLeft(cur, now) : 0;
+  // A gap in the guide: what comes next, instead of the group or "No guide data" (v-live-06).
+  const next = !cur && shifted?.next && isValidProgram(shifted.next) && ms(shifted.next.start) > now ? shifted.next : undefined;
   const text = rowText(t);
+  // A search across groups names each run's group once, over its first row (ChannelList): the row
+  // keeps it for screen readers only, and without a programme says there is no guide.
+  const group = props.showGroup ? channel.categoryName : '';
+  // In its own group a row without a programme says so; elsewhere its group tells it apart.
+  const inOpenGroup = !!props.groupId && channel.categoryId === props.groupId;
 
   return (
     <div
@@ -210,9 +282,12 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         data-row-index={index}
         tabIndex={active ? 0 : -1}
         aria-current={playing ? 'true' : undefined}
+        // Named as the row draws it, the place after the name ("ESPN HD (US)"), not "US pipe ESPN HD"
+        // (v-live-12, w-a11y-03); the tooltip keeps the provider's name.
         aria-label={[
           channel.number !== undefined ? `${channel.number}` : '',
-          name,
+          plainChannelName(channel.name, props.stripPrefix),
+          group ? plainChannelName(group, false) : '',
           favorite ? text.favorite : '',
           locked ? text.locked : '',
           cur ? t('nowShowing', { title: cur.title }) : '',
@@ -229,7 +304,8 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             so the logo and the name lead the row. */}
         <span
           className={cn(
-            'w-7 shrink-0 text-end font-numeric text-sm tabular-nums',
+            'shrink-0 text-end font-numeric text-sm tabular-nums',
+            NUMBER_WIDTH,
             playing ? 'text-fg' : 'text-fg-subtle',
           )}
         >
@@ -241,6 +317,10 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             <ChannelName
               name={channel.name}
               strip={props.stripPrefix}
+              // In its own group, a "PRIME: " the header already names is left out.
+              group={inOpenGroup ? channel.categoryName : undefined}
+              // The provider's whole name when the column cuts it (event channels differ at the end).
+              title={channel.name}
               // A step up on touch, held at arm's length: the desktop's dense 13.5 px name and 12 px
               // programme fit the same 60 px row at 15 and 13.5.
               className={cn('truncate text-body-sm text-match-parent text-fg pointer-coarse:text-body', playing ? 'font-semibold' : 'font-medium')}
@@ -248,7 +328,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             {/* Marks, not slots: an empty row gives their room to the title. */}
             {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
                 It steps aside while the floating actions show their own heart. */}
-            {favorite ? FAVORITE_MARK : null}
+            {favorite && !props.hideFavoriteMark ? FAVORITE_MARK : null}
             {archive ? (
               <span
                 title={
@@ -299,9 +379,23 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
                 </span>
               )}
             </>
+          ) : next ? (
+            <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-subtle pointer-coarse:text-body-sm" data-testid="row-next">
+              <span className="shrink-0 whitespace-nowrap">{`${text.upNext} ${formatClock(ms(next.start), props.language)}`}</span>
+              <span aria-hidden className="shrink-0">
+                ·
+              </span>
+              <span dir="auto" className="min-w-0 truncate text-match-parent" title={next.title}>
+                {next.title}
+              </span>
+            </span>
           ) : props.guideUnavailable ? (
             <span className="truncate text-caption text-fg-subtle" data-testid="row-guide-unavailable">
               {text.guideNotAnswering}
+            </span>
+          ) : inOpenGroup || group ? (
+            <span className="truncate text-caption text-fg-subtle" data-testid="row-no-guide">
+              {locked ? text.locked : text.noGuide}
             </span>
           ) : (
             <span dir="auto" className="truncate text-caption text-match-parent text-fg-subtle">

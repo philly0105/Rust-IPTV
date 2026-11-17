@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 import { cn, fieldClass, Skeleton, usePresence } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 
+import { ChannelName } from './ChannelLogo';
 import type { ScopePickerListProps } from './ScopePickerList';
 
 export interface PickerOption {
@@ -64,6 +65,11 @@ export interface ScopePickerProps {
    * The trigger's height has to allow two lines (`h-auto`).
    */
   wrapLabel?: boolean;
+  /**
+   * Live TV's region key for these groups (`${sourceId}:live`): with it, a source whose groups carry
+   * country tags gets Live's region select beside the filter, and the two share the pick.
+   */
+  regionScope?: string;
   className?: string;
   testId?: string;
 }
@@ -112,6 +118,7 @@ export function ScopePicker({
   triggerIcon,
   optionIcon = true,
   wrapLabel,
+  regionScope,
   className,
   testId,
 }: ScopePickerProps) {
@@ -124,6 +131,8 @@ export function ScopePicker({
 
   const all = useMemo(() => sections.flatMap((s) => s.options), [sections]);
   const current = all.find((o) => o.value === value);
+  // A group reads as the list draws it: the place's tag after the name, quiet ("SPORTS US").
+  const currentIsGroup = !!current && !!sections.find((s) => s.id === 'groups')?.options.includes(current);
 
   // The list's chunk, once the page idles after the picker is up (or sooner: hover, focus, open).
   useEffect(() => {
@@ -143,7 +152,8 @@ export function ScopePicker({
     const below = window.innerHeight - r.bottom - GAP - MARGIN;
     const above = r.top - GAP - MARGIN;
     const up = below < 240 && above > below;
-    const width = Math.min(Math.max(r.width, 256), 352, window.innerWidth - 2 * MARGIN);
+    // A little wider with a region select beside the filter, so the filter keeps room to type.
+    const width = Math.min(Math.max(r.width, regionScope ? 320 : 256), 352, window.innerWidth - 2 * MARGIN);
     const rtl = getComputedStyle(el).direction === 'rtl';
     const left = Math.max(MARGIN, Math.min(rtl ? r.right - width : r.left, window.innerWidth - width - MARGIN));
     const maxHeight = Math.max(160, Math.min(420, up ? above : below));
@@ -247,9 +257,13 @@ export function ScopePicker({
         ) : (
           <>
             {optionIcon && current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
-            <span dir="auto" className={cn('min-w-0 flex-1', wrapLabel ? 'line-clamp-2 break-words leading-tight' : 'truncate', !current && 'text-fg-subtle')}>
-              {current?.label ?? placeholder ?? ''}
-            </span>
+            {currentIsGroup ? (
+              <ChannelName name={current.label} twoLines={wrapLabel} className={cn('min-w-0 flex-1', wrapLabel ? 'leading-tight' : 'truncate')} />
+            ) : (
+              <span dir="auto" className={cn('min-w-0 flex-1', wrapLabel ? 'line-clamp-2 break-words leading-tight' : 'truncate', !current && 'text-fg-subtle')}>
+                {current?.label ?? placeholder ?? ''}
+              </span>
+            )}
             <ChevronDown aria-hidden size={16} className={cn('shrink-0 text-fg-muted motion-safe:transition-transform', open && 'rotate-180')} />
           </>
         )}
@@ -284,6 +298,7 @@ export function ScopePicker({
                 filterFrom={filterFrom}
                 listId={listId}
                 maxHeight={place.maxHeight}
+                regionScope={regionScope}
                 onPick={pick}
               />
             </div>,

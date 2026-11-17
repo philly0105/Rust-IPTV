@@ -23,7 +23,7 @@ import { Button, cn, LivePill, MetaLine, Skeleton, useScaledPx } from '@/ui';
 import { ProgramActions } from '@/features/recording';
 
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, plainChannelName } from '../lib/channelName';
 import { canCatchUp, formatClock, formatDay, formatRange, localDayKey, minutesLeft, ms, programProgress, programWhen } from '../lib/epgTime';
 import { genreColor, genreOf } from './genre';
 import { useProgramDescription } from './programDescription';
@@ -95,6 +95,8 @@ export function GuidePreview(props: GuidePreviewProps) {
   const { t } = useTranslation('guide');
   const { channel, program } = props;
   const name = channel ? displayChannelName(channel.name, props.stripPrefix) : '';
+  // Screen readers hear the cleaned name ("ESPN HD (US)").
+  const srName = channel ? plainChannelName(channel.name, props.stripPrefix) : '';
   const [detailsRef, narrow] = useNarrowerThan(useScaledPx(PREVIEW_LABELLED_ACTIONS_PX));
   return (
     // One height whatever the programme says, so the grid under it never moves as the cursor goes;
@@ -114,7 +116,7 @@ export function GuidePreview(props: GuidePreviewProps) {
             <button
               type="button"
               tabIndex={-1}
-              aria-label={t('watchNow', { channel: name })}
+              aria-label={t('watchNow', { channel: srName })}
               onClick={() => props.onWatch(channel)}
               data-testid="guide-preview-picture"
               className="group/pic absolute inset-0 flex items-center justify-center bg-[radial-gradient(120%_90%_at_50%_18%,hsl(220_20%_18%/0.85),transparent_68%)] outline-none"
@@ -136,7 +138,7 @@ export function GuidePreview(props: GuidePreviewProps) {
       </div>
       <div ref={detailsRef} className="flex min-w-0 flex-1 flex-col">
         {channel && program ? (
-          <PreviewDetails {...props} channel={channel} program={program} name={name} narrow={narrow} />
+          <PreviewDetails {...props} channel={channel} program={program} name={name} srName={srName} narrow={narrow} />
         ) : (
           <div className="flex h-full flex-col justify-center gap-1 text-fg-muted">
             <CalendarClock size={18} aria-hidden className="text-fg-subtle" />
@@ -153,10 +155,10 @@ export function GuidePreview(props: GuidePreviewProps) {
  * gives way first, so the title is never cut in half. The actions sit at the end of the title's
  * line, so the band is a third shorter and the grid under it keeps more rows.
  */
-function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: EpgProgram; name: string; narrow: boolean }) {
+function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: EpgProgram; name: string; srName: string; narrow: boolean }) {
   const { t, i18n } = useTranslation('live');
   const { t: tg } = useTranslation('guide');
-  const { channel, program, next, now, kind, name, narrow } = props;
+  const { channel, program, next, now, kind, name, srName, narrow } = props;
   const lang = i18n.language;
   const when = programWhen(program, now);
   const catchupOk = canCatchUp(program, channel, kind, now);
@@ -168,7 +170,7 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
       <p className="flex min-w-0 shrink-0 items-center gap-2 text-caption text-fg-muted">
         <ChannelLogo src={channel.logoUrl} name={name} size={20} sourceId={channel.ref.sourceId} />
         {channel.number !== undefined ? <span className="font-numeric tabular-nums">{channel.number}</span> : null}
-        <ChannelName name={channel.name} strip={props.stripPrefix} className="min-w-0 truncate" />
+        <ChannelName name={channel.name} strip={props.stripPrefix} srName={srName} className="min-w-0 truncate" />
       </p>
       <div className="mt-1 flex min-w-0 shrink-0 items-center gap-3" data-testid="guide-preview-title-row">
         <h2 dir="auto" title={program.title} className="min-w-0 flex-1 truncate text-title-sm text-match-parent text-fg" data-testid="guide-preview-title">
@@ -186,13 +188,20 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
               {when === 'now' ? t('startOver') : t('watchCatchup')}
             </Button>
           ) : null}
+          {/* A short label: the channel is named above (and in its accessible name); a provider's long name filled the row. */}
           {when !== 'now' ? (
-            <Button size="sm" variant={catchupOk ? 'ghost' : 'secondary'} icon={<Play size={14} />} onClick={() => props.onWatch(channel)} className="min-w-0" title={narrow ? t('playChannel', { name }) : undefined}>
-              <span className="truncate">{t('playChannel', { name })}</span>
+            <Button
+              size="sm"
+              variant={catchupOk ? 'ghost' : 'secondary'}
+              icon={<Play size={14} />}
+              onClick={() => props.onWatch(channel)}
+              aria-label={t('playChannel', { name: srName })}
+            >
+              {t('watchChannel')}
             </Button>
           ) : null}
           {/* recording: */}
-          <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} variant={narrow ? 'icons' : 'buttons'} />
+          <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} variant={narrow ? 'icons' : 'buttons'} explainNoRecording={false} />
         </div>
       </div>
       <div className="mt-1 flex min-w-0 shrink-0 items-center gap-4">

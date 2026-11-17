@@ -16,6 +16,7 @@ import { useShellStore } from './store';
 export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; area: string; desktopOnly?: true }[] = [
   { combo: 'mod+k', descKey: 'scPalette', area: 'Global' },
   { combo: 'mod+f', descKey: 'scSearch', area: 'Global' },
+  { combo: '/', descKey: 'scSearch', area: 'Global' },
   // A browser keeps Ctrl+R for reload (SH-ctrl-r-browser); only the app window binds it.
   { combo: 'mod+r', descKey: 'scRecent', area: 'Global', desktopOnly: true },
   { combo: '?', descKey: 'scHelp', area: 'Global' },
@@ -27,7 +28,9 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'mod+alt+l', descKey: 'parental:shortcutLockNow', area: 'Parental controls' },
   { combo: 'mod+b', descKey: 'scSidebar', area: 'Live' },
   { combo: 'digit', descKey: 'scDigits', area: 'Live' },
-  { combo: '/', descKey: 'live:shortcutFocusSearch', area: 'Live' },
+  // The group column and the channel list hand focus across (CategorySidebar onListKey, ChannelList onKeyDown).
+  { combo: 'arrowleft', descKey: 'live:shortcutColumns', area: 'Live' },
+  { combo: 'arrowright', descKey: 'live:shortcutColumns', area: 'Live' },
   { combo: 'enter', descKey: 'scSearchToList', area: 'Live' },
   { combo: 'arrowdown', descKey: 'scSearchToList', area: 'Live' },
   { combo: 'escape', descKey: 'scSearchClear', area: 'Live' },
@@ -42,9 +45,24 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   // The focused channel list (ChannelList.tsx onKeyDown): while a live channel plays, plain Page Up/Down zap.
   { combo: 'shift+pageup', descKey: 'scChannelListPage', area: 'Live' },
   { combo: 'shift+pagedown', descKey: 'scChannelListPage', area: 'Live' },
-  // Guide (EpgGridPage.tsx): search and jump to a date and time.
-  { combo: '/', descKey: 'guide:searchLabel', area: 'Guide' },
+  // Guide (EpgGridPage.tsx): jump to a date and time. Its search is the shell's Ctrl+F and "/".
   { combo: 't', descKey: 'guide:jumpTitle', area: 'Guide' },
+  // The focused guide grid (EpgGridPage.tsx onGridKey).
+  { combo: 'arrowup', descKey: 'scGuideChannel', area: 'Guide' },
+  { combo: 'arrowdown', descKey: 'scGuideChannel', area: 'Guide' },
+  { combo: 'arrowleft', descKey: 'scGuideProgramme', area: 'Guide' },
+  { combo: 'arrowright', descKey: 'scGuideProgramme', area: 'Guide' },
+  { combo: 'pageup', descKey: 'scGuidePage', area: 'Guide' },
+  { combo: 'pagedown', descKey: 'scGuidePage', area: 'Guide' },
+  { combo: 'home', descKey: 'scGuideNow', area: 'Guide' },
+  { combo: 'mod+home', descKey: 'scGuideFirst', area: 'Guide' },
+  { combo: 'end', descKey: 'scGuideLast', area: 'Guide' },
+  { combo: 'enter', descKey: 'scGuideOpen', area: 'Guide' },
+  { combo: 'shift+f10', descKey: 'scItemMenu', area: 'Guide' },
+  { combo: 'contextmenu', descKey: 'scItemMenu', area: 'Guide' },
+  // Home's rails (DashboardRail.tsx): Left, Right, Home and End move inside a rail (Dialogs and lists).
+  { combo: 'arrowup', descKey: 'scHomeRows', area: 'Home' },
+  { combo: 'arrowdown', descKey: 'scHomeRows', area: 'Home' },
   // Only inside the Manage lists and Edit channels dialogs (SortableList.tsx onKeyDown); the list
   // page and the Lists sidebar reorder through those dialogs, so the text names them.
   { combo: 'alt+arrowup', descKey: 'scListsDialogMoveUp', area: 'Lists' },
@@ -68,6 +86,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'backspace', descKey: 'multiview:shortcutCloseTile', area: 'Multi-view' },
   { combo: 'r', descKey: 'multiview:shortcutReplaceTile', area: 'Multi-view' },
   { combo: 's', descKey: 'multiview:shortcutSwapTile', area: 'Multi-view' },
+  { combo: 'z', descKey: 'multiview:shortcutEnlargeTile', area: 'Multi-view' },
   { combo: 'escape', descKey: 'scVodBack', area: 'Vod' },
   // Bound by the movie and series grid (CategoryGridPage.tsx) while it shows posters.
   { combo: 's', descKey: 'vod:shortcutMyList', area: 'Vod' },
@@ -89,6 +108,13 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'alt+arrowdown', descKey: 'sources:shortcutMoveDown', area: 'Sources' },
   { combo: 'alt+arrowup', descKey: 'library:shortcutMoveUp', area: 'Favorites' },
   { combo: 'alt+arrowdown', descKey: 'library:shortcutMoveDown', area: 'Favorites' },
+  // Bound by the focused row on Favorites and Recently watched (the pages' onRowKeyDown).
+  { combo: 'delete', descKey: 'scListRemove', area: 'Favorites' },
+  { combo: 'shift+f10', descKey: 'scRowMenu', area: 'Favorites' },
+  { combo: 'contextmenu', descKey: 'scRowMenu', area: 'Favorites' },
+  { combo: 'delete', descKey: 'scListRemove', area: 'Recently watched' },
+  { combo: 'shift+f10', descKey: 'scRowMenu', area: 'Recently watched' },
+  { combo: 'contextmenu', descKey: 'scRowMenu', area: 'Recently watched' },
   { combo: 'p', descKey: 'library:shortcutPause', area: 'Downloads' },
   { combo: 'r', descKey: 'library:shortcutRetry', area: 'Downloads' },
   { combo: 'x', descKey: 'library:shortcutCancel', area: 'Downloads' },
@@ -173,6 +199,7 @@ const AREA_ORDER = [
   'Seek bar',
   'Live',
   'Guide',
+  'Home',
   'Multi-view',
   'Vod',
   'Search',
@@ -180,6 +207,7 @@ const AREA_ORDER = [
   'Lists',
   'My List',
   'Favorites',
+  'Recently watched',
   'Sources',
   'Downloads',
   'My videos',
@@ -200,6 +228,7 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   Navigation: 'shell:areaNavigation',
   Live: 'shell:areaLive',
   Guide: 'guide:shortcutArea',
+  Home: 'shell:navDashboard',
   Lists: 'lists:title',
   'Multi-view': 'multiview:shortcutArea',
   Vod: 'shell:areaVod',
@@ -207,6 +236,7 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   'My List': 'mylist:title',
   Sources: 'sources:title',
   Favorites: 'library:favoritesTitle',
+  'Recently watched': 'library:recentTitle',
   Downloads: 'library:title',
   'My videos': 'library:myVideosTitle',
   Stats: 'stats:title',
@@ -341,7 +371,9 @@ function OpenShortcutOverlay() {
           aria-label={t('shortcutsListLabel')}
           tabIndex={0}
           // Two balanced columns: each area flows into the next, with no gap where a short one sat beside a long one.
-          className="gap-x-10 rounded-md md:columns-2"
+          // Focused, it keeps its top below the sticky filter (scroll-mt), and its ring is drawn
+          // inside it with a little room, as the scroller would clip an outline to two side lines.
+          className="-mx-2 scroll-mt-16 gap-x-10 rounded-md px-2 pt-2 focus-visible:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset md:columns-2"
         >
           {groups.map(([area, list], gi) => (
             // Area names have spaces; an IDREF must not, so the id comes from useId plus the index.

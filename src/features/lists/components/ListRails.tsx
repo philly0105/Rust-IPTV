@@ -4,6 +4,7 @@
  * card zaps within that list. Loaded lazily by `CustomListRails` (rails.tsx).
  */
 
+import { X } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -11,7 +12,8 @@ import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type CustomList } from '@/api/types';
 import { intlLocale } from '@/lib/intl';
 
-import { ChannelCard, DashboardRail, displayChannelName, errorDescription, toast, useDisplayPrefs, usePendingRemovals, useVisibleSources } from '../deps';
+import { ChannelCard, DashboardRail, displayChannelName, errorDescription, plainChannelName, toast, useDisplayPrefs, usePendingRemovals, useVisibleSources } from '../deps';
+import { useListActions } from '../hooks/useListActions';
 import { useListItems } from '../hooks/useLists';
 import { playFromList } from '../lib/play';
 import { listPath } from '../paths';
@@ -33,6 +35,7 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
   const { t: ts } = useTranslation('shell');
   const prefs = useDisplayPrefs();
   const items = useListItems(list.id);
+  const { removeEntries } = useListActions();
   // Channels of a source in its delete-undo window are already gone, as on the other Home rails.
   const removingSources = usePendingRemovals((s) => s.ids);
   const entries = useMemo(
@@ -66,13 +69,15 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
       errorHint={t('localDataHint')}
       onRetry={() => void items.refetch()}
       seeAll={{ to: listPath(list.id) }}
-      meta={<span className="text-xs tabular-nums text-fg-subtle">{t('channelCount', { count: itemCount, formatted: fmt.format(itemCount) })}</span>}
+      meta={<span className="shrink-0 text-caption tabular-nums text-fg-subtle">{t('channelCount', { count: itemCount, formatted: fmt.format(itemCount) })}</span>}
       getKey={(c) => itemKey(c.ref)}
       cardWidth={232}
       skeletonAspect={16 / 9}
       renderCard={(c, rail) => {
         const nn = nowNext.data?.[itemKey(c.ref)];
         const name = displayChannelName(c.name, prefs.stripCountryPrefix);
+        // Read aloud and in toasts: the cleaned name ("ESPN HD (US)"), as the list page names it.
+        const plain = plainChannelName(c.name, prefs.stripCountryPrefix);
         return (
           <ChannelCard
             rail={rail}
@@ -83,12 +88,24 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
             nowProgress={progress(nn?.now?.start, nn?.now?.end, offset)}
             sourceName={sourceName.get(c.ref.sourceId)}
             isRadio={c.ref.contentType === 'radio'}
-            ariaLabel={ts('playTitle', { title: name })}
+            ariaLabel={ts('playTitle', { title: plain })}
             // Right click, the context-menu key and Shift+F10: Home's channel menu (its Play plays from the list too).
             channel={c}
+            // Taken out of the list from Home, with the list page's Undo.
+            menuExtra={[
+              {
+                id: 'remove-from-list',
+                label: t('removeFromList'),
+                icon: <X className="size-4" />,
+                onSelect: () => {
+                  const entry = entries?.find((e) => e.channel === c);
+                  if (entry) removeEntries(list, [entry], plain);
+                },
+              },
+            ]}
             onPlay={() =>
               void playFromList(c, list.id, nn?.now?.title, name).catch((err: unknown) =>
-                toast({ title: tl('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
+                toast({ title: tl('playFailed', { name: plain }), description: errorDescription(err), variant: 'error' }),
               )
             }
           />
@@ -101,7 +118,12 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
 /** The rails of `lists` (those with Show on Home), loaded lazily by `CustomListRails`. */
 export function ListRails({ lists }: { lists: readonly CustomList[] }) {
   const sources = useVisibleSources();
-  const sourceName = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
+  // With one source its name under every card says nothing (and read like a programme): the card
+  // says Live TV or Radio, as Home's other channel rails do.
+  const sourceName = useMemo(() => {
+    const all = sources.data ?? [];
+    return new Map(all.length > 1 ? all.map((s) => [s.id, s.name]) : []);
+  }, [sources.data]);
   return (
     <>
       {lists.map((l) => (

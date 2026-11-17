@@ -8,13 +8,14 @@
  */
 
 import { useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
 import { itemKey, type Category, type Channel, type ChannelQuality, type ItemKey, type Page, type Source, type SourceKind } from '@/api/types';
 import { channelQuality } from '@/lib/channelQuality';
+import { isSeparatorName } from '@/lib/channelName';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import {
@@ -136,14 +137,6 @@ function describe(channel: Channel): Described {
     described.set(channel, d);
   }
   return d;
-}
-
-/**
- * A provider's heading row between groups of channels ("##### FOX ᴴᴰ/ᴿᴬᵂ #####", "===== NFL ====="): a
- * playlist entry with a name, but no channel, which would otherwise read as the network it names.
- */
-export function isSeparatorName(name: string): boolean {
-  return /^\s*[#=*~_]{3,}|[#=*~_]{3,}\s*$/.test(name);
 }
 
 /** One index row. */
@@ -288,9 +281,10 @@ const NO_SOURCES: Source[] = [];
 
 /**
  * The sports channel index of every visible source. `loading` until each part has answered once (rows
- * appear as parts arrive); `error` is the first failure, with the other parts' rows still listed.
+ * appear as parts arrive); `error` is the first failure, with the other parts' rows still listed, and
+ * `retry` reads the failed parts again.
  */
-export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; loading: boolean; error: unknown } {
+export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; loading: boolean; error: unknown; retry: () => void } {
   const client = useQueryClient();
   const sources = useVisibleSources();
   const list = sources.data ?? NO_SOURCES;
@@ -311,5 +305,11 @@ export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; l
   });
   const channels = useMemo(() => buildIndex(list, groups.lists, networks.data), [list, groups.lists, networks.data]);
   const loading = enabled && (sources.isPending || groups.pending || (list.length > 0 && networks.isPending));
-  return { channels, loading, error: sources.error ?? groups.error ?? networks.error ?? null };
+  const { refetch: refetchSources } = sources;
+  const retry = useCallback(() => {
+    if (sources.error) void refetchSources();
+    const parts = new Set<unknown>([sportsGroupsKey('')[0], sportsNetworksKey[0]]);
+    void client.refetchQueries({ predicate: (q) => q.state.status === 'error' && parts.has(q.queryKey[0]) });
+  }, [client, sources.error, refetchSources]);
+  return { channels, loading, error: sources.error ?? groups.error ?? networks.error ?? null, retry };
 }

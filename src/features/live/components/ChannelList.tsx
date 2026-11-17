@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { UNSAFE_LocationContext } from 'react-router';
 
@@ -8,9 +8,10 @@ import { TEXT_LINK, cn, useListVirtualizer, useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { ParentalLocks } from '../hooks/useParentalLocks';
+import { isSeparatorName } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow, RowCaption } from './ChannelRow';
 
 export interface ChannelListProps {
   paged: PagedChannels;
@@ -42,16 +43,29 @@ export interface ChannelListProps {
    * the list leaves them alone. Shift+PageUp and Shift+PageDown still page the list.
    */
   zapKeys?: boolean;
+  /** See `ChannelRow.showGroup`: a search across every group. */
+  showGroup?: boolean;
+  /** A caption over the first row: a number typed found the channel that leads the matches (v-live-10). */
+  leadCaption?: string;
+  /** See `ChannelRow.groupId`: the group the list is open on. */
+  groupId?: string;
+  /** See `ChannelRow.hideFavoriteMark`: the Favorites view. */
+  hideFavoriteMark?: boolean;
 }
 
 interface ListPlace {
   active: number;
   scrollTop: number;
+  /** The channel playing (`playingKey`) while the list was last on screen. */
+  playing?: string;
 }
 
 /** Cursor and scroll offset per list key, kept for the session (bounded, oldest dropped first). */
 const listMemory = new Map<string, ListPlace>();
 const LIST_MEMORY_LIMIT = 64;
+/** The band over a run of search results from one group, at 100 %: a caption line and its air. */
+const GROUP_CAPTION_HEIGHT = 26;
+const GROUP_CAPTION_SPACING = 8;
 /** The cursor has to rest this long before the parent (guide ribbon) follows it. */
 export const ACTIVE_SETTLE_MS = 200;
 
@@ -63,6 +77,30 @@ function remember(key: string, patch: Partial<ListPlace>): void {
     const oldest = listMemory.keys().next().value;
     if (oldest !== undefined) listMemory.delete(oldest);
   }
+}
+
+/** The group column's tab stop, which the inline-start arrow moves to from a row (CategorySidebar). */
+const GROUP_TAB_STOP = '[data-testid="group-nav"] [data-cat-index][tabindex="0"]';
+
+/** The index of the row `el` is in, if any. */
+function rowIndexOf(el: EventTarget | null): number | null {
+  const row = el instanceof Element ? el.closest<HTMLElement>('[data-row-index]') : null;
+  const i = row ? Number(row.dataset.rowIndex) : NaN;
+  return Number.isInteger(i) ? i : null;
+}
+
+/**
+ * `i`, or the nearest row from it in the direction `dir` (then back the other way) that is not a
+ * provider's heading. A row not loaded yet counts as playable: the cursor can wait on it.
+ */
+function playableFrom(paged: PagedChannels, i: number, dir: 1 | -1, count: number): number {
+  for (const d of [dir, -dir]) {
+    for (let j = i; j >= 0 && j < count; j += d) {
+      const ch = paged.getChannel(j);
+      if (!ch || !isSeparatorName(ch.name)) return j;
+    }
+  }
+  return i;
 }
 
 /** Tests: forget every remembered list position. */
@@ -113,10 +151,24 @@ export function ChannelList(props: ChannelListProps) {
 
   // Rows follow the UI scale, and compact density tightens their padding and gaps.
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
+  // A search across groups names the group once over each run of its results, in a caption band
+  // above the run's first row (v-live-02): on every row it left a few letters of group and title.
+  const captionHeight = useRowHeight(GROUP_CAPTION_HEIGHT, GROUP_CAPTION_SPACING);
+  const groupCaption = (i: number): string | undefined => {
+    const { paged: p, showGroup, leadCaption } = propsRef.current;
+    const ch = p.getChannel(i);
+    const group = showGroup && ch?.categoryName && !isSeparatorName(ch.name) ? ch.categoryName : undefined;
+    if (i === 0 && leadCaption) return group ? `${leadCaption} · ${group}` : leadCaption;
+    if (!group) return undefined;
+    if (i === 0) return group;
+    const prev = p.getChannel(i - 1);
+    // Not loaded yet: no band until it is known, then the sizes are measured again.
+    return prev && prev.categoryName !== group ? group : undefined;
+  };
   const virtualizer = useListVirtualizer({
     count,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => rowHeight,
+    estimateSize: (i) => rowHeight + (groupCaption(i) ? captionHeight : 0),
     overscan: 10,
     // Without a hint, the window's size (P2-LIVE-1): the list's own comes after the first layout,
     // and an 800 px guess rendered the rows again before a taller window's first paint.
@@ -131,6 +183,15 @@ export function ChannelList(props: ChannelListProps) {
     measuredHeight.current = rowHeight;
     virtualizer.measure();
   }, [rowHeight, virtualizer]);
+  // New results in a search across groups: their caption bands change the sizes.
+  const captionsFor = props.showGroup ? paged.loaded : null;
+  const captionsMeasured = useRef({ captionsFor, lead: props.leadCaption });
+  useLayoutEffect(() => {
+    const m = captionsMeasured.current;
+    if (m.captionsFor === captionsFor && m.lead === props.leadCaption) return;
+    captionsMeasured.current = { captionsFor, lead: props.leadCaption };
+    virtualizer.measure();
+  }, [captionsFor, props.leadCaption, virtualizer]);
   const items = virtualizer.getVirtualItems();
   const first = items[0]?.index ?? 0;
   const last = items[items.length - 1]?.index ?? 0;
@@ -195,9 +256,14 @@ export function ChannelList(props: ChannelListProps) {
 
   // The cursor follows the playing channel (zap, number entry, remote) once its row is loaded.
   const playingKey = playingRef ? `${playingRef.sourceId}|${playingRef.contentType}|${playingRef.itemId}` : '';
-  // A remembered cursor wins on mount; with none, the playing channel's row is picked up.
-  const followKey = useRef(listMemory.has(resetKey) ? '' : playingKey);
+  // A remembered cursor wins on mount while the same channel plays as when the list was left; with
+  // none, or once another channel started elsewhere (the mini player's Expand, Watch on Sports),
+  // the playing channel's row is picked up.
+  const followKey = useRef(listMemory.has(resetKey) && listMemory.get(resetKey)?.playing === playingKey ? '' : playingKey);
   const seenPlayingKey = useRef(playingKey);
+  useEffect(() => {
+    remember(resetKey, { playing: playingKey });
+  }, [resetKey, playingKey]);
   /** `playingKey|number|list` of the lookup under way for a channel outside the loaded pages. */
   const locating = useRef('');
   const follow = (index: number, align: 'auto' | 'center') => {
@@ -247,7 +313,26 @@ export function ChannelList(props: ChannelListProps) {
   // left a parent render queued behind each keystroke of a fast repeat, so no commit ever ended
   // idle and React stopped the chain as an update loop (#185).
   const activeChannel = paged.getChannel(active);
+  // The cursor never rests on a provider's heading (a list that opens on one, a reload).
+  const activeIsHeading = !!activeChannel && isSeparatorName(activeChannel.name);
+  useEffect(() => {
+    if (activeIsHeading) setActive((a) => playableFrom(propsRef.current.paged, a, 1, propsRef.current.paged.total ?? 0));
+  }, [activeIsHeading, setActive]);
   const { onActiveChange } = props;
+
+  // The number column takes the widest number this list has shown (ChannelRow): it only grows
+  // while the list stays, so scrolling back to low numbers does not move every logo again.
+  // It starts as wide as the list's count: channels are numbered 1 to N, so All channels with
+  // 30,132 takes 5ch from the first frame instead of moving every name past 9,999 (v-live-09).
+  const widest = useRef({ key: resetKey, digits: 0 });
+  if (widest.current.key !== resetKey) widest.current = { key: resetKey, digits: 0 };
+  // Not the count the previous list leaves while this one loads (a search of "12" took 5ch from All channels).
+  if (count >= 1000 && !paged.refreshing) widest.current.digits = Math.max(widest.current.digits, String(count).length);
+  for (const l of paged.loaded) {
+    const n = l.channel.number;
+    if (n !== undefined && n >= 1000) widest.current.digits = Math.max(widest.current.digits, String(n).length);
+  }
+  const numberDigits = widest.current.digits;
   useEffect(() => {
     if (!onActiveChange) return;
     const id = window.setTimeout(() => onActiveChange(activeChannel), ACTIVE_SETTLE_MS);
@@ -286,9 +371,9 @@ export function ChannelList(props: ChannelListProps) {
   });
 
   const moveTo = useCallback(
-    (i: number) => {
+    (i: number, dir: 1 | -1 = 1) => {
       if (count === 0) return;
-      const next = Math.max(0, Math.min(count - 1, i));
+      const next = playableFrom(paged, Math.max(0, Math.min(count - 1, i)), dir, count);
       followKey.current = '';
       // In the event handler, not in a commit: the virtualizer answers the scroll from its own listener.
       virtualizer.scrollToIndex(next, { align: 'auto' });
@@ -302,7 +387,7 @@ export function ChannelList(props: ChannelListProps) {
       }
       setActive(next);
     },
-    [count, setActive, virtualizer],
+    [count, setActive, virtualizer, paged],
   );
 
   const activate = useCallback(
@@ -310,7 +395,7 @@ export function ChannelList(props: ChannelListProps) {
       setActive(index);
       const p = propsRef.current.paged;
       const ch = p.getChannel(index);
-      if (!ch) return;
+      if (!ch || isSeparatorName(ch.name)) return;
       const plays = how === 'key' || how === 'double' || (how === 'click' && !propsRef.current.openOnDoubleClick);
       if (plays) propsRef.current.onPlay(ch, p.getNowNext(index));
     },
@@ -331,27 +416,41 @@ export function ChannelList(props: ChannelListProps) {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     // Ctrl+S, Alt+Enter and friends belong to the app and the browser, not to the row.
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    // The keys act on the row that has focus. Focus can land on a row without the list's own
+    // handlers (a screen reader's focus mode, the scroll memory's restore): the cursor follows it.
+    const focusedRow = rowIndexOf(e.target);
+    if (focusedRow !== null && focusedRow !== activeRef.current) setActive(focusedRow);
     const active = activeRef.current;
     const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 640) / rowHeight) - 1);
     switch (e.key) {
       case 'ArrowDown':
-        moveTo(active + 1);
+        moveTo(active + 1, 1);
         break;
       case 'ArrowUp':
-        moveTo(active - 1);
+        moveTo(active - 1, -1);
         break;
+      case 'ArrowLeft':
+      case 'ArrowRight': {
+        // Toward the inline start: over to the group column (a remote has arrows and OK, no Tab).
+        // The other way stays with the player's seek keys.
+        if (!bare || e.shiftKey || e.key !== (documentIsRtl() ? 'ArrowRight' : 'ArrowLeft')) return;
+        const group = document.querySelector<HTMLElement>(GROUP_TAB_STOP);
+        if (!group) return;
+        group.focus();
+        break;
+      }
       case 'PageDown':
       case 'PageUp':
         // While a live channel plays these zap (the `?` overlay's channel up and down): let the key
         // through to the playback shortcuts. Arrows keep moving the cursor, Shift pages the list.
         if (props.zapKeys && !e.shiftKey) return;
-        moveTo(e.key === 'PageDown' ? active + page : active - page);
+        moveTo(e.key === 'PageDown' ? active + page : active - page, e.key === 'PageDown' ? 1 : -1);
         break;
       case 'Home':
-        moveTo(0);
+        moveTo(0, 1);
         break;
       case 'End':
-        moveTo(count - 1);
+        moveTo(count - 1, -1);
         break;
       case 'Enter':
         if (!bare) return;
@@ -408,6 +507,8 @@ export function ChannelList(props: ChannelListProps) {
         role="list"
         aria-label={t('channelList')}
         data-testid="channel-list"
+        // The shell's skip link lands on the list's current row, past the toolbar.
+        data-skip-target=""
         aria-busy={paged.refreshing || undefined}
         // Focusable from script only: it holds focus while the cursor's row is still loading.
         tabIndex={-1}
@@ -424,6 +525,8 @@ export function ChannelList(props: ChannelListProps) {
           if (!(to instanceof Node && e.currentTarget.contains(to)) && (e.target as HTMLElement).isConnected) lastFocused.current = null;
         }}
         // `group/list`: the cursor row is marked only while the list has focus (ChannelRow).
+        // Wide enough for the source's longest channel number (ChannelRow's number column).
+        style={numberDigits > 3 ? ({ '--num-w': `${numberDigits}ch` } as CSSProperties) : undefined}
         className={`group/list relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
           paged.refreshing ? 'opacity-60' : ''
         }`}
@@ -431,6 +534,7 @@ export function ChannelList(props: ChannelListProps) {
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
           {items.map((v) => {
             const ch = paged.getChannel(v.index);
+            const caption = v.size > rowHeight ? groupCaption(v.index) : undefined;
             return (
               <div
                 key={v.key}
@@ -438,11 +542,18 @@ export function ChannelList(props: ChannelListProps) {
                 aria-setsize={count}
                 aria-posinset={v.index + 1}
                 data-index={v.index}
-                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}
+                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, paddingTop: caption ? v.size - rowHeight : undefined, transform: `translateY(${v.start}px)` }}
               >
+                {/* Above the run's first row, in the room its item has over a row; the row keeps its
+                    place in the tree, so focus stays when the band arrives. The row's own name
+                    carries the group for screen readers. */}
+                {caption ? (
+                  <RowCaption aria-hidden label={caption} compact={props.compact} station={props.station} className="absolute inset-x-0 top-0 pb-1" style={{ height: v.size - rowHeight }} data-testid="group-caption" />
+                ) : null}
                 <ListChannelRow
                   t={t}
                   separator={separator}
+                  language={i18n.language}
                   index={v.index}
                   channel={ch}
                   nowNext={paged.getNowNext(v.index)}
@@ -457,6 +568,9 @@ export function ChannelList(props: ChannelListProps) {
                   epgOffsetMinutes={prefs.epgOffsetMinutes}
                   guideUnavailable={paged.guideUnavailable}
                   locked={props.locks?.channelLocked(ch) ?? false}
+                  showGroup={props.showGroup}
+                  groupId={props.groupId}
+                  hideFavoriteMark={props.hideFavoriteMark}
                   onActivate={activate}
                   onToggleFavorite={props.onToggleFavorite}
                   onContextMenu={onRowContext}

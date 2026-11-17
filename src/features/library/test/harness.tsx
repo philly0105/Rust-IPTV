@@ -8,6 +8,10 @@ import { create } from 'zustand';
 import { queryClient } from '@/api/query';
 import type { PlayerSource } from '@/api/types';
 import library from '@/i18n/en/library.json';
+// A channel row's menu is Live TV's (library-04), with the list and multi-view entries.
+import lists from '@/i18n/en/lists.json';
+import live from '@/i18n/en/live.json';
+import multiview from '@/i18n/en/multiview.json';
 // The shared no-source state's actions come from the sources feature, in its namespace.
 import sources from '@/i18n/en/sources.json';
 
@@ -15,9 +19,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['library', 'sources'],
+  ns: ['library', 'sources', 'live', 'lists', 'multiview'],
   defaultNS: 'library',
-  resources: { en: { library, sources } },
+  resources: { en: { library, sources, live, lists, multiview } },
   interpolation: { escapeValue: false },
   initAsync: false,
 });
@@ -65,7 +69,14 @@ export const playerModule = {
 };
 
 /** The shell header: pages push title and actions into it; tests render the actions. */
-type FakeHeaderState = { title: string; subtitle?: string; actions?: React.ReactNode; search?: { placeholder: string } } | null;
+type FakeHeaderState = {
+  title: string;
+  subtitle?: string;
+  actions?: React.ReactNode;
+  search?: { placeholder: string };
+  back?: { onClick: () => void; label?: string };
+  section?: string;
+} | null;
 const useFakeHeader = create<{ header: FakeHeaderState }>(() => ({ header: null }));
 const setHeader = (header: FakeHeaderState) => useFakeHeader.setState({ header });
 export const shellModule = {
@@ -76,8 +87,15 @@ function FakeHeader() {
   const header = useFakeHeader((s) => s.header);
   return (
     <header data-testid="fake-header">
+      {/* The detail pages' Back (HeaderState.back), as the real header draws it. */}
+      {header?.back ? (
+        <button type="button" data-testid="header-back" onClick={header.back.onClick}>
+          {header.back.label ?? 'Back'}
+        </button>
+      ) : null}
       {/* Like the real shell header (C16): the title is a paragraph, never a heading; pages own their h1. */}
       <p data-testid="page-title">{header?.title}</p>
+      {header?.section ? <p data-testid="page-section">{header.section}</p> : null}
       {header?.subtitle ? <p data-testid="page-subtitle">{header.subtitle}</p> : null}
       {header?.actions}
       {/* The page's own search, when it puts one in the header (else the shell shows Search everything). */}

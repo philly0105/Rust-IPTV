@@ -7,7 +7,8 @@ import { extendTailwindMerge } from 'tailwind-merge';
  * the type scale (`text-caption` ... `text-display`) is font sizes, so
  * `cn('text-body', 'text-fg')` keeps both (an unknown `text-*` would count as a
  * colour and drop the size); `ease-enter` / `ease-exit` are timing functions,
- * and the globals.css keyframes are known `animate-*` values.
+ * and the globals.css keyframes are known `animate-*` values. `text-match-parent`
+ * (globals.css) is a text alignment, so a colour after it does not drop it.
  * Colors (`bg-surface-2`, `text-fg-muted`, `border-edge`), radii, and fonts
  * already resolve through tailwind-merge's open value matching.
  */
@@ -32,6 +33,9 @@ const twMerge = extendTailwindMerge({
         'live-pulse',
         'indeterminate',
       ],
+    },
+    classGroups: {
+      'text-alignment': [{ text: ['match-parent'] }],
     },
   },
 });

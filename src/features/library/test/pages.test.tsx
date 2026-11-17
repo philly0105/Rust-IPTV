@@ -74,7 +74,7 @@ describe('DownloadsPage', () => {
     }),
   );
 
-  it('renders one row per non-completed status with its actions', async () => {
+  it('renders one queue row per unfinished status with its actions', async () => {
     rpc.handlers['downloads.list'] = () => list;
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
 
@@ -85,15 +85,17 @@ describe('DownloadsPage', () => {
         .getAllByRole('button')
         .map((b) => b.dataset['action'])
         .filter(Boolean);
-    expect(actions('downloading')).toEqual(['pause', 'cancel']);
-    expect(actions('queued')).toEqual(['pause', 'cancel', 'next']);
-    expect(actions('paused')).toEqual(['resume', 'remove']);
+    // Download speed first, so the queue actions keep their places at the row's end.
+    expect(actions('downloading')).toEqual(['speed', 'pause', 'cancel']);
+    expect(actions('queued')).toEqual(['speed', 'pause', 'cancel', 'next']);
+    expect(actions('paused')).toEqual(['speed', 'resume', 'remove']);
     expect(actions('failed')).toEqual(['retry', 'remove']);
     expect(actions('canceled')).toEqual(['retry', 'remove']);
     expect(screen.getByText('Queue')).toBeTruthy();
     expect(screen.getByText('Needs attention')).toBeTruthy();
     expect(screen.getByText('HTTP 403')).toBeTruthy();
-    expect(screen.queryByText('Title completed')).toBeNull();
+    // The finished one is listed under the queue, not as a transfer.
+    expect(within(screen.getByTestId('finished-row')).getByText('Title completed')).toBeTruthy();
     expect(screen.getByRole('progressbar', { name: 'Download progress for Title downloading' })).toBeTruthy();
   });
 
@@ -111,13 +113,18 @@ describe('DownloadsPage', () => {
       download = { ...download, rateLimitBps: (args as { bytesPerSecond: number | null }).bytesPerSecond ?? undefined };
     };
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Default speed: 1 MiB/s' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Default speed: 1 MB/s' }));
+    // 1 MB/s is a preset; any other number is Custom.
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('1');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(rpc.callsOf('settings.update')).toEqual([{ patch: { downloadRateLimitBps: 2.5 * mib } }]));
     const openRow = async () => fireEvent.click(await screen.findByRole('button', { name: /Change download speed for News/ }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(screen.getByText('Default: 2.5 MiB/s')).toBeTruthy();
+    // The default is not repeated on the row; its speed button names it.
+    expect(await screen.findByRole('button', { name: 'Change download speed for News (Default: 2.5 MB/s)' })).toBeTruthy();
+    expect(screen.queryByTestId('download-speed-limit')).toBeNull();
     await openRow();
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('default');
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
@@ -125,6 +132,14 @@ describe('DownloadsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(rpc.callsOf('downloads.setRateLimit')).toEqual([{ id: 51, bytesPerSecond: 4 * mib }]);
+    // A limit of its own shows on the row.
+    expect((await screen.findByTestId('download-speed-limit')).textContent).toContain('4 MB/s');
+    await openRow();
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('custom');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rpc.callsOf('downloads.setRateLimit').at(-1)).toEqual({ id: 51, bytesPerSecond: 10 * mib });
     await openRow();
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'unlimited' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -135,7 +150,7 @@ describe('DownloadsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(rpc.callsOf('downloads.setRateLimit').at(-1)).toEqual({ id: 51, bytesPerSecond: null });
-    expect(screen.getByText('Default: 2.5 MiB/s')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Change download speed for News (Default: 2.5 MB/s)' })).toBeTruthy();
   });
 
   it('rejects invalid speeds and keeps the editor open when saving fails', async () => {
@@ -155,6 +170,24 @@ describe('DownloadsPage', () => {
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect((screen.getByRole('spinbutton') as HTMLInputElement).value).toBe('3');
+  });
+
+  it('pauses every running row at once, then resumes every paused one', async () => {
+    let rows = [
+      makeDownload({ id: 61, title: 'One', status: 'downloading' }),
+      makeDownload({ id: 62, title: 'Two', status: 'queued' }),
+      makeDownload({ id: 63, title: 'Three', status: 'failed' }),
+    ];
+    rpc.handlers['downloads.list'] = () => rows;
+    rpc.handlers['downloads.pause'] = (args) => {
+      rows = rows.map((d) => (d.id === (args as { id: number }).id ? { ...d, status: 'paused' } : d));
+    };
+    rpc.handlers['downloads.resume'] = () => undefined;
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause all' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.pause').map((a) => (a as { id: number }).id).sort()).toEqual([61, 62]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume all' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.resume').map((a) => (a as { id: number }).id).sort()).toEqual([61, 62]));
   });
 
   it('calls the matching rpc for row actions', async () => {
@@ -205,7 +238,9 @@ describe('DownloadsPage', () => {
       resumeSeconds: 300,
       subtitle: 'Evening news',
     });
-    expect(screen.getByRole('button', { name: 'Pause Channel 1' })).toBeTruthy();
+    // An archived programme is named by the programme, not its channel (four would all read "Channel 1").
+    expect(screen.getByRole('button', { name: 'Pause Evening news' })).toBeTruthy();
+    expect(screen.getByTestId('download-row').textContent).toContain('Channel 1 · Sun 18 Oct 8:00 PM');
   });
 
   it('offers Try again on a retryable failure and re-issues the command', async () => {
@@ -336,11 +371,37 @@ describe('DownloadsPage', () => {
     expect((await screen.findByRole('link', { name: 'Browse movies' })).getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
   });
 
-  it('shows the empty state when only completed items remain', async () => {
-    rpc.handlers['downloads.list'] = () => [list[3]];
+  it('with no sources, says to add one first, like every other empty page (sources-onboarding-15)', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    rpc.handlers['sources.list'] = () => [];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
-    expect(await screen.findByText('Nothing is downloading')).toBeTruthy();
-    expect(screen.getByText('Your 1 finished download is in My videos.')).toBeTruthy();
+    expect(await screen.findByText(/^Add a source first\. Then use the download button/)).toBeTruthy();
+    expect(await screen.findByTestId('library-empty-add-source')).toBeTruthy();
+  });
+
+  it('keeps a finished download on the page with Play and its page in My videos', async () => {
+    rpc.handlers['downloads.list'] = () => [
+      makeDownload({ id: 21, status: 'completed', title: 'Heat', totalBytes: 2048, fileAvailable: true, completedAt: '2026-10-02T00:00:00Z', fileName: 'Heat (1995).mkv', filePath: 'D:\\Videos\\Heat (1995).mkv' }),
+      makeDownload({ id: 22, status: 'completed', title: 'Ronin', fileAvailable: false, completedAt: '2026-10-03T00:00:00Z' }),
+    ];
+    rpc.handlers['myvideos.playSource'] = () => ({ url: 'file:///heat.mkv', kind: 'file' });
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    const rows = await screen.findAllByTestId('finished-row');
+    expect(screen.queryByText('Nothing is downloading')).toBeNull();
+    expect(screen.getByText('Recently finished')).toBeTruthy();
+    // Newest first; a file that is gone offers to download it again instead of Play.
+    expect(rows.map((r) => r.dataset['downloadId'])).toEqual(['22', '21']);
+    expect(within(rows[0]!).getByText('File missing')).toBeTruthy();
+    fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Download Ronin again' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.retry')).toEqual([{ id: 22 }]));
+    // The file to look for, with its full path in the tooltip (walkthrough-13).
+    const file = within(rows[1]!).getByTestId('finished-file');
+    expect(file.textContent).toBe('Heat (1995).mkv');
+    expect(file.getAttribute('title')).toBe('D:\\Videos\\Heat (1995).mkv');
+    expect(within(rows[0]!).queryByTestId('finished-file')).toBeNull();
+    expect(within(rows[1]!).getByRole('link', { name: 'Show Heat in My videos' }).getAttribute('href')).toBe('/my-videos/21');
+    fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Play Heat' }));
+    await waitFor(() => expect(rpc.callsOf('myvideos.playSource')).toEqual([{ id: 21 }]));
   });
 
   it('shows the error state', async () => {
@@ -419,7 +480,7 @@ describe('MyVideoDetailPage', () => {
   it('shows not found for an unknown id', async () => {
     rpc.handlers['myvideos.list'] = () => library;
     renderAt('/my-videos/99', [{ path: '/my-videos/:id', element: <MyVideoDetailPage /> }]);
-    expect(await screen.findByText('This video is not in your library')).toBeTruthy();
+    expect(await screen.findByText('This video is not in My videos')).toBeTruthy();
   });
 });
 
@@ -433,7 +494,9 @@ describe('FavoritesPage', () => {
     expect(screen.queryByTestId('page-search')).toBeNull();
     // One icon per idea: a favourite is the rail's heart, and the copy under it no longer says "Star".
     expect(document.querySelector('svg.lucide-heart')).toBeTruthy();
-    expect(screen.getByText('Add channels, movies, and series from any source to your favorites to collect them here.')).toBeTruthy();
+    // It says how to add one, and where a movie for later goes instead (library-01, library-11).
+    expect(screen.getByText(/Press the heart on a channel or on a title's page, or S on a channel in Live TV/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'My List' }).getAttribute('href')).toBe('/my-list');
     cleanup();
 
     rpc.handlers['favorites.list'] = () => favs;
@@ -561,15 +624,30 @@ describe('RecentPage', () => {
     rpc.handlers['positions.continueWatching'] = () => [p1];
     renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
 
-    // No bar and no time left to show, so the row's end gives the clock the card gave.
+    // No bar and no time left to show; the type line says where it stopped, in words (library-10).
     const resume = await screen.findByTestId('entry-resume');
     expect(within(resume).queryByRole('progressbar')).toBeNull();
-    const left = within(resume).getByTestId('entry-left');
-    expect(left.getAttribute('title')).toBe('Resume at 30:00');
-    expect(within(left).getByText('Resume at 30:00')).toBeTruthy();
-    expect(within(left).getByText('30:00')).toBeTruthy();
+    expect(within(resume).getByTestId('entry-stopped').textContent).toBe('·Stopped at 30:00');
+    expect(within(resume).queryByTestId('entry-left')).toBeNull();
     // The other row is plain history: no clock.
-    expect(screen.getAllByTestId('entry-left')).toHaveLength(1);
+    expect(screen.getAllByTestId('entry-stopped')).toHaveLength(1);
+    // Without a time left it is the only clock on the row, so a phone keeps it too.
+    expect(within(resume).getByTestId('entry-stopped').className).not.toContain('max-sm:hidden');
+  });
+
+  it('"Stopped at" gives way to the time left: it ellipsizes, and a phone drops it (v-themes-locales-02)', async () => {
+    const p1 = makePosition('p1', 1800, 5400);
+    rpc.handlers['recent.list'] = () => [{ ref: p1.ref, viewedAt: new Date().toISOString(), snapshot: p1.snapshot! }];
+    rpc.handlers['positions.continueWatching'] = () => [p1];
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+
+    const resume = await screen.findByTestId('entry-resume');
+    const stopped = within(resume).getByTestId('entry-stopped');
+    expect(stopped.className).toMatch(/(^|\s)min-w-0(\s|$)/);
+    expect(stopped.className).toContain('truncate');
+    expect(stopped.className).toContain('max-sm:hidden');
+    expect(stopped.className).not.toContain('shrink-0');
+    expect(within(resume).getByTestId('entry-left').className).toContain('shrink-0');
   });
 
   it('empty while the quality filter is on, says it may be hiding channels', async () => {

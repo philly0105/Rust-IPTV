@@ -1,11 +1,12 @@
-import { CloudOff, Compass } from 'lucide-react';
+import { CloudOff, Compass, Unplug } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createBrowserRouter, isRouteErrorResponse, Link, matchRoutes, Navigate, useParams, useRouteError, type RouteObject } from 'react-router';
+import { createBrowserRouter, isRouteErrorResponse, Link, matchRoutes, Navigate, Outlet, useLocation, useParams, useRouteError, type RouteObject } from 'react-router';
 
 import { prefetchScreenData } from '@/api/bootPrefetch';
 import { getConnectionState, onConnectionState } from '@/api/events';
 import { useRpcQuery } from '@/api/query';
+import type { Source } from '@/api/types';
 import { isDesktop, RpcError } from '@/api/transport';
 import { libraryRoutes } from '@/features/library/routes';
 import { listsRoutes } from '@/features/lists/routes';
@@ -19,7 +20,8 @@ import { statsRoutes } from '@/features/stats/routes';
 import { vodRoutes } from '@/features/vod/routes';
 import { ShellLayout, sourceHomePath, useShellHeader, useShellStore } from '@/shell';
 import { useOffline } from '@/shell/connection';
-import { PHONE_QUERY } from '@/shell/navigation';
+import { liveTabTarget, PHONE_QUERY, RAIL_DOCK_QUERY, readLastSource } from '@/shell/navigation';
+import { routeSourceId } from '@/shell/railLinks';
 import { setRouteWarmer } from '@/shell/routeIntent';
 import { ShellSkeleton } from '@/shell/ShellLayout';
 import { loadDashboard, StartupRedirect } from '@/shell/StartupRedirect';
@@ -66,9 +68,13 @@ export function NotFoundPage() {
 export function AppLoading() {
   const railPref = useShellStore((s) => s.railCollapsed);
   const railHiddenPref = useShellStore((s) => s.railHidden);
-  const narrow = useMediaQuery('(max-width: 1023px)');
+  const narrow = useMediaQuery(RAIL_DOCK_QUERY);
   const phone = useMediaQuery(PHONE_QUERY);
-  return <ShellSkeleton collapsed={railPref || narrow} railHidden={railHiddenPref && narrow && !phone} phone={phone} testId="app-loading" />;
+  // Home's blocks only where Home is coming; any other page gets the neutral line, so its own
+  // layout (Live's columns, a grid) does not replace a Home-shaped placeholder.
+  const { pathname } = window.location;
+  const home = pathname === '/' || pathname === '/dashboard';
+  return <ShellSkeleton collapsed={railPref || narrow} railHidden={railHiddenPref && narrow && !phone} phone={phone} homeBody={home} testId="app-loading" />;
 }
 
 /** A lazy page chunk that failed to download (offline, or a stale build after an update). */
@@ -183,6 +189,73 @@ export function SourceIndexRedirect() {
 
 const sourceRootRoutes: RouteObject[] = [{ path: 's/:sourceId', element: <SourceIndexRedirect /> }];
 
+/**
+ * Every page of a source (`/s/:sourceId/...` and the catch-up archive) when that source is not
+ * there: an old bookmark, a stale link, a source removed from another window. The page would show
+ * a bare "Not found"; this says what happened and leads on, to Live TV of a source that is there
+ * (or to adding one) and to the Sources page. While the list loads, or when it failed, the page
+ * renders as before: the list is prefetched at boot, so that rarely waits.
+ */
+export function SourceGuard() {
+  const { pathname } = useLocation();
+  const sources = useRpcQuery('sources.list', undefined);
+  const id = routeSourceId(pathname);
+  const gone = !!id && !!sources.data && !sources.data.some((s) => s.id === id);
+  return gone ? <SourceGone sources={sources.data!} /> : <Outlet />;
+}
+
+function SourceGone({ sources }: { sources: readonly Source[] }) {
+  const { t } = useTranslation(['shell', 'common']);
+  // The header and the route announcement say what the page says, not a vaguer 'Not found'.
+  const title = t('shell:sourceMissing');
+  useShellHeader({ title }, [title]);
+  const live = liveTabTarget(sources, readLastSource());
+  return (
+    <>
+      <h1 className="sr-only">{title}</h1>
+      <EmptyState
+        icon={<Unplug size={28} aria-hidden />}
+        title={title}
+        description={t('common:errorHintNotFound')}
+        action={
+          <div className="flex flex-wrap justify-center gap-2">
+            {live ? (
+              <>
+                <Link to={live} className={buttonClass('primary')}>
+                  {t('shell:railLive')}
+                </Link>
+                <Link to="/sources" className={buttonClass('secondary')}>
+                  {t('shell:manageSources')}
+                </Link>
+              </>
+            ) : (
+              <Link to="/sources?add=1" className={buttonClass('primary')}>
+                {t('shell:addSource')}
+              </Link>
+            )}
+          </div>
+        }
+      />
+    </>
+  );
+}
+
+/** A page of one source: under SourceGuard. */
+const isSourcePage = (r: RouteObject) => /^(s|live\/archive)\/:sourceId(\/|$)/.test(r.path ?? '');
+
+const featureRoutes: RouteObject[] = [
+  ...sourcesRoutes,
+  ...settingsRoutes,
+  ...liveRoutes,
+  ...vodRoutes,
+  ...libraryRoutes,
+  ...multiviewRoutes,
+  ...myListRoutes,
+  ...listsRoutes,
+  ...statsRoutes,
+  ...sportsRoutes,
+];
+
 /** C7 route tree: the shell layout at `/` with every feature's relative routes. */
 export const routes: RouteObject[] = [
   {
@@ -197,17 +270,9 @@ export const routes: RouteObject[] = [
         errorElement: <RouteErrorPage />,
         children: [
           ...shellChildRoutes,
-          ...sourcesRoutes,
-          ...settingsRoutes,
-          ...liveRoutes,
-          ...vodRoutes,
-          ...libraryRoutes,
-          ...multiviewRoutes,
-          ...myListRoutes,
-          ...listsRoutes,
-          ...statsRoutes,
-          ...sportsRoutes,
-          ...sourceRootRoutes,
+          ...featureRoutes.filter((r) => !isSourcePage(r)),
+          // Pathless: the pages keep their paths, and a source that is not there gets one answer.
+          { element: <SourceGuard />, children: [...featureRoutes.filter(isSourcePage), ...sourceRootRoutes] },
           { path: '*', element: <NotFoundPage /> },
         ],
       },

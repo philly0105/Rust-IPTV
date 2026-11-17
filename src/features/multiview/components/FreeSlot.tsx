@@ -1,10 +1,10 @@
-import { LoaderCircle, Plus, Search } from 'lucide-react';
+import { LoaderCircle, Plus, Search, TriangleAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey } from '@/api/types';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/features/live/lib/channelName';
+import { displayChannelName, plainChannelName } from '@/features/live/lib/channelName';
 
 import { Button, cn, TOUCH_TARGET } from '../deps';
 import type { QuickPick } from '../quickPicks';
@@ -65,6 +65,8 @@ export interface FreeSlotProps {
   /** The wall is empty: the next slot also says how the wall works. */
   intro: boolean;
   picks: readonly QuickPick[];
+  /** Accounts with every stream in use: their picks are marked as the picker marks its rows. */
+  limitedSources: ReadonlySet<string>;
   picksLoading: boolean;
   /** Key of the pick being put up, while its parental check runs. */
   pending: string | null;
@@ -74,10 +76,12 @@ export interface FreeSlotProps {
 
 /**
  * A free slot. The next one to fill lists up to three recent or favorite live channels that go up
- * with one click, and "More channels" for the picker; the others, and the next one when there is
- * nothing to offer, are one button that opens the picker.
+ * with one click, and "More channels" for the picker; with nothing to offer it is one button that
+ * opens the picker. Tiles fill the slots in order, so the free slots after it are plain numbered
+ * frames that give the layout its shape: a button there would put the channel in the next slot,
+ * not the one clicked.
  */
-export function FreeSlot({ slot, className, disabled, next, intro, picks, picksLoading, pending, onAdd, onPick }: FreeSlotProps) {
+export function FreeSlot({ slot, className, disabled, next, intro, picks, limitedSources, picksLoading, pending, onAdd, onPick }: FreeSlotProps) {
   const { t } = useTranslation('multiview');
   const { stripCountryPrefix } = useDisplayPrefs();
   const number = slot + 1;
@@ -89,11 +93,21 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
   const hint = (shown: string) =>
     explains ? (
       <span id={hintId} data-testid="multiview-empty-hint" className={cn('max-w-[28rem] text-center text-sm font-normal text-pretty text-fg-muted', shown)}>
-        {t('emptyBody')}
+        <span className="pointer-coarse:hidden">{t('emptyBody')}</span>
+        <span className="hidden pointer-coarse:inline">{t('emptyBodyTouch')}</span>
       </span>
     ) : null;
 
-  if (!next || (!picksLoading && picks.length === 0)) {
+  if (!next) {
+    // Stacked (a wall under 42rem, a phone) these are left out: screens of dashes to scroll past.
+    return (
+      <div aria-hidden data-testid="multiview-free-frame" data-slot={number} className={cn(FRAME, 'hidden @2xl:flex', className)}>
+        <SlotNumber number={number} />
+      </div>
+    );
+  }
+
+  if (!picksLoading && picks.length === 0) {
     // Stacked (a wall under 42rem, a phone), the slots after the next one are left out and the
     // next one is a short row: N full-width 16:9 frames were screens of dashes to scroll past.
     // The toolbar's Add channel and the next slot still reach the picker. On an empty wall the
@@ -113,7 +127,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
         className={cn(
           FRAME,
           '@container/slot group/slot flex flex-col items-center justify-center gap-2 p-2 text-fg-muted outline-none',
-          next ? stacked : 'hidden @2xl:flex',
+          stacked,
           'hover:border-accent hover:bg-surface hover:text-fg active:bg-surface-2',
           'focus-visible:border-solid focus-visible:border-focus focus-visible:text-fg',
           'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-divider disabled:hover:bg-surface/50',
@@ -195,12 +209,15 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
                   const busy = pending === k;
                   // The name the picker and Live TV give the channel (settings.stripCountryPrefix).
                   const name = displayChannelName(p.title, stripCountryPrefix);
+                  // Heard as toasts word it ("ESPN HD (US)"); the tooltip keeps the provider's name.
+                  const spoken = plainChannelName(p.title, stripCountryPrefix);
+                  const limited = limitedSources.has(p.ref.sourceId);
                   return (
                     <li key={k} className={ROW_ROOM[i]}>
                       <button
                         type="button"
-                        aria-label={t('pickerAddLabel', { name })}
-                        title={name}
+                        aria-label={limited ? `${t('pickerAddLabel', { name: spoken })}, ${t('errorLimitTitle')}` : t('pickerAddLabel', { name: spoken })}
+                        title={limited ? `${name}: ${t('errorLimitTitle')}` : name}
                         aria-busy={busy || undefined}
                         disabled={disabled || (pending !== null && !busy)}
                         onClick={() => onPick(p, slot)}
@@ -215,6 +232,8 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
                         <ChannelName name={p.title} strip={stripCountryPrefix} className="min-w-0 flex-1 truncate" />
                         {busy ? (
                           <LoaderCircle aria-hidden className="size-4 shrink-0 text-fg-muted motion-safe:animate-spin" />
+                        ) : limited ? (
+                          <TriangleAlert aria-hidden data-testid="multiview-quick-pick-limit" className="size-4 shrink-0 text-warning" />
                         ) : (
                           <Plus aria-hidden className="size-4 shrink-0 text-fg-muted" />
                         )}

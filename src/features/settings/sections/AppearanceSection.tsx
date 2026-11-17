@@ -46,46 +46,47 @@ const RAIL_KEY: Record<keyof DashboardRails, string> = {
  * in step with the token file.
  */
 export const PREVIEW_PALETTE = {
-  dark: { bg: '#0c1320', surface: '#121a29', line: '#1d2637', fg: '#eef1f6', accent: '#f5b544' },
+  dark: { bg: '#0c1320', surface: '#121a29', line: '#1d2637', fg: '#e3e7ee', accent: '#f5b544' },
   light: { bg: '#edf0f5', surface: '#ffffff', line: '#e1e5ec', fg: '#0f1626', accent: '#8f4f00' },
-  oled: { bg: '#000000', surface: '#000000', line: '#151a22', fg: '#eef1f6', accent: '#f5b544' },
+  oled: { bg: '#000000', surface: '#000000', line: '#151a22', fg: '#e3e7ee', accent: '#f5b544' },
 } as const;
 
 /**
- * Every accent's text tone with its text-on-fill (`accent`, `fg`) and its solid fill with the
- * text on that fill (`solid`, `solidFg`), per theme (OLED uses the dark set). The swatches show
+ * Every accent's text tone with its text-on-fill (`accent`, `fg`), its solid fill with the
+ * text on that fill (`solid`, `solidFg`) and its mark tone (`mark`, 3:1 on the page), per theme
+ * (OLED uses the dark set). The swatches show
  * the solid fill, which is what a primary button looks like in that theme. Mirrors the
  * data-accent blocks in tokens.css; a test keeps them in step.
  */
-type AccentTones = { accent: string; fg: string; solid: string; solidFg: string };
+type AccentTones = { accent: string; fg: string; solid: string; solidFg: string; mark: string };
 export const ACCENT_PALETTE: Record<Accent, Record<'dark' | 'light', AccentTones>> = {
   amber: {
-    dark: { accent: '#f5b544', fg: '#1b1204', solid: '#f5b544', solidFg: '#1b1204' },
-    light: { accent: '#8f4f00', fg: '#ffffff', solid: '#f5b544', solidFg: '#1b1204' },
+    dark: { accent: '#f5b544', fg: '#1b1204', solid: '#f5b544', solidFg: '#1b1204', mark: '#f5b544' },
+    light: { accent: '#8f4f00', fg: '#ffffff', solid: '#f5b544', solidFg: '#1b1204', mark: '#c26900' },
   },
   teal: {
-    dark: { accent: '#3ccfbd', fg: '#03201c', solid: '#3ccfbd', solidFg: '#03201c' },
-    light: { accent: '#00685d', fg: '#ffffff', solid: '#3ccfbd', solidFg: '#03201c' },
+    dark: { accent: '#3ccfbd', fg: '#03201c', solid: '#3ccfbd', solidFg: '#03201c', mark: '#3ccfbd' },
+    light: { accent: '#00685d', fg: '#ffffff', solid: '#3ccfbd', solidFg: '#03201c', mark: '#008e7e' },
   },
   violet: {
-    dark: { accent: '#b7a0ff', fg: '#170c33', solid: '#b7a0ff', solidFg: '#170c33' },
-    light: { accent: '#6a42cf', fg: '#ffffff', solid: '#b7a0ff', solidFg: '#170c33' },
+    dark: { accent: '#b7a0ff', fg: '#170c33', solid: '#b7a0ff', solidFg: '#170c33', mark: '#b7a0ff' },
+    light: { accent: '#6a42cf', fg: '#ffffff', solid: '#b7a0ff', solidFg: '#170c33', mark: '#8460ea' },
   },
   rose: {
-    dark: { accent: '#ff8fb3', fg: '#2e0614', solid: '#ff8fb3', solidFg: '#2e0614' },
-    light: { accent: '#b3215a', fg: '#ffffff', solid: '#ff8fb3', solidFg: '#2e0614' },
+    dark: { accent: '#ff8fb3', fg: '#2e0614', solid: '#ff8fb3', solidFg: '#2e0614', mark: '#ff8fb3' },
+    light: { accent: '#b3215a', fg: '#ffffff', solid: '#ff8fb3', solidFg: '#2e0614', mark: '#da3772' },
   },
   lime: {
-    dark: { accent: '#b4e05a', fg: '#141f02', solid: '#b4e05a', solidFg: '#141f02' },
-    light: { accent: '#476800', fg: '#ffffff', solid: '#b4e05a', solidFg: '#141f02' },
+    dark: { accent: '#b4e05a', fg: '#141f02', solid: '#b4e05a', solidFg: '#141f02', mark: '#b4e05a' },
+    light: { accent: '#476800', fg: '#ffffff', solid: '#b4e05a', solidFg: '#141f02', mark: '#628c00' },
   },
   sky: {
-    dark: { accent: '#6cc2ff', fg: '#03182b', solid: '#6cc2ff', solidFg: '#03182b' },
-    light: { accent: '#0a5ca6', fg: '#ffffff', solid: '#6cc2ff', solidFg: '#03182b' },
+    dark: { accent: '#6cc2ff', fg: '#03182b', solid: '#6cc2ff', solidFg: '#03182b', mark: '#6cc2ff' },
+    light: { accent: '#0a5ca6', fg: '#ffffff', solid: '#6cc2ff', solidFg: '#03182b', mark: '#167bd6' },
   },
   coral: {
-    dark: { accent: '#ff9474', fg: '#2b0d04', solid: '#ff9474', solidFg: '#2b0d04' },
-    light: { accent: '#ad3b16', fg: '#ffffff', solid: '#ff9474', solidFg: '#2b0d04' },
+    dark: { accent: '#ff9474', fg: '#2b0d04', solid: '#ff9474', solidFg: '#2b0d04', mark: '#ff9474' },
+    light: { accent: '#ad3b16', fg: '#ffffff', solid: '#ff9474', solidFg: '#2b0d04', mark: '#d6532a' },
   },
 };
 
@@ -195,8 +196,12 @@ function AccentPicker({ value, onChange, tone, hintId }: { value: Accent; onChan
                 className="flex size-9 items-center justify-center rounded-full motion-safe:transition-[box-shadow,scale] motion-safe:duration-150 motion-safe:group-active:scale-95"
                 style={{
                   background: swatch.solid,
-                  // Ring in the swatch's own colour, separated by a gap the colour of the card.
-                  boxShadow: selected ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${swatch.solid}` : 'inset 0 0 0 1px rgb(0 0 0 / 0.12)',
+                  // Ring in the swatch's mark tone (the fill itself in dark; a deeper shade in light,
+                  // where the bright fill is under 3:1 on white), separated by a gap the colour of
+                  // the card. Unselected, a light swatch gets a firmer inset edge on white.
+                  boxShadow: selected
+                    ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${swatch.mark}`
+                    : `inset 0 0 0 1px rgb(0 0 0 / ${tone === 'light' ? 0.18 : 0.12})`,
                 }}
               >
                 {selected ? <Check size={18} strokeWidth={2.75} style={{ color: swatch.solidFg }} /> : null}
@@ -418,15 +423,15 @@ export function AppearanceSection({ settings, update }: SectionProps) {
           {options.map((o) => {
             const selected = o.value === current;
             return (
-              // One selection language on the page: the chosen card (like the chosen swatch) gets
-              // the accent outline and a check badge. The radio stays, visually hidden, for its
+              // One selection language on the page: the chosen card gets a firm neutral outline on
+              // the selected fill, and the check badge is its one accent mark (selection is neutral). The radio stays, visually hidden, for its
               // semantics and arrow keys; the card draws its focus ring.
               // rounded-md: one radius step under the 12 px group it sits in, 12 px in.
               <label
                 key={o.value}
                 className={clsx(
                   'relative flex min-w-0 cursor-pointer flex-col gap-2 rounded-md border p-2 @md:gap-3 @md:p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
-                  selected ? 'border-accent bg-surface-2' : 'border-edge hover:border-border hover:bg-hover active:bg-active',
+                  selected ? 'border-fg-muted bg-selected' : 'border-edge hover:border-border hover:bg-hover active:bg-active',
                 )}
               >
                 {/* The check sits inside the preview's corner, not across its edge. */}

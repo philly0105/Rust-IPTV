@@ -143,14 +143,14 @@ describe('sidebar section', () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
     const first = h.renderAt('/live', routes);
     await screen.findByTestId('lists-sidebar');
-    const fold = screen.getByRole('button', { name: 'Lists' });
+    const fold = screen.getByRole('button', { name: 'Channel lists' });
     expect(fold.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(fold);
     expect(fold.getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByTestId('lists-sidebar').closest('[hidden]')).not.toBeNull();
     first.unmount();
     h.renderAt('/live', routes);
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Lists/ }).getAttribute('aria-expanded')).toBe('false'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Channel lists/ }).getAttribute('aria-expanded')).toBe('false'));
   });
 
   it('empty: invites a new list; New list and Manage open their dialogs', async () => {
@@ -161,6 +161,18 @@ describe('sidebar section', () => {
     expect(dialog()).toEqual({ kind: 'create', channel: undefined, openAfter: true });
     fireEvent.click(screen.getByRole('button', { name: 'Manage lists' }));
     expect(dialog()).toEqual({ kind: 'manage', focusId: undefined });
+  });
+
+  it('on the list page, New list is a labelled row under the lists (w-walkthrough-11)', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+    h.renderAt('/lists/L1', [{ path: '/lists/:listId', element: <ListsSidebarSection variant="page" activeListId="L1" /> }]);
+    await screen.findByTestId('lists-sidebar');
+    const section = screen.getByTestId('lists-section');
+    // One New list, in words: no bare icon by the heading as well.
+    const add = within(section).getByRole('button', { name: 'New list' });
+    expect(add.textContent).toBe('New list');
+    fireEvent.click(add);
+    expect(dialog()).toEqual({ kind: 'create', channel: undefined, openAfter: true });
   });
 
   it('a load failure says so and retries', async () => {

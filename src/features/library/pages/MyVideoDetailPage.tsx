@@ -5,7 +5,7 @@
  * returns to browse.
  */
 
-import { ArrowLeft, FileWarning, FolderOpen, Library, Play, RotateCcw, SearchX, Trash2 } from 'lucide-react';
+import { ArrowLeft, Download as DownloadIcon, FileWarning, FolderOpen, Library, Play, RotateCcw, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -14,7 +14,7 @@ import { RpcError, isDesktop } from '@/api/transport';
 import { useRpcQuery } from '@/api/query';
 import type { Download, ItemRef } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
-import { BackButton } from '@/ui/Page';
+import { Tooltip } from '@/ui/Tooltip';
 import { intlLocale } from '@/lib/intl';
 
 import {
@@ -24,7 +24,6 @@ import {
   DetailHeroSkeleton,
   EmptyState,
   ErrorState,
-  HERO_BACK,
   HeroActionGroup,
   HeroIcon,
   IconButton,
@@ -32,6 +31,7 @@ import {
   PlayerStage,
   SectionHeader,
   Toggle,
+  useDetailPageHeader,
   useShortcut,
   useToast,
   usePlayerStore,
@@ -43,7 +43,6 @@ import { EPISODE_ROW_HEIGHT, EpisodeRow, episodeActions, episodeCode, type Episo
 import { VirtualRows } from '../components/VirtualRows';
 import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useMyVideos, useSourcesById } from '../hooks/useLibraryData';
-import { usePageHeader } from '../hooks/usePageHeader';
 import { formatBytes, formatClock } from '../lib/format';
 import { entryTargetId, findEntry, groupBySeason, buildLibrary, type EpisodeEntry, type LibraryEntry } from '../lib/myvideos';
 import { playDownload } from '../lib/playDownload';
@@ -123,7 +122,9 @@ export function MyVideoDetailPage() {
   const [playing, setPlaying] = useState<{ id: number; url?: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Download | null>(null);
-  const [deleteFile, setDeleteFile] = useState(false);
+  // In a browser the file is on the server, where nothing else can delete it later (no Show in
+  // folder there), so removing it from the library frees the space by default.
+  const [deleteFile, setDeleteFile] = useState(!isDesktop);
   const removedEntry = useRef(false);
   const playerUrl = usePlayerStore((s) => s.source?.url);
   const playerTitle = usePlayerStore((s) => s.source?.title);
@@ -181,7 +182,7 @@ export function MyVideoDetailPage() {
     (a: EpisodeAction, d: Download) => {
       if (a === 'play') void play(d);
       else if (a === 'remove') {
-        setDeleteFile(false);
+        setDeleteFile(!isDesktop);
         setRemoveTarget(d);
       } else void perform(a, d);
     },
@@ -206,16 +207,14 @@ export function MyVideoDetailPage() {
     setRemoveTarget(null);
   };
 
-  // The header title is also the window and tab title, so it is the title's own name, as on the
-  // catalogue's detail pages.
-  const pageTitle = entry?.title ?? t('myVideosTitle');
-  // While watching, Back sits in the header (the hero and its Back pill are gone); browsing, it is
-  // the hero's frosted pill, the one Back pattern of every detail page.
-  const backAction = useMemo(
-    () => (watching ? <BackButton to={back} onClick={goBack} label={t('backToLibrary')} /> : undefined),
-    [back, goBack, t, watching],
-  );
-  usePageHeader(pageTitle, entry ? t(entry.kind === 'movie' ? 'movie' : 'series') : undefined, backAction);
+  // The catalogue's detail pattern (MovieDetailPage): the header title is also the window and tab
+  // title, so it is the title's own name. Browsing, the header leads with Back and names the
+  // section while the hero shows the title large, and the title fades in once the hero's h1
+  // scrolls away. Watching, the h1 under the player names the title as the header does, and the
+  // one way back is "Back to details" beside it, as on a catalogue page's watch stage.
+  const myVideos = t('myVideosTitle');
+  const pageTitle = entry?.title ?? myVideos;
+  useDetailPageHeader(watching ? { title: pageTitle } : { title: pageTitle, section: myVideos, back: { onClick: goBack } }, [watching, pageTitle, myVideos]);
 
   useShortcut('backspace', goBack, { description: t('backToLibrary'), area: t('myVideosTitle') });
 
@@ -333,6 +332,22 @@ export function MyVideoDetailPage() {
           />
         </HeroIcon>
       )}
+      {/* In a browser the file is on the server: this copies it to the device in hand. */}
+      {entry.kind === 'movie' && !isDesktop && !movieMissing && (
+        <HeroIcon caption={t('saveToDeviceShort')}>
+          <Tooltip content={t('saveToDevice')} describe={false}>
+            <a
+              href={`/api/files/${entry.download.id}`}
+              download={entry.download.fileName ?? ''}
+              aria-label={t('saveToDevice')}
+              className={buttonClass('secondary', 'lg', 'w-12 px-0')}
+              data-testid="save-offline"
+            >
+              <DownloadIcon size={18} aria-hidden />
+            </a>
+          </Tooltip>
+        </HeroIcon>
+      )}
       {entry.kind === 'movie' && (
         <HeroIcon caption={t('actionRemove')}>
           <IconButton
@@ -342,7 +357,7 @@ export function MyVideoDetailPage() {
             label={t('removeFromLibrary')}
             icon={<Trash2 size={18} aria-hidden />}
             onClick={() => {
-              setDeleteFile(false);
+              setDeleteFile(!isDesktop);
               setRemoveTarget(entry.download);
             }}
             data-testid="remove-offline"
@@ -393,7 +408,7 @@ export function MyVideoDetailPage() {
   const episodeList = entry.kind === 'series' && (
     <VirtualRows
       // Browsing, the list lays out at its full height inside the page's own scroller.
-      className={watching ? '-mx-2 px-2' : '-mx-2 flex-none overflow-visible px-2'}
+      className={watching ? '-mx-2 px-2' : '-mx-2 flex-none overflow-visible px-2 pb-0'}
       rows={rows}
       label={t('downloadedEpisodes')}
       rowHeight={(r) => (r.kind === 'header' ? SEASON_HEADER_HEIGHT : EPISODE_ROW_HEIGHT)}
@@ -442,7 +457,7 @@ export function MyVideoDetailPage() {
       onConfirm={() => void confirmRemove()}
     >
       {removeTarget && removeTarget.fileAvailable !== false && (
-        <Toggle checked={deleteFile} onChange={setDeleteFile} label={t('alsoDeleteFile')} description={t('alsoDeleteFileHint')} />
+        <Toggle checked={deleteFile} onChange={setDeleteFile} label={t('alsoDeleteFile')} description={t(isDesktop ? 'alsoDeleteFileHint' : 'alsoDeleteFileHintServer')} />
       )}
     </ConfirmDialog>
   );
@@ -478,7 +493,6 @@ export function MyVideoDetailPage() {
         model={heroModel(entry, catalogue)}
         sourceId={artSourceId}
         castLinks={false}
-        back={<BackButton to={back} onClick={goBack} label={t('backToLibrary')} className={HERO_BACK} />}
         // The size and the download date are facts of the file: they sit in About, once.
         chips={[
           <span key="kind">{t(entry.kind === 'movie' ? 'movie' : 'series')}</span>,

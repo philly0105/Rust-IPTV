@@ -1,20 +1,20 @@
 /**
  * `/lists/:listId`: a custom list laid out like Live. Lists on the side (a
- * drawer on a page under 66rem), the list's channels in the Live `ChannelList`, and
+ * drawer on a page under 79rem or a window held upright), the list's channels in the Live `ChannelList`, and
  * the player with the guide ribbon. Playing a row zaps within the list.
  * Channels the provider dropped sit under the list, greyed, with Remove.
  */
 
-import { ListOrdered, ListTree, ListVideo, Plus, Settings2, Trash2, X } from 'lucide-react';
+import { ChevronDown, ListOrdered, ListTree, ListVideo, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 
-import { invalidate, useRpcQuery } from '@/api/query';
-import { rpc } from '@/api/transport';
+import { useRpcQuery } from '@/api/query';
 import { itemKey, sameRef, type Channel, type CustomListEntry, type EpgNowNext, type ItemKey, type SourceKind } from '@/api/types';
 import { registerCommands } from '@/shell/commands';
 import { useChannelEditShortcuts } from '@/features/channeledit';
+import { toggleFavoriteWithUndo } from '@/features/library/lib/favoriteToggle';
 import { EpgMappingDialog } from '@/features/live/components/EpgMappingDialog';
 import { EpgRibbon } from '@/features/live/components/EpgRibbon';
 import { LiveStageColumn } from '@/features/live/components/LiveStageColumn';
@@ -46,6 +46,7 @@ import {
   buttonClass,
   cn,
   displayChannelName,
+  plainChannelName,
   errorDescription,
   useDisplayPrefs,
   useMediaQuery,
@@ -74,10 +75,11 @@ const SIDEBAR_KEY = 'lists.sidebarCollapsed';
  * The page width, in rem, under which the lists leave their column for the drawer: Live TV's rule
  * for its groups (GROUPS_COLUMN_MIN_REM), since this page has the same three columns beside the
  * rail. Below it, beside the expanded rail in a 1024 px window, the stage ran off the page's end
- * and cut its idle card, Resume and the ribbon's view toggle. Not imported from LivePage, which
- * would pull Live's page into this chunk.
+ * and cut its idle card, Resume and the ribbon's view toggle; up to 79rem (a 1280 or 1366 px
+ * laptop beside the expanded rail) the column left a 480 to 540 px picture, where the drawer
+ * leaves 700 to 760 px. Not imported from LivePage, which would pull Live's page into this chunk.
  */
-const LISTS_COLUMN_MIN_REM = 66;
+const LISTS_COLUMN_MIN_REM = 79;
 
 /** The index of the channel row `el` is in, if any. */
 function rowIndexOf(el: EventTarget | null): number | null {
@@ -127,7 +129,7 @@ export function ListPage() {
     (channel: Channel, nn?: EpgNowNext) => {
       const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
       playFromList(channel, listId, nn?.now?.title, name).catch((err: unknown) =>
-        toast({ title: tl('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
+        toast({ title: tl('playFailed', { name: plainChannelName(channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err), variant: 'error' }),
       );
     },
     [listId, prefs.stripCountryPrefix, tl, toast],
@@ -214,23 +216,20 @@ export function ListPage() {
       if (favInFlight.current.has(key)) return;
       favInFlight.current.add(key);
       setOverride(key, !wasFavorite);
-      const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+      const name = plainChannelName(channel.name, prefs.stripCountryPrefix);
       try {
-        const res = await rpc('favorites.toggle', {
-          ref: channel.ref,
-          snapshot: { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
-        });
-        setOverride(key, res.isFavorite);
-        await invalidate('favorites.');
-        toast({ title: res.isFavorite ? tl('favoriteAdded', { name }) : tl('favoriteRemoved', { name }), variant: 'success' });
-      } catch (err) {
-        toast({ title: wasFavorite ? tl('favoriteRemoveFailed') : tl('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
+        await toggleFavoriteWithUndo(
+          channel.ref,
+          { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
+          name,
+          wasFavorite,
+        );
       } finally {
         favInFlight.current.delete(key);
         setOverride(key, undefined);
       }
     },
-    [prefs.stripCountryPrefix, setOverride, tl, toast],
+    [prefs.stripCountryPrefix, setOverride],
   );
   const onToggleFavorite = useCallback((c: Channel, fav: boolean) => void toggleFavorite(c, fav), [toggleFavorite]);
 
@@ -245,7 +244,8 @@ export function ListPage() {
   const removeItem = useMemo((): MenuItem[] => {
     const entry = menu ? entryOf(menu.channel) : undefined;
     if (!menu || !list || !entry) return [];
-    const name = displayChannelName(menu.channel.name, prefs.stripCountryPrefix);
+    // The toast's text: the name as the row draws it (w-a11y-03).
+    const name = plainChannelName(menu.channel.name, prefs.stripCountryPrefix);
     return [{ id: 'remove', label: t('removeFromList'), icon: <X className="size-4" />, onSelect: () => actions.removeEntries(list, [entry], name) }];
   }, [menu, list, entryOf, prefs.stripCountryPrefix, t, actions]);
   const menuItems = useChannelMenuItems(menu?.channel ?? null, {
@@ -270,7 +270,12 @@ export function ListPage() {
   // on a narrower window, or a page under LISTS_COLUMN_MIN_REM, they open as a drawer from the bar.
   const pageRef = useRef<HTMLDivElement>(null);
   const roomForLists = useFitsWidth(pageRef, LISTS_COLUMN_MIN_REM);
-  const wide = useMediaQuery('(min-width: 1024px)') && roomForLists;
+  // A window held upright stacks the stage over the channels, as Live does (responsive-01): the
+  // lists are a drawer there, and a portrait tablet gets a full-width picture.
+  const portrait = useMediaQuery('(orientation: portrait)', false);
+  const wide = useMediaQuery('(min-width: 1024px)') && !portrait && roomForLists;
+  const tablet = useMediaQuery('(min-width: 768px)');
+  const stacked = portrait && tablet;
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_KEY) === '1';
@@ -357,7 +362,7 @@ export function ListPage() {
         // there, since the channels bar right below has the same button.
         // Manage lists is also the lists column's gear: while the column is on screen the header
         // leaves it out, so it shows once; folded away or in the drawer, the header keeps it. Folded
-        // away on a wide page it keeps its label. With the lists in the drawer (a page under 66rem,
+        // away on a wide page it keeps its label. With the lists in the drawer (a page under 79rem,
         // a phone included) it is a bare gear, so the list's channel count keeps its room beside the
         // title, as Live TV's does at the same width.
         <div className="flex items-center gap-1">
@@ -366,7 +371,6 @@ export function ListPage() {
             size="sm"
             icon={<ListOrdered className="size-4" />}
             onClick={() => openEditListItems(list.id)}
-            title={t('editChannels')}
             className="max-sm:hidden"
           >
             {t('editChannels')}
@@ -377,7 +381,6 @@ export function ListPage() {
               size="sm"
               icon={<Settings2 className="size-4" />}
               onClick={() => openManageLists(list.id)}
-              title={t('manageLists')}
             >
               {t('manageLists')}
             </Button>
@@ -489,7 +492,7 @@ export function ListPage() {
   }
 
   return (
-    <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid="list-page">
+    <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:landscape:flex-row" data-testid="list-page">
       <h1 className="sr-only">{title}</h1>
       {sidebarVisible ? <aside className="flex w-60 shrink-0 flex-col border-e border-divider bg-surface">{sidebar}</aside> : null}
       {!wide && drawerOpen ? (
@@ -509,22 +512,44 @@ export function ListPage() {
         </>
       ) : null}
 
-      {/* channels: beside the stage from 768 px, under it on a phone. A share of the page with
-          Live's bounds, so the two pages leave the stage the same room at every width. */}
+      {/* channels: beside the stage from 768 px held sideways, under it on a phone or an upright
+          tablet. A share of the page with Live's bounds, so the two pages leave the stage the same
+          room at every width. */}
       <section
         aria-label={tl('channels')}
-        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(300px,32%,400px)] md:min-w-60 md:flex-initial md:border-e"
+        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:landscape:w-[clamp(300px,32%,400px)] md:landscape:min-w-60 md:landscape:flex-initial md:landscape:border-e min-[150rem]:landscape:w-[clamp(300px,24%,560px)]"
         onFocus={onListFocus}
       >
         {/* The list's name is in the header (and on its sidebar row): the bar holds the tools. */}
         <div className="flex items-center gap-2 border-b border-divider px-2 py-2">
-          <IconButton
-            size="sm"
-            label={sidebarVisible || drawerOpen ? t('hideLists') : t('showLists')}
-            aria-expanded={sidebarVisible || drawerOpen}
-            icon={<ListTree className="size-4" />}
-            onClick={toggleSidebar}
-          />
+          {!sidebarVisible && list ? (
+            // The lists folded away (a tablet, a phone, or folded by hand): the button names the list
+            // that is open and is the way to the others, as Live's groups button names its group.
+            <Button
+              variant="ghost"
+              size="sm"
+              className="max-w-[55%] min-w-0 shrink gap-1.5 px-2"
+              icon={<ListTree className="size-4 shrink-0" />}
+              aria-expanded={drawerOpen}
+              aria-haspopup={wide ? undefined : 'dialog'}
+              onClick={toggleSidebar}
+              data-testid="lists-toggle"
+            >
+              <span className="sr-only">{`${t('showLists')}: `}</span>
+              <span dir="auto" className="truncate">
+                {list.name}
+              </span>
+              <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
+            </Button>
+          ) : (
+            <IconButton
+              size="sm"
+              label={sidebarVisible || drawerOpen ? t('hideLists') : t('showLists')}
+              aria-expanded={sidebarVisible || drawerOpen}
+              icon={<ListTree className="size-4" />}
+              onClick={toggleSidebar}
+            />
+          )}
           {composition.length > 1 ? (
             // Where the list's channels come from: each source's monogram (the rail's mark) with its
             // count, so every source fits beside the tools; the name is spoken and shows on hover.
@@ -587,6 +612,7 @@ export function ListPage() {
         stageTestId="list-stage"
         ribbonTestId="list-ribbon"
         ribbonOnPhone={stageBusy && !(!ribbonChannel && listEmpty)}
+        stacked={stacked}
         idle={
           <StageIdle
             kind="live"
@@ -594,6 +620,7 @@ export function ListPage() {
             resumeProgram={resumeCatchup?.program && { title: resumeCatchup.program.title, positionSeconds: resumeCatchup.positionSeconds }}
             highlighted={!!cursorChannel}
             locked={locks.channelLocked(idleCard?.channel)}
+            pending={!!last?.pending}
             now={now}
             stripPrefix={prefs.stripCountryPrefix}
             epgOffsetMinutes={prefs.epgOffsetMinutes}
@@ -612,6 +639,7 @@ export function ListPage() {
             onMapEpg={setMapping}
             guideHref={ribbonChannel ? `/epg?${new URLSearchParams({ source: ribbonChannel.ref.sourceId, view: `list:${listId}`, focus: ribbonChannel.ref.itemId }).toString()}` : undefined}
             details
+            compact={stacked}
           />
         }
       />
@@ -620,7 +648,8 @@ export function ListPage() {
         pos={menu?.pos ?? null}
         items={menuItems}
         header={menuHeader}
-        label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
+        // Spoken: the name as the row draws it, not the provider's "US| " (w-a11y-03).
+        label={plainChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
         onClose={closeMenu}
       />
       <EpgMappingDialog channel={mapping} onClose={() => setMapping(null)} />
@@ -659,7 +688,13 @@ function UnavailableEntries({
                 <span dir="auto" className="min-w-0 flex-1 truncate text-sm line-through decoration-fg-subtle/50">
                   {name}
                 </span>
-                <IconButton size="sm" variant="ghost" label={t('removeNamed', { name })} icon={<Trash2 className="size-4" />} onClick={() => onRemove([e], name)} />
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  label={t('removeNamed', { name: plainChannelName(e.snapshot.title, strip) })}
+                  icon={<Trash2 className="size-4" />}
+                  onClick={() => onRemove([e], plainChannelName(e.snapshot.title, strip))}
+                />
               </li>
             );
           })}

@@ -69,7 +69,7 @@ export function SleepChip({ compact, expanded = false, menuId, onOpen }: { compa
         onMouseDown={pressKeepsFocus}
         onClick={onOpen}
         className={cn(
-          'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors pointer-coarse:min-h-9',
+          'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors pointer-coarse:min-h-[calc(44rem/15)]',
           compact ? 'h-6 gap-1 px-1.5 text-[calc(11rem/15)]' : 'h-7 gap-1.5 px-2.5 text-caption',
           // The last minute lights up in the accent, which over the picture is the bright glass one in every theme (player.css).
           last ? 'bg-white/10 text-accent ring-accent/70' : 'text-on-glass ring-white/25 hover:ring-white/45',

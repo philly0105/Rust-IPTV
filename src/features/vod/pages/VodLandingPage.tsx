@@ -1,4 +1,4 @@
-import { ChevronRight, Clapperboard, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
+import { ChevronRight, Clapperboard, EyeOff, Lock, SearchX, Tv } from 'lucide-react';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -7,14 +7,17 @@ import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type Category, type ItemSnapshot, type PlaybackPosition, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 // The module itself, not the player barrel: small, no imports, already in the player core chunk.
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { preloadEngines } from '@/features/player/enginePreload';
+import { groupRegion, groupRegions, readRegion, writeRegion, type GroupRegion } from '@/features/live/lib/groupRegion';
 import { snapshotTitle } from '@/lib/title';
 
 import { CatalogRail, type CatalogRailProps } from '../components/CatalogRail';
 import { CategoryIndex, FROM_LANDING, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
-import { itemLanguage } from '../lib/language';
+import { sectionlessCategoryName } from '../lib/categoryName';
+import { itemLanguage, languageName } from '../lib/language';
 import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import type { PrefetchTarget } from '../hooks/prefetch';
@@ -23,13 +26,14 @@ import { useClientHeight } from '../hooks/useContainerColumns';
 import { useEdgeFades } from '../hooks/useEdgeFades';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useShowSourceName } from '../hooks/useShowSourceName';
+import { usePosterMenu, type PosterMenuItem } from '../hooks/usePosterMenu';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
 import { loadSearchPage } from '../routes';
 import { ALL_CATEGORIES, effectiveMinRating, type GridQueryInput, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
-import { Button, EmptyState, ErrorState, IconButton, Page, SearchInput, Skeleton, buttonClass, cn, filterChipClass } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, Page, SearchInput, Select, Skeleton, buttonClass, cn, filterChipClass } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 /** Category rails under the top rails; the rest of the categories are one click away in the index. */
@@ -56,6 +60,32 @@ function writeIndexOpen(open: boolean): void {
   } catch {
     // Storage full or blocked: the disclosure still works for this visit.
   }
+}
+
+/** How long the index heading is held at the top after All categories takes it there. */
+const HOLD_AT_TOP_MS = 1000;
+
+/**
+ * Keeps `el` at the top of `scroller` while the content above it changes height, for
+ * {@link HOLD_AT_TOP_MS} or until the user wheels, touches, clicks or presses a key. Returns the stop.
+ */
+function holdAtTop(scroller: HTMLElement, el: HTMLElement): () => void {
+  const content = scroller.firstElementChild;
+  if (!content || typeof ResizeObserver === 'undefined') return () => undefined;
+  const ro = new ResizeObserver(() => {
+    const drift = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    if (Math.abs(drift - (parseFloat(getComputedStyle(el).scrollMarginTop) || 0)) > 1) el.scrollIntoView({ block: 'start' });
+  });
+  ro.observe(content);
+  const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+  const stop = () => {
+    ro.disconnect();
+    clearTimeout(timer);
+    for (const type of events) scroller.removeEventListener(type, stop);
+  };
+  const timer = setTimeout(stop, HOLD_AT_TOP_MS);
+  for (const type of events) scroller.addEventListener(type, stop, { passive: true });
+  return stop;
 }
 
 export function VodLandingPage({ kind }: { kind: VodKind }) {
@@ -92,6 +122,32 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const allCats = useRpcQuery('catalog.categories', categoriesArgs(sourceId, contentType), { enabled: !!sourceId });
   const shownCats = useMemo(() => allCats.data?.filter((c) => !c.hidden), [allCats.data]);
   const catsLoaded = shownCats !== undefined;
+  // Providers file their categories under language tags ("EN | ACTION", "FR | CINÉMA"), as Live's
+  // groups are filed under countries: the same picker narrows them to one, kept per source and
+  // section. Untagged categories ("NETFLIX MOVIES") stay under every pick, after the tag's own.
+  const regionScope = `${sourceId}:${kind}`;
+  const regions = useMemo(() => groupRegions((shownCats ?? []).map((c) => c.name)), [shownCats]);
+  // The page stays mounted from one landing to the next, so the stored pick is read again for a new scope.
+  const [regionPicked, setRegionPicked] = useState(() => ({ scope: regionScope, tag: readRegion(regionScope) }));
+  let regionPick = regionPicked.tag;
+  if (regionPicked.scope !== regionScope) {
+    regionPick = readRegion(regionScope);
+    setRegionPicked({ scope: regionScope, tag: regionPick });
+  }
+  // A tag the provider no longer has shows every category.
+  const region = regionPick && regions.some((r) => r.tag === regionPick) ? regionPick : null;
+  const pickRegion = useCallback(
+    (tag: string | null) => {
+      writeRegion(regionScope, tag);
+      setRegionPicked({ scope: regionScope, tag });
+    },
+    [regionScope],
+  );
+  const regionCats = useMemo(() => {
+    if (!shownCats || !region) return shownCats;
+    const tagged = shownCats.map((c) => [c, groupRegion(c.name)] as const);
+    return [...tagged.filter(([, tag]) => tag === region), ...tagged.filter(([, tag]) => tag === null)].map(([c]) => c);
+  }, [shownCats, region]);
   // Back from a category: same scroll offset, focus on the category you opened. The index's own
   // positions only (the rails above hold grid indices of their own), and none while its filter is
   // on (the index section says when it starts or stops, not per keystroke). Called here, not in
@@ -126,7 +182,13 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     toggle.focus({ preventScroll: true });
     // Pressed while the categories load (IDX-M1): their rails go in above the index when they
     // arrive, so the heading is taken to the top once more then.
-    if (catsLoaded) revealPending.current = false;
+    if (!catsLoaded) return;
+    revealPending.current = false;
+    // The rails the jump passed mount as it lands (or go away when empty), and a mounted rail is
+    // a little shorter or taller than its placeholder, so the heading drifts under the header.
+    // For a moment it is held at the top, until the page settles or the user scrolls or types.
+    const scroller = scrollRef.current;
+    if (scroller) return holdAtTop(scroller, toggle);
   }, [indexAsked, catsLoaded]);
   const recent = useRecentlyAdded(source.data, kind);
   const resume = useResumeMap(sourceId, kind);
@@ -153,15 +215,18 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const sourceLine = sourceName ? (countText ? `${sourceName} · ${countText}` : sourceName) : countText;
 
   // One search entry (L1-visual-13): the header field searches this source. Typing opens the
-  // source's search page with the text so far; the field stays in the header there, so focus and
-  // the caret carry over. Later keystrokes before it opens replace that entry instead of stacking.
+  // source's search page with the text so far, on this section's tab (the others stay a click
+  // away); the field stays in the header there, so focus and the caret carry over. Later
+  // keystrokes before it opens replace that entry instead of stacking.
   const navigate = useNavigate();
   const [searchDraft, setSearchDraft] = useState('');
   const searchStarted = useRef(false);
   const onSearch = (v: string) => {
     setSearchDraft(v);
     if (!v.trim()) return;
-    void navigate(`/s/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(v)}`, { replace: searchStarted.current });
+    void navigate(`/s/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(v)}&type=${kind === 'movie' ? 'movies' : 'series'}`, {
+      replace: searchStarted.current,
+    });
     searchStarted.current = true;
   };
   // Warm the search page while the landing idles, so the first keystroke opens it at once.
@@ -177,10 +242,16 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // VOD starts here: warm hls.js and mpegts.js once the browser is idle (preloadEngines waits for
   // it), so the first movie or episode play does not fetch them after the click.
   useEffect(() => preloadEngines(), []);
-  // With one source the field says "Search this source": short enough for the field on a 1024 px
-  // tablet, where "Search channels, movies, and series" was cut off, and not "Search everything",
-  // the name of the palette's button right beside it.
-  const searchPlaceholder = sourceName ? t('searchInSource', { source: sourceName }) : t('searchSource');
+  // The field names what this page holds ("Search movies"), and the source only when there are
+  // others; "Search everything" is the palette's button right beside it.
+  const searchPlaceholder =
+    kind === 'movie'
+      ? sourceName
+        ? t('searchMoviesInSource', { source: sourceName })
+        : t('searchMovies')
+      : sourceName
+        ? t('searchSeriesInSource', { source: sourceName })
+        : t('searchSeries');
   usePageHeader(
     {
       title,
@@ -203,28 +274,37 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     [sourceKind, kind, sourceId, minRating, hideWatched],
   );
   // Categories with titles (a Stalker portal may not count them), in the provider's order. Locked
-  // categories stay out of the rails: their posters would show before the PIN is asked.
+  // categories stay out of the rails: their posters would show before the PIN is asked. A category
+  // that holds every title shown here gets none either when Recently added shows them already (an
+  // m3u playlist without dates has no Recently added, and then the category's rail is the one).
+  const recentShown = (recent.data?.length ?? 0) > 0;
   const railCats = useMemo(
     () =>
-      (shownCats ?? [])
-        .filter((c) => (c.itemCount > 0 || sourceKind === 'stalker') && !locks.categoryLocked(c.id))
+      (regionCats ?? [])
+        .filter(
+          (c) =>
+            (c.itemCount > 0 || sourceKind === 'stalker') &&
+            !locks.categoryLocked(c.id) &&
+            !(recentShown && c.itemCount > 0 && c.itemCount === visibleCount),
+        )
         .slice(0, CATEGORY_RAIL_LIMIT),
-    [shownCats, sourceKind, locks],
+    [regionCats, sourceKind, locks, visibleCount, recentShown],
   );
 
   // The chip row: the shown categories with titles in the provider's order, locked ones marked.
   const chipCats = useMemo(
     () =>
-      (shownCats ?? [])
+      (regionCats ?? [])
         .filter((c) => c.itemCount > 0 || sourceKind === 'stalker')
         .slice(0, CATEGORY_CHIP_LIMIT)
-        .map((c) => ({ id: c.id, name: c.name, locked: locks.categoryLocked(c.id) })),
-    [shownCats, sourceKind, locks],
+        .map((c) => ({ id: c.id, name: c.name, label: sectionlessCategoryName(c.name, kind), locked: locks.categoryLocked(c.id) })),
+    [regionCats, sourceKind, locks, kind],
   );
+  const regionSelect = regions.length > 0 ? <RegionSelect regions={regions} value={region} onChange={pickRegion} /> : null;
   const manageLabel = hiddenCount > 0 ? t('manageCategoriesHidden', { count: hiddenCount }) : t('manageCategories');
 
-  const card = useCallback(
-    (item: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean) => (
+  const card = useCallback<LandingCardRender>(
+    (item, i, rail, isWatched, quietLanguage) => (
       <LandingCard
         item={item}
         index={i}
@@ -233,9 +313,19 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
         watched={isWatched}
         locked={locks.itemLocked(item)}
         sourceKind={sourceKind}
+        quietLanguage={quietLanguage}
       />
     ),
     [resume, locks, sourceKind],
+  );
+
+  // The posters' menu (right click, the menu key, a long press), as in a category grid.
+  const posterMenu = usePosterMenu({ sourceKind, resume, openDetails: (ref) => void navigate(detailHref(ref) ?? '#') });
+  const openPosterMenu = posterMenu.open;
+  const railMenu = useCallback(
+    (item: VodItem | SeriesItem, i: number, pos: { x: number; y: number }) =>
+      openPosterMenu({ ref: item.ref, name: item.titleBase || item.title, title: item.title, year: item.year, posterUrl: item.posterUrl, categoryId: item.categoryId }, i, pos),
+    [openPosterMenu],
   );
 
   if (source.isError) {
@@ -250,15 +340,20 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const isEmptySource =
     source.data && source.data.kind !== 'stalker' && sourceCount === 0 && shownCats && shownCats.length === 0 && hiddenCount === 0;
   const allHref = hrefFor(ALL_CATEGORIES);
+  // One failure, one message (states-feedback-05): when the categories and Recently added both
+  // fail, the library itself is failing, and every rail below would draw the same error with its
+  // own Try again. One error with one retry stands in for the chips, the rails and the index, as
+  // Home merges its rails' errors. Continue watching reads positions, not the catalog, so it stays.
+  const catalogDown = !isEmptySource && allCats.isError && recent.isError;
 
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-y-auto overflow-x-hidden" data-testid={`vod-landing-${kind}`}>
-      <Page width="wide" className="flex flex-col gap-10 max-sm:gap-8">
+      <Page width="full" className="flex flex-col gap-10 max-sm:gap-8">
         {/* The shell header shows the title and the count, with the source when there are others (one place, L1-visual-13). Its
             subtitle folds away below md, so only there the source line shows here: in the category
             row's first line, or on its own over an empty source. */}
         <h1 className="sr-only">{title}</h1>
-        {isEmptySource && sourceLine && <p className="-mb-6 min-w-0 truncate text-sm text-fg-muted md:hidden">{sourceLine}</p>}
+        {(isEmptySource || catalogDown) && sourceLine && <p className="-mb-6 min-w-0 truncate text-sm text-fg-muted md:hidden">{sourceLine}</p>}
         {isEmptySource ? (
           <EmptyState
             icon={kind === 'movie' ? <Clapperboard size={32} /> : <Tv size={32} />}
@@ -270,20 +365,35 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               </Link>
             }
           />
+        ) : catalogDown ? (
+          <>
+            {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} menu={openPosterMenu} />}
+            <ErrorState
+              error={allCats.error}
+              title={t('pageLoadFailed')}
+              retrying={allCats.isFetching || recent.isFetching}
+              onRetry={() => {
+                // The rails' own pages are asked again as they mount, since their queries failed.
+                void allCats.refetch();
+                void recent.refetch();
+              }}
+            />
+          </>
         ) : (
           <>
             {/* The categories one press from the top: the index itself waits under the rails. */}
             <CategoryChips
               lead={sourceLine}
               cats={chipCats}
-              total={shownCats?.length}
+              total={regionCats?.length}
               loading={allCats.isPending}
               hrefFor={hrefFor}
               onShowAll={showIndex}
-              manage={<IconButton size="sm" label={manageLabel} icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0 max-md:order-last" />}
+              region={regionSelect}
+              manage={<IconButton size="sm" label={manageLabel} icon={<EyeOff aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0 max-md:order-last" />}
             />
             {/* CB-VOD-LANDING: rails first, the way Plex and Apple TV open a library. */}
-            {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} />}
+            {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} menu={openPosterMenu} />}
             <PosterRail<VodItem | SeriesItem>
               title={t('recentlyAdded')}
               seeAll={{ to: allHref }}
@@ -293,6 +403,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               loading={recent.isPending}
               empty={recent.isError ? <ErrorState size="inline" error={recent.error} onRetry={() => void recent.refetch()} /> : undefined}
               myList={myListTarget}
+              menu={railMenu}
               render={(item, i, rail) => card(item, i, rail, watched.has(itemKey(item.ref)))}
             />
             {/* A Stalker portal sorts by name or by date added only: its "top rated" would be the newest. */}
@@ -305,19 +416,22 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                 sort="rating"
                 rootRef={scrollRef}
                 card={card}
+                menu={railMenu}
               />
             )}
             {railCats.map((c) => (
               <LandingRail
                 key={c.id}
-                title={c.name}
+                title={sectionlessCategoryName(c.name, kind)}
                 count={c.itemCount > 0 ? fmt.format(c.itemCount) : undefined}
                 seeAllTo={hrefFor(c.id)}
                 grid={grid}
                 categoryId={c.id}
+                categoryLanguage={itemLanguage('', c.name)?.code}
                 sort="added"
                 rootRef={scrollRef}
                 card={card}
+                menu={railMenu}
               />
             ))}
 
@@ -325,7 +439,8 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
             <CategoryIndexSection
               kind={kind}
               cats={allCats}
-              shownCats={shownCats}
+              shownCats={regionCats}
+              region={regionSelect}
               visibleCount={visibleCount}
               locks={locks}
               hrefFor={hrefFor}
@@ -342,6 +457,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
           </>
         )}
       </Page>
+      {posterMenu.element}
       <HiddenCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
     </div>
   );
@@ -349,6 +465,9 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 
 /** The grid arguments every landing rail shares; each rail adds its category and sort. */
 type RailGrid = Omit<GridQueryInput, 'categoryId' | 'sort'>;
+
+/** A landing poster for a rail, told the language its category already names (`quietLanguage`). */
+type LandingCardRender = (item: VodItem | SeriesItem, index: number, rail: RailCardProps, watched: boolean, quietLanguage?: string) => ReactNode;
 
 /**
  * Top rated or a category's rail (VOD-LANDING-RENDERS). Memoized on plain props, and it builds its
@@ -364,6 +483,8 @@ const LandingRail = memo(function LandingRail({
   sort,
   rootRef,
   card,
+  menu,
+  categoryLanguage,
 }: {
   title: string;
   count?: string | undefined;
@@ -372,11 +493,23 @@ const LandingRail = memo(function LandingRail({
   categoryId: string;
   sort: GridQueryInput['sort'];
   rootRef: RefObject<HTMLDivElement | null>;
-  card: CatalogRailProps['card'];
+  card: LandingCardRender;
+  menu: CatalogRailProps['menu'];
+  /** The category's own language ("EN" for "EN | ACTION"): its posters leave out that badge (realdata-22). */
+  categoryLanguage?: string | undefined;
 }) {
   const input = useMemo(() => (grid ? { ...grid, categoryId, sort } : undefined), [grid, categoryId, sort]);
   const seeAll = useMemo(() => ({ to: seeAllTo }), [seeAllTo]);
-  return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={card} />;
+  // A category's name as the chips draw it, its language's tag after it, quiet; "Top rated" as it is.
+  const heading = useMemo(
+    () => (categoryId === ALL_CATEGORIES ? title : <ChannelName name={title} className="block min-w-0 truncate" />),
+    [categoryId, title],
+  );
+  const railCard = useMemo<CatalogRailProps['card']>(
+    () => (categoryLanguage ? (item, i, rail, watched) => card(item, i, rail, watched, categoryLanguage) : card),
+    [card, categoryLanguage],
+  );
+  return <CatalogRail title={heading} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={railCard} menu={menu} />;
 });
 
 /**
@@ -392,6 +525,7 @@ const LandingCard = memo(function LandingCard({
   watched,
   locked,
   sourceKind,
+  quietLanguage,
 }: {
   item: VodItem | SeriesItem;
   index: number;
@@ -400,9 +534,16 @@ const LandingCard = memo(function LandingCard({
   watched: boolean;
   locked: boolean;
   sourceKind: SourceKind | undefined;
+  /** The rail's category names this language: a poster of it shows no badge for it (realdata-22). */
+  quietLanguage: string | undefined;
 }) {
   const myList = useMemo(() => myListTarget(item), [item]);
-  const language = useMemo(() => itemLanguage(item.title, item.categoryName), [item]);
+  // In "EN | ACTION" every poster carried the same EN badge and "English" in its caption; a title
+  // in another language than its category keeps both, and so does every title in a mixed rail.
+  const language = useMemo(() => {
+    const lang = itemLanguage(item.title, item.categoryName);
+    return lang?.code === quietLanguage ? undefined : lang;
+  }, [item, quietLanguage]);
   const prefetch = useMemo<PrefetchTarget | undefined>(
     () => (sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined),
     [item, sourceKind],
@@ -449,6 +590,7 @@ function CategoryIndexSection({
   toggleRef,
   manageLabel,
   onManage,
+  region,
 }: {
   kind: VodKind;
   /** The categories query, for its loading and error states. */
@@ -469,6 +611,8 @@ function CategoryIndexSection({
   toggleRef: RefObject<HTMLButtonElement | null>;
   manageLabel: string;
   onManage: () => void;
+  /** The language picker, beside the filter while the index is open. */
+  region: ReactNode;
 }) {
   const { t } = useTranslation('vod');
   const indexId = useId();
@@ -487,7 +631,12 @@ function CategoryIndexSection({
   const viewport = useClientHeight(scrollRef, open);
 
   const entries = useMemo<CategoryEntry[]>(() => {
-    const list = categoryEntries(shownCats ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));
+    const list = categoryEntries(shownCats ?? [], filter).map((e) => ({
+      ...e,
+      name: sectionlessCategoryName(e.name, kind),
+      fullName: e.name,
+      ...(locks.categoryLocked(e.id) ? { locked: true } : {}),
+    }));
     if (filter.trim()) return list;
     const all: CategoryEntry = {
       id: ALL_CATEGORIES,
@@ -525,7 +674,8 @@ function CategoryIndexSection({
               if (!open && lower) onShowIndex();
               else onOpenChange(!open);
             }}
-            className="-ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
+            // scroll-mt: taken to the top, the heading keeps a little room under the header.
+            className="-ms-2 inline-flex scroll-mt-2 items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
           >
             <ChevronRight aria-hidden size={18} className={cn('text-fg-muted motion-safe:transition-transform rtl:rotate-180', open && 'rotate-90 rtl:rotate-90')} />
             {t('browseAllCategories')}
@@ -533,8 +683,9 @@ function CategoryIndexSection({
         </h2>
         {shownCats && <span className="tabular text-sm text-fg-subtle">{t('categoryCount', { count: shownCats.length })}</span>}
         <div className="ms-auto flex flex-wrap items-center gap-2">
+          {open && region}
           {open && <SearchInput value={filter} onChange={setFilter} size="sm" placeholder={t('filterCategories')} className="w-56 max-sm:w-full" />}
-          <Button size="sm" variant="ghost" icon={<ListFilter aria-hidden size={16} />} onClick={onManage}>
+          <Button size="sm" variant="ghost" icon={<EyeOff aria-hidden size={16} />} onClick={onManage}>
             {manageLabel}
           </Button>
         </div>
@@ -582,7 +733,8 @@ function CategoryIndexSection({
  * Below md the shell header drops its subtitle, so the row starts with the source line (`lead`)
  * with All categories at its end, and the chips take the next line, ended by Manage: beside the
  * two buttons a phone showed little more than one chip. The lines have no gap between them: the
- * buttons' boxes (44 px on touch) already space them, so the page grows by little.
+ * buttons' boxes (44 px on touch) already space them, so the page grows by little. The language
+ * picker (`region`), when the provider tags its categories, leads the chips on either layout.
  */
 function CategoryChips({
   lead,
@@ -592,15 +744,19 @@ function CategoryChips({
   hrefFor,
   onShowAll,
   manage,
+  region,
 }: {
   /** The title count (after the source's name when there are others), shown below md, where the header does not show it. */
   lead?: string | undefined;
-  cats: readonly { id: string; name: string; locked: boolean }[];
+  /** `label` is what the chip shows (the name without the section's word), `name` the provider's. */
+  cats: readonly { id: string; name: string; label: string; locked: boolean }[];
   total: number | undefined;
   loading: boolean;
   hrefFor: (id: string) => string;
   onShowAll: () => void;
   manage: ReactNode;
+  /** The language picker, before the chips. */
+  region?: ReactNode;
 }) {
   const { t, i18n } = useTranslation('vod');
   const fades = useEdgeFades(`${loading}|${cats.map((c) => c.id).join(',')}|${i18n.language}`);
@@ -612,12 +768,15 @@ function CategoryChips({
           {lead}
         </p>
       )}
-      {/* Room for the focus halo, which the scroller would clip. Below md it is too wide to share the
-          source line, so it starts the next line, and Manage (also order-last, after it) ends that line. */}
+      {/* Below md the chips start the next line (this break, the picker, the chips and Manage are
+          order-last, in that order), and Manage ends it. */}
+      <div aria-hidden className="h-0 basis-full max-md:order-last md:hidden" />
+      {region && <div className="shrink-0 max-md:order-last">{region}</div>}
+      {/* Room for the focus halo, which the scroller would clip. */}
       <ul
         ref={fades.ref}
         style={fades.style}
-        className="-m-1.5 flex min-w-0 items-center gap-2 overflow-x-auto p-1.5 scrollbar-none max-md:order-last max-md:grow max-md:basis-[calc(100%-5.5rem)]"
+        className="-m-1.5 flex min-w-0 items-center gap-2 overflow-x-auto p-1.5 scrollbar-none max-md:order-last max-md:basis-0 max-md:grow"
       >
         {loading
           ? [0, 1, 2, 3, 4].map((i) => (
@@ -629,9 +788,8 @@ function CategoryChips({
               <li key={c.id} className="shrink-0">
                 <Link to={hrefFor(c.id)} state={FROM_LANDING} className={filterChipClass(false, 'max-w-[16rem]')} title={c.name} data-testid="vod-category-chip">
                   {c.locked && <Lock aria-hidden size={14} className="shrink-0" />}
-                  <span dir="auto" className="truncate">
-                    {c.name}
-                  </span>
+                  {/* "EN | ACTION" as group names read: the name, its language's tag after it, quiet. */}
+                  <ChannelName name={c.label} className="min-w-0 truncate" />
                   {c.locked && <span className="sr-only">, {t('locked')}</span>}
                 </Link>
               </li>
@@ -663,10 +821,12 @@ const ContinueSectionRail = memo(function ContinueSectionRail({
   positions,
   locked,
   sourceKind,
+  menu,
 }: {
   positions: PlaybackPosition[];
   locked: (item: { ref: PlaybackPosition['ref'] }) => boolean;
   sourceKind: SourceKind | undefined;
+  menu: (item: PosterMenuItem, index: number, pos: { x: number; y: number }) => void;
 }) {
   const { t } = useTranslation('vod');
   const myList = (p: PlaybackPosition) => {
@@ -681,6 +841,10 @@ const ContinueSectionRail = memo(function ContinueSectionRail({
       items={positions}
       bleed
       myList={myList}
+      menu={(p, i, pos) => {
+        const name = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;
+        menu({ ref: p.ref, name, posterUrl: p.snapshot?.posterUrl }, i, pos);
+      }}
       render={(p, i, rail) => {
         const name = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;
         const left = p.durationSeconds ? Math.max(0, p.durationSeconds - p.positionSeconds) : 0;
@@ -704,3 +868,35 @@ const ContinueSectionRail = memo(function ContinueSectionRail({
     />
   );
 });
+
+/**
+ * The language picker of the chip row and the category index: Live's region picker (CategorySidebar)
+ * for VOD categories. The list reads "FR · French · 12 categories"; closed, the pick reads "FR" alone.
+ */
+function RegionSelect({ regions, value, onChange }: { regions: GroupRegion[]; value: string | null; onChange: (tag: string | null) => void }) {
+  const { t, i18n } = useTranslation('vod');
+  // The tag's language in the app's, as the posters name it ("SE · Swedish"); a tag no name
+  // resolves for stays as the provider wrote it (w-realdata-11).
+  const named = (tag: string) => {
+    const lang = itemLanguage('', `${tag} |`);
+    const name = lang ? languageName(lang, i18n.language, (g) => t(`languageGroup_${g}`)) : tag;
+    return name === tag ? tag : `${tag} · ${name}`;
+  };
+  return (
+    <Select
+      aria-label={t('detailLanguage')}
+      title={t('detailLanguage')}
+      // The chips' height, as Live's picker takes its toolbar's, and as wide as the pick: sized to the
+      // longest option ("EN · 25 categories") it took a third of a phone's row from the chips.
+      // Where field-sizing is not supported the select keeps its own width, up to the cap.
+      className="h-8 w-fit max-w-40 ps-2 pe-8 field-sizing-content"
+      value={value ?? ''}
+      onValueChange={(v) => onChange(v || null)}
+      options={[
+        { value: '', label: t('allLanguages') },
+        ...regions.map((r) => ({ value: r.tag, label: r.tag === value ? r.tag : `${named(r.tag)} · ${t('categoryCount', { count: r.groups })}` })),
+      ]}
+      data-testid="vod-category-region"
+    />
+  );
+}

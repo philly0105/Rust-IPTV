@@ -9,8 +9,10 @@ import { useRouteIntent } from '@/shell/routeIntent';
 import { Button, cn, ErrorState, IconButton, SearchInput, Select, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { useLongPress } from '../hooks/useLongPress';
-import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { groupRegion, groupRegions, readRegion, regionLabel, writeRegion } from '../lib/groupRegion';
 import { documentIsRtl } from '../lib/rtl';
+import { ChannelName } from './ChannelLogo';
 
 /** A group row's slot at 100 %. */
 const ROW = 36;
@@ -19,6 +21,8 @@ const ROW = 36;
  * 36 px less the text-sm line (1.25rem = 18.75 px at the 15 px root).
  */
 const ROW_SPACING = 17;
+/** A group row's slot on a touch screen: a 44 px target, as the channel rows' menus have. */
+const TOUCH_ROW = 44;
 /** Index of the "All channels" link in the keyboard order (the groups follow from 0). */
 const ALL = -1;
 
@@ -42,7 +46,9 @@ export interface CategorySidebarProps {
    * LG-12: views pinned above "All channels" (Favorites, Recently watched). Their `id` goes through
    * `hrefFor` like a group's and is `activeId` while open; they are not filtered and have no menu.
    */
-  pinned?: readonly { id: string; label: string; icon: ReactNode }[];
+  pinned?: readonly { id: string; label: string; icon: ReactNode; count?: ReactNode }[];
+  /** Drawn after the pinned views, in their row slot (`rowHeight`): Live's Hidden channels. */
+  afterPinned?(rowHeight: number): ReactNode;
   /**
    * A single group holds what "All" holds: leave its row and the filter out (Radio, whose
    * playlists often file every station under one group), unless it is the open one.
@@ -53,16 +59,29 @@ export interface CategorySidebarProps {
    * most groups carry a country tag ("US| ", "UK: "), as in big international playlists.
    */
   regionScope?: string;
+  /** Told when the user picks a region (the page reads the pick again from storage). */
+  onRegionChange?(): void;
+  /**
+   * In the groups drawer, whose title already says "Groups": the section heading is for screen
+   * readers only, and the region select takes the row, so "All regions" reads in full in every locale.
+   */
+  inDrawer?: boolean;
+  /**
+   * Takes a filter that matched no group over to the channel search (a channel's name typed into
+   * the groups filter, the first search box on the page). `stations` names Radio's items.
+   */
+  onSearchChannels?(query: string): void;
+  stations?: boolean;
 }
 
-function linkClass(active: boolean): string {
+export function linkClass(active: boolean): string {
   return `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${
     active ? 'tuning-tick bg-selected font-medium text-fg' : 'text-fg-muted hover:bg-hover hover:text-fg'
   }`;
 }
 
 /** The active row's count steps up to fg-muted with its label (both hold 4.5:1 on the selected fill). */
-function countClass(active: boolean): string {
+export function countClass(active: boolean): string {
   return `text-xs tabular-nums ${active ? 'text-fg-muted' : 'text-fg-subtle'}`;
 }
 
@@ -77,8 +96,9 @@ export function CategorySidebar(props: CategorySidebarProps) {
   const [filter, setFilter] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
-  // Rows follow the UI scale, and compact density tightens them.
-  const rowHeight = useRowHeight(ROW, ROW_SPACING);
+  // Rows follow the UI scale, and compact density tightens them. A finger gets the 44 px target.
+  const coarse = useMediaQuery('(pointer: coarse)', false);
+  const rowHeight = useRowHeight(coarse ? TOUCH_ROW : ROW, coarse ? ROW_SPACING + TOUCH_ROW - ROW : ROW_SPACING);
 
   const lone = !!props.hideLoneGroup && props.categories?.length === 1 && props.categories[0]!.id !== props.activeId;
   const regions = useMemo(() => groupRegions((props.categories ?? []).map((c) => c.name)), [props.categories]);
@@ -134,9 +154,12 @@ export function CategorySidebar(props: CategorySidebarProps) {
   }, [activeIndex, props.activeId, virtualizer]);
 
   const pinnedCount = props.pinned?.length ?? 0;
-  // Roving focus: one tab stop in the list (the open group, else the first), arrows move between links.
-  const [cursor, setCursor] = useState<number>(ALL);
-  const tabStop = cursor !== ALL && cursor < visible.length ? cursor : activeIndex >= 0 ? activeIndex : 0;
+  // Roving focus: one tab stop for the pinned views, All channels and the groups (the open one,
+  // else All channels), and the arrows move between them. Each was a Tab stop of its own.
+  const [cursor, setCursor] = useState<number | null>(null);
+  const pinnedOpen = props.pinned?.findIndex((p) => p.id === props.activeId) ?? -1;
+  const openStop = pinnedOpen >= 0 ? ALL - pinnedCount + pinnedOpen : activeIndex >= 0 ? activeIndex : ALL;
+  const tabStop = cursor !== null && cursor >= ALL - pinnedCount && cursor < visible.length ? cursor : openStop;
   const focusPending = useRef<number | null>(null);
   useEffect(() => {
     const i = focusPending.current;
@@ -149,6 +172,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
   });
   const moveTo = (i: number) => {
     const next = Math.max(ALL - pinnedCount, Math.min(visible.length - 1, i));
+    if (next <= ALL) setCursor(next);
     if (next === ALL) {
       navRef.current?.querySelector<HTMLElement>('[data-cat-index="all"]')?.focus();
       return;
@@ -211,6 +235,16 @@ export function CategorySidebar(props: CategorySidebarProps) {
       case 'End':
         moveTo(visible.length - 1);
         break;
+      case 'ArrowLeft':
+      case 'ArrowRight': {
+        // Toward the inline end: over to the channel list's cursor row (a remote has arrows and OK,
+        // no Tab). Not from the drawer, which covers the list.
+        if (e.shiftKey || e.key !== (documentIsRtl() ? 'ArrowLeft' : 'ArrowRight') || navRef.current?.closest('[role="dialog"]')) return;
+        const row = document.querySelector<HTMLElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]');
+        if (!row) return;
+        row.focus();
+        break;
+      }
       default:
         return;
     }
@@ -235,29 +269,39 @@ export function CategorySidebar(props: CategorySidebarProps) {
   const allActive = !props.activeId;
 
   return (
-    <nav ref={navRef} aria-label={t('groups')} className="flex h-full min-h-0 flex-col" onKeyDown={onListKey}>
+    <nav ref={navRef} aria-label={t('groups')} className="flex h-full min-h-0 flex-col" onKeyDown={onListKey} data-testid="group-nav">
       <div className="flex items-center gap-1 px-3 pt-3 pb-2">
-        <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>
+        {/* The drawer's own title already says Groups, to sight and to screen readers. */}
+        {props.inDrawer ? null : <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>}
         {regions.length > 0 && !lone ? (
           <Select
             aria-label={t('region')}
             title={t('region')}
-            className="h-7 w-auto max-w-28 ps-2 pe-7 text-xs"
+            // The toolbar's one height: 30 px, as the Manage button beside it.
+            className={cn('h-8 ps-2 pe-7', props.inDrawer ? 'min-w-0 flex-1' : 'w-auto max-w-28')}
             value={region ?? ''}
             onValueChange={(v) => {
               const next = v || null;
               writeRegion(props.regionScope, next);
               setPicked({ scope: props.regionScope, tag: next });
-              setCursor(ALL);
+              setCursor(null);
+              props.onRegionChange?.();
             }}
             options={[
-              { value: '', label: t('allRegions') },
-              ...regions.map((r) => ({ value: r.tag, label: `${r.tag} · ${fmt.format(r.groups)}` })),
+              // In the column's narrow header the closed select says "All" ("Todas las regiones"
+              // did not fit 105 px); the drawer has the room for the full words.
+              { value: '', label: t(!region && !props.inDrawer ? 'allRegionsShort' : 'allRegions') },
+              // "UK · United Kingdom · 3 groups" in the list (a bare 3 read as a count of channels);
+              // the picked one reads "UK" alone, which is what the closed select shows in its narrow header.
+              ...regions.map((r) => ({
+                value: r.tag,
+                label: r.tag === region ? r.tag : t('regionOption', { region: regionLabel(r.tag, intlLocale(i18n.language)), count: r.groups }),
+              })),
             ]}
             data-testid="group-region"
           />
         ) : null}
-        <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} />
+        <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} className="ms-auto" />
       </div>
       {lone ? null : (
         <div className="px-3 pb-2">
@@ -266,7 +310,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
             value={filter}
             onChange={(v) => {
               setFilter(v);
-              setCursor(ALL);
+              setCursor(null);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Escape' && filter) {
@@ -293,7 +337,9 @@ export function CategorySidebar(props: CategorySidebarProps) {
             <ViewLink
               to={props.hrefFor(p.id)}
               onClick={props.onNavigate}
+              onFocus={() => setCursor(ALL - pinnedCount + k)}
               data-cat-index={`pin-${k}`}
+              tabIndex={tabStop === ALL - pinnedCount + k ? 0 : -1}
               aria-current={on ? 'page' : undefined}
               className={linkClass(on)}
             >
@@ -301,16 +347,20 @@ export function CategorySidebar(props: CategorySidebarProps) {
                 {p.icon}
               </span>
               <span className="flex-1 truncate">{p.label}</span>
+              {p.count === undefined ? null : <span className={countClass(on)}>{p.count}</span>}
             </ViewLink>
           </div>
         );
       })}
+      {props.afterPinned?.(rowHeight)}
       <div className="px-2" style={{ height: rowHeight }}>
         {/* Plain links with an explicit aria-current: radio groups differ only in `?category=`, which NavLink ignores. */}
         <ViewLink
           to={props.hrefFor(undefined)}
           onClick={props.onNavigate}
+          onFocus={() => setCursor(ALL)}
           data-cat-index="all"
+          tabIndex={tabStop === ALL ? 0 : -1}
           aria-current={allActive ? 'page' : undefined}
           className={linkClass(allActive)}
         >
@@ -320,7 +370,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
       </div>
 
       {props.error ? (
-        <ErrorState error={props.error} onRetry={props.onRetry} />
+        // Sized for the 14 px rows of this column, and says what failed (the channel list still works).
+        <ErrorState size="inline" title={t('groupsLoadFailed')} error={props.error} onRetry={props.onRetry} />
       ) : props.isLoading ? (
         <div className="flex flex-col px-2 pt-0.5" aria-busy="true" aria-label={t('loadingGroups')}>
           {Array.from({ length: 10 }, (_, i) => (
@@ -341,12 +392,30 @@ export function CategorySidebar(props: CategorySidebarProps) {
       ) : visible.length === 0 && filter ? (
         <div className="flex flex-col items-start gap-2 px-4 pt-3 text-sm text-fg-muted">
           <p>{t('noGroupsMatch', { query: filter })}</p>
+          {props.onSearchChannels ? (
+            <Button
+              size="sm"
+              variant="primary"
+              // The whole query on two lines if it must, never cut: it is what the button carries over.
+              className="h-auto min-h-8 max-w-full py-1.5 text-start break-words whitespace-normal"
+              onClick={() => {
+                const q = filter.trim();
+                setFilter('');
+                props.onSearchChannels?.(q);
+              }}
+              data-testid="group-filter-search-channels"
+            >
+              {t(props.stations ? 'searchStationsFor' : 'searchChannelsFor', { query: filter.trim() })}
+            </Button>
+          ) : null}
           <Button size="sm" onClick={() => setFilter('')}>
             {t('clearSearch')}
           </Button>
         </div>
       ) : (
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" data-testid="group-list">
+        // tabIndex -1: with the roving stop on a pinned row above, Chrome made the scroller its own
+        // unnamed Tab stop (w-a11y-01); the arrows reach every group from that stop.
+        <div ref={scrollRef} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" data-testid="group-list">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((v) => {
               const c = visible[v.index]!;
@@ -355,7 +424,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
               return (
                 <div
                   key={c.id}
-                  className="flex min-w-0 items-center"
+                  className="group/grp flex min-w-0 items-center"
                   style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}
                 >
                   <GroupLink
@@ -396,9 +465,19 @@ export function CategorySidebar(props: CategorySidebarProps) {
  * A pinned view's link or All channels. A rest of the pointer or focus on it asks for the view's
  * first data (`useRouteIntent`), as on a group's link.
  */
-function ViewLink({ to, ...rest }: ComponentProps<typeof Link> & { to: string }) {
+function ViewLink({ to, onFocus, ...rest }: ComponentProps<typeof Link> & { to: string }) {
   const intent = useRouteIntent(to);
-  return <Link {...intent} to={to} {...rest} />;
+  return (
+    <Link
+      {...intent}
+      to={to}
+      onFocus={(e) => {
+        onFocus?.(e);
+        intent.onFocus(e);
+      }}
+      {...rest}
+    />
+  );
 }
 
 /** Made once, so a group row's re-render skips its icon (P2-LIVE-3). */
@@ -443,7 +522,7 @@ const GroupLink = memo(function GroupLink({
   // A rest on the link asks for the group's first page with its now/next and favourite flags, so
   // a click shows complete rows at once. Rows that scroll under a still pointer do not count.
   const intent = useRouteIntent(to);
-  // Inside the row's slot (a flex row): the link, then the touch screen's ⋮.
+  // Inside the row's slot (a flex row): the link, then the ⋮ (over the row's end with a mouse).
   return (
     <>
       <Link
@@ -467,10 +546,17 @@ const GroupLink = memo(function GroupLink({
         }
         {...(onMenu ? longPress : undefined)}
         // No callout or text selection on a long press (iOS would offer to open the link).
-        className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
+        className={cn(
+          linkClass(active),
+          'min-w-0 flex-1',
+          // The row stays lit while the pointer is on its ⋮.
+          onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]',
+          onMenu && !active && 'group-hover/grp:bg-hover group-hover/grp:text-fg',
+        )}
         title={locked ? `${c.name} (${lockedLabel})` : c.name}
       >
-        <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
+        {/* Drawn as a channel row draws its name: "PRIME ᴿᴬᵂ" and a quiet "US" after it (w-realdata-13). */}
+        <ChannelName name={c.name} className="min-w-0 flex-1 truncate text-match-parent" />
         {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} /> : null}
         <span className={countClass(active)}>{count}</span>
       </Link>
@@ -486,9 +572,15 @@ const GroupLink = memo(function GroupLink({
             // Under the button from its inline start, as a channel row's ⋮ opens.
             onMenu({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 }, c, index);
           }}
-          // Touch only, as tall as the row (a mouse has the right click). 44 px wide; the row's own
-          // height, so it never reaches into the next row.
-          className="hidden h-full shrink-0 pointer-coarse:inline-flex pointer-coarse:min-h-0"
+          // With a mouse it floats over the row's end on hover, and while the row has keyboard focus,
+          // as a channel row's ⋮ does (w-walkthrough-12): the right click was the only way in. It
+          // fits the row at any density. On touch it sits in the row's flow, always shown, 44 px
+          // wide and the row's own height, so it never reaches into the next row.
+          className={cn(
+            'absolute inset-y-0.5 end-1 h-auto w-7 rounded-md border border-edge bg-surface-2 opacity-0 shadow-2',
+            'group-hover/grp:opacity-100 group-has-[:focus-visible]/grp:opacity-100',
+            'pointer-coarse:static pointer-coarse:h-full pointer-coarse:min-h-0 pointer-coarse:shrink-0 pointer-coarse:rounded-md pointer-coarse:border-transparent pointer-coarse:bg-transparent pointer-coarse:opacity-100 pointer-coarse:shadow-none',
+          )}
           data-testid="group-menu-button"
         />
       ) : null}

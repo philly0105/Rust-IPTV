@@ -81,7 +81,7 @@ describe('external playback in the stage', () => {
     act(() => usePlayerStore.setState({ source, mode: 'external', status: 'error', error: 'vlc.exe not found' }));
     render(<PlayerStage />);
     expect(screen.getByRole('alert').textContent).toContain('vlc.exe not found');
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 });
 

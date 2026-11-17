@@ -3,11 +3,10 @@ import type { TFunction } from 'i18next';
 import {
   CalendarRange,
   Clapperboard,
-  CornerDownLeft,
   Gift,
   Keyboard,
   Layers,
-  ListVideo,
+  LoaderCircle,
   Lock,
   Monitor,
   Moon,
@@ -15,6 +14,7 @@ import {
   Radio,
   Route,
   Search,
+  Server,
   Settings as SettingsIcon,
   Sun,
   Terminal,
@@ -28,62 +28,43 @@ import { useLocation, useNavigate } from 'react-router';
 import { homeContinueArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import { isDesktop } from '@/api/transport';
-import { itemKey, type ContentType, type ItemRef, type ItemSnapshot } from '@/api/types';
+import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type SourceKind } from '@/api/types';
 // Light modules only (no guide page): programme hits and the guide link they open.
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
-// Live TV's own module for a channel's name (it shares it with ChannelLogo, in Live's chunk).
-import { ChannelName } from '@/features/live/components/ChannelLogo';
+// Live TV's own module for a channel's logo and name, in Live's chunk.
+import { ChannelLogo, ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/features/live/lib/channelName';
 import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
 // Pure helpers (no React): the Search page's first-page arguments and detail paths.
-import { detailHref, normalizeQuery, SEARCH_LIMIT, searchRequestLimit } from '@/features/vod/lib/search';
+import { detailHref, normalizeQuery, rankChannels, SEARCH_LIMIT, searchRequestLimit } from '@/features/vod/lib/search';
 // The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
+// The Scheduled list's day words (pure helpers, no hooks), as the Search page's day headings use them.
+import { dayHeading } from '@/features/recording/lib/schedule';
+import { plainChannelName } from '@/lib/channelName';
+import { intlLocale } from '@/lib/intl';
 import { snapshotTitle } from '@/lib/title';
 import { Dialog, Kbd, Poster, cn, toast, errorDescription } from '@/ui';
 
+import { channelNumberQuery, useChannelNumberHits } from './channelNumberSearch';
 import { useCommandList } from './commands';
+import { containsWords, SETTING_TARGETS, SETTINGS_SECTIONS } from './settingTargets';
 import { LIBRARY_LINKS, readLastSource, watchLinks } from './navigation';
 import { playFromShell, type PlayItemArgs } from './playFromShell';
+import { takePaletteKeys } from './paletteKeys';
 import { railFadeMask } from './Rail';
 import { railLinks, routeSourceId } from './railLinks';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
 import { persistTheme, useTheme } from './theme';
 
-/**
- * Every Settings section, in page order. A copy of the settings feature's `SECTION_IDS` (importing
- * it would pull that module into the main chunk); a shell test fails when the two drift apart.
- */
-export const SETTINGS_SECTIONS = [
-  'general',
-  'playback',
-  'players',
-  'epg',
-  'recording',
-  'metadata',
-  'appearance',
-  'parental',
-  'remote',
-  'backup',
-  'shortcuts',
-  'about',
-] as const;
+// Every Settings section, in page order (shared with the Search page's settings rows).
+export { SETTINGS_SECTIONS } from './settingTargets';
 
 /** Separates an item's title from its id inside the cmdk value (the id keeps values unique). */
 const VALUE_SEP = '';
-
-/** True when every word of `search` appears, unbroken, somewhere in `text` (case-insensitive). */
-function containsWords(text: string, search: string): boolean {
-  const hay = text.toLowerCase();
-  return search
-    .toLowerCase()
-    .split(/\s+/)
-    .every((word) => hay.includes(word));
-}
 
 /**
  * Score for an item value: matches the visible title and keywords only, so internal ids
@@ -110,18 +91,25 @@ interface PaletteItem {
   title: string;
   group: string;
   icon?: LucideIcon;
-  /** A picture instead of the icon: a channel's logo. */
-  /** A channel logo (fitted into the tile), or with `poster` a title's poster (cropped to fill it). */
-  image?: { src: string; sourceId: string; poster?: boolean };
+  /**
+   * A channel logo (fitted into the tile), or with `poster` a title's poster (cropped to fill it).
+   * A title always has one: without a poster, or when it fails, the tile is its initials.
+   */
+  image?: { src?: string; sourceId: string; poster?: boolean };
   shortcut?: string;
   keywords?: string[];
+  /** A channel's group, first in the quiet trailing text, drawn as Live TV's groups column draws it. */
+  detailGroup?: string;
   /** Quiet trailing text: a favourite's or recent item's kind, then its source when there are several. */
   detail?: readonly string[];
+  /** A channel's provider name after the details, drawn as the channel rows draw theirs (a programme's channel). */
+  detailChannel?: string;
   /** One more detail from 640 px up; a phone's row keeps that room for its title. */
   wideDetail?: string;
   /**
    * The title is a channel's provider name: drawn as Live TV's rows draw it (ChannelName), the
-   * place tag after the name and the strip setting applied. Matching still reads the name as it is.
+   * place tag after the name and the strip setting applied, beside its logo or Live's monogram
+   * (ChannelLogo). Matching still reads the name as it is.
    */
   channel?: boolean;
   run(): void;
@@ -175,6 +163,7 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
   const sources = useVisibleSources();
   const favorites = useRpcQuery('favorites.list', {}, { enabled: open });
   const recent = useRpcQuery('recent.list', RECENT_ARGS, { enabled: open });
+  const strip = useDisplayPrefs().stripCountryPrefix;
   const q = query.trim();
 
   return useMemo(() => {
@@ -204,12 +193,12 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
                   playItem({ ref, title, posterUrl: snapshot.posterUrl, isLive: true, isRadio: ref.contentType === 'radio', sourceKind: source.kind }),
                 )
                 .catch((err: unknown) =>
-                  toast({ variant: 'error', title: t('playFailed', { title }), description: errorDescription(err) }),
+                  toast({ variant: 'error', title: t('playFailed', { title: plainChannelName(title, strip) }), description: errorDescription(err) }),
                 )
           : () => void navigate(`/s/${sid}/${ref.contentType}/${iid}`),
       };
     });
-  }, [q, sources.data, favorites.data, recent.data, t, navigate]);
+  }, [q, sources.data, favorites.data, recent.data, strip, t, navigate]);
 }
 
 /** Most library channels, and most library movies and series, the palette lists for one query. */
@@ -220,38 +209,49 @@ const CATALOG_DEBOUNCE_MS = 120;
 /**
  * Channels, movies and series from the whole library (`catalog.search`), so the palette that the
  * header calls "Search everything" finds a channel nobody has favourited or watched yet. It asks
- * with the Search page's own first-page arguments, so "Search for" opens on an answer already in
+ * with the Search page's own first-page arguments, so "See all results" opens on an answer already in
  * the cache, after a pause in typing and only while the palette is open. The core caps every type
  * at that limit (57k channels or not); the palette shows the first few that still match what is
  * typed, skipping items the favourites and recent group already lists (`skip`, by `itemKey`).
  * A channel plays in the dock, a movie or series opens its detail page, where a parental lock
  * still asks for the PIN.
  */
-function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>): PaletteItem[] {
-  const { t } = useTranslation(['shell', 'vod']);
+function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>): { items: PaletteItem[]; pending: boolean } {
+  const { t } = useTranslation(['shell', 'vod', 'player']);
   const navigate = useNavigate();
   const sources = useVisibleSources();
+  const strip = useDisplayPrefs().stripCountryPrefix;
   const debounced = normalizeQuery(useDebounced(query, CATALOG_DEBOUNCE_MS));
   // While a newer query waits, the last answer stays and narrows by the filter below, so the
   // groups do not blink out between keystrokes.
   const catalog = useRpcQuery('catalog.search', { query: debounced, limit: searchRequestLimit(SEARCH_LIMIT) }, { enabled: open && !!debounced, staleTime: 30_000, keepPrevious: true });
+  // A typed channel number ("12") finds the channel at that number in each source, listed first.
+  const sourceIds = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
+  const numbered = useChannelNumberHits(sourceIds, useDebounced(query, CATALOG_DEBOUNCE_MS), open);
   const q = query.trim();
+  // Waiting out the pause counts: the first answer the user reads must not be "Nothing found".
+  const pending = open && !!normalizeQuery(query) && (normalizeQuery(query) !== debounced || catalog.isFetching || numbered.pending);
 
-  return useMemo(() => {
+  const items = useMemo(() => {
     const data = catalog.data;
-    if (!q || !data) return [];
+    if (!q) return [];
     const sourceById = new Map((sources.data ?? []).map((s) => [s.id, s]));
     const many = sourceById.size > 1;
-    // The core matched words with diacritics folded and renamed channels by their provider name,
-    // which the palette's own filter does not: the query an answer is for counts as its keyword,
-    // so an answer for "fo" still narrows to the titles holding "fox".
-    const answered = (catalog.isPlaceholderData ? '' : debounced) || undefined;
-    const keywords = answered ? [answered] : undefined;
-    const pick = <T extends { ref: ItemRef }>(list: readonly T[], title: (x: T) => string) =>
-      list.filter((x) => sourceById.has(x.ref.sourceId) && !skip.has(itemKey(x.ref)) && paletteFilter(title(x), q, keywords) > 0).slice(0, CATALOG_LIMIT);
-
     const channels = t('vod:group_live');
-    const items: PaletteItem[] = pick(data.live, (c) => c.name).map((c): PaletteItem => {
+    const play = (c: Channel, sourceKind: SourceKind) => () =>
+      void playFromShell({
+        ref: c.ref,
+        title: c.name,
+        posterUrl: c.logoUrl,
+        isLive: true,
+        isRadio: c.isRadio,
+        sourceKind,
+        ...(c.categoryId ? { categoryId: c.categoryId } : {}),
+      }).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title: plainChannelName(c.name, strip) }), description: errorDescription(err) }));
+    // The number is what matched, so it is the row's keyword and its detail says so.
+    const typedNumber = channelNumberQuery(q);
+    const byNumber = typedNumber === undefined ? [] : numbered.channels.filter((c) => sourceById.has(c.ref.sourceId) && !skip.has(itemKey(c.ref)));
+    const items: PaletteItem[] = byNumber.map((c): PaletteItem => {
       const source = sourceById.get(c.ref.sourceId)!;
       return {
         id: `catalog.${itemKey(c.ref)}`,
@@ -260,21 +260,40 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
         channel: true,
         icon: c.isRadio ? Radio : Tv,
         image: c.logoUrl ? { src: c.logoUrl, sourceId: c.ref.sourceId } : undefined,
-        keywords,
-        // The channel's group tells two feeds of one name apart ("FOX HD" in Sports and in Backup).
-        detail: [c.categoryName, many ? source.name : ''].filter(Boolean),
-        run: () =>
-          void playFromShell({
-            ref: c.ref,
-            title: c.name,
-            posterUrl: c.logoUrl,
-            isLive: true,
-            isRadio: c.isRadio,
-            sourceKind: source.kind,
-            ...(c.categoryId ? { categoryId: c.categoryId } : {}),
-          }).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title: c.name }), description: errorDescription(err) })),
+        keywords: [q],
+        detail: [t('player:channelNumber', { number: typedNumber }), many ? source.name : ''].filter(Boolean),
+        run: play(c, source.kind),
       };
     });
+    if (!data) return items;
+    const listed = new Set(byNumber.map((c) => itemKey(c.ref)));
+    // The core matched words with diacritics folded and renamed channels by their provider name,
+    // which the palette's own filter does not: the query an answer is for counts as its keyword,
+    // so an answer for "fo" still narrows to the titles holding "fox".
+    const answered = (catalog.isPlaceholderData ? '' : debounced) || undefined;
+    const keywords = answered ? [answered] : undefined;
+    const pick = <T extends { ref: ItemRef }>(list: readonly T[], title: (x: T) => string) =>
+      list
+        .filter((x) => sourceById.has(x.ref.sourceId) && !skip.has(itemKey(x.ref)) && !listed.has(itemKey(x.ref)) && paletteFilter(title(x), q, keywords) > 0)
+        .slice(0, CATALOG_LIMIT);
+
+    // As the Search page lists them: no provider heading rows, the user's region and whole-word names first.
+    for (const c of pick(rankChannels(data.live, q), (c) => c.name)) {
+      const source = sourceById.get(c.ref.sourceId)!;
+      items.push({
+        id: `catalog.${itemKey(c.ref)}`,
+        title: c.name,
+        group: channels,
+        channel: true,
+        icon: c.isRadio ? Radio : Tv,
+        image: c.logoUrl ? { src: c.logoUrl, sourceId: c.ref.sourceId } : undefined,
+        keywords,
+        // The channel's group tells two feeds of one name apart ("FOX HD" in Sports and in Backup).
+        detailGroup: c.categoryName || undefined,
+        detail: many ? [source.name] : undefined,
+        run: play(c, source.kind),
+      });
+    }
     const titles = t('vod:group_titles');
     const vod = [...pick(data.movies, (m) => m.title), ...pick(data.series, (s) => s.title)];
     for (const v of vod) {
@@ -285,14 +304,15 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
         title: v.title,
         group: titles,
         icon: CONTENT_ICONS[v.ref.contentType],
-        image: v.posterUrl ? { src: v.posterUrl, sourceId: v.ref.sourceId, poster: true } : undefined,
+        image: { src: v.posterUrl, sourceId: v.ref.sourceId, poster: true },
         keywords,
         detail: [[kind, v.year].filter(Boolean).join(' · '), many ? source.name : ''].filter(Boolean),
         run: () => void navigate(detailHref(v.ref) ?? '/search'),
       });
     }
     return items;
-  }, [q, debounced, catalog.data, catalog.isPlaceholderData, sources.data, skip, t, navigate]);
+  }, [q, debounced, catalog.data, catalog.isPlaceholderData, numbered.channels, sources.data, skip, strip, t, navigate]);
+  return { items, pending };
 }
 
 /** Recent channels the palette opens with. */
@@ -311,6 +331,7 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
   const sources = useVisibleSources();
   const recent = useRpcQuery('recent.list', RECENT_ARGS, { enabled: open });
   const resume = useRpcQuery('positions.continueWatching', homeContinueArgs(), { enabled: open });
+  const strip = useDisplayPrefs().stripCountryPrefix;
   const empty = !query.trim();
 
   return useMemo(() => {
@@ -339,7 +360,7 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
         icon: isRadio ? Radio : Tv,
         image: r.snapshot.posterUrl ? { src: r.snapshot.posterUrl, sourceId: r.ref.sourceId } : undefined,
         detail: many ? [source.name] : undefined,
-        run: play({ ref: r.ref, title, posterUrl: r.snapshot.posterUrl, isLive: true, isRadio, sourceKind: source.kind }, title),
+        run: play({ ref: r.ref, title, posterUrl: r.snapshot.posterUrl, isLive: true, isRadio, sourceKind: source.kind }, plainChannelName(title, strip)),
       });
     }
     const continuing = t('railContinueWatching');
@@ -355,8 +376,8 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
         title,
         group: continuing,
         icon: p.ref.contentType === 'series' ? Layers : Clapperboard,
-        // The title's poster, as the channel rows above show their logos; the glyph only without one.
-        image: p.snapshot.posterUrl ? { src: p.snapshot.posterUrl, sourceId: p.ref.sourceId, poster: true } : undefined,
+        // The title's poster, as the channel rows above show their logos; its initials without one.
+        image: { src: p.snapshot.posterUrl, sourceId: p.ref.sourceId, poster: true },
         detail: p.snapshot.subtitle ? [p.snapshot.subtitle] : undefined,
         run: play(
           { ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot.subtitle, posterUrl: p.snapshot.posterUrl, isLive: false, isRadio: false, sourceKind: source.kind },
@@ -365,17 +386,17 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
       });
     }
     return items;
-  }, [empty, sources.data, recent.data, resume.data, t]);
+  }, [empty, sources.data, recent.data, resume.data, strip, t]);
 }
 
 /** Most guide programmes the palette lists for one query: distinct shows, after folding. */
 const PROGRAMME_LIMIT = 5;
 /**
  * Hits asked of each source: the Search page's own Programmes limit (`PROGRAMME_LIMIT` in
- * SearchPage.tsx), so "Search for" opens on answers already in the cache, and enough that five
+ * SearchPage.tsx), so "See all results" opens on answers already in the cache, and enough that five
  * distinct shows remain after a show on many channels at once folds into one row.
  */
-const PROGRAMME_REQUEST_LIMIT = 50;
+const PROGRAMME_REQUEST_LIMIT = 200;
 
 /**
  * Programme hits folded by title and start (one show on several channels at once), in first-hit
@@ -392,6 +413,13 @@ export function foldProgrammeHits<H extends { program: { title: string; start: s
   return [...rows.values()];
 }
 
+/** "Today" or "Tomorrow" in the UI language (capitalized), else the short date ("Mon, Nov 16"). */
+function airingDay(at: number, now: number, lang: string): string {
+  const heading = dayHeading(at, now, lang);
+  if (!heading.date) return formatDay(at, lang);
+  return heading.label.charAt(0).toLocaleUpperCase(intlLocale(lang)) + heading.label.slice(1);
+}
+
 /**
  * Guide programmes whose titles match the query (`epg.search` of each source, after a pause in
  * typing, only while the palette is open). One opens the guide at the programme. A show on many
@@ -399,19 +427,22 @@ export function foldProgrammeHits<H extends { program: { title: string; start: s
  * first, where the others share its time column: it names that channel, so the user sees where
  * Enter goes, and from 640 px up counts them all (a phone's row has no room left for the title).
  */
-function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
+function useProgrammeItems(query: string, open: boolean): { items: PaletteItem[]; pending: boolean } {
   const { t, i18n } = useTranslation('shell');
   const navigate = useNavigate();
   const sources = useVisibleSources();
   const prefs = useDisplayPrefs();
   const debounced = useDebounced(query.trim(), 200);
   const ids = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
-  const { hits } = useProgrammeSearch(ids, debounced, { enabled: open, limit: PROGRAMME_REQUEST_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
+  const search = useProgrammeSearch(ids, debounced, { enabled: open, limit: PROGRAMME_REQUEST_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
+  const hits = search.hits;
+  const pending = open && (debounced !== query.trim() || search.pending);
 
-  return useMemo(() => {
+  const items = useMemo(() => {
     if (!query.trim()) return [];
     const group = t('groupProgrammes');
     const lang = i18n.language;
+    const now = Date.now();
     return foldProgrammeHits(hits, PROGRAMME_LIMIT).map(({ hit, channels }): PaletteItem => {
       const at = ms(hit.program.start);
       const link = guideHitLink(hit);
@@ -420,7 +451,10 @@ function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
         title: hit.program.title,
         group,
         icon: CalendarRange,
-        detail: [`${formatDay(at, lang)} ${formatClock(at, lang)}`, displayChannelName(hit.channelName, prefs.stripCountryPrefix)],
+        // "Today 7:00 AM" as the Search page's day headings say it, and the channel as the channel
+        // rows draw it (the place tag after the name, quiet), not the provider's "US| ESPN HD".
+        detail: [`${airingDay(at, now, lang)} ${formatClock(at, lang)}`],
+        detailChannel: hit.channelName,
         wideDetail: channels > 1 ? t('countChannels', { count: channels }) : undefined,
         // The core matched the title with diacritics folded ("cafe" finds "Café"), which the
         // palette's own filter does not: the typed words count as its keywords.
@@ -428,7 +462,8 @@ function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
         run: () => void navigate(link.to, { state: link.state }),
       };
     });
-  }, [query, hits, debounced, prefs.stripCountryPrefix, t, i18n.language, navigate]);
+  }, [query, hits, debounced, t, i18n.language, navigate]);
+  return { items, pending };
 }
 
 /**
@@ -446,7 +481,7 @@ function settingsKeywords(key: string, section: string, t: TFunction, en: TFunct
 
 /** Built-in navigation, source, and settings commands. Exported for tests. */
 export function usePaletteItems(): PaletteItem[] {
-  const { t, i18n } = useTranslation(['shell', 'parental']);
+  const { t, i18n } = useTranslation(['shell', 'parental', 'settings', 'player']);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const sources = useVisibleSources();
@@ -504,7 +539,7 @@ export function usePaletteItems(): PaletteItem[] {
         run: go(l.to),
         ...NAV_EXTRA[l.section ?? l.to],
       })),
-      { id: 'nav.sources', title: t('manageSources'), group: nav, icon: ListVideo, run: go('/sources'), keywords: ['playlists'] },
+      { id: 'nav.sources', title: t('manageSources'), group: nav, icon: Server, run: go('/sources'), keywords: ['playlists'] },
       { id: 'nav.addSource', title: t('addSource'), group: nav, icon: Plus, run: go('/sources?add=1'), keywords: ['playlist', 'm3u', 'xtream', 'stalker', 'portal'] },
       { id: 'nav.settings', title: t('navSettings'), group: nav, icon: SettingsIcon, run: go('/settings'), keywords: ['preferences'] },
     ];
@@ -550,17 +585,36 @@ export function usePaletteItems(): PaletteItem[] {
       });
     }
     const en = i18n.getFixedT('en', 'shell');
+    // A section by the name the Settings page's own nav gives it ("Guide", not "TV guide").
+    const sectionName = (section: string) => t(`settings:section${section[0]!.toUpperCase()}${section.slice(1)}`);
     for (const section of SETTINGS_SECTIONS) {
       // External players run only in the desktop app; the browser's settings page has no such section.
       if (section === 'players' && !isDesktop) continue;
       const key = `settings${section[0]!.toUpperCase()}${section.slice(1)}`;
+      // Under the Settings heading the section's name alone ("Playback"), so the word that tells
+      // the rows apart leads; "Settings: Playback" still finds it ("settings play").
+      const full = t('settingsSection', { section: sectionName(section) });
       items.push({
         id: `settings.${section}`,
-        title: t('settingsSection', { section: t(key) }),
+        title: sectionName(section),
         group: set,
         icon: SettingsIcon,
         run: go(`/settings/${section}`),
-        keywords: settingsKeywords(key, section, t, en),
+        keywords: [full, ...settingsKeywords(key, section, t, en)],
+      });
+    }
+    // Single settings by their own names ("Interface size" for "font size"), opening the group
+    // that holds them; the row says which section that is.
+    for (const target of SETTING_TARGETS) {
+      if (target.section === 'players' && !isDesktop) continue;
+      items.push({
+        id: `setting.${target.id}`,
+        title: t(target.label),
+        group: set,
+        icon: SettingsIcon,
+        detail: [t('settingsSection', { section: sectionName(target.section) })],
+        run: go(`/settings/${target.section}#${target.id}`),
+        keywords: [en(target.label), ...target.keywords],
       });
     }
 
@@ -576,7 +630,7 @@ function useSuggestedItems(query: string): PaletteItem[] {
   const { t } = useTranslation('shell');
   const navigate = useNavigate();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
-  const { resolved } = useTheme();
+  const { resolved, toggle } = useTheme();
   const empty = !query.trim();
   return useMemo(() => {
     if (!empty) return [];
@@ -588,19 +642,21 @@ function useSuggestedItems(query: string): PaletteItem[] {
         group,
         icon: resolved === 'dark' ? Sun : Moon,
         shortcut: 'mod+shift+l',
-        run: () => void persistTheme(resolved === 'dark' ? 'light' : 'dark'),
+        run: toggle,
       },
       { id: 'suggest.addSource', title: t('addSource'), group, icon: Plus, run: () => navigate('/sources?add=1') },
       { id: 'suggest.shortcuts', title: t('keyboardShortcuts'), group, icon: Keyboard, shortcut: '?', run: () => setHelpOpen(true) },
     ];
-  }, [empty, resolved, t, navigate, setHelpOpen]);
+  }, [empty, resolved, toggle, t, navigate, setHelpOpen]);
 }
 
 /** Groups the empty palette shows; the rest (sources, settings) wait for a query. */
 const EMPTY_GROUP_IDS = ['recent.', 'resume.', 'suggest.', 'nav.'];
+/** Already a suggestion in the empty palette, so its Go to group leaves it out. */
+const SUGGESTED_NAV = new Set(['nav.addSource']);
 
 export function CommandPalette() {
-  const { t } = useTranslation('shell');
+  const { t } = useTranslation(['shell', 'vod']);
   const open = useShellStore((s) => s.paletteOpen);
   const setOpen = useShellStore((s) => s.setPaletteOpen);
   const items = usePaletteItems();
@@ -612,8 +668,10 @@ export function CommandPalette() {
   const content = useContentItems(query, open);
   // A favourite or recent item the library also finds is listed once, in the group above.
   const contentKeys = useMemo(() => new Set(content.map((it) => it.id.slice('content.'.length))), [content]);
-  const catalog = useCatalogItems(query, open, contentKeys);
-  const programmes = useProgrammeItems(query, open);
+  const { items: catalog, pending: catalogPending } = useCatalogItems(query, open, contentKeys);
+  const { items: programmes, pending: programmesPending } = useProgrammeItems(query, open);
+  // The library or the guide is still answering: an empty list is not "nothing" yet.
+  const searching = catalogPending || programmesPending;
   // The row Enter runs (cmdk's value); see the reset below.
   const [selected, setSelected] = useState('');
   // Every way of closing (Esc, the scrim, Ctrl+K again, Back) leaves the next open empty: the
@@ -625,12 +683,20 @@ export function CommandPalette() {
     if (open) setSelected('');
   }
 
+  // Keys typed between Ctrl+K and the field taking focus (the dialog focused it in its own layout
+  // effect, which runs before this one) are the query's start (paletteKeys.ts).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const typed = takePaletteKeys();
+    if (typed) setQuery(typed);
+  }, [open]);
+
   // Favourites and recent items lead: a tie with a command goes to the content. With nothing
   // typed, the recent channels, the titles to resume and the suggestions lead, then the
   // destinations; sources and settings come with a query.
   const groups = useMemo(() => {
     const empty = !query.trim();
-    const all = empty ? [...start, ...suggested, ...items.filter((it) => EMPTY_GROUP_IDS.some((p) => it.id.startsWith(p)))] : [...content, ...catalog, ...programmes, ...items];
+    const all = empty ? [...start, ...suggested, ...items.filter((it) => EMPTY_GROUP_IDS.some((p) => it.id.startsWith(p)) && !SUGGESTED_NAV.has(it.id))] : [...content, ...catalog, ...programmes, ...items];
     const map = new Map<string, PaletteItem[]>();
     for (const it of all) {
       const list = map.get(it.group) ?? [];
@@ -652,9 +718,14 @@ export function CommandPalette() {
     // "NBA 05" from League Pass starts with "nba" and outscores the "US| NBA TV FHD" they watch,
     // which then sat eighth and lost Enter. A library group scores at most what the content
     // group does, and on a tie the content (listed first, the sort is stable) leads.
+    // Guide programmes come after both (w-realdata-06): "sky sports" with SKY SPORTS ACTION HD
+    // among the recent channels selected a "Sky Sports News" airing. They score at most what the
+    // best channel or title group does, and the sort leaves them after it on a tie.
     const own = scored.find(([g]) => g[1][0]?.id.startsWith('content.'))?.[1];
-    return scored
-      .map(([g, score]) => [g, own !== undefined && g[1][0]?.id.startsWith('catalog.') ? Math.min(score, own) : score] as const)
+    const capped = scored.map(([g, score]) => [g, own !== undefined && g[1][0]?.id.startsWith('catalog.') ? Math.min(score, own) : score] as const);
+    const library = Math.max(0, ...capped.filter(([g]) => /^(content|catalog)\./.test(g[1][0]?.id ?? '')).map(([, score]) => score));
+    return capped
+      .map(([g, score]) => [g, library > 0 && g[1][0]?.id.startsWith('programme.') ? Math.min(score, library) : score] as const)
       .sort((a, b) => b[1] - a[1])
       .map(([g]) => g);
   }, [groups, query]);
@@ -775,8 +846,15 @@ export function CommandPalette() {
             line on the group headings' inset, not a 7rem block that pushed the one row left to
             press halfway down the list.
           */}
-          <Cmdk.Empty data-testid="palette-empty" className="px-[calc(14rem/15)] pt-3 pb-1 text-sm text-fg-muted">
-            {t('paletteEmpty')}
+          <Cmdk.Empty data-testid="palette-empty" className="flex items-center gap-2 px-[calc(14rem/15)] pt-3 pb-1 text-sm text-fg-muted">
+            {searching ? (
+              <>
+                <LoaderCircle aria-hidden size={14} className="shrink-0 motion-safe:animate-spin" />
+                {t('vod:searching')}
+              </>
+            ) : (
+              t('paletteEmpty')
+            )}
           </Cmdk.Empty>
           {ranked.map(([group, list]) => (
             <Cmdk.Group key={group} heading={group}>
@@ -784,15 +862,21 @@ export function CommandPalette() {
                 const Icon = it.icon;
                 return (
                   <Cmdk.Item key={it.id} value={`${it.title}${VALUE_SEP}${it.id}`} keywords={it.keywords} onSelect={() => run(it.run)} className={row}>
-                    <span aria-hidden className={iconTile}>
-                      {it.image?.poster ? (
-                        <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" className="size-full after:hidden" rounded="sm" />
-                      ) : it.image ? (
-                        <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" fit="contain" kind="live" className="bg-transparent after:hidden [&_img]:p-0.5" rounded="sm" />
-                      ) : (
-                        Icon && <Icon size={16} />
-                      )}
-                    </span>
+                    {it.channel ? (
+                      <span aria-hidden className="flex size-7 shrink-0">
+                        <ChannelLogo src={it.image?.src} name={it.title} size={28} sourceId={it.image?.sourceId} />
+                      </span>
+                    ) : (
+                      <span aria-hidden className={iconTile}>
+                        {it.image?.poster ? (
+                          <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" className="size-full after:hidden" rounded="sm" />
+                        ) : it.image ? (
+                          <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" fit="contain" kind="live" className="bg-transparent after:hidden [&_img]:p-0.5" rounded="sm" />
+                        ) : (
+                          Icon && <Icon size={16} />
+                        )}
+                      </span>
+                    )}
                     {it.channel ? (
                       <ChannelName name={it.title} strip={prefs.stripCountryPrefix} title={it.title} className="min-w-0 flex-1 truncate text-match-parent" />
                     ) : (
@@ -801,11 +885,15 @@ export function CommandPalette() {
                       </span>
                     )}
                     {/* Capped, so a long channel group or source name never squeezes the title. */}
+                    {it.detailGroup && <ChannelName name={it.detailGroup} title={it.detailGroup} className={detailText} />}
                     {it.detail?.map((d, i) => (
                       <span key={i} dir="auto" title={d} className={detailText}>
                         {d}
                       </span>
                     ))}
+                    {it.detailChannel && (
+                      <ChannelName name={it.detailChannel} strip={prefs.stripCountryPrefix} title={it.detailChannel} className={detailText} />
+                    )}
                     {it.wideDetail && (
                       <span dir="auto" title={it.wideDetail} className={cn(detailText, 'max-sm:hidden')}>
                         {it.wideDetail}
@@ -828,8 +916,8 @@ export function CommandPalette() {
                 <span aria-hidden className={iconTile}>
                   <Search size={16} />
                 </span>
+                {/* No Enter glyph: Enter runs the highlighted row, which the footer says. */}
                 <span className="min-w-0 flex-1 truncate">{t('searchFor', { query: query.trim() })}</span>
-                <CornerDownLeft aria-hidden size={14} className="text-fg-subtle" />
               </Cmdk.Item>
             </Cmdk.Group>
           )}

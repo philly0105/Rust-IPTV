@@ -14,11 +14,14 @@ const DIR = join(__dirname, '..');
 /** Modules only an open menu needs. */
 const MENU_ONLY = [
   '@/features/channeledit',
+  '@/features/library/lib/favoriteToggle',
   '@/features/lists/hooks/useAddToList',
   '@/features/live/components/ContextMenu',
+  '@/features/live/hooks/useChannelMenuItems',
   '@/features/multiview/addChannel',
   '@/features/multiview/useMultiviewMenuItem',
   '@/features/parental/lockMenu',
+  '@/features/vod/hooks/usePosterMenu',
   './ChannelMenuBody',
 ];
 

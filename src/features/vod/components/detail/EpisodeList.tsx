@@ -9,7 +9,7 @@ import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, isResumable, isWatched, progressFraction } from '../../lib/format';
 import { handleGridKeyDown } from '../../lib/gridNav';
 import { useMediaQuery } from '@/shell/useMediaQuery';
-import { IconButton, MetaLine, Poster, PosterCellWidthContext, ProgressBar, Tabs, WatchedChip, cn, useListVirtualizer, usePosterWidthBox, useScaledPx } from '@/ui';
+import { IconButton, MetaLine, Poster, PosterCellWidthContext, ProgressBar, Select, Tabs, WatchedChip, cn, useListVirtualizer, usePosterWidthBox, useScaledPx } from '@/ui';
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
@@ -35,9 +35,28 @@ export function useSeasonLabel(): (s: Pick<Season, 'number' | 'name'>) => string
   };
 }
 
+/**
+ * Past this many seasons the tabs no longer fit a row (about 9 at 1440 px, 3 on a phone), and a
+ * mouse wheel cannot scroll the strip to the rest: the seasons become one dropdown (vod-detail-12).
+ */
+const MAX_SEASON_TABS = 8;
+
 export function SeasonTabs({ seasons, value, onChange }: { seasons: Season[]; value: number; onChange: (n: number) => void }) {
   const { t } = useTranslation('vod');
   const label = useSeasonLabel();
+  if (seasons.length > MAX_SEASON_TABS) {
+    return (
+      <Select
+        aria-label={t('seasons')}
+        value={String(value)}
+        onValueChange={(id) => onChange(Number(id))}
+        options={seasons.map((s) => ({ value: String(s.number), label: t('seasonOption', { season: label(s), count: s.episodes.length }) }))}
+        className="w-auto min-w-56"
+        wrapperClassName="self-start"
+        data-testid="vod-season-select"
+      />
+    );
+  }
   return (
     <Tabs
       label={t('seasons')}
@@ -58,6 +77,8 @@ export interface EpisodeListProps {
   positions: Map<string, PlaybackPosition>;
   downloads: Map<string, Download>;
   playingEpisodeId?: string;
+  /** The episode the hero's Play or Resume starts: marked "Up next" while nothing plays (vod-detail-06). */
+  nextEpisodeId?: string;
   onPlay: (ep: Episode) => void;
   canDownload: boolean;
   pendingDownload: string | null;
@@ -78,7 +99,7 @@ export function offlineDownload(d: Download | undefined): Download | undefined {
 /**
  * Episodes of one season, virtualized. Each row plays on Enter/click (from the downloaded file when
  * there is one); arrows move between rows. A row is one surface: it lights on hover, and its facts
- * (code, runtime, watched or progress, downloaded) read as one line above the title. On a phone that
+ * (up next, code, runtime, progress, downloaded) read as one line above the title. On a phone that
  * line keeps to the code, the runtime, Now playing and the downloaded icon.
  */
 export function EpisodeList({
@@ -86,6 +107,7 @@ export function EpisodeList({
   positions,
   downloads,
   playingEpisodeId,
+  nextEpisodeId,
   onPlay,
   canDownload,
   pendingDownload,
@@ -136,6 +158,7 @@ export function EpisodeList({
         const resumable = isResumable(pos);
         const watched = isWatched(pos);
         const playing = ep.id === playingEpisodeId;
+        const upNext = !playingEpisodeId && ep.id === nextEpisodeId;
         const runtime = formatRuntime(ep.durationSeconds ?? pos?.durationSeconds);
         const code = episodeCode(ep.season, ep.episode);
         const hasActions = !!onToggleWatched || canDownload;
@@ -166,21 +189,31 @@ export function EpisodeList({
                 type="button"
                 data-grid-index={row.index}
                 onClick={() => onPlay(ep)}
-                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}${progressLabel ? `, ${progressLabel}` : ''}${offline ? `, ${t('downloaded')}` : ''}`}
+                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${upNext ? `, ${t('upNext')}` : ''}${watched ? `, ${t('watched')}` : ''}${progressLabel ? `, ${progressLabel}` : ''}${offline ? `, ${t('downloaded')}` : ''}`}
                 aria-current={playing ? 'true' : undefined}
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus sm:gap-4"
               >
                 <div className="relative w-28 shrink-0 sm:w-40" data-testid="episode-thumb">
-                  <PosterCellWidthContext.Provider value={thumbWidth}>
-                    <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 text-white opacity-0 group-hover:bg-scrim/50 group-hover:opacity-100 motion-safe:transition-opacity"
-                      >
-                        <Play size={22} className="fill-current" />
+                  {ep.posterUrl?.trim() ? (
+                    <PosterCellWidthContext.Provider value={thumbWidth}>
+                      <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
+                        <PlayHover />
+                      </Poster>
+                    </PosterCellWidthContext.Provider>
+                  ) : (
+                    // No still (normal for M3U and many Xtream providers): a quiet tile with the
+                    // episode's number. Initials tinted from each title made a season a column of
+                    // colours ("PI", "E2", "P2") that told the episodes apart no better than the code.
+                    <div
+                      className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-sm bg-surface-2 ring-1 ring-edge ring-inset"
+                      data-testid="episode-number-tile"
+                    >
+                      <span aria-hidden className="font-display text-title-sm tabular text-fg-muted sm:text-title">
+                        {ep.episode > 0 ? `E${ep.episode}` : code}
                       </span>
-                    </Poster>
-                  </PosterCellWidthContext.Provider>
+                      <PlayHover />
+                    </div>
+                  )}
                   {/* On the thumbnail the bar is glass, and drawn only (the row says how far). A watched
                       episode shows the watched tick instead, as a poster does. */}
                   {watched ? (
@@ -204,6 +237,12 @@ export function EpisodeList({
                     as="span"
                     className="min-w-0 text-caption text-fg-subtle max-sm:h-[1lh] max-sm:overflow-hidden max-sm:whitespace-nowrap"
                     items={[
+                      // First, where the eye lands coming down from the hero's Resume (vod-detail-06).
+                      upNext && (
+                        <span key="up-next" className="font-medium text-accent" data-testid="episode-up-next">
+                          {t('upNext')}
+                        </span>
+                      ),
                       <span key="code" className="tabular text-fg-muted">
                         {code}
                       </span>,
@@ -212,12 +251,8 @@ export function EpisodeList({
                           {runtime}
                         </span>
                       ),
-                      watched && sm && (
-                        <span key="watched" className="inline-flex items-center gap-1 text-success" data-testid="episode-watched">
-                          <CircleCheck aria-hidden size={12} className="shrink-0" />
-                          {t('watched')}
-                        </span>
-                      ),
+                      // Watched is the thumbnail's tick and the toggle's green: a third "Watched" in
+                      // words made a finished season a column of green (vod-detail-15).
                       playing && (
                         <span key="playing" className="text-accent">
                           {t('nowPlaying')}
@@ -241,12 +276,17 @@ export function EpisodeList({
                   <div
                     dir="auto"
                     title={ep.title}
-                    className="line-clamp-2 text-[calc(15rem/15)] leading-5 font-medium [overflow-wrap:anywhere] text-fg text-match-parent sm:line-clamp-1"
+                    className="line-clamp-2 text-body leading-5 font-medium [overflow-wrap:anywhere] text-fg text-match-parent sm:line-clamp-1"
                     data-testid="episode-title"
                   >
                     {ep.title}
                   </div>
-                  {ep.plot && <p dir="auto" className="line-clamp-2 text-body-sm text-fg-muted text-match-parent max-sm:hidden">{ep.plot}</p>}
+                  {/* The whole plot as the tooltip where two lines cut it. */}
+                  {ep.plot && (
+                    <p dir="auto" title={ep.plot} className="line-clamp-2 text-body-sm text-fg-muted text-match-parent max-sm:hidden">
+                      {ep.plot}
+                    </p>
+                  )}
                 </div>
               </button>
               {hasActions && (
@@ -265,7 +305,6 @@ export function EpisodeList({
                   )}
                   {canDownload && (
                     <DownloadButton
-                      compact
                       label={`${code} ${ep.title}`}
                       download={downloads.get(ep.id)}
                       pending={pendingDownload === ep.id}
@@ -279,5 +318,21 @@ export function EpisodeList({
         );
       })}
     </div>
+  );
+}
+
+/** The play glyph a row's thumbnail shows under the pointer. */
+function PlayHover() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 opacity-0 group-hover:bg-scrim/70 group-hover:opacity-100 motion-safe:transition-opacity"
+    >
+      {/* On a disc, as poster cards draw it: over a tile without artwork the bare glyph landed
+          between the initials and read "S▶H" (vod-detail-05). */}
+      <span className="rounded-full bg-glass-strong p-2 text-on-glass">
+        <Play size={18} className="fill-current" />
+      </span>
+    </span>
   );
 }

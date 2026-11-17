@@ -49,7 +49,8 @@ export function progressFraction(pos: ProgressInput | undefined | null): number 
  * threshold (`MIN_RESUME_SECONDS`, so the label matches what playback does)
  * and before 95 %. A watched row is not, except a watched movie replayed
  * part-way to between 5 % and 95 % (`isWatchedReplay`, the player's rule):
- * it resumes there and keeps its watched tick.
+ * it resumes there (the player clears such a replay's mark once it gets past
+ * 5 %, so this is a row saved before that, or whose clearing failed).
  */
 export function isResumable(pos: ProgressInput | undefined | null): boolean {
   if (!pos || !(pos.positionSeconds > MIN_RESUME_SECONDS)) return false;
@@ -107,7 +108,8 @@ function cleanCodeSlow(t: string, season: number, episode: number): string {
  * Episode title without the noise Xtream panels wrap around it:
  * `Captain Kindling - S01E02 - Last Call` -> `Last Call`. Strips a leading
  * series name and a leading or trailing episode code (`S01E02`, `1x02`) for
- * this season/episode. Returns '' when nothing else is left.
+ * this season/episode. Returns '' when nothing else is left, or only the
+ * series name (`Captain Kindling S01E02`).
  */
 export function cleanEpisodeTitle(title: string | undefined, seriesTitle: string | undefined, season: number, episode: number): string {
   let t = (title ?? '').trim();
@@ -141,7 +143,9 @@ export function cleanEpisodeTitle(title: string | undefined, seriesTitle: string
       }
     }
   }
-  return t.trim();
+  t = t.trim();
+  // "Show S01E02": once the code is gone only the series' name is left, which names no episode.
+  return series && t.toLowerCase() === series.toLowerCase() ? '' : t;
 }
 
 /**

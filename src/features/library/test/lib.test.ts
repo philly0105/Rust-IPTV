@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DownloadStatus, PlayerSource } from '@/api/types';
 
 import { buildFavoriteRows, groupFavorites, moveWithinGroup, reorderArgs, sortFavorites, withPositions } from '../lib/favorites';
-import { etaSeconds, formatBytes, formatClock, formatDuration, percentOf } from '../lib/format';
+import { etaSeconds, formatBytes, formatClock, formatDuration, formatSpeedLimit, percentOf } from '../lib/format';
 import { k } from '../lib/keys';
 import { buildLibrary, filterLibrary, findEntry, groupBySeason, parseEpisodeCode, resumePoint, seriesTitle, type SeriesEntry } from '../lib/myvideos';
 import { positionToSave, SAVE_EVERY_MS, trackDownloadPosition, type PositionStore } from '../lib/positionSync';
 import { effectiveProgress, ProgressStore, STALE_MS } from '../lib/progress';
-import { actionsFor, buildQueueRows, partitionQueue, queueCounts } from '../lib/queue';
+import { actionsFor, buildQueueRows, downloadNames, partitionQueue, queueCounts } from '../lib/queue';
 import { bucketOf, buildRecentRows, continueForSource, watchedFraction } from '../lib/recent';
 import { makeDownload, makeEpisode, makeFavorite, makePosition, makeRecent } from './fixtures';
 
@@ -21,11 +21,20 @@ describe('queue', () => {
     makeDownload({ id: 100 + i, status, createdAt: `2026-10-01T10:0${i}:00Z`, updatedAt: `2026-10-01T11:0${i}:00Z` }),
   );
 
-  it('drops completed rows and orders active then attention', () => {
-    const { active, attention } = partitionQueue(all);
+  it('orders active, then attention, then finished rows', () => {
+    const { active, attention, finished } = partitionQueue(all);
     // Active rows stay in the order they were added, whatever their status.
     expect(active.map((d) => d.status)).toEqual(['queued', 'downloading', 'paused']);
     expect(attention.map((d) => d.status)).toEqual(['canceled', 'failed']);
+    expect(finished.map((d) => d.status)).toEqual(['completed']);
+  });
+
+  it('keeps the latest finished downloads, newest first', () => {
+    const done = Array.from({ length: 12 }, (_, i) =>
+      makeDownload({ id: i + 1, status: 'completed', completedAt: `2026-10-${String(i + 1).padStart(2, '0')}T00:00:00Z` }),
+    );
+    const { finished } = partitionQueue(done);
+    expect(finished.map((d) => d.id)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
   });
 
   it('keeps queued rows in FIFO order', () => {
@@ -45,9 +54,9 @@ describe('queue', () => {
 
   it('builds section headers with counts', () => {
     const rows = buildQueueRows(all);
-    expect(rows.map((r) => r.key)).toEqual(['h-active', 'd-100', 'd-101', 'd-102', 'h-attention', 'd-105', 'd-104']);
+    expect(rows.map((r) => r.key)).toEqual(['h-active', 'd-100', 'd-101', 'd-102', 'h-attention', 'd-105', 'd-104', 'h-finished', 'd-103']);
     expect(rows[0]).toMatchObject({ kind: 'header', count: 3 });
-    expect(buildQueueRows([makeDownload({ status: 'completed' })])).toEqual([]);
+    expect(buildQueueRows([])).toEqual([]);
   });
 
   it('offers the right actions per status', () => {
@@ -293,5 +302,22 @@ describe('position sync', () => {
     set({ source: { url: 'http://other', kind: 'hls', title: 'B', isLive: true, isRadio: false } });
     expect(save).toHaveBeenLastCalledWith(7, 6);
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe('download speed limits and names', () => {
+  it('formats a limit in the units the live speed uses, without a trailing .0', () => {
+    expect(formatSpeedLimit(2 * 1024 * 1024, 'en')).toBe('2 MB/s');
+    expect(formatSpeedLimit(2.5 * 1024 * 1024, 'en')).toBe('2.5 MB/s');
+    expect(formatSpeedLimit(400_000, 'en')).toBe('391 KB/s');
+    expect(formatSpeedLimit(0, 'en')).toBe('');
+  });
+
+  it('names an archived programme by the programme, with its channel and air time after it', () => {
+    const catchup = { title: 'US| ESPN2 FHD', subtitle: 'SportsCenter · Mon 9:00 AM', episodeId: 'catchup:2026-11-16T09:00:00Z' };
+    expect(downloadNames(catchup)).toEqual({ title: 'SportsCenter', subtitle: 'US| ESPN2 FHD · Mon 9:00 AM' });
+    expect(downloadNames({ ...catchup, subtitle: 'News · Late · Mon 9:00 AM' })).toEqual({ title: 'News · Late', subtitle: 'US| ESPN2 FHD · Mon 9:00 AM' });
+    expect(downloadNames({ title: 'Harbor Nine', subtitle: 'S01E02 · The Tide Turns', episodeId: 'e2' })).toEqual({ title: 'Harbor Nine', subtitle: 'S01E02 · The Tide Turns' });
+    expect(downloadNames({ title: 'Harbor Lights' })).toEqual({ title: 'Harbor Lights' });
   });
 });

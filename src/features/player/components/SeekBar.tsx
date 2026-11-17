@@ -21,7 +21,7 @@ export interface SeekBarProps {
 }
 
 /** Half the width of the widest preview label ("1:02:03"), in px. */
-const TIP_HALF = 28;
+const TIP_HALF = 36;
 
 /** Centre of the preview label: under the pointer, but never past either end of the bar. */
 export function clampTip(x: number, width: number): number {
@@ -29,9 +29,12 @@ export function clampTip(x: number, width: number): number {
   return Math.min(width - TIP_HALF, Math.max(TIP_HALF, x));
 }
 
-/** The preview labels over the bar: the glass tooltip's look. */
+/**
+ * The preview labels over the bar: the glass tooltip's look. The time under the pointer is what
+ * the user reads while aiming, so it is body size; the mini player keeps the caption (PV-18).
+ */
 const SEEK_LABEL =
-  'pointer-events-none absolute bottom-7 rounded-sm border border-glass-border bg-glass-strong px-2 py-0.5 font-numeric text-caption text-on-glass tabular-nums shadow-2 pointer-coarse:bottom-10';
+  'pointer-events-none absolute bottom-7 rounded-sm border border-glass-border bg-glass-strong px-2.5 py-1 font-numeric text-body-sm text-on-glass tabular-nums shadow-2 pointer-coarse:bottom-10 [[data-player-mini]_&]:px-2 [[data-player-mini]_&]:py-0.5 [[data-player-mini]_&]:text-caption';
 
 /**
  * The seek bar (PL-BAR-HIERARCHY): a 4 px track that thickens under the pointer, the buffered
@@ -110,7 +113,12 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
       aria-valuenow={Math.floor(shown)}
       aria-valuetext={valueText}
       data-scrubbing={scrubbing ? '' : undefined}
-      className={cn('group/seek relative flex h-6 cursor-pointer touch-none items-center select-none pointer-coarse:h-9', className)}
+      // A finger gets the 44 px floor: the row is 34 px tall and the hit area reaches 10 px up over
+      // the picture (not down, where the buttons are), so the bar and the row keep their size.
+      className={cn(
+        'group/seek relative flex h-6 cursor-pointer touch-none items-center select-none pointer-coarse:h-9 pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:top-[calc(100%-44rem/15)] pointer-coarse:before:bottom-0',
+        className,
+      )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -134,9 +142,9 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
             style={{ left: `${pct(r.start)}%`, width: `${Math.max(0, pct(r.end) - pct(r.start))}%` }}
           />
         ))}
-        {/* Up to the time under the pointer, lighter, so the preview reads against the played part. */}
+        {/* Up to the time under the pointer, a step lighter than the buffered part, so the aimed span reads. */}
         {hover && !scrubbing && (
-          <div aria-hidden data-testid="seek-hover-fill" className="absolute inset-y-0 left-0 bg-white/25" style={{ width: `${pct(hover.time)}%` }} />
+          <div aria-hidden data-testid="seek-hover-fill" className="absolute inset-y-0 left-0 bg-white/45" style={{ width: `${pct(hover.time)}%` }} />
         )}
         <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${pct(shown)}%` }} />
       </div>

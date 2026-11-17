@@ -14,6 +14,9 @@ import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef, RecordingFile } from '@/api/types';
+// Straight from live, as EntryRow takes it: a recording's channel reads as it does in the other library rows.
+import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { CARD_ART } from '@/ui/card';
 import { cn } from '@/ui/cn';
@@ -39,12 +42,21 @@ function useChannelLogo(f: RecordingFile): string | undefined {
 /** Caption under the wide artwork: title and one line of facts. */
 export const RECORDING_CAPTION_HEIGHT = 48;
 
+/** "Nov 16, 4:12 PM": the year only when it is not this one, so a narrow card keeps the time. */
+function recordedFormat(at: number): Intl.DateTimeFormatOptions {
+  const sameYear = new Date(at).getFullYear() === new Date().getFullYear();
+  return sameYear ? DATE_THIS_YEAR : DATE_OTHER_YEAR;
+}
+const DATE_THIS_YEAR: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+const DATE_OTHER_YEAR: Intl.DateTimeFormatOptions = { ...DATE_THIS_YEAR, year: 'numeric' };
+
 function RecordingCardImpl({ entry }: { entry: RecordingEntry }) {
   const { t, i18n } = useTranslation('library');
   const f = entry.file;
   const writing = f.status === 'recording';
   const at = Date.parse(f.date);
-  const date = Number.isFinite(at) ? dateTimeFormat(intlLocale(i18n.language), { dateStyle: 'medium', timeStyle: 'short' }).format(at) : '';
+  const date = Number.isFinite(at) ? dateTimeFormat(intlLocale(i18n.language), recordedFormat(at)).format(at) : '';
+  const { stripCountryPrefix } = useDisplayPrefs();
   const channel = f.title && f.channelName ? f.channelName : undefined;
   const logo = useChannelLogo(f);
 
@@ -83,14 +95,24 @@ function RecordingCardImpl({ entry }: { entry: RecordingEntry }) {
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-caption text-fg-muted">
           {entry.missing ? (
-            <Badge variant="danger" className="inline-flex items-center gap-1">
+            // Warning, as the Recordings tab and Missing files say it: the file is gone, nothing failed.
+            <Badge variant="warning" className="inline-flex items-center gap-1">
               <FileWarning size={12} aria-hidden />
               {t('fileMissing')}
             </Badge>
           ) : (
-            <span dir="auto" className="truncate tabular-nums">
-              {channel ? `${channel} · ${date}` : date}
-            </span>
+            <>
+              {/* The channel gives way to the date and time, which tell two recordings of a channel apart. */}
+              {channel && (
+                <>
+                  <ChannelName name={channel} strip={stripCountryPrefix} title={channel} className="min-w-0 truncate" />
+                  <span aria-hidden className="shrink-0 text-fg-subtle">
+                    ·
+                  </span>
+                </>
+              )}
+              <span className={cn('tabular-nums', channel ? 'shrink-0' : 'truncate')}>{date}</span>
+            </>
           )}
         </span>
       </div>

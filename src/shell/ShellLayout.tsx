@@ -1,6 +1,7 @@
+import { PanelLeftOpen } from 'lucide-react';
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Outlet, useLocation, useNavigate, useNavigationType } from 'react-router';
 
 import type { Settings } from '@/api/types';
 import { isDesktop } from '@/api/transport';
@@ -10,18 +11,19 @@ import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import '@/i18n';
-import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
+import { cn, focusToasts, IconButton, Skeleton, ToastViewport } from '@/ui';
 import { isTypingTarget } from '@/ui/focus';
 
 import { ConnectionBanner, ConnectionWatcher } from './connection';
 import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
-import { focusSearchWhenReady } from './focusSearch';
+import { focusSearchWhenReady, SEARCH_FIELD } from './focusSearch';
 import { Header, HEADER_SEARCH_WIDTH } from './Header';
-import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
+import { LIBRARY_LINKS, PHONE_QUERY, RAIL_DOCK_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
+import { bufferPaletteKeys } from './paletteKeys';
 import { modalOpen, useShortcut } from './shortcuts';
 import { PLAYER_PREFETCH_DELAY_MS, scheduleIdleLoad, schedulePlayerLoad } from './idleLoad';
 import { useShellStore, type ShellStore } from './store';
@@ -149,6 +151,7 @@ const OnboardingHost = lazy(() => import('@/features/onboarding/host').then((m) 
 
 /** Opens the command palette from anywhere. */
 export function openPalette(): void {
+  bufferPaletteKeys();
   useShellStore.getState().setPaletteOpen(true);
 }
 
@@ -204,26 +207,36 @@ function GlobalShortcuts() {
       const s = useShellStore.getState();
       // Inside the palette it closes it; over another dialog it does not open.
       if (!s.paletteOpen && modalOpen()) return;
+      // What is typed right after the press belongs in the palette's field, on its first open too.
+      if (!s.paletteOpen) bufferPaletteKeys();
       s.setPaletteOpen(!s.paletteOpen);
     },
     { description: t('scPalette'), area, allowInInput: true, allowInModal: true },
   );
+  // Ctrl+F and "/" mean one thing everywhere: this page's search field (the header's, or one the
+  // page marks with data-page-search, as Live TV and a category grid do), else the Search page.
+  const searchThisPage = (e: KeyboardEvent) => {
+    e.preventDefault();
+    useShellStore.getState().setPaletteOpen(false);
+    const field = document.querySelector<HTMLInputElement>(SEARCH_FIELD);
+    if (field) {
+      field.focus();
+      field.select();
+      return;
+    }
+    navigate('/search');
+    focusSearchWhenReady();
+  };
   useShortcut(
     'mod+f',
     (e) => {
       if (navigationKeyBlocked(e)) return;
-      useShellStore.getState().setPaletteOpen(false);
-      const field = document.querySelector<HTMLInputElement>('[data-shell-search], [data-page-search]');
-      if (field && !window.location.pathname.startsWith('/search')) {
-        field.focus();
-        field.select();
-        return;
-      }
-      navigate('/search');
-      focusSearchWhenReady();
+      searchThisPage(e);
     },
     { description: t('scSearch'), area, allowInInput: true, allowInModal: true },
   );
+  // Typed in a field, "/" is text; the registry leaves it to the field.
+  useShortcut('/', searchThisPage, { description: t('scSearch'), area });
   // Desktop only: the app window has no reload, so Ctrl+R is free there. In a browser it is the
   // reload key, and claiming it sent a user refreshing a stuck page to Recently watched instead
   // (SH-ctrl-r-browser); there the palette and the rail lead to it.
@@ -258,6 +271,12 @@ function GlobalShortcuts() {
       if (s.paletteOpen) return s.setPaletteOpen(false);
       if (s.helpOpen) return s.setHelpOpen(false);
       if (s.panelOpen) return s.setPanelOpen(false);
+      if (s.railPeek) {
+        // Focus goes back to Expand sidebar, the button that opened it (the rail is the same element).
+        s.setRailPeek(false);
+        document.querySelector<HTMLElement>('[data-rail-peek]')?.focus();
+        return;
+      }
       // Leaves a search or text field; a focused link, card or button keeps focus (and the Tab position).
       const active = document.activeElement;
       if (active instanceof HTMLElement && isTextEntry(active)) active.blur();
@@ -265,6 +284,23 @@ function GlobalShortcuts() {
     { description: t('scEscape'), area, allowInInput: true },
   );
   return null;
+}
+
+/** The first control a `data-skip-target="first"` region hands focus to. */
+const FIRST_CONTROL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]';
+
+/**
+ * The skip link's target: the page's first `[data-skip-target]` (its main list, grid or rail), at
+ * the item in it that takes Tab (the roving row, cell or card), else `main#main` itself. A region
+ * of plain controls (a settings section) says `data-skip-target="first"`: its first control.
+ * Exported for tests.
+ */
+export function skipToContent(): void {
+  const main = document.getElementById('main');
+  const target = main?.querySelector<HTMLElement>('[data-skip-target]');
+  const into = target?.querySelector<HTMLElement>(target.dataset['skipTarget'] === 'first' ? FIRST_CONTROL : '[tabindex="0"]') ?? target;
+  into?.focus();
+  if (!into || document.activeElement !== into) main?.focus();
 }
 
 const NON_TEXT_INPUTS = new Set(['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'color', 'file', 'image']);
@@ -295,9 +331,128 @@ function ShellNavigationEffects() {
     if (s.paletteOpen) s.setPaletteOpen(false);
     if (s.helpOpen) s.setHelpOpen(false);
     if (s.panelOpen) s.setPanelOpen(false);
+    if (s.railPeek) s.setRailPeek(false);
   }, [key]);
   useOutletScrollMemory();
+  useMainFocusRescue();
   return null;
+}
+
+/**
+ * Room at the end of a page that scrolls in <main>, as tall as the floating mini player sits over
+ * the window's foot (PlayerDock writes --player-float-inset), so the page's last row can scroll
+ * clear of it (v-shell-home-13). A page that fills <main> and scrolls inside itself (the guide, a
+ * catalog grid) gets none: a strip across the whole width would only shorten it. Those scrollers
+ * (VirtualGrid, VirtualList, VirtualCardGrid, VirtualRows, the guide's grid) end in a bottom padding
+ * of the same variable instead, so their last row scrolls clear without the page losing height.
+ */
+function FloatInsetSpacer() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const spacer = ref.current;
+    const main = spacer?.parentElement;
+    if (!spacer || !main || typeof ResizeObserver === 'undefined') return;
+    const check = () => setScrolls(main.scrollHeight - spacer.offsetHeight > main.clientHeight + 1);
+    const resize = new ResizeObserver(check);
+    const watch = () => {
+      resize.disconnect();
+      resize.observe(main);
+      for (const child of main.children) if (child !== spacer) resize.observe(child);
+      check();
+    };
+    const children = new MutationObserver(watch);
+    children.observe(main, { childList: true });
+    watch();
+    return () => {
+      resize.disconnect();
+      children.disconnect();
+    };
+  }, []);
+  return <div ref={ref} aria-hidden className="shrink-0" style={{ height: scrolls ? 'var(--player-float-inset, 0px)' : 0 }} data-player-float-spacer="" />;
+}
+
+/**
+ * When the focused control inside the page goes away (Try again swaps an error for a skeleton,
+ * a dismissed card unmounts), focus would fall to <body>, where Tab starts over from the skip
+ * link. It moves to the page's main region instead, in this one place for every page.
+ */
+function useMainFocusRescue() {
+  useEffect(() => {
+    const main = document.getElementById('main');
+    if (!main) return;
+    let held: Element | null = null;
+    const observer = new MutationObserver(() => {
+      if (!held || held.isConnected) return;
+      held = null;
+      observer.disconnect();
+      const active = document.activeElement;
+      if (!active || active === document.body) main.focus({ preventScroll: true });
+    });
+    const onFocusIn = (e: FocusEvent) => {
+      held = e.target as Element;
+      observer.observe(main, { childList: true, subtree: true });
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      // Focus moved on to something else (a dialog, the rail): nothing to rescue.
+      if (e.relatedTarget && !main.contains(e.relatedTarget as Node)) {
+        held = null;
+        observer.disconnect();
+      }
+    };
+    main.addEventListener('focusin', onFocusIn);
+    main.addEventListener('focusout', onFocusOut);
+    return () => {
+      observer.disconnect();
+      main.removeEventListener('focusin', onFocusIn);
+      main.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
+}
+
+/** How long after a new page opens the announcer names it: its header is set by then. */
+export const ROUTE_ANNOUNCE_DELAY_MS = 400;
+
+/**
+ * Names the page that opened, for screen readers: a page change by a link, the palette or a key
+ * changes only document.title, which they do not read, and focus rightly stays where it was (the
+ * rail link). A polite live region gets the page's title (the header's, as the window shows it)
+ * a moment after each new pathname; not on the first load, not for a query-only change, and not
+ * on Back or Forward, where focus goes back to where it was on that page and says enough.
+ */
+function RouteAnnouncer() {
+  const { pathname } = useLocation();
+  const navigationType = useNavigationType();
+  const popRef = useRef(false);
+  popRef.current = navigationType === 'POP';
+  const last = useRef(pathname);
+  const [text, setText] = useState('');
+  useEffect(() => {
+    if (last.current === pathname) return;
+    last.current = pathname;
+    setText('');
+    if (popRef.current) return;
+    let unsubscribe: (() => void) | undefined;
+    const announce = (): boolean => {
+      const header = useShellStore.getState().header;
+      const title = header?.documentTitle || header?.title;
+      if (title) setText(title);
+      return !!title;
+    };
+    // A page that names itself late (its title waits for data) is named when it does.
+    const timer = window.setTimeout(() => {
+      if (!announce()) unsubscribe = useShellStore.subscribe(() => announce() && unsubscribe?.());
+    }, ROUTE_ANNOUNCE_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe?.();
+    };
+  }, [pathname]);
+  return (
+    <p className="sr-only" aria-live="polite" aria-atomic="true" data-route-announcer="">
+      {text}
+    </p>
+  );
 }
 
 // SH-1 (performance audit): the shell's router and settings readers live in these leaves. The
@@ -333,7 +488,23 @@ const selectLanguage = (s: Settings) => s.language;
  * the real rail and header (the brand row, the Watch and Library groups at --rail-item-height,
  * the footer row, the search slot, the phone tab bar), so nothing jumps as the shell replaces it.
  */
-export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = 'shell-skeleton' }: { collapsed: boolean; railHidden: boolean; phone?: boolean; testId?: string }) {
+export function ShellSkeleton({
+  collapsed,
+  railHidden,
+  phone = false,
+  homeBody = true,
+  testId = 'shell-skeleton',
+}: {
+  collapsed: boolean;
+  railHidden: boolean;
+  phone?: boolean;
+  /**
+   * Home's shape under the header (a title, a wide block, a rail). Off, one faint line where every
+   * page starts: a cold link to Live TV or the guide drew Home's blocks and then jumped to columns.
+   */
+  homeBody?: boolean;
+  testId?: string;
+}) {
   const rows = (n: number) =>
     Array.from({ length: n }, (_, i) => (
       <div key={i} className={cn('flex h-(--rail-item-height) items-center gap-3', collapsed ? 'justify-center' : 'px-3')}>
@@ -378,7 +549,7 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
         </div>
       )}
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider px-(--page-gutter) sm:gap-4">
+        <div aria-hidden className="flex h-[calc(var(--header-height)+env(safe-area-inset-top,0px))] shrink-0 pt-[env(safe-area-inset-top,0px)] items-center gap-3 border-b border-divider px-(--page-gutter) sm:gap-4">
           <Skeleton className="h-6 w-32" />
           <div className="flex-1" />
           {!phone && (
@@ -389,17 +560,23 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
           )}
         </div>
         <div aria-hidden className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden px-(--page-gutter) py-6">
-          <Skeleton className="h-5 w-48" />
-          <Skeleton className="h-40 w-full max-w-[80rem] rounded-lg" />
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
+          {homeBody ? (
+            <>
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-40 w-full max-w-[80rem] rounded-lg" />
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
+            </>
+          ) : (
+            <Skeleton className="h-5 w-48 opacity-60" />
+          )}
         </div>
         {phone && (
           <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>
             {Array.from({ length: 5 }, (_, i) => (
               <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
                 <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
-                <Skeleton className="h-2 w-10" />
+                <Skeleton className="h-2.5 w-10" />
               </div>
             ))}
           </div>
@@ -408,6 +585,41 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
     </div>
   );
 }
+
+/**
+ * The way back to the rail while a page has the whole window (railAside): Expand sidebar, floating
+ * on glass in the top-start corner. It takes focus back when the rail it opened closes (Escape, the
+ * scrim, Collapse), since the rail's own button goes with the rail.
+ */
+function RailAsideButton() {
+  const { t } = useTranslation('shell');
+  const setRailPeek = useShellStore((s) => s.setRailPeek);
+  const ref = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    // Only when focus went with the rail: a link in it may have opened a page that took it.
+    if (railAsideOpened && (!document.activeElement || document.activeElement === document.body)) ref.current?.focus();
+    railAsideOpened = false;
+  }, []);
+  return (
+    <IconButton
+      ref={ref}
+      label={t('expandRail')}
+      tooltipSide="inline-end"
+      tooltipTone="glass"
+      icon={<PanelLeftOpen aria-hidden size={18} className="rtl:-scale-x-100" />}
+      aria-expanded={false}
+      onClick={() => {
+        railAsideOpened = true;
+        setRailPeek(true);
+      }}
+      data-rail-peek=""
+      data-testid="rail-aside"
+      className="fixed start-[calc(env(safe-area-inset-left,0px)+0.5rem)] top-[calc(env(safe-area-inset-top,0px)+0.5rem)] z-30 bg-glass-strong text-on-glass shadow-1 hover:bg-glass-strong hover:text-on-glass"
+    />
+  );
+}
+/** Set when the floating Expand sidebar opens the rail, so the button that comes back takes focus. */
+let railAsideOpened = false;
 
 /**
  * While the phone tab bar shows, --shell-bottom-inset on <html> holds its height (safe area
@@ -434,14 +646,24 @@ export function ShellLayout() {
   const { t } = useTranslation('shell');
   const language = useSettingsValue(selectLanguage);
   const railPref = useShellStore((s) => s.railCollapsed);
-  const narrow = useMediaQuery('(max-width: 1023px)');
+  const narrow = useMediaQuery(RAIL_DOCK_QUERY);
   const wide = useMediaQuery('(min-width: 1440px)');
   // Below sm the tab bar replaces the rail (CB-PHONE-NAV).
   const phone = useMediaQuery(PHONE_QUERY);
-  const collapsed = railPref || narrow;
-  // Hiding the rail is a narrow-window choice: from 1024 px up it always shows, and on a phone
+  // Hiding the rail is a narrow-window choice: from 1100 px up it always shows, and on a phone
   // there is no rail to show.
   const railHidden = useShellStore((s) => s.railHidden) && narrow && !phone;
+  // Below 1100 px the icon rail opens over the page (Expand sidebar), only while it is docked.
+  const railPeekPref = useShellStore((s) => s.railPeek);
+  const railPeek = railPeekPref && narrow && !phone && !railHidden;
+  const collapsed = !railPeek && (railPref || narrow);
+  // A page that takes the whole window (header.stepAside: Multi-view on a phone held sideways)
+  // takes the docked icon rail's column too; a floating Expand sidebar opens it over the page.
+  const railAside = useShellStore((s) => !!s.header?.stepAside) && narrow && !phone && !railHidden;
+  // A window widened past the narrow range (or narrowed to a phone) leaves no peek to come back to.
+  useEffect(() => {
+    if (railPeekPref && !railPeek) useShellStore.getState().setRailPeek(false);
+  }, [railPeekPref, railPeek]);
 
   useParentalEvents();
   const player = usePlayerModule();
@@ -490,12 +712,19 @@ export function ShellLayout() {
       <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
         <a
           href="#main"
+          // Past the page's toolbar to what it is about (the channel list, the guide grid) when the
+          // page marks it, and without a #main history entry that the next Back would only strip.
+          onClick={(e) => {
+            e.preventDefault();
+            skipToContent();
+          }}
           className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
         >
           {t('skipToContent')}
         </a>
         <GlobalShortcuts />
-        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
+        {!railHidden && !phone && (!railAside || railPeek) && <Rail collapsed={collapsed} autoCollapsed={narrow} peek={railPeek} aside={railAside} />}
+        {railAside && !railPeek && <RailAsideButton />}
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           <Header panelInline={wide} railHidden={railHidden} phone={phone} />
           <ConnectionBanner />
@@ -514,11 +743,19 @@ export function ShellLayout() {
               className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
             >
               <Outlet />
+              {!phone && <FloatInsetSpacer />}
             </main>
             <ShellNavigationEffects />
+            <RouteAnnouncer />
             <ContextPanel inline={wide} />
           </div>
           {player && <player.ExternalPlaybackFooter />}
+          {/*
+            A phone's mini player bar floats over the bottom of the outlet (PlayerDock writes its
+            height to --player-bar-inset): the outlet gives up that much room, so every page and
+            every scroller inside one ends above the bar instead of under it.
+          */}
+          {phone && <div aria-hidden className="shrink-0" style={{ height: 'var(--player-bar-inset, 0px)' }} data-player-bar-spacer="" />}
           {phone && <TabBar />}
         </div>
         {player && <player.PlayerDock />}

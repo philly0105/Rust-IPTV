@@ -1,5 +1,6 @@
 {
-  "title": "Listy",
+  "title": "Listy kanałów",
+  "lead": "Twoje własne grupy kanałów",
   "newList": "Nowa lista",
   "newListName": "Nazwa nowej listy",
   "createList": "Utwórz listę",
@@ -17,6 +18,7 @@
   "localDataHint": "Listy są zapisywane przez aplikację. Spróbuj ponownie albo uruchom aplikację jeszcze raz, jeśli błąd się powtarza.",
   "emptyTitle": "Nie masz jeszcze list",
   "emptyHint": "Grupuj kanały z dowolnych źródeł, np. Sport albo Dla dzieci.",
+  "emptyNoSources": "Najpierw dodaj źródło. Potem grupuj jego kanały w listy, np. Sport albo Dla dzieci.",
   "sidebarEmpty": "Grupuj kanały z dowolnych źródeł.",
   "channelCount_one": "{{formatted}} kanał",
   "channelCount_few": "{{formatted}} kanały",

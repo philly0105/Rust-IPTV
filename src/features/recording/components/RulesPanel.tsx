@@ -69,7 +69,8 @@ export function RecordingRulesPanel() {
 }
 
 function RuleRow({ rule, onRemove }: { rule: RecordingRule; onRemove: () => void }) {
-  const { t, i18n } = useTranslation('guide');
+  // live: the switch's one-word label, the guide's own Record.
+  const { t, i18n } = useTranslation(['guide', 'live']);
   const { setRuleEnabled } = useRuleActions();
   // Shown at once; the list refetch confirms it, a failure puts it back.
   const [pending, setPending] = useState<boolean | null>(null);
@@ -108,6 +109,10 @@ function RuleRow({ rule, onRemove }: { rule: RecordingRule; onRemove: () => void
           {rule.upcoming > 0 ? <span className="shrink-0 tabular-nums text-fg-subtle">{t('ruleUpcoming', { n: rule.upcoming })}</span> : null}
         </span>
       </div>
+      {/* What the switch does, in a word beside it; its accessible label names the series. */}
+      <span aria-hidden className="shrink-0 text-caption text-fg-muted max-sm:hidden" data-testid="rule-switch-label">
+        {t('live:record')}
+      </span>
       <Toggle checked={enabled} onChange={(on) => void toggle(on)} disabled={pending !== null} hideLabel label={t('ruleToggle', { title: rule.title })} />
       <IconButton label={t('removeRuleFor', { title: rule.title })} icon={<Trash2 size={16} aria-hidden />} onClick={onRemove} data-testid="rule-remove" />
     </li>

@@ -302,6 +302,12 @@ describe('validators', () => {
     expect(checkHttpUrl('http:/example.com/a.m3u')).toEqual({ ok: true, url: 'http://example.com/a.m3u' });
     expect(checkHttpUrl('htp:/example.com')).toEqual({ ok: false, error: 'errorUrlScheme' });
     expect(normalizeXtreamServer('https://xt.example.com/get.php?username=a')).toEqual({ ok: true, url: 'https://xt.example.com' });
+    // Chrome parses a space in the host; the core refused it as unreadable (sources-onboarding-05).
+    expect(checkHttpUrl('my provider . com/list m3u')).toEqual({ ok: false, error: 'errorUrlSpaces' });
+    expect(checkHttpUrl('http://my provider.com/list.m3u')).toEqual({ ok: false, error: 'errorUrlSpaces' });
+    expect(checkHttpUrl('http://a.example.com/x.m3u\nhttp://b.example.com/y.m3u')).toEqual({ ok: false, error: 'errorUrlSpaces' });
+    // A space in the path is sent percent-encoded.
+    expect(checkHttpUrl('http://example.com/my list.m3u').ok).toBe(true);
   });
 
   it('parses xtream get.php links', () => {

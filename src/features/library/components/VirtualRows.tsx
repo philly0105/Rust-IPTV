@@ -227,7 +227,7 @@ export function VirtualRows<R extends RowBase>({
   return (
     <div
       ref={scrollRef}
-      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)}
+      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[var(--player-float-inset,0px)]', className)}
       data-testid={testId}
       onBlur={(e) => {
         // Focus that leaves for another control is a deliberate move; forget the row.

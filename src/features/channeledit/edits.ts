@@ -12,7 +12,7 @@ import { getConnectionState, onAppEvent } from '@/api/events';
 import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type ChannelEdit, type ItemRef, type Page } from '@/api/types';
-import { displayChannelName } from '@/features/live/lib/channelName';
+import { displayChannelName, plainChannelName } from '@/features/live/lib/channelName';
 import { useSettings } from '@/shell/useSettings';
 
 const EDITS_STALE_MS = 30_000;
@@ -378,4 +378,10 @@ export function restoreHidden(sourceId: string, list: ChannelEdit[] | undefined)
 export function useDisplayName(): (name: string) => string {
   const strip = useSettings().data?.stripCountryPrefix;
   return useCallback((name: string) => displayChannelName(name, strip), [strip]);
+}
+
+/** A channel name as a toast gives it (`plainChannelName`): "CBS HD (US)", or "CBS HD" when Settings strip the tag. */
+export function useToastName(): (name: string) => string {
+  const strip = useSettings().data?.stripCountryPrefix;
+  return useCallback((name: string) => plainChannelName(name, strip), [strip]);
 }

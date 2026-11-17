@@ -1,5 +1,6 @@
 {
-  "title": "Listas",
+  "title": "Listas de canais",
+  "lead": "Seus próprios grupos de canais",
   "newList": "Nova lista",
   "newListName": "Nome da nova lista",
   "createList": "Criar lista",
@@ -17,6 +18,7 @@
   "localDataHint": "As listas são salvas pelo app. Tente de novo ou reinicie o app se continuar falhando.",
   "emptyTitle": "Nenhuma lista ainda",
   "emptyHint": "Agrupe canais de qualquer fonte, como Esportes ou Infantil.",
+  "emptyNoSources": "Adicione primeiro uma fonte. Depois agrupe os canais dela em listas, como Esportes ou Infantil.",
   "sidebarEmpty": "Agrupe canais de qualquer fonte.",
   "channelCount_one": "{{formatted}} canal",
   "channelCount_many": "{{formatted}} canais",

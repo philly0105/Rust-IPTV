@@ -67,7 +67,7 @@
   "lockoutActive": "間違ったPINの入力が多すぎます。{{time}}後にもう一度PINを入力できます。",
   "behaviourTitle": "ロックの動作",
   "behaviourPinNote": "ここでの変更にはPINが必要です。",
-  "modeLabel": "ロックされたコンテンツ",
+  "modeLabel": "ロックされているとき",
   "modeHide": "非表示にする",
   "modeAsk": "PINを求める",
   "modeHideText": "ロックされたグループとタイトルは、リスト、検索、お気に入り、視聴を再開から消えます。",

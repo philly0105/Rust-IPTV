@@ -158,7 +158,7 @@ export function containerLabel(stats: StreamStats, url: string): string | undefi
 export function engineLabel(engine: EngineName, t: TFunction<'player'>): string {
   switch (engine) {
     case 'mpv':
-      return 'MPV';
+      return 'mpv';
     case 'hls':
       return 'hls.js';
     case 'dash':

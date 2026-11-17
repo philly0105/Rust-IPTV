@@ -4,6 +4,7 @@ import { Lock } from 'lucide-react';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 
 import { columnsFor, useElementWidth, useScrollMargin } from '../hooks/useContainerColumns';
 import { handleGridKeyDown } from '../lib/gridNav';
@@ -13,6 +14,8 @@ import { intlLocale } from '@/lib/intl';
 export interface CategoryEntry {
   id: string;
   name: string;
+  /** The provider's name when `name` shortens it, for the tooltip. */
+  fullName?: string;
   /** Omitted when the source does not report counts (Stalker). */
   count?: number;
   emphasis?: boolean;
@@ -91,14 +94,16 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
                   // The grid reads this: Escape there goes back one step instead of pushing the landing again.
                   state={FROM_LANDING}
                   data-grid-index={i}
-                  title={entry.locked && lockedLabel ? `${entry.name} (${lockedLabel})` : undefined}
+                  // The whole name: a long one is cut at the column's width.
+                  title={entry.locked && lockedLabel ? `${entry.fullName ?? entry.name} (${lockedLabel})` : (entry.fullName ?? entry.name)}
                   className={cn(
                     'group flex h-11 items-center gap-3 rounded-md px-3',
                     'text-sm text-fg-muted hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg',
                     entry.emphasis && 'font-semibold text-fg',
                   )}
                 >
-                  <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">{entry.name}</span>
+                  {/* "EN | ACTION" as group names read: the name, its language's tag after it, quiet. */}
+                  <ChannelName name={entry.name} className="min-w-0 flex-1 truncate text-match-parent" />
                   {entry.locked && (
                     <Lock data-testid="category-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} />
                   )}

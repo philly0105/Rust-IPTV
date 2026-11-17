@@ -95,6 +95,19 @@ describe('Favorites rows say what is on air', () => {
     expect(screen.queryByTestId('entry-now')).toBeNull();
   });
 
+  it('sets the subtitle off from the type with a quiet dot ("Movie · 2019", v-phone-11)', async () => {
+    const fav = makeFavorite('movie', 'm1', 0);
+    rpc.handlers['favorites.list'] = () => [{ ...fav, snapshot: { ...fav.snapshot, subtitle: '2019' } }];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    const row = await screen.findByTestId('entry-row');
+    const year = within(row).getByText('2019');
+    const dot = year.previousElementSibling!;
+    expect(dot.textContent).toBe('·');
+    expect(dot.getAttribute('aria-hidden')).toBe('true');
+    expect(dot.previousElementSibling!.textContent).toBe('Movie');
+  });
+
   it('floats the row actions over the row end on a fine pointer, the grip last, and gives touch one menu with all of them', async () => {
     rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('live', 'ch2', 1)];
     rpc.handlers['epg.nowNext'] = () => ({});
@@ -117,19 +130,21 @@ describe('Favorites rows say what is on air', () => {
     expect(time.className).toContain('not-pointer-coarse:group-hover:invisible');
     expect(time.className).toContain('not-pointer-coarse:in-focus-visible:invisible');
     expect(time.className).toContain('not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible');
-    expect(time.className).toMatch(/(^|\s)w-40(\s|$)/);
-    // Touch: one menu button, hidden on a fine pointer, holding Play, the moves and remove.
-    const trigger = within(row).getByRole('button', { name: /Actions for/ });
+    expect(time.className).toMatch(/(^|\s)w-48(\s|$)/);
+    // Touch: one menu button, hidden on a fine pointer (the strip has its own ⋮ before it). A
+    // channel's menu is Live TV's (library-04), with the page's moves among its entries.
+    const trigger = within(row).getAllByRole('button', { name: /Actions for/ }).at(-1)!;
+    // The menu's code is a lazy chunk: loaded ahead, so findByRole does not wait on its transform.
+    await import('../components/EntryChannelMenu');
     expect(trigger.className).toContain('not-pointer-coarse:hidden');
     fireEvent.click(trigger);
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent);
-    // The red item says what it does in full: the menu is named for the row, so no title in it
-    // (a long channel name cut a titled label before "from favorites").
-    expect(items).toEqual(['Play', 'Move up', 'Move down', 'Remove from favorites']);
+    expect(items[0]).toBe('Play');
+    expect(items).toEqual(expect.arrayContaining(['Remove from favorites', 'Add to list…', 'Move up', 'Move down']));
     // The first row cannot move up.
-    expect(within(menu).getByRole('menuitem', { name: 'Move up' }).getAttribute('aria-disabled')).toBe('true');
-    expect(within(menu).getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBeNull();
+    expect((within(menu).getByRole('menuitem', { name: 'Move up' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole('menuitem', { name: 'Move down' }) as HTMLButtonElement).disabled).toBe(false);
     // The hover strip's remove button keeps the titled name, for a screen reader on the button alone.
     expect(within(strip).getByRole('button', { name: /^Remove .+ from favorites$/ })).toBeTruthy();
   });
@@ -327,7 +342,9 @@ describe('Scheduled says the padding once and stops with a labelled button', () 
     renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
     const note = await screen.findByRole('note');
     expect(note.dataset['testid']).toBe('scheduled-no-recording');
-    expect(note.textContent).toBe('Recording is unavailable because the server has no mpv. Reminders still work.');
+    expect(note.textContent).toBe("This server can't record TV. Reminders still work. (The server needs mpv installed.)");
+    // The empty state below asks only for what works without recording.
+    expect(screen.getByText('Open the TV guide and choose Remind me on a programme.')).toBeTruthy();
     // Not a page-wide card over the empty state.
     expect(note.className).not.toMatch(/\bborder\b|bg-surface/);
   });
@@ -381,8 +398,11 @@ describe('My Videos toolbar and the offline detail page', () => {
     expect((await screen.findByTestId('play-offline')).textContent).toContain('10:00');
     expect(screen.getByRole('heading', { level: 1, name: 'Heat' })).toBeTruthy();
     expect(screen.getByTestId('vod-detail-poster')).toBeTruthy();
-    // One Back pattern: the hero's pill, back to the library.
-    expect(screen.getByRole('link', { name: 'Back to My videos' }).getAttribute('href')).toBe('/my-videos');
+    // The catalogue's detail pattern: Back in the header, which names the section while the hero's
+    // title is on screen; no Back pill in the hero.
+    expect(within(screen.getByTestId('fake-header')).getByRole('button', { name: 'Back' })).toBeTruthy();
+    expect(screen.getByTestId('page-section').textContent).toBe('My videos');
+    expect(screen.queryByRole('link', { name: 'Back to My videos' })).toBeNull();
     const about = screen.getByTestId('vod-about');
     expect(within(about).getByText('Heat (1995).mkv')).toBeTruthy();
     expect(within(about).getByText('Northwind')).toBeTruthy();

@@ -18,7 +18,7 @@ import {
   House,
   Layers,
   LayoutGrid,
-  ListOrdered,
+  ListVideo,
   Radio,
   Search,
   Trophy,
@@ -58,6 +58,8 @@ export interface NavLinkDef {
   notInRail?: boolean;
   /** One of Library's less used pages: the rail folds it under the group's More row. */
   more?: boolean;
+  /** What runs away from the page that the row marks while it runs (activityMarks.tsx). */
+  activity?: 'downloads' | 'recording';
 }
 
 /**
@@ -103,13 +105,14 @@ export const LIBRARY_LINKS: readonly NavLinkDef[] = [
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
   // Run 2: custom channel lists and watch stats reuse their pages' titles.
   // A list can be created before any source is added.
-  { to: '/lists', labelKey: 'lists:title', icon: ListOrdered, noSourceNeeded: true },
+  // ListVideo, as the list page, its column and its empty state draw a channel list (library-12).
+  { to: '/lists', labelKey: 'lists:title', icon: ListVideo, noSourceNeeded: true },
   { to: '/recent', labelKey: 'navRecent', icon: History },
   // The rest are visited now and then, not every evening: the rail folds them under More.
-  { to: '/downloads', labelKey: 'navDownloads', icon: Download, more: true },
+  { to: '/downloads', labelKey: 'navDownloads', icon: Download, more: true, activity: 'downloads' },
   { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive, more: true },
   // recording:
-  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock, more: true },
+  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock, more: true, activity: 'recording' },
   { to: '/stats', labelKey: 'stats:title', icon: ChartColumn, more: true },
 ];
 
@@ -118,6 +121,13 @@ export const RAIL_WATCH_LINKS = WATCH_LINKS.filter((l) => !l.notInRail);
 
 /** The phone tab bar's width limit (Tailwind `sm`): below it the rail goes and the bar shows. */
 export const PHONE_QUERY = '(max-width: 639px)';
+
+/**
+ * Below 1100 px (about 69rem) the rail docks as icons and opens over the page (Expand sidebar). At
+ * 1024 the 248 px labelled rail left Live TV a 300 px list ("Around the H…"), so a 1024 px tablet
+ * gets the icon rail too (v-live-05).
+ */
+export const RAIL_DOCK_QUERY = '(max-width: 1099px)';
 
 // ---------------------------------------------------------------------------
 // The last source the user opened, for the phone tab bar's Live TV tab and the Watch group's
@@ -160,6 +170,16 @@ export function liveTabTarget(sources: readonly Source[] | undefined, lastSource
   const pick = watchable.find((s) => !s.lastError) ?? watchable[0];
   if (pick) return live(pick);
   return sourceHomePath(last ?? list[0]!);
+}
+
+/**
+ * The catch-up archive opened from the TV guide (the guide passes `state.from`, and the archive's
+ * Back leads there): the rail and the tab bar mark the guide on it rather than Live TV.
+ */
+export function archiveFromGuide(pathname: string, state: unknown): boolean {
+  if (!pathname.startsWith('/live/archive/')) return false;
+  const from = (state as { from?: unknown } | null)?.from;
+  return typeof from === 'string' && /^\/epg(?:[/?#]|$)/.test(from);
 }
 
 /** True for the routes the Live TV tab stands for: a source's live or radio pages and the archive. */

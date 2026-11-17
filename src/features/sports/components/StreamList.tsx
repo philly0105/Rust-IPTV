@@ -4,22 +4,29 @@
  * stream tall. Each row names the channel, the picture quality its name gives, why it matched (the
  * guide, an event channel's name, a team's own channel, or a network carrying the game) and offers
  * what fits the game's phase: Watch from 15 minutes before the start, Replay from the channel's
- * archive once it is over, Record before it starts. The player loads on the press.
+ * archive once it is over, Record before it starts. Before Watch comes, a row puts its actions on a
+ * line of their own: Remind me (a guide reminder, as the guide's own; not with reminders off) and
+ * Record where recording is supported, after "Watch from 4:45 PM" on the best row. A press on the row
+ * itself does what its main action does (Watch, Replay, Remind me), or says when Watch comes. The
+ * player loads on the press.
  */
 
-import { ChevronDown, ChevronUp, Circle, Clock, History, Play } from 'lucide-react';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { Bell, BellOff, ChevronDown, ChevronUp, Circle, Clock, History, Play, TriangleAlert, Volume2 } from 'lucide-react';
+import { Fragment, useCallback, useMemo, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 
-import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type Settings } from '@/api/types';
+import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type PlayerSource, type Reminder, type Settings } from '@/api/types';
 // Straight from its module (sports/deps.ts re-exports only ChannelLogo from it), the same chunk.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { plainChannelName } from '@/lib/channelName';
 import { channelQuality } from '@/lib/channelQuality';
 
 import {
   Badge,
   Button,
   ChannelLogo,
+  cn,
   MetaLine,
   Tooltip,
   canCatchUp,
@@ -27,12 +34,15 @@ import {
   errorDescription,
   formatClock,
   formatTimeRange,
+  PHONE_QUERY,
   loadPlayback,
+  loadPlayerStage,
   loadPlayerStore,
   markFor,
   ms,
   useDisplayPrefs,
   useRecordingCapabilities,
+  useRemindersEnabled,
   useScheduleActions,
   useScheduleIndex,
   useSettingsValue,
@@ -57,7 +67,7 @@ export const QUALITY_LABEL: Record<ChannelQuality, string> = { sd: 'SD', hd: '72
 
 function QualityTag({ quality }: { quality: ChannelQuality }) {
   return (
-    <span className="rounded-xs border border-edge px-1 text-2xs leading-4 font-semibold text-fg-muted tabular-nums" data-testid="sports-stream-quality">
+    <span className="rounded-xs border border-edge px-1 text-caption leading-4 font-semibold text-fg-muted tabular-nums" data-testid="sports-stream-quality">
       {QUALITY_LABEL[quality]}
     </span>
   );
@@ -71,47 +81,82 @@ export interface StreamContext {
   /** More than one source: rows name theirs. */
   multiSource: boolean;
   canRecord: boolean;
-  /** The Live TV quality filter is on, so a missing event channel may be its doing. */
+  /** Guide reminders are on (Settings, Recording): an upcoming game's rows offer Remind me. */
+  remindersOn: boolean;
+  /** Live TV's quality filter or the page's "1080p+" is on, so a missing stream may be its doing. */
   qualityFiltered: boolean;
+  /** Part of the channel index failed: a game with no stream may have one that wasn't looked through. */
+  streamsFailed: boolean;
+  /** What the player plays, once a Watch or Replay on this page has loaded it; the row it came from says so. */
+  playing: PlayerSource | undefined;
   /** A recording is waiting or running for this programme on this channel. */
   isRecording(ref: ItemRef, program: EpgProgram): boolean;
+  /** The pending reminder for this programme on this channel. */
+  reminderFor(ref: ItemRef, program: EpgProgram): Reminder | undefined;
   watch(match: StreamMatch, title: string, name: string): Promise<void>;
   replay(match: StreamMatch, program: EpgProgram, name: string): Promise<void>;
   record(match: StreamMatch, program: EpgProgram, name: string): Promise<boolean>;
+  /** Sets a reminder for the programme, or removes `existing`. */
+  remind(match: StreamMatch, program: EpgProgram, name: string, existing: Reminder | undefined): Promise<void>;
 }
 
 const selectMinQuality = (s: Settings) => s.liveMinQuality ?? null;
 
-export function useStreamContext(now: number, sourceCount: number): StreamContext {
+type PlayerStore = Awaited<ReturnType<typeof loadPlayerStore>>['usePlayerStore'];
+const noSubscription = () => () => {};
+
+/**
+ * The player's source, read from its store once a press here has loaded it: the page never loads the
+ * player itself (deps.ts), so until then nothing plays that this page started.
+ */
+function usePlayingSource(store: PlayerStore | null): PlayerSource | undefined {
+  return useSyncExternalStore(store ? store.subscribe : noSubscription, () => store?.getState().source);
+}
+
+export function useStreamContext(now: number, sourceCount: number, hdOnly = false, streamsFailed = false): StreamContext {
   const { t } = useTranslation('sports');
   const { toast } = useToast();
   const prefs = useDisplayPrefs();
   const canRecord = useRecordingCapabilities().data?.supported === true;
+  const remindersOn = useRemindersEnabled();
   const index = useScheduleIndex();
   const actions = useScheduleActions();
-  const qualityFiltered = useSettingsValue(selectMinQuality).data != null;
+  const qualityFiltered = useSettingsValue(selectMinQuality).data != null || hdOnly;
+  const navigate = useNavigate();
+  const [store, setStore] = useState<PlayerStore | null>(null);
+  const playing = usePlayingSource(store);
 
   const watch = useCallback(
     async (m: StreamMatch, title: string, name: string) => {
       try {
         const [{ playChannel }, { usePlayerStore }] = await Promise.all([loadPlayback(), loadPlayerStore()]);
+        setStore(() => usePlayerStore);
         await playChannel(m.channel, m.sourceKind, title, name);
         // Channel up and down then walk the channel's group, not the last Live category. Only when this
         // channel is the one playing: a refused PIN leaves what played alone.
         if (sameRef(usePlayerStore.getState().source?.ref, m.channel.ref)) {
-          usePlayerStore.setState({ zapContext: { sourceId: m.sourceId, ...(m.channel.categoryId ? { categoryId: m.channel.categoryId } : {}) } });
+          const zapContext = { sourceId: m.sourceId, ...(m.channel.categoryId ? { categoryId: m.channel.categoryId } : {}) };
+          usePlayerStore.setState({ zapContext });
+          // On a phone the mini player is a thumbnail over the tab bar, and nobody watches a game in
+          // that: Watch goes on to the big picture, where the bar's Expand would take it.
+          if (window.matchMedia?.(PHONE_QUERY).matches) {
+            const { expandPath } = await loadPlayerStage();
+            const path = expandPath(usePlayerStore.getState().source, zapContext);
+            if (path) void navigate(path);
+          }
         }
       } catch (err) {
-        toast({ variant: 'error', title: t('playFailed', { name }), description: errorDescription(err) });
+        toast({ variant: 'error', title: t('playFailed', { name: plainChannelName(m.channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err) });
       }
     },
-    [t, toast],
+    [t, toast, navigate, prefs.stripCountryPrefix],
   );
 
   const replay = useCallback(
     async (m: StreamMatch, program: EpgProgram, name: string) => {
       try {
-        const { playCatchup } = await loadPlayback();
+        const [{ playCatchup }, { usePlayerStore }] = await Promise.all([loadPlayback(), loadPlayerStore()]);
+        setStore(() => usePlayerStore);
         await playCatchup(m.channel, m.sourceKind, program, Date.now(), name);
       } catch (err) {
         toast({ variant: 'error', title: t('replayFailed'), description: errorDescription(err) });
@@ -120,18 +165,40 @@ export function useStreamContext(now: number, sourceCount: number): StreamContex
     [t, toast],
   );
 
-  const { record: schedule } = actions;
+  const { record: schedule, toggleReminder } = actions;
   const record = useCallback(
     (m: StreamMatch, program: EpgProgram, name: string) =>
       schedule({ ref: m.channel.ref, channelName: name, program: { title: program.title, start: program.start, end: program.end } }),
     [schedule],
   );
 
+  const remind = useCallback(
+    (m: StreamMatch, program: EpgProgram, name: string, existing: Reminder | undefined) =>
+      toggleReminder({ ref: m.channel.ref, channelName: name, program: { title: program.title, start: program.start, end: program.end } }, existing),
+    [toggleReminder],
+  );
+
   const isRecording = useCallback((ref: ItemRef, program: EpgProgram) => !!markFor(index, ref, program).recording, [index]);
+  const reminderFor = useCallback((ref: ItemRef, program: EpgProgram) => markFor(index, ref, program).reminder, [index]);
 
   return useMemo(
-    () => ({ now, strip: prefs.stripCountryPrefix, multiSource: sourceCount > 1, canRecord, qualityFiltered, isRecording, watch, replay, record }),
-    [now, prefs.stripCountryPrefix, sourceCount, canRecord, qualityFiltered, isRecording, watch, replay, record],
+    () => ({
+      now,
+      strip: prefs.stripCountryPrefix,
+      multiSource: sourceCount > 1,
+      canRecord,
+      remindersOn,
+      qualityFiltered,
+      streamsFailed,
+      playing,
+      isRecording,
+      reminderFor,
+      watch,
+      replay,
+      record,
+      remind,
+    }),
+    [now, prefs.stripCountryPrefix, sourceCount, canRecord, remindersOn, qualityFiltered, streamsFailed, playing, isRecording, reminderFor, watch, replay, record, remind],
   );
 }
 
@@ -186,13 +253,12 @@ export function streamAction(game: Game, m: StreamMatch, now: number, canRecord:
 
 function WatchFrom({ time }: { time: string }) {
   const { t } = useTranslation('sports');
-  const label = t('watchFrom', { time });
-  // A clock, not a play mark: nothing here can be pressed yet, and a play mark beside a time read as a button.
+  // A clock, not a play mark: nothing here can be pressed yet, and a play mark beside a time read as a
+  // button. The words are on screen, not only the time: a bare clock left people pressing the row.
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-caption text-fg-subtle tabular-nums" title={label} data-testid="sports-watch-from">
+    <span className="inline-flex shrink-0 items-center gap-1 text-caption text-fg-muted tabular-nums" data-testid="sports-watch-from">
       <Clock aria-hidden size={12} />
-      <span aria-hidden>{time}</span>
-      <span className="sr-only">{label}</span>
+      {t('watchFrom', { time })}
     </span>
   );
 }
@@ -203,6 +269,7 @@ function StreamRow({
   title,
   ctx,
   first,
+  best,
   toggle,
 }: {
   game: Game;
@@ -210,27 +277,46 @@ function StreamRow({
   title: string;
   ctx: StreamContext;
   first: boolean;
+  /** The first of several rows: the stream the order puts first says it is the best one. */
+  best: boolean;
   /** The first row's Show all toggle, at the end of its metadata. */
   toggle?: ReactNode;
 }) {
   const { t, i18n } = useTranslation('sports');
+  const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const name = displayChannelName(match.channel.name, ctx.strip) || match.channel.name;
+  // What a screen reader hears: the cleaned name toasts use ("ESPN HD (US)"), not the provider's "US| ESPN HD".
+  const spoken = plainChannelName(match.channel.name, ctx.strip);
   const action = streamAction(game, match, ctx.now, ctx.canRecord, title);
   const run = (work: () => Promise<unknown>) => {
     setBusy(true);
     void work().finally(() => setBusy(false));
   };
 
+  // The row whose stream the player has on: its action gives way to a quiet "Playing", in the accent
+  // as Live TV marks its playing row, so with several games on the user sees which one this is.
+  const playing =
+    ctx.playing !== undefined &&
+    sameRef(ctx.playing.ref, match.channel.ref) &&
+    ((action?.kind === 'watch' && ctx.playing.isLive) || (action?.kind === 'replay' && !ctx.playing.isLive));
+
   let button = null;
-  if (action?.kind === 'watch') {
+  if (playing) {
+    button = (
+      <span className="inline-flex h-8 items-center gap-1.5 px-2 text-body-sm font-medium text-accent" data-testid="sports-playing">
+        <Volume2 aria-hidden size={16} />
+        {t('playing')}
+      </span>
+    );
+  } else if (action?.kind === 'watch') {
     button = (
       <Button
         size="sm"
         variant="secondary"
         icon={<Play size={16} aria-hidden />}
         loading={busy}
-        aria-label={t('watchLabel', { title, name })}
+        aria-label={t('watchLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.watch(match, title, name))}
         data-testid="sports-watch"
       >
@@ -245,7 +331,7 @@ function StreamRow({
         variant="secondary"
         icon={<History size={16} aria-hidden />}
         loading={busy}
-        aria-label={t('replayLabel', { title, name })}
+        aria-label={t('replayLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.replay(match, program, name))}
         data-testid="sports-replay"
       >
@@ -264,7 +350,7 @@ function StreamRow({
         variant="secondary"
         icon={<Circle size={14} aria-hidden className="fill-live text-live" />}
         loading={busy}
-        aria-label={t('recordLabel', { title, name })}
+        aria-label={t('recordLabel', { title, name: spoken })}
         onClick={() => run(() => ctx.record(match, program, name))}
         data-testid="sports-record"
       >
@@ -273,6 +359,46 @@ function StreamRow({
     );
   }
 
+  // Before Watch comes: a guide reminder for the game's programme, which fires with "Watch now" as the
+  // guide's own do, whether or not Record is offered too. A press again takes it away.
+  const later = watchesLater(game, ctx.now);
+  const watchTime = later ? formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language) : '';
+  const remindProgram = later && ctx.remindersOn ? gameProgram(game, match, title) : null;
+  const reminder = remindProgram ? ctx.reminderFor(match.channel.ref, remindProgram) : undefined;
+  const remind = remindProgram && (reminder || ms(remindProgram.start) > ctx.now) ? () => run(() => ctx.remind(match, remindProgram, name, reminder)) : null;
+  const remindButton = remind ? (
+    <Tooltip content={t('watchFrom', { time: watchTime })}>
+      <Button
+        size="sm"
+        variant="secondary"
+        icon={reminder ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
+        aria-pressed={!!reminder}
+        loading={busy}
+        aria-label={reminder ? undefined : t('remindLabel', { title, name: spoken })}
+        onClick={remind}
+        data-testid="sports-remind"
+      >
+        {reminder ? t('reminderOn') : t('remindMe')}
+      </Button>
+    </Tooltip>
+  ) : null;
+
+  // A press on the row does what its main action does: Watch, Replay or Remind me. Record never runs
+  // from a stray press; before Watch comes, with no reminder to set, the row says when Watch comes.
+  let primary: (() => void) | null = null;
+  if (playing) primary = null;
+  else if (action?.kind === 'watch') primary = () => run(() => ctx.watch(match, title, name));
+  else if (action?.kind === 'replay') primary = () => run(() => ctx.replay(match, action.program, name));
+  else if (remind) primary = remind;
+  else if (later) primary = () => toast({ title: t('watchFrom', { time: watchTime }) });
+  const onRowClick = primary
+    ? (e: MouseEvent<HTMLLIElement>) => {
+        // The row's own buttons (and the "+2") act for themselves.
+        if (busy || (e.target as Element).closest('button, a')) return;
+        primary();
+      }
+    : undefined;
+
   const program = match.program;
   const quality = channelQuality(match.channel.name);
   // The guide slot's times say what the card doesn't: when a live game's broadcast runs, which slot a
@@ -280,39 +406,91 @@ function StreamRow({
   // only repeats the start time above, the third time on the card with the Watch clock, so it goes.
   const slotRepeatsStart =
     program !== null && game.phase === 'scheduled' && game.timeValid && !game.timeNote && Math.abs(ms(program.start) - game.startMs) < MINUTE;
+  const slot = program && !slotRepeatsStart ? formatTimeRange(ms(program.start), ms(program.end), i18n.language) : null;
+  const slotStart = program && !slotRepeatsStart ? formatClock(ms(program.start), i18n.language) : null;
+  const reason = t(REASON_KEYS[match.reason]);
+  // A guide slot already says the match came from the guide, so it stands in for "In guide": the
+  // reason stays its tooltip and is read before it. So does the regional warning, whose tooltip says
+  // why the channel matched: on the line, the reason is what pushed the slot or the warning to "N.".
+  const slotIsReason = slot !== null && match.reason === 'guide';
+  const reasonHidden = slotIsReason || match.regional;
   return (
-    <li className="flex min-w-0 items-center gap-3 py-2" data-testid="sports-stream" data-reason={match.reason}>
+    <li
+      className={cn('flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2', primary && 'cursor-pointer')}
+      aria-current={playing ? 'true' : undefined}
+      onClick={onRowClick}
+      data-testid="sports-stream"
+      data-reason={match.reason}
+    >
       <ChannelLogo src={match.channel.logoUrl} name={name} size={32} sourceId={match.sourceId} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      {/* A container, so the line below fits what it says to the room the row's action leaves. */}
+      <div className="@container flex min-w-0 flex-1 flex-col gap-1">
         {/* Named as Live TV's list names it: the country tag after the name, quiet. */}
         <ChannelName name={match.channel.name} strip={ctx.strip} className="truncate text-body-sm font-medium text-fg" testId="sports-stream-name" />
-        {/* Wraps as a whole: where the details and the toggle don't fit beside an action, the toggle
-            goes under them rather than the details breaking in two. */}
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+        {/* One line: the quality, the warning and the slot's time keep their width, and only the
+            source's name (or the reason) truncates; the toggle keeps its place at the end, so the row
+            never grows a line that starts with a dot. Where the line is short (a phone, a card with an
+            action), the slot shows its start only, its range in the tooltip, and "Best" goes after a
+            quality tag: the order and the "+2" beside it already say this one is first. With a slot
+            or the regional warning beside it, the source's name is then only read: the room left
+            drew it as one letter. */}
+        <span className="flex min-w-0 items-center gap-1.5">
           <MetaLine
             as="span"
+            className={cn(
+              'flex-nowrap [&>span]:shrink-0 [&>span:has([data-meta-shrink])]:shrink',
+              quality && '@max-[15rem]:[&>span:has([data-testid=sports-best])]:hidden',
+              (slot || match.regional) && '@max-[15rem]:[&>span:has([data-testid=sports-stream-source])]:sr-only',
+            )}
             items={[
               // First, so the rows' qualities line up down the list; the name's own marker is often cut
               // off or a superscript ("ᴴᴰ").
               quality ? <QualityTag key="quality" quality={quality} /> : null,
-              // Why it matched is quiet text: a badge on every card made status green the page's loudest
-              // colour. Only the regional warning stays a badge, since it may be the wrong game.
-              <span key="reason" data-testid="sports-reason">
-                {t(REASON_KEYS[match.reason])}
-              </span>,
-              match.regional ? (
-                <Badge key="regional" variant="warning" title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')} data-testid="sports-regional">
-                  {t('regional')}
-                </Badge>
+              // After the quality, which stays lined up down the list. Quiet words, not another badge: the
+              // order already puts the surest, sharpest stream first.
+              best ? (
+                <span key="best" className="font-medium text-fg-muted" title={t('bestHint')} data-testid="sports-best">
+                  {t('best')}
+                </span>
               ) : null,
+              // The regional warning, since it may be the wrong game: warning-toned text, not a filled
+              // badge, as on an NFL Sunday nearly every card carries it. Before the reason, so where the
+              // line runs short the warning is never what truncates.
+              match.regional ? (
+                <Fragment key="regional">
+                  <span
+                    className="flex min-w-0 items-center gap-1 text-warning"
+                    title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')}
+                    data-testid="sports-regional"
+                  >
+                    <TriangleAlert aria-hidden size={12} className="shrink-0" />
+                    <span className="truncate">{t('regional')}</span>
+                  </span>
+                  {slotIsReason ? null : <span className="sr-only">{`, ${reason}`}</span>}
+                </Fragment>
+              ) : null,
+              // Why it matched is quiet text: a badge on every card made status green the page's loudest colour.
+              reasonHidden ? null : (
+                <span key="reason" className="block truncate" data-meta-shrink="" data-testid="sports-reason">
+                  {reason}
+                </span>
+              ),
               ctx.multiSource ? (
-                <span key="source" dir="auto" data-testid="sports-stream-source">
+                <span key="source" dir="auto" className="block truncate" data-meta-shrink="" data-testid="sports-stream-source">
                   {match.sourceName}
                 </span>
               ) : null,
-              program && !slotRepeatsStart ? (
-                <span key="time" className="tabular-nums" data-testid="sports-stream-slot">
-                  {formatTimeRange(ms(program.start), ms(program.end), i18n.language)}
+              slot ? (
+                <span
+                  key="time"
+                  className="block truncate tabular-nums"
+                  title={slotIsReason ? `${reason}: ${slot}` : slot}
+                  data-meta-shrink=""
+                  data-testid="sports-stream-slot"
+                >
+                  {slotIsReason ? <span className="sr-only">{`${reason}, `}</span> : null}
+                  <span className="@max-[15rem]:hidden">{slot}</span>
+                  <span className="@min-[15rem]:hidden">{slotStart}</span>
                 </span>
               ) : null,
             ]}
@@ -321,10 +499,17 @@ function StreamRow({
         </span>
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
-      {!button && first && watchesLater(game, ctx.now) ? (
-        // Where nothing can be done yet (no recording here), the best row says when Watch comes: a clock
-        // and the time, small enough to leave the channel's name its room; the sentence is its name.
-        <WatchFrom time={formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language)} />
+      {later && (first || remindButton) ? (
+        // Before Watch comes, a line under the name says when Watch comes (the best row) and offers Remind
+        // me, with Record above it in the row's own place: both buttons beside the name left it a few letters.
+        <div className="flex basis-full flex-wrap items-center justify-end gap-2 ps-11">
+          {first ? (
+            <span className="me-auto">
+              <WatchFrom time={watchTime} />
+            </span>
+          ) : null}
+          {remindButton}
+        </div>
       ) : null}
     </li>
   );
@@ -369,6 +554,13 @@ export function StreamList({
         </p>
       );
     }
+    if (ctx.streamsFailed) {
+      return (
+        <p className="text-caption text-fg-subtle" data-testid="sports-streams-failed">
+          {t('streamsFailed')}
+        </p>
+      );
+    }
     return (
       <p className="text-caption text-fg-subtle" data-testid="sports-no-streams">
         {t('noStreams')}
@@ -382,9 +574,9 @@ export function StreamList({
   // The rest of the streams open from a small "+2" at the end of the best row's metadata, not a row
   // of its own under it: on most cards that row was a fifth of the card. It stays where it is once
   // open (a chevron up), so the same press closes the list again. Its hit area reaches 44 px on
-  // touch screens without making the line taller. Only for a coarse pointer, as the kit's
-  // TOUCH_TARGET: for a mouse it would reach up over the channel name, and hovering a long name
-  // would light the chip and open its tooltip.
+  // touch screens (12.625px either side of its 18.75px box) and 24 px for a mouse without making
+  // the line taller. Only 24 for a mouse: more would reach up over the channel name, and hovering
+  // a long name would light the chip.
   const toggle =
     more > 0 ? (
       <Tooltip content={toggleLabel} describe={false}>
@@ -393,7 +585,7 @@ export function StreamList({
           aria-label={toggleLabel}
           aria-expanded={all}
           onClick={() => setAll((v) => !v)}
-          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums pointer-coarse:after:absolute pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-3 hover:bg-surface-3 active:bg-pressed"
+          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums after:absolute after:inset-x-0 after:-inset-y-0.5 pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-[calc(12.625rem/15)] hover:bg-surface-3 active:bg-pressed"
           data-testid="sports-show-all"
         >
           {all ? null : <span aria-hidden>{`+${more}`}</span>}
@@ -411,6 +603,7 @@ export function StreamList({
           title={title}
           ctx={ctx}
           first={i === 0}
+          best={i === 0 && list.length > 1}
           {...(i === 0 ? { toggle } : {})}
         />
       ))}

@@ -6,10 +6,12 @@ import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { queryClient, rpcKey } from '@/api/query';
+
 import { addToWall, replaceOnWall, wallAccepts } from '../addChannel';
 import { useMultiviewStore } from '../store';
 import { useMultiviewMenuItem } from '../useMultiviewMenuItem';
-import { i18n, input, LocationProbe, resetWall } from './harness';
+import { i18n, input, LocationProbe, resetWall, source } from './harness';
 
 const gate = vi.hoisted(() => ({ ensureUnlocked: (async () => true) as (items: unknown[]) => Promise<boolean> }));
 const toasts = vi.hoisted(() => [] as { title?: unknown; description?: unknown; variant?: string; action?: { label: unknown; onClick(): void } }[]);
@@ -184,6 +186,25 @@ describe('useMultiviewMenuItem', () => {
     await waitFor(() => expect(gate.ensureUnlocked).toHaveBeenCalled());
     expect(toasts).toHaveLength(0);
     expect(screen.getByTestId('location').textContent).toBe('/live');
+  });
+
+  it("warns in the toast when the add takes an account past its connection limit", async () => {
+    queryClient.setQueryData(rpcKey('sources.list'), [source('src1', 'xtream', 'Demo TV')]);
+    queryClient.setQueryData(rpcKey('account.status', { sourceId: 'src1' }), { maxConnections: 2 });
+    store().add(input(1));
+    store().add(input(2));
+    const { result } = renderHook(() => useMultiviewMenuItem(input(3)), { wrapper });
+    act(() => result.current.onSelect());
+    await waitFor(() => expect(toasts).toHaveLength(1));
+    expect(toasts[0]).toMatchObject({ variant: 'warning', title: 'Added Channel 3 to multi-view' });
+    expect(toasts[0]!.description).toBe('Demo TV allows 2 streams at a time and the wall uses 3. Tiles past the limit may not play.');
+  });
+
+  it("passes a Sports card's matchup on to the tile", async () => {
+    const { result } = renderHook(() => useMultiviewMenuItem({ ...input(1), caption: 'Chargers at Ravens' }), { wrapper });
+    act(() => result.current.onSelect());
+    await waitFor(() => expect(toasts).toHaveLength(1));
+    expect(store().tiles[0]!.caption).toBe('Chargers at Ravens');
   });
 
   it('keeps its identity while the channel fields stay the same', () => {

@@ -12,3 +12,8 @@ export function focusTileOf(state: unknown): string | undefined {
   const key = (state as MultiviewLocationState).focusTile;
   return typeof key === 'string' && key ? key : undefined;
 }
+
+/** Live TV of a source, where "Watch in the player" takes a tile's channel. */
+export function liveTvPath(sourceId: string): string {
+  return `/s/${encodeURIComponent(sourceId)}/live`;
+}

@@ -3,12 +3,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 
 import { cn } from '../cn';
 import { bindInputModality, focusFromPointer, focusIfPlayerOwnsFocus, focusIsLost, formatTime, pressKeepsFocus, SEEK_STEP_JL } from '../format';
 import { showOsd, UP_NEXT_SECONDS, useMediaStore } from '../media';
 import { consumeMenuDismiss } from '../menuDismiss';
+import { useStageEndedAction } from '../stage';
 import { exitPip, usePipStore } from '../pip';
 import {
   cancelUpNext,
@@ -16,6 +18,7 @@ import {
   MIN_RESUME_SECONDS,
   playUpNextNow,
   replay,
+  resumeFits,
   selectEnded,
   setPaused,
   usePlayerStore,
@@ -28,7 +31,7 @@ import { BarReadout, Controls, CtlButton, InlineSpinner, retryPlayback } from '.
 import { ErrorActions } from './ErrorActions';
 import { glassButton } from './glassButton';
 import { InlinePlayer } from './InlinePlayer';
-import { FullscreenChannelPanel, LiveProgrammeLine, RadioPlayer, SleepPrompt, StreamInfoPanel, TitleLogo, VideoContextMenu, ZapBanner } from './lazyParts';
+import { FullscreenChannelPanel, LiveProgrammeLine, PlayerChannelName, RadioPlayer, SleepPrompt, StreamInfoPanel, TitleLogo, VideoContextMenu, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
 import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
 import { SHORT_PLAYER_PX, useNarrow, useSmallPlayer } from './useNarrow';
@@ -118,15 +121,31 @@ function useTopClearOfZapBanner(ref: RefObject<HTMLElement | null>): number | un
   return top;
 }
 
-/** Big tuner readout after a zap or volume change. */
-function Osd() {
+/**
+ * Big tuner readout after a zap or volume change. `short`: a short player (a phone's stage, the
+ * Live page's stage) has its title bar across the top corner the readout uses, so it shows in the
+ * middle of the picture instead, a size smaller.
+ */
+function Osd({ short = false }: { short?: boolean }) {
   const osd = useMediaStore((s) => s.osd);
   if (!osd) return null;
-  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} />;
+  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} zap={!!osd.zap} short={short} />;
 }
 
 /** `locked`: a zap passing a channel parental controls lock; a lock stands before its number. */
-function OsdReadout({ primary, secondary, locked = false }: { primary: string; secondary?: string | undefined; locked?: boolean }) {
+function OsdReadout({
+  primary,
+  secondary,
+  locked = false,
+  zap = false,
+  short,
+}: {
+  primary: string;
+  secondary?: string | undefined;
+  locked?: boolean;
+  zap?: boolean;
+  short: boolean;
+}) {
   const { t } = useTranslation('player');
   const ref = useRef<HTMLDivElement>(null);
   const digits = /^\d+$/.test(primary);
@@ -134,16 +153,27 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
   return (
     <div
       ref={ref}
-      aria-live="polite"
+      // A tune's readout is said once by ZapAnnouncer.
+      aria-live={zap ? undefined : 'polite'}
+      aria-hidden={zap || undefined}
+      data-testid="player-osd"
       // Within the player, whatever its size: long lines (file names, reasons) wrap, never clip.
-      className="player-osd player-chrome pointer-events-none absolute top-5 end-6 z-20 max-w-[min(40rem,calc(100%-3rem))] text-end [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
-      style={top === undefined ? undefined : { top }}
+      // PV-06: words sit on a glass plate, so "Forward 10 seconds" reads over a bright picture; a
+      // channel number keeps the tuner's big digits with only a shadow.
+      className={cn(
+        'player-osd player-chrome pointer-events-none absolute z-20 max-w-[min(40rem,calc(100%-3rem))] [overflow-wrap:anywhere]',
+        short ? 'inset-x-0 top-1/2 mx-auto w-fit -translate-y-1/2 text-center' : 'top-5 end-6 text-end',
+        digits
+          ? '[text-shadow:0_2px_12px_rgb(0_0_0/0.8)]'
+          : 'rounded-lg border border-glass-border bg-glass-strong px-3 py-2 text-on-glass shadow-2',
+      )}
+      style={top === undefined || short ? undefined : { top }}
     >
       <div
         className={cn(
           'font-numeric leading-none tabular-nums',
-          digits ? 'text-6xl text-accent-hover' : 'text-2xl',
-          locked && 'flex items-center justify-end gap-3',
+          digits ? 'text-6xl text-accent-hover' : short ? 'text-title' : 'text-2xl',
+          locked && cn('flex items-center gap-3', short ? 'justify-center' : 'justify-end'),
         )}
       >
         {locked && (
@@ -154,7 +184,7 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
         )}
         {primary}
       </div>
-      {secondary && <div className="mt-1 line-clamp-2 text-title-sm">{secondary}</div>}
+      {secondary && <div className={cn('mt-1 line-clamp-2', short ? 'text-body' : 'text-title-sm')}>{secondary}</div>}
     </div>
   );
 }
@@ -278,15 +308,50 @@ function UpNextCard({ variant = 'overlay', compact = false, short = false }: { v
 /**
  * Over the DOM video once a VOD item finished: one big replay button (the controls stay usable).
  * Under the title bar, and centred in the room above the control bar; a short player (a phone's
- * 16:9) gets the small disc without its label, which the bar's own Replay already names.
+ * 16:9) gets the small disc without its label, which the bar's own Replay already names. A stage
+ * with a way out (a detail page's watch stage) says the item finished and offers it beside Replay,
+ * so a finished movie is not a dead end (PV-09).
  */
 function EndedOverlay({ compact, short = false }: { compact: boolean; short?: boolean }) {
   const { t } = useTranslation('player');
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
   const fullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
-  if (!ended || upNext) return null;
+  const action = useStageEndedAction();
+  // The way on takes focus when the player had it (or the page did): it stayed on the page's
+  // body, so Enter did nothing, as UpNextCard's Play now already does.
+  const primary = useRef<HTMLButtonElement>(null);
+  const shown = ended && !upNext;
+  useEffect(() => {
+    if (shown) focusIfPlayerOwnsFocus(primary.current);
+  }, [shown]);
+  if (!shown) return null;
   const small = compact || short;
+  if (action && !compact) {
+    return (
+      <div
+        data-testid="ended-overlay"
+        role="status"
+        className={cn(
+          'player-chrome absolute inset-0 z-[8] flex flex-col items-center justify-center bg-black/55 motion-safe:animate-fade-in',
+          short ? 'gap-2 pb-12' : fullscreen ? 'gap-4 pb-36' : 'gap-3 pb-20',
+        )}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <p className={cn('font-medium text-on-glass [text-shadow:0_1px_3px_rgb(0_0_0/0.6)]', short ? 'text-body-sm' : 'text-title-sm')}>{t('playbackFinished')}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button type="button" onClick={replay} className={glassButton('secondary', short ? 'sm' : 'md')}>
+            <RotateCcw aria-hidden />
+            {t('replay')}
+          </button>
+          <button ref={primary} type="button" onClick={action.onClick} className={glassButton('primary', short ? 'sm' : 'md')}>
+            {action.label}
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       data-testid="ended-overlay"
@@ -298,6 +363,7 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <button
+        ref={primary}
         type="button"
         onClick={replay}
         aria-label={t('replay')}
@@ -484,7 +550,8 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const status = usePlayerStore((s) => s.status);
-  const title = usePlayerStore((s) => s.source?.title);
+  // The PiP bar's title: a live (or catch-up) channel's in the toasts' plain form, "ESPN2 FHD (US)" (a drag region holds text only).
+  const title = usePlayerStore((s) => (s.source?.isLive || s.source?.catchupProgramStart ? plainChannelName(s.source.title, false) : s.source?.title));
   const pip = usePipStore((s) => s.active);
   const [idle, setIdle] = useState(false);
   const [volumeDragging, setVolumeDragging] = useState(false);
@@ -608,7 +675,11 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
       {!thumb && (
         <>
           {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
-          <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
+          <StreamInfoPanel
+            big={overlay && !small}
+            columns={shortPlayer && !smallPlayer && !small}
+            className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')}
+          />
           {/*
             Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
             mini player says it in its header instead; a short player gets the one-line chip.
@@ -725,7 +796,7 @@ function UnmutePrompt({ compact }: { compact: boolean }) {
       onDoubleClick={(e) => e.stopPropagation()}
       className={cn(
         'absolute z-[25] inline-flex items-center rounded-full bg-accent-solid font-medium text-accent-solid-fg shadow-2 hover:bg-accent-solid-hover active:bg-accent-solid-pressed motion-safe:animate-pop-in',
-        compact ? 'end-2 top-2 gap-1.5 px-2.5 py-1 text-caption' : 'end-3 top-3 gap-2 px-3.5 py-2 text-body-sm sm:end-4 sm:top-4 pointer-coarse:min-h-11',
+        compact ? 'end-2 top-2 gap-1.5 px-2.5 py-1 text-caption' : 'end-3 top-3 gap-2 px-3.5 py-2 text-body-sm sm:end-4 sm:top-4 pointer-coarse:min-h-[calc(44rem/15)]',
       )}
     >
       <VolumeX aria-hidden className={compact ? 'size-3.5' : 'size-4'} />
@@ -805,6 +876,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const status = usePlayerStore((s) => s.status);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
+  const inStage = usePlayerStore((s) => s.dock === 'stage');
   const panelOpen = useMediaStore((s) => s.channelPanelOpen);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const pip = usePipStore((s) => s.active);
@@ -889,15 +961,18 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
     if (host) host.dataset['idle'] = String(!chromeVisible);
   }, [chromeVisible]);
 
-  // Resume notice for VOD.
+  // Resume notice for VOD, once the file's length is known: a saved spot past its end is not
+  // applied (InlinePlayer), so it says playback starts at the beginning instead of "Resumed at".
   const resumedFrom = source?.resumeSeconds;
+  const lengthKnown = usePlayerStore((s) => !!s.durationSeconds && Number.isFinite(s.durationSeconds));
   useEffect(() => {
-    if (source?.url && resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
-      showOsd(t('resumedAt', { time: formatTime(resumedFrom) }));
+    if (source?.url && lengthKnown && resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
+      const length = usePlayerStore.getState().durationSeconds ?? 0;
+      showOsd(resumeFits(resumedFrom, length) ? t('resumedAt', { time: formatTime(resumedFrom) }) : t('resumePastEnd'));
     }
-    // Only when a new item starts.
+    // Only when a new item starts and its length is known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source?.url]);
+  }, [source?.url, lengthKnown]);
 
   // Chrome that follows the stores itself, made once per change of what it is given: the surface
   // re-renders for each step of a zap (the next channel's title, the loading and playing status),
@@ -906,9 +981,16 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const overlays = useMemo(
     () => (
       <>
-        <Osd />
+        <Osd short={shortPlayer} />
         <UnmutePrompt compact={compact} />
-        <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
+        {/* A short player (the Live page's stage) gives it the height above the bar, over the title. */}
+        <StreamInfoPanel
+          big={isFullscreen && !pip}
+          columns={shortPlayer && !smallPlayer && !compact && !pip}
+          className={
+            compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : shortPlayer ? 'start-3 top-3 max-h-[calc(100%-4.5rem)]' : 'start-4 top-16 max-h-[calc(100%-9rem)]'
+          }
+        />
         {/*
           Zap banner (C5): the title's corner, or the far one while the channel list or stream info
           holds it. The mini player says it in its header instead; a short player gets the
@@ -1037,6 +1119,9 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   // of item (Up next across the top, the replay disc in the middle) has the height to itself too.
   const titleHidden = !chromeVisible || zapShown || shortError || (shortPlayer && (endedNow || upNextShown));
   const liveRef = source.isLive ? source.ref : undefined;
+  // A phone's Live stage: the page's Now strip right under the picture says what airs and how far
+  // in, so the title over a 220 px picture is the channel's name alone.
+  const nameOnly = smallPlayer && inStage && !isFullscreen;
 
   return (
     <div
@@ -1117,11 +1202,12 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
                       titleHover.onPointerLeave();
                     }}
                   >
-                    {source.title}
+                    {/* A catch-up programme's title is its channel's name too. */}
+                    {liveRef || source.catchupProgramStart ? <PlayerChannelName title={source.title} glass /> : source.title}
                   </h2>
                   {/* What airs now, kept current while the channel plays (PL-STALE-PROGRAMME); an episode's line for VOD. */}
                   {liveRef ? (
-                    <LiveProgrammeLine channel={liveRef} fallback={source.subtitle} />
+                    !nameOnly && <LiveProgrammeLine channel={liveRef} fallback={source.subtitle} />
                   ) : (
                     source.subtitle && (
                       <p dir="auto" data-testid="player-subtitle" className="mt-0.5 truncate text-body-sm text-on-glass-muted">

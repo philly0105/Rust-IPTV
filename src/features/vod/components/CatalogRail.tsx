@@ -14,6 +14,12 @@ import { PosterRail, type RailCardProps } from './PosterRail';
 /** Cards a catalog rail shows: a slice to browse, with See all for the rest. */
 export const CATALOG_RAIL_LIMIT = 20;
 
+/**
+ * Fewest rated titles a rail sorted by rating needs. A catalog without ratings (most m3u
+ * playlists) would otherwise show a "Top rated" rail of titles in no particular order.
+ */
+const MIN_RATED = 3;
+
 /** Caption, gap and the track's padding under a rail card's artwork, for the placeholder's height. */
 const RAIL_CHROME_PX = 76;
 
@@ -30,15 +36,18 @@ export interface CatalogRailProps {
   eager?: boolean;
   /** A title to leave out (the one whose detail page shows "More in <category>"). */
   exclude?: ItemRef | undefined;
+  /** Opens a poster's menu (PosterRail's `menu`). */
+  menu?: ((item: VodItem | SeriesItem, index: number, pos: { x: number; y: number }) => void) | undefined;
 }
 
 /**
  * One poster rail of the Movies and Series landing (CB-VOD-LANDING): the first page of a grid, a
  * category or the whole section by rating. Until it nears the viewport it is a placeholder of the
  * rail's height, so the page keeps its length (scroll memory lands where it left) and asks the
- * catalog only for rails the user gets to. A rail whose grid turns out empty goes away.
+ * catalog only for rails the user gets to. A rail whose grid turns out empty goes away, and so does
+ * a rail by rating with fewer than {@link MIN_RATED} rated titles.
  */
-export function CatalogRail({ title, count, seeAll, input, rootRef, card, eager, exclude }: CatalogRailProps) {
+export function CatalogRail({ title, count, seeAll, input, rootRef, card, eager, exclude, menu }: CatalogRailProps) {
   const [ref, near] = useNearViewport<HTMLDivElement>(rootRef);
   const cardWidth = useRailCardWidth();
   if (!eager && !near) {
@@ -49,7 +58,7 @@ export function CatalogRail({ title, count, seeAll, input, rootRef, card, eager,
       </section>
     );
   }
-  return <CatalogRailBody title={title} count={count} seeAll={seeAll} input={input} card={card} cardWidth={cardWidth} exclude={exclude} />;
+  return <CatalogRailBody title={title} count={count} seeAll={seeAll} input={input} card={card} cardWidth={cardWidth} exclude={exclude} menu={menu} />;
 }
 
 function CatalogRailBody({
@@ -60,6 +69,7 @@ function CatalogRailBody({
   card,
   cardWidth,
   exclude,
+  menu,
 }: Omit<CatalogRailProps, 'rootRef' | 'eager'> & { cardWidth: number }) {
   const page = useVodPage(input, 0);
   // Stalker portals filter neither by rating nor by watched, so the rail drops what the grid
@@ -67,12 +77,15 @@ function CatalogRailBody({
   // watched ones. Those go before the rail takes its slice, once their lookup has answered.
   const portal = !!input && !ratingFilterInCore(input.sourceKind);
   const hideWatched = portal && input?.hideWatched === true;
+  const byRating = input?.sort === 'rating';
   const candidates = useMemo(() => {
-    const list = page.data?.items ?? [];
+    const all = page.data?.items ?? [];
+    // Sorted by rating, the unrated titles at the end are no part of a "top rated" rail.
+    const list = byRating ? all.filter((i) => (i.rating ?? 0) > 0) : all;
     const rated = portal && input?.minRating ? filterByRating(list, input.minRating) : list;
     const kept = exclude ? rated.filter((i) => !sameRef(i.ref, exclude)) : rated;
     return hideWatched ? kept : kept.slice(0, CATALOG_RAIL_LIMIT);
-  }, [page.data, portal, input?.minRating, exclude, hideWatched]);
+  }, [page.data, byRating, portal, input?.minRating, exclude, hideWatched]);
   const lookup = useWatchedLookup(candidates);
   const watched = lookup.keys;
   const items = useMemo(
@@ -82,7 +95,7 @@ function CatalogRailBody({
   const checking = hideWatched && !lookup.settled;
   // A retry clears the error state until the next answer.
   const [retrying, setRetrying] = useState(false);
-  if (page.isSuccess && !checking && items.length === 0) return null;
+  if (page.isSuccess && !checking && items.length < (byRating ? MIN_RATED : 1)) return null;
   return (
     <PosterRail<VodItem | SeriesItem>
       title={title}
@@ -105,6 +118,7 @@ function CatalogRailBody({
         ) : undefined
       }
       myList={myListTarget}
+      menu={menu}
       render={(item, i, rail) => card(item, i, rail, watched.has(itemKey(item.ref)))}
     />
   );

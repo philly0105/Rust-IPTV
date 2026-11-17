@@ -46,6 +46,17 @@ const LOCALE = /[\\/]src[\\/]i18n[\\/]([^\\/]+)[\\/](?:[^\\/]+\.json|index\.ts)$
  * of `features/library/lib/format.ts`, which imports `formatDurationParts` (pnpm size:check).
  */
 const OWN_CHUNK = /[\\/]src[\\/]lib[\\/]duration\.ts$/;
+/**
+ * `src/features/vod/lib/recentSearches.ts` too, for the same reason: Search and the library share
+ * it, and the merge once put it in the channel-number OSD's chunk, which imports the player store,
+ * so Search waited for 12 more chunks (134 kB) before its first render (pnpm size:check).
+ */
+const RECENT_SEARCHES = /[\\/]src[\\/]features[\\/]vod[\\/]lib[\\/]recentSearches\.ts$/;
+/**
+ * `src/features/live/lib/groupRegion.ts` too: Search imports it, and the merge brought the guide's
+ * time, catch-up, language and grid-navigation helpers into Home with it (pnpm size:check).
+ */
+const GROUP_REGION = /[\\/]src[\\/]features[\\/]live[\\/]lib[\\/]groupRegion\.ts$/;
 
 function vendorChunk(id: string): string | undefined {
   // English strings change on every copy edit; their own chunk keeps the app
@@ -56,6 +67,8 @@ function vendorChunk(id: string): string | undefined {
   const locale = LOCALE.exec(id);
   if (locale) return `locale-${locale[1]}`;
   if (OWN_CHUNK.test(id)) return 'duration';
+  if (RECENT_SEARCHES.test(id)) return 'recentSearches';
+  if (GROUP_REGION.test(id)) return 'groupRegion';
   const at = id.lastIndexOf('node_modules');
   if (at < 0) return undefined;
   const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);

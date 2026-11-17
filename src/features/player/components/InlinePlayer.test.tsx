@@ -11,6 +11,11 @@ vi.mock('@/api/transport', () => ({
 // The parental gate has its own tests (parentalHook.test.ts); here everything may play.
 vi.mock('../parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
+const failoverOrigin = vi.hoisted(() => ({ title: undefined as string | undefined }));
+vi.mock('../failover', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../failover')>()),
+  failoverOriginTitle: () => failoverOrigin.title,
+}));
 
 const { usePlayerStore, __resetPlayerForTests, SEEK_SETTLE_MS } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
@@ -47,7 +52,7 @@ describe('stream error overlay', () => {
     expect(alert.getAttribute('data-error-class')).toBe('auth');
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('The provider refused this stream');
     expect(alert.textContent).toContain('HTTP 403');
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 
   it('leaves room for the title bar and scrolls from the top in a short player (390 px)', () => {
@@ -81,9 +86,27 @@ describe('stream error overlay', () => {
     expect(heading.getAttribute('title')).toContain('HTTP 403');
     expect(alert.querySelector('details')).toBeNull();
     expect(alert.querySelector('p.line-clamp-2')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     // With the title bar hidden, the panel names what failed.
     expect(screen.getByTestId('error-item').textContent).toBe('Movie');
+  });
+
+  it('names both channels when the copy failover switched to fails too, without blaming a source (w-walkthrough-15)', () => {
+    failoverOrigin.title = 'FOX HD (US)';
+    try {
+      const backup = { ...placeholder, title: 'US| FOX (Backup)', isLive: true };
+      const { unmount } = render(<InlinePlayer short />);
+      act(() => usePlayerStore.setState({ source: backup, mode: 'inline', status: 'error', error: 'decode' }));
+      expect(screen.getByTestId('error-failover').textContent).toBe('FOX HD (US) and FOX (Backup) (US) did not play here.');
+      // The line names the copy that failed: no second line with its name.
+      expect(screen.queryByTestId('error-item')).toBeNull();
+      unmount();
+      render(<InlinePlayer />);
+      act(() => usePlayerStore.setState({ source: backup, mode: 'inline', status: 'error', error: 'decode' }));
+      expect(screen.getByTestId('error-failover').textContent).not.toContain('source');
+    } finally {
+      failoverOrigin.title = undefined;
+    }
   });
 
   it('uses the RPC error code when the message says nothing useful', () => {
@@ -153,7 +176,7 @@ describe('stream error overlay', () => {
     expect(usePlayerStore.getState().status).toBe('error');
     const { rpc } = await import('@/api/transport');
     const before = vi.mocked(rpc).mock.calls.filter((c) => c[0] === 'xtream.streamUrl').length;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
     });

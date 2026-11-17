@@ -11,7 +11,7 @@ import type { EpgSourceStatus, GuideSearchHit } from '@/api/types';
 
 import { DAY, HOUR, MINUTE } from '../../lib/epgTime';
 import { HeaderSlot, lastHeader } from '../../test/fakes';
-import { GuideHeaderSearch, GuideSearchPanel, SEARCH_DEBOUNCE_MS } from '../GuideSearchPanel';
+import { ALSO_SHOWN, GuideHeaderSearch, GuideSearchPanel, SEARCH_DEBOUNCE_MS } from '../GuideSearchPanel';
 import { SEARCH_LIMIT } from '../search';
 import { createRpcMock, hit, i18n, installDomStubs, renderGuide, settings } from './harness';
 
@@ -49,6 +49,7 @@ beforeEach(() => {
   rpc.reset();
   rpc.handlers['epg.sources'] = () => guideLoaded;
   rpc.handlers['epg.search'] = () => [];
+  rpc.handlers['catalog.channels'] = () => ({ items: [], total: 0, offset: 0, limit: 5 });
   rpc.handlers['reminders.list'] = () => [];
   rpc.handlers['recordings.list'] = () => [];
   rpc.handlers['recordings.rules'] = () => [];
@@ -73,12 +74,13 @@ function NOW_PLUS(delta: number) {
 
 function panel(props: Partial<Parameters<typeof GuideSearchPanel>[0]> = {}) {
   const onSelect = vi.fn();
+  const onSelectChannel = vi.fn();
   const onWatch = vi.fn();
   const onClose = vi.fn();
   renderGuide(
-    <GuideSearchPanel query="news" sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onWatch={onWatch} onClose={onClose} {...props} />,
+    <GuideSearchPanel query="news" sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onSelectChannel={onSelectChannel} onWatch={onWatch} onClose={onClose} {...props} />,
   );
-  return { onSelect, onWatch, onClose, el: () => screen.getByTestId('guide-search-panel') };
+  return { onSelect, onSelectChannel, onWatch, onClose, el: () => screen.getByTestId('guide-search-panel') };
 }
 const state = () => screen.getByTestId('guide-search-panel').getAttribute('data-state');
 
@@ -120,6 +122,8 @@ describe('GuideSearchPanel states', () => {
     await waitFor(() => expect(state()).toBe('empty'));
     expect(screen.getByText('Nothing matches “zzz”')).toBeTruthy();
     expect(screen.getByText('Searches titles for the next 14 days.')).toBeTruthy();
+    // The search of everything finds channels, movies and series as well as programmes.
+    expect(screen.getByTestId('search-everything-for').getAttribute('href')).toBe('/search?q=zzz');
   });
 
   it('without a loaded guide it says so, links to the guide settings and does not search', async () => {
@@ -203,14 +207,27 @@ describe('GuideSearchPanel results', () => {
     expect(Date.parse(chosen.program.start)).toBe(Date.parse(HITS[1]!.program.start) + 30 * MINUTE);
   });
 
-  it('says when the results are cut at the limit', async () => {
+  it('says when the results are cut at the limit: the count is a floor and the end says how far it got (v-guide-04)', async () => {
+    // Each show airs on two channels at once, so the 100 airings fold into 50 rows.
     rpc.handlers['epg.search'] = () =>
-      Array.from({ length: SEARCH_LIMIT }, (_, i) =>
-        hit(`News ${i}`, NOW_PLUS(HOUR + i * MINUTE), NOW_PLUS(2 * HOUR + i * MINUTE), { ref: { sourceId: 'src1', contentType: 'live', itemId: `c${i}` } }),
-      );
+      Array.from({ length: SEARCH_LIMIT }, (_, i) => {
+        const k = Math.floor(i / 2);
+        return hit(`News ${k}`, NOW_PLUS(HOUR + k * MINUTE), NOW_PLUS(2 * HOUR + k * MINUTE), { ref: { sourceId: 'src1', contentType: 'live', itemId: `c${i}` } });
+      });
     panel();
     await waitFor(() => expect(state()).toBe('results'));
-    expect(screen.getByText(`First ${SEARCH_LIMIT} shown. Refine the search.`)).toBeTruthy();
+    expect(screen.getByTestId('guide-search-count').textContent).toBe('50+ results');
+    // The last airing listed starts at 11:51 AM (10:02 + 1 h + 49 min).
+    expect(screen.getByTestId('guide-search-more').textContent).toMatch(/^Showing airings up to .+ 11:51\sAM\. See all results for more\.$/);
+    expect(screen.queryByText(/Refine the search/)).toBeNull();
+  });
+
+  it('results under the limit are counted plainly, with no end note', async () => {
+    rpc.handlers['epg.search'] = () => [hit('News', NOW_PLUS(HOUR), NOW_PLUS(2 * HOUR))];
+    panel();
+    await waitFor(() => expect(state()).toBe('results'));
+    expect(screen.getByTestId('guide-search-count').textContent).toBe('1 result');
+    expect(screen.queryByTestId('guide-search-more')).toBeNull();
   });
 
   // Review round 1: the heading's join came from code (`${rel}, ${date}`), so ja, zh and ar showed
@@ -231,6 +248,67 @@ describe('GuideSearchPanel results', () => {
     } finally {
       i18n.addResource('en', 'guide', 'dayHeading', original);
     }
+  });
+
+  it('lists the channels whose name matches first, and choosing one hands it over', async () => {
+    const espn = { ...hit('x', NOW, NOW).ref, itemId: 'e' };
+    rpc.handlers['catalog.channels'] = () => ({
+      items: [{ ref: espn, name: 'US| ESPN HD', number: 1, categoryId: 'g', categoryName: 'Sports', isRadio: false }],
+      total: 1,
+      offset: 0,
+      limit: 5,
+    });
+    const { onSelectChannel } = panel({ query: 'espn' });
+    await waitFor(() => expect(state()).toBe('empty'));
+    expect(rpc.of('catalog.channels')[0]).toMatchObject({ sourceId: 'src1', query: { offset: 0, limit: 5, search: 'espn' } });
+    const channels = await screen.findByTestId('guide-search-channels');
+    // Under a matching channel, the programmes' empty state is one quiet line.
+    // It speaks of programme titles: the channels above it do match (v-guide-03).
+    expect(screen.getByTestId('guide-search-no-programmes').textContent).toBe('No programme titles match “espn”');
+    fireEvent.click(within(channels).getByTestId('guide-search-channel'));
+    expect(onSelectChannel).toHaveBeenCalledWith(expect.objectContaining({ ref: espn }));
+  });
+
+  it('ends with a link to search everything for the query', async () => {
+    panel({ query: 'zzz' });
+    await waitFor(() => expect(state()).toBe('empty'));
+    expect(screen.getByTestId('guide-search-everything').getAttribute('href')).toBe('/search?q=zzz');
+  });
+
+  it('folds a show airing on several channels at once into one row', async () => {
+    const at = NOW_PLUS(HOUR);
+    rpc.handlers['epg.search'] = () =>
+      ['a', 'b', 'c'].map((id, i) => hit('SportsCenter', at, at + HOUR, { channelName: `Chan ${id}`, channelNumber: i + 1, ref: { sourceId: 'src1', contentType: 'live', itemId: id } }));
+    const { onSelect } = panel({ query: 'sports' });
+    await waitFor(() => expect(state()).toBe('results'));
+    expect(screen.getAllByTestId('guide-search-hit')).toHaveLength(1);
+    expect(screen.getByTestId('guide-search-count').textContent).toBe('1 result');
+    const toggle = screen.getByTestId('guide-search-also-toggle');
+    expect(toggle.textContent).toBe('+2 channels');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(within(screen.getByTestId('guide-search-also')).getByRole('button', { name: /^SportsCenter, Chan c, / }));
+    expect((onSelect.mock.calls[0]![0] as GuideSearchHit).ref.itemId).toBe('c');
+  });
+
+  it('lists the first eight other channels of a widely carried show, then Show all', async () => {
+    const at = NOW_PLUS(HOUR);
+    rpc.handlers['epg.search'] = () =>
+      Array.from({ length: 61 }, (_, i) => hit('SportsCenter', at, at + HOUR, { channelName: `Chan ${i}`, channelNumber: i + 1, ref: { sourceId: 'src1', contentType: 'live', itemId: `x${i}` } }));
+    panel({ query: 'sports' });
+    await waitFor(() => expect(state()).toBe('results'));
+    const toggle = screen.getByTestId('guide-search-also-toggle');
+    expect(toggle.textContent).toBe('+60 channels');
+    fireEvent.click(toggle);
+    const list = () => screen.getByTestId('guide-search-also');
+    expect(within(list()).getAllByRole('button', { name: /^SportsCenter, Chan / })).toHaveLength(ALSO_SHOWN);
+    const all = within(list()).getByTestId('guide-search-also-all');
+    expect(all.textContent).toBe('Show all (61)');
+    fireEvent.click(all);
+    expect(within(list()).getAllByRole('button', { name: /^SportsCenter, Chan / })).toHaveLength(60);
+    expect(within(list()).queryByTestId('guide-search-also-all')).toBeNull();
+    // Focus moves on to the first channel it brought in.
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^SportsCenter, Chan 9, /);
   });
 
   // Review round 1: "05:00 AM" wrapped in the old w-12 column. The time never wraps now and the
@@ -255,7 +333,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
     renderGuide(
       <>
         <HeaderSlot />
-        <GuideHeaderSearch title="TV guide" subtitle="Demo" inputRef={inputRef} sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onWatch={onWatch} />
+        <GuideHeaderSearch title="TV guide" subtitle="Demo" inputRef={inputRef} sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onSelectChannel={vi.fn()} onWatch={onWatch} />
       </>,
     );
     const input = screen.getByRole('searchbox', { name: 'Search the guide' }) as HTMLInputElement;
@@ -264,7 +342,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
 
   it('sets the header: title, subtitle and the field, which points at the panel while it shows', async () => {
     const { input } = field();
-    expect(lastHeader()).toMatchObject({ title: 'TV guide', subtitle: 'Demo', search: { placeholder: 'Search guide', label: 'Search the guide' } });
+    expect(lastHeader()).toMatchObject({ title: 'TV guide', subtitle: 'Demo', search: { placeholder: 'Search programmes and channels', label: 'Search the guide' } });
     expect(input.hasAttribute('data-shell-search')).toBe(true);
     expect(input.getAttribute('aria-controls')).toBeNull();
     fireEvent.change(input, { target: { value: 'news' } });
@@ -279,7 +357,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
     renderGuide(
       <>
         <HeaderSlot />
-        <GuideHeaderSearch title="TV guide" inputRef={inputRef} sourceId="" disabled offsetMinutes={0} now={NOW} onSelect={vi.fn()} onWatch={vi.fn()} />
+        <GuideHeaderSearch title="TV guide" inputRef={inputRef} sourceId="" disabled offsetMinutes={0} now={NOW} onSelect={vi.fn()} onSelectChannel={vi.fn()} onWatch={vi.fn()} />
       </>,
     );
     const input = screen.getByRole('searchbox', { name: 'Search the guide' });
@@ -309,9 +387,10 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
     await waitFor(() => expect(document.activeElement).toBe(mains()[0]));
     fireEvent.keyDown(mains()[0]!, { key: 'ArrowDown' });
     expect(document.activeElement).toBe(mains()[1]);
+    // The last row hands the query to the Search page.
     fireEvent.keyDown(mains()[1]!, { key: 'End' });
-    expect(document.activeElement).toBe(mains()[3]);
-    fireEvent.keyDown(mains()[3]!, { key: 'Home' });
+    expect(document.activeElement).toBe(screen.getByTestId('guide-search-everything'));
+    fireEvent.keyDown(mains()[4]!, { key: 'Home' });
     expect(document.activeElement).toBe(mains()[0]);
     // Up from the first hit: back to the field, panel still open.
     fireEvent.keyDown(mains()[0]!, { key: 'ArrowUp' });
@@ -363,7 +442,7 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
 describe('guide search hits name a channel as Live TV does (round 5)', () => {
   const tagged = [hit('Evening News', NOW_PLUS(-12 * MINUTE), NOW_PLUS(18 * MINUTE), { channelName: 'US| Alpha HD', channelNumber: 1, ref: { sourceId: 'src1', contentType: 'live', itemId: 'a' } })];
 
-  it('draws the country tag after the name, quiet, and keeps the provider name for screen readers', async () => {
+  it('draws the country tag after the name, quiet, and names the channel for screen readers as toasts do (w-a11y-03)', async () => {
     rpc.handlers['epg.search'] = () => tagged;
     panel();
     await waitFor(() => expect(state()).toBe('results'));
@@ -372,7 +451,8 @@ describe('guide search hits name a channel as Live TV does (round 5)', () => {
     expect(tag.textContent).toBe('US');
     expect(tag.previousElementSibling!.textContent).toBe('Alpha HD');
     expect(tag.className).toContain('text-fg-subtle');
-    expect(within(row).getAllByRole('button', { name: /US\| Alpha HD/ }).length).toBeGreaterThan(0);
+    expect(within(row).getAllByRole('button', { name: /Alpha HD \(US\)/ }).length).toBeGreaterThan(0);
+    expect(within(row).queryAllByRole('button', { name: /US\|/ })).toHaveLength(0);
   });
 
   it('leaves the tag out with "Hide country tags" on', async () => {

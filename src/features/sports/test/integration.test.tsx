@@ -155,10 +155,14 @@ function card(key: string, within_: HTMLElement = document.body): HTMLElement {
   return el;
 }
 
+/** Each stream's reason and its name as drawn (a feed's quality words, "HD", are drawn apart from the station). */
 function rows(el: HTMLElement) {
   return within(el)
     .getAllByTestId('sports-stream')
-    .map((r) => `${r.getAttribute('data-reason')} ${r.querySelector('span[dir="auto"]')?.textContent}`);
+    .map((r) => {
+      const name = within(r).getByTestId('sports-stream-name');
+      return `${r.getAttribute('data-reason')} ${(name.querySelector('[aria-hidden]') ?? name).textContent}`;
+    });
 }
 
 describe('sports page with its real hooks', () => {

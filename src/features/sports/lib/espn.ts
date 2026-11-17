@@ -8,7 +8,7 @@
 
 import { dateTimeFormat } from '@/lib/intl';
 
-import type { Game, GameBroadcast, GamePhase, GameTeam, League } from './types';
+import type { Game, GameBroadcast, GameClock, GamePhase, GameTeam, League } from './types';
 
 export const ET_ZONE = 'America/New_York';
 
@@ -157,6 +157,33 @@ function stateOf(type: Json | null): Game['state'] {
   return type?.completed === true ? 'post' : 'pre';
 }
 
+const INNING_HALVES: Record<string, Extract<GameClock, { kind: 'inning' }>['half']> = {
+  top: 'top',
+  bot: 'bottom',
+  bottom: 'bottom',
+  mid: 'middle',
+  middle: 'middle',
+  end: 'end',
+};
+
+/**
+ * A live game's clock from ESPN's status: its type name, period and clock. Baseball's status has the
+ * inning but not its half, which only the short detail's first word gives ("Top 5th", "Bot 5th", "Mid 5th").
+ * Null for anything else (a weather delay, a type this doesn't know): the card then shows ESPN's text.
+ */
+function clockOf(league: League, name: string | null, period: number | null, displayClock: string | null, shortDetail: string): GameClock | null {
+  if (period === null || period < 1) return null;
+  if (league === 'mlb') {
+    const half = INNING_HALVES[/^\s*([a-z]+)/i.exec(shortDetail)?.[1]?.toLowerCase() ?? ''];
+    return half && (name === 'STATUS_IN_PROGRESS' || name === 'STATUS_END_PERIOD') ? { kind: 'inning', half, inning: period } : null;
+  }
+  if (name === 'STATUS_HALFTIME') return { kind: 'halftime' };
+  if (name === 'STATUS_END_PERIOD') return { kind: 'endOfPeriod', period };
+  if (name !== 'STATUS_IN_PROGRESS') return null;
+  // College overtime is untimed: its clock stays at 0:00.
+  return { kind: 'running', period, clock: league === 'cfb' && period > 4 ? null : displayClock };
+}
+
 function teamOf(c: Json, league: League, scored: boolean): GameTeam | null {
   const t = obj(c.team);
   const id = str(t?.id) ?? str(c.id);
@@ -251,6 +278,7 @@ function gameOf(league: League, e: Json): Game | null {
   // The game's page: its summary link, which ESPN swaps for a "live" one while the game is on.
   // A live football game's down and distance; other sports' situations (balls and strikes) are not read.
   const situation = state === 'in' ? str(obj(comp.situation)?.downDistanceText) : null;
+  const clock = state === 'in' ? clockOf(league, str(type?.name), num(status?.period), str(status?.displayClock), str(type?.shortDetail) ?? '') : null;
   const links = arr(e.links).map(obj);
   const link =
     links.find((l) => arr(l?.rel).includes('summary')) ?? links.find((l) => arr(l?.rel).includes('live') && arr(l?.rel).includes('event'));
@@ -280,6 +308,7 @@ function gameOf(league: League, e: Json): Game | null {
     broadcasts: broadcastsOf(comp),
     gamecastUrl: httpUrl(link?.href),
     ...(situation ? { situation } : {}),
+    ...(clock ? { clock } : {}),
   };
 }
 

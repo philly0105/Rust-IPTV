@@ -12,6 +12,7 @@ import { Link } from 'react-router';
 
 import { Button, IconButton, Skeleton, cn, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+import { useMediaQuery } from '../deps';
 import { useLists } from '../hooks/useLists';
 import { listPath } from '../paths';
 import { openCreateList, openManageLists } from '../store';
@@ -27,6 +28,8 @@ export interface ListsSidebarSectionProps {
 const FOLD_KEY = 'lists.sidebarFolded';
 const ROW = 36;
 const ROW_SPACING = 17;
+/** A row's slot on a touch screen: 44 px, as the group rows under it in Live's drawer. */
+const TOUCH_ROW = 44;
 
 const linkClass = (active: boolean) =>
   `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${
@@ -46,7 +49,8 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
   const { t, i18n } = useTranslation('lists');
   const { t: tc } = useTranslation('common');
   const lists = useLists();
-  const rowHeight = useRowHeight(ROW, ROW_SPACING);
+  const coarse = useMediaQuery('(pointer: coarse)', false);
+  const rowHeight = useRowHeight(coarse ? TOUCH_ROW : ROW, coarse ? ROW_SPACING + TOUCH_ROW - ROW : ROW_SPACING);
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const headingId = useId();
   const bodyId = useId();
@@ -133,12 +137,12 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
       </div>
     );
   } else {
-    body = (
+    const list = (
       <ul
         ref={listRef}
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className={cn('flex flex-col px-2', isPage ? 'min-h-0 flex-1 overflow-y-auto pb-3' : 'max-h-[min(36vh,300px)] overflow-y-auto overscroll-contain pb-1')}
+        className={cn('flex flex-col px-2', !isPage && 'max-h-[min(36vh,300px)] overflow-y-auto overscroll-contain pb-1')}
         data-testid="lists-sidebar"
       >
         {items.map((l, i) => {
@@ -166,6 +170,21 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
         })}
       </ul>
     );
+    body = isPage ? (
+      <div className="min-h-0 flex-1 overflow-y-auto pb-3">
+        {list}
+        {/* New list in words under the lists, as the rail's Add source (w-walkthrough-11): the
+            page's own + adds channels, and a bare icon by the heading was easy to miss. */}
+        <div className="px-2" style={{ height: rowHeight }}>
+          <button type="button" onClick={() => openCreateList({ openAfter: true })} className={cn(linkClass(false), 'w-full')} data-testid="lists-new">
+            <ListPlus className="size-4 shrink-0 text-fg-subtle" aria-hidden />
+            <span className="flex-1 truncate text-start">{t('newList')}</span>
+          </button>
+        </div>
+      </div>
+    ) : (
+      list
+    );
   }
 
   return (
@@ -182,7 +201,7 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
               aria-expanded={!folded}
               aria-controls={bodyId}
               onClick={toggleFold}
-              className="-ms-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
+              className="-ms-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none pointer-coarse:min-h-[calc(44rem/15)] hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
             >
               <ChevronDown className={cn('size-3.5 text-fg-subtle motion-safe:transition-transform', folded && '-rotate-90 rtl:rotate-90')} aria-hidden />
               {t('title')}
@@ -190,9 +209,12 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
             </button>
           </h2>
         )}
-        <IconButton size="sm" label={t('newList')} icon={<ListPlus className="size-4" />} onClick={() => openCreateList({ openAfter: isPage })} />
+        {/* The list page says New list in words under its lists (or in its empty state). */}
+        {isPage ? null : <IconButton size="sm" label={t('newList')} icon={<ListPlus className="size-4" />} onClick={() => openCreateList({ openAfter: false })} />}
         <IconButton size="sm" label={t('manageLists')} icon={<Settings2 className="size-4" />} onClick={() => openManageLists(activeListId)} />
       </div>
+      {/* Under the heading, what a channel list is (library-01): the page is titled by the list. */}
+      {isPage ? <p className="-mt-1 px-3 pb-2 text-caption text-fg-subtle">{t('lead')}</p> : null}
       <div id={bodyId} hidden={folded} className={cn(isPage && 'flex min-h-0 flex-1 flex-col')}>
         {body}
       </div>

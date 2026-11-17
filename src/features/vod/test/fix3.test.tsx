@@ -11,7 +11,7 @@ import { isResumable, progressFraction } from '../lib/format';
 import { resumeTarget } from '../lib/merge';
 import { effectiveMinRating, filterByRating } from '../lib/paging';
 import { forgetSpots } from '../hooks/useScrollMemory';
-import { currentLocation, installDomStubs, makeSource, openHeroMenu, renderAt, settings } from './harness';
+import { currentLocation, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -145,11 +145,14 @@ describe('U4-fix3: a cold link of the wrong kind redirects', () => {
     expect(callsOf('stalker.seriesDetail')[0]!.args).toEqual({ ref: { sourceId: 'src1', contentType: 'series', itemId: '7001' } });
   });
 
-  it('keeps the not-found page when the id is neither kind', async () => {
+  it('says the title is gone, with a way on, when the id is neither kind (vod-detail-09)', async () => {
     rpcMock.handlers['xtream.vodDetail'] = notFound('This movie is no longer offered by the provider.');
     rpcMock.handlers['catalog.item'] = notFound('catalog item not found');
     renderAt('/s/src1/movie/m7', movieRoute);
-    await screen.findByText('This movie is no longer offered by the provider.');
+    await screen.findByText('This title is no longer available');
+    expect(screen.getByRole('link', { name: 'Browse movies' }).getAttribute('href')).toBe('/s/src1/movies');
+    // Not an error with only Technical details: no Retry, no danger state.
+    expect(screen.queryByRole('button', { name: /Try again|Retry/ })).toBeNull();
   });
 });
 
@@ -158,7 +161,7 @@ describe('U4-fix3: TMDB key status on the similar rail', () => {
     rpcMock.handlers['settings.get'] = () => settings({ tmdb: { enabled: true } });
     rpcMock.handlers['tmdb.testKey'] = () => ({ ok: false, message: 'No API key found. Paste one here, or put TMDB_API_KEY=<key> in a .env file.' });
     renderAt('/s/src1/movie/m7', movieRoute);
-    await screen.findByText('Add a TMDB key in Settings > Metadata.');
+    await screen.findByText('Add a TMDB key in Settings > Posters and details.');
     expect(screen.getByRole('link', { name: 'Add a TMDB key' }).getAttribute('href')).toBe('/settings/metadata');
     expect(screen.queryByText('TMDB has no similar titles for this one.')).toBeNull();
     expect(screen.queryByTestId('tmdb-attribution')).toBeNull();
@@ -302,7 +305,9 @@ describe('U4-fix3: watched state', () => {
     renderAt('/s/src1/movie/m7', movieRoute);
     expect(await screen.findByRole('button', { name: 'Mark as unwatched' })).toBeTruthy();
     expect(await screen.findByRole('button', { name: /Resume/ })).toBeTruthy();
-    expect(within(await openHeroMenu()).getByRole('menuitem', { name: 'Start over' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy();
+    // The meta line says it in words, not only the Watched button's tint (vod-detail-14).
+    expect(screen.getByTestId('vod-watched-fact').textContent).toBe('Watched');
   });
 
   it('isResumable: a watched movie resumes only between 5 % and 95 %; a watched episode never does', () => {
@@ -327,7 +332,7 @@ describe('U4-fix3: watched state', () => {
     // leave Watched out (they say it in words from sm up, episodeListPhone.test).
     expect(screen.getAllByTestId('episode-watched-chip')).toHaveLength(1);
     // Play starts after the watched episode.
-    expect(screen.getByRole('button', { name: 'Play S01E02' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play episode 2' })).toBeTruthy();
 
     // The watched episode's own button offers the way back; the next one's marks it, no menu in between.
     expect(screen.getByRole('button', { name: 'Mark S01E01 as unwatched' })).toBeTruthy();

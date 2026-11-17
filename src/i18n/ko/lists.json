@@ -1,5 +1,6 @@
 {
-  "title": "목록",
+  "title": "내 채널 목록",
+  "lead": "직접 만든 채널 묶음",
   "newList": "새 목록",
   "newListName": "새 목록 이름",
   "createList": "목록 만들기",
@@ -17,6 +18,7 @@
   "localDataHint": "목록은 앱에 저장됩니다. 다시 시도하거나, 계속 실패하면 앱을 다시 시작하세요.",
   "emptyTitle": "아직 목록이 없습니다",
   "emptyHint": "스포츠나 키즈처럼 어느 소스의 채널이든 묶어 보세요.",
+  "emptyNoSources": "먼저 소스를 추가하세요. 그다음 스포츠나 키즈처럼 채널을 목록으로 묶을 수 있습니다.",
   "sidebarEmpty": "어느 소스의 채널이든 묶어 보세요.",
   "channelCount_other": "채널 {{formatted}}개",
   "listsUsed": "목록 {{max}}개 중 {{used}}개 사용",

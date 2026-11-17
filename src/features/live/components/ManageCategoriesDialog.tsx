@@ -5,8 +5,9 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { ContentType } from '@/api/types';
 
-import { Button, Checkbox, Dialog, ErrorState, SearchInput, Skeleton, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { Button, Checkbox, Dialog, ErrorState, SearchInput, Select, Skeleton, useListVirtualizer, useToast, errorDescription } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+import { groupRegion, groupRegions, regionLabel } from '../lib/groupRegion';
 import { foldForFilter } from './CategorySidebar';
 
 const ROW = 36;
@@ -28,6 +29,9 @@ export function ManageCategoriesDialog({
   const all = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true }, { enabled: open });
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
+  // The region picker of the group column, here too: "hide every group outside the US" is a region
+  // and Hide these, not 900 boxes.
+  const [region, setRegion] = useState('');
   const [saving, setSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -37,6 +41,7 @@ export function ManageCategoriesDialog({
   useEffect(() => {
     if (!open) {
       setFilter('');
+      setRegion('');
       seeded.current = null;
       return;
     }
@@ -57,11 +62,14 @@ export function ManageCategoriesDialog({
     });
   }, [open, all.data]);
 
+  const regions = useMemo(() => groupRegions((all.data ?? []).map((c) => c.name)), [all.data]);
   const shown = useMemo(() => {
     const q = foldForFilter(filter.trim());
     const list = all.data ?? [];
-    return q ? list.filter((c) => foldForFilter(c.name).includes(q)) : list;
-  }, [all.data, filter]);
+    return q || region ? list.filter((c) => (!region || groupRegion(c.name) === region) && (!q || foldForFilter(c.name).includes(q))) : list;
+  }, [all.data, filter, region]);
+  // The bulk buttons act on the rows shown: "all" only while every group is.
+  const narrowed = !!filter.trim() || !!region;
 
   const virtualizer = useListVirtualizer({
     count: shown.length,
@@ -114,14 +122,32 @@ export function ManageCategoriesDialog({
       }
     >
       <p className="mb-3 text-sm text-fg-muted">{t('manageCategoriesHint')}</p>
+      {/* The filter on its own line, the region and the bulk buttons under it: in one row a long
+          "All regions" (de, el, es) squeezed the field to its icon and drew over it. The two buttons
+          wrap as one pair, never one of them alone. */}
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <SearchInput size="sm" className="min-w-0 flex-1" value={filter} onChange={setFilter} placeholder={t('filterGroups')} label={t('filterGroups')} />
-        <Button size="sm" variant="ghost" onClick={() => setMany(true)}>
-          {t('selectAll')}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setMany(false)}>
-          {t('selectNone')}
-        </Button>
+        <SearchInput size="sm" className="basis-full" value={filter} onChange={setFilter} placeholder={t('filterGroups')} label={t('filterGroups')} />
+        {regions.length > 0 ? (
+          <Select
+            aria-label={t('region')}
+            className="h-8 w-auto max-w-48 ps-2 pe-7"
+            value={region}
+            onValueChange={setRegion}
+            options={[
+              { value: '', label: t('allRegions') },
+              ...regions.map((r) => ({ value: r.tag, label: t('regionOption', { region: regionLabel(r.tag, intlLocale(i18n.language)), count: r.groups }) })),
+            ]}
+            data-testid="manage-groups-region"
+          />
+        ) : null}
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setMany(true)}>
+            {t(narrowed ? 'showThese' : 'selectAll')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setMany(false)}>
+            {t(narrowed ? 'hideThese' : 'selectNone')}
+          </Button>
+        </div>
       </div>
       <p className="mb-2 text-xs text-fg-subtle" aria-live="polite">
         {t('groupsVisibleOf', { visible: visibleIds.size, total })}

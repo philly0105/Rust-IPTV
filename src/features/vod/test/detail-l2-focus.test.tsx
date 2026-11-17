@@ -123,7 +123,7 @@ describe('Focus on open (L2-vod-9)', () => {
 
   it('a series opened from the grid focuses Play on its first episode', async () => {
     openFrom('/s/src1/series/s1');
-    const play = await screen.findByRole('button', { name: 'Play S01E01' });
+    const play = await screen.findByRole('button', { name: 'Play season 1, episode 1' });
     await focusLands(play);
     expect(screen.getByRole('heading', { level: 1, name: 'Severance' }).getAttribute('tabindex')).toBe('-1');
   });
@@ -155,7 +155,7 @@ describe('Focus on open (L2-vod-9)', () => {
 
   it('focuses once per visit: a later render does not pull focus back', async () => {
     openFrom('/s/src1/series/s1');
-    const play = await screen.findByRole('button', { name: 'Play S01E01' });
+    const play = await screen.findByRole('button', { name: 'Play season 1, episode 1' });
     await focusLands(play);
     play.blur();
     fireEvent.click(screen.getByRole('tab', { name: /Season 2/ }));
@@ -211,7 +211,7 @@ describe('Focus on open (L2-vod-9)', () => {
 describe('Episode list renders one season (L2-vod-10)', () => {
   it('only the selected season has rows in the DOM', async () => {
     renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
-    await screen.findByRole('button', { name: 'Play S01E01' });
+    await screen.findByRole('button', { name: 'Play season 1, episode 1' });
     const rows = () => screen.queryAllByRole('listitem').filter((el) => el.closest('[role=list]')?.getAttribute('aria-label') === 'Episodes');
     await waitFor(() => expect(rows()).toHaveLength(2));
     expect(screen.queryByRole('button', { name: /S02E01/ })).toBeNull();

@@ -1,5 +1,6 @@
 {
-  "title": "Listes",
+  "title": "Listes de chaînes",
+  "lead": "Vos propres groupes de chaînes",
   "newList": "Nouvelle liste",
   "newListName": "Nom de la nouvelle liste",
   "createList": "Créer une liste",
@@ -17,6 +18,7 @@
   "localDataHint": "Les listes sont enregistrées par l'application. Réessayez, ou redémarrez l'application si l'erreur persiste.",
   "emptyTitle": "Aucune liste pour l'instant",
   "emptyHint": "Regroupez des chaînes de n'importe quelle source, comme Sport ou Enfants.",
+  "emptyNoSources": "Ajoutez d’abord une source. Regroupez ensuite ses chaînes en listes, comme Sport ou Enfants.",
   "sidebarEmpty": "Regroupez des chaînes de n'importe quelle source.",
   "channelCount_one": "{{formatted}} chaîne",
   "channelCount_many": "{{formatted}} chaînes",

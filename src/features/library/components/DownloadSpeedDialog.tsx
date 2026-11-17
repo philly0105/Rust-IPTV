@@ -6,7 +6,29 @@ import { rpc } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { Button, Dialog, Input, Select, errorDescription } from '@/ui';
 
+import { formatSpeedLimit } from '../lib/format';
+import { downloadNames } from '../lib/queue';
+
 export const MIB = 1024 * 1024;
+
+/**
+ * Limits most people want, in the MB/s the rows show for the live speed (binary megabytes, as
+ * formatBytes counts them). Anything else is Custom, in MB/s to one decimal.
+ */
+const PRESETS_MB = [1, 2, 5, 10] as const;
+
+/** The dialog's choice for a stored limit: a preset when it is one, else Custom. */
+function modeFor(bps: number | undefined): string {
+  if (bps === undefined) return 'default';
+  if (bps === 0) return 'unlimited';
+  const preset = PRESETS_MB.find((mb) => mb * MIB === bps);
+  return preset ? String(preset) : 'custom';
+}
+
+/** A stored limit in MB/s for the Custom field: one decimal, never below 0.1 (an old 0.38147 reads 0.4). */
+function customAmount(bps: number): string {
+  return String(Math.max(0.1, Math.round((bps / MIB) * 10) / 10));
+}
 
 export function DownloadSpeedDialog({ download, globalLimit, onClose }: {
   download?: Download;
@@ -14,21 +36,22 @@ export function DownloadSpeedDialog({ download, globalLimit, onClose }: {
   onClose: () => void;
 }) {
   const { t, i18n } = useTranslation('library');
+  const lang = i18n.language;
   const initial = download ? download.rateLimitBps : globalLimit;
-  const [mode, setMode] = useState(initial === undefined ? 'default' : initial === 0 ? 'unlimited' : 'custom');
-  const [amount, setAmount] = useState(String((initial || globalLimit || MIB) / MIB));
+  const [mode, setMode] = useState(() => modeFor(initial));
+  const [amount, setAmount] = useState(() => customAmount(initial || globalLimit || MIB));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ReactNode>();
   const numeric = Number(amount);
-  const valid = mode !== 'custom' || (amount.trim() !== '' && Number.isFinite(numeric) && numeric > 0 && numeric <= 1024 && Math.round(numeric * MIB) >= 1);
-  const formattedGlobal = globalLimit === 0 ? t('speedUnlimited') : t('speedValue', { value: (globalLimit / MIB).toLocaleString(i18n.language, { maximumFractionDigits: 6 }) });
+  const valid = mode !== 'custom' || (amount.trim() !== '' && Number.isFinite(numeric) && numeric > 0 && numeric <= 1024);
+  const formattedGlobal = globalLimit === 0 ? t('speedUnlimited') : formatSpeedLimit(globalLimit, lang);
 
   const save = async () => {
     if (busy || !valid) return;
     setBusy(true);
     setError(undefined);
     try {
-      const bps = mode === 'default' ? null : mode === 'unlimited' ? 0 : Math.round(numeric * MIB);
+      const bps = mode === 'default' ? null : mode === 'unlimited' ? 0 : mode === 'custom' ? Math.round(numeric * MIB) : Number(mode) * MIB;
       if (download) {
         await rpc('downloads.setRateLimit', { id: download.id, bytesPerSecond: bps });
         await invalidate('downloads.list');
@@ -49,7 +72,7 @@ export function DownloadSpeedDialog({ download, globalLimit, onClose }: {
       open
       onClose={() => { if (!busy) onClose(); }}
       dismissible={!busy}
-      title={download ? t('speedDownloadTitle', { title: download.subtitle || download.title }) : t('speedGlobalTitle')}
+      title={download ? t('speedDownloadTitle', { title: downloadNames(download).title }) : t('speedGlobalTitle')}
       description={download ? t('speedDownloadHint') : t('speedGlobalHint')}
       size="sm"
     >
@@ -61,8 +84,9 @@ export function DownloadSpeedDialog({ download, globalLimit, onClose }: {
           onChange={(event) => setMode(event.target.value)}
           options={[
             ...(download ? [{ value: 'default', label: t('speedUseDefault', { speed: formattedGlobal }) }] : []),
-            { value: 'custom', label: t('speedCustom') },
             { value: 'unlimited', label: t('speedUnlimited') },
+            ...PRESETS_MB.map((mb) => ({ value: String(mb), label: formatSpeedLimit(mb * MIB, lang) })),
+            { value: 'custom', label: t('speedCustom') },
           ]}
         />
         {mode === 'custom' && (
@@ -70,9 +94,9 @@ export function DownloadSpeedDialog({ download, globalLimit, onClose }: {
             type="number"
             label={t('speedLimitLabel')}
             hint={t('speedUnitsHint')}
-            min={1 / MIB}
+            min={0.1}
             max={1024}
-            step="any"
+            step={0.1}
             value={amount}
             onValueChange={setAmount}
             disabled={busy}

@@ -22,8 +22,6 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
         hideWatched={false}
         counts={{ all: 2, movie: 1, series: 1 }}
         watchedCount={1}
-        query=""
-        onQuery={noop}
         onFilter={noop}
         onSort={noop}
         onHideWatched={noop}
@@ -46,8 +44,6 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
         hideWatched={false}
         counts={{ all: 2, movie: 1, series: 1 }}
         watchedCount={0}
-        query=""
-        onQuery={noop}
         onFilter={noop}
         onSort={noop}
         onHideWatched={noop}
@@ -55,12 +51,33 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
       />,
     );
     const classes = (el: Element) => el.className.split(/\s+/);
-    // The field and the menu are h-10, as tall as a pill tab's track and the md segmented control.
-    expect(classes(screen.getByTestId('mylist-search'))).toContain('h-10');
+    // The menu is h-10, as tall as a pill tab's track and the md segmented control. The search is
+    // in the shell header (library-06).
+    expect(screen.queryByTestId('mylist-search')).toBeNull();
     expect(classes(screen.getByTestId('mylist-sort'))).toContain('h-10');
     expect(classes(screen.getByTestId('mylist-sort'))).not.toContain('h-9');
     // The view switch keeps the default (md) size: no compact track.
     const view = screen.getByRole('radiogroup', { name: 'View' });
     expect(classes(view)).not.toContain('p-0.5');
+  });
+
+  it('puts the view switch after the sort in the DOM as on screen, so Tab goes left to right (v-vod-12)', () => {
+    render(
+      <MyListToolbar
+        filter="all"
+        sort="order"
+        hideWatched={false}
+        counts={{ all: 2, movie: 1, series: 1 }}
+        watchedCount={1}
+        onFilter={noop}
+        onSort={noop}
+        onHideWatched={noop}
+        onView={noop}
+      />,
+    );
+    const view = screen.getByRole('radiogroup', { name: 'View' });
+    const sort = screen.getByTestId('mylist-sort');
+    expect(sort.compareDocumentPosition(view) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(view.className).not.toMatch(/order-/);
   });
 });

@@ -27,6 +27,12 @@ export interface HeaderSearch {
   controls?: string;
   /** The field holds its place but takes no input (the guide before its source is known). */
   disabled?: boolean;
+  /**
+   * The field is the global search itself (the Search page), so the header leaves out the palette
+   * button it otherwise keeps beside a page's own field; Ctrl+K still opens the palette. On a phone
+   * the field stays a whole box instead of folding into an icon.
+   */
+  hidePalette?: boolean;
 }
 
 /** The header's Back control (the kit BackButton at its leading edge). */
@@ -45,6 +51,11 @@ export interface HeaderState {
    */
   documentTitle?: string;
   subtitle?: string;
+  /**
+   * The end of `subtitle` that must stay whole (a count, "30,132 channels"): on a narrow header
+   * the text before it truncates instead.
+   */
+  subtitleEnd?: string;
   actions?: ReactNode;
   search?: HeaderSearch;
   /** A Back control before the title: detail pages, which the window has no browser chrome to leave. */
@@ -56,6 +67,15 @@ export interface HeaderState {
    * (or `documentTitle`) throughout.
    */
   section?: string;
+  /**
+   * The page asks the header to step aside: the shell draws no header bar while it is set, and the
+   * page gets its height. For a page whose own toolbar already says where the user is and holds
+   * every action the header would carry (Multi-view's floating toolbar on a very short window,
+   * Live TV on a phone while a channel plays, whose title only repeats the tab bar). The page must
+   * keep `actions` reachable itself. Ignored while the rail is hidden: its Show button is in the
+   * header.
+   */
+  stepAside?: boolean;
 }
 
 export interface ShellStore {
@@ -71,15 +91,21 @@ export interface ShellStore {
   helpOpen: boolean;
   railCollapsed: boolean;
   /**
-   * Below 1024 px, where the rail is always icons: the user hid it (header button brings it back).
+   * Below 1100 px, where the rail is always icons: the user hid it (header button brings it back).
    * Wider windows ignore it, so the rail never goes missing on a desktop.
    */
   railHidden: boolean;
+  /**
+   * Below 1100 px, where the rail is docked as icons: the full rail is open over the page for a
+   * moment (Expand sidebar), until a link is followed, Escape, a press outside or Collapse.
+   */
+  railPeek: boolean;
   setPaletteOpen(open: boolean): void;
   setHelpOpen(open: boolean): void;
   setPanelOpen(open: boolean): void;
   toggleRail(): void;
   toggleRailHidden(): void;
+  setRailPeek(open: boolean): void;
 }
 
 const RAIL_KEY = 'tsrust.railCollapsed';
@@ -112,6 +138,7 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   helpOpen: false,
   railCollapsed: storedFlag(RAIL_KEY),
   railHidden: storedFlag(RAIL_HIDDEN_KEY),
+  railPeek: false,
   setPaletteOpen: (open) => set({ paletteOpen: open, ...(open ? { helpOpen: false } : {}) }),
   setHelpOpen: (open) => set({ helpOpen: open, ...(open ? { paletteOpen: false } : {}) }),
   setPanelOpen: (open) => set({ panelOpen: open }),
@@ -123,8 +150,9 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   toggleRailHidden: () => {
     const next = !get().railHidden;
     storeFlag(RAIL_HIDDEN_KEY, next);
-    set({ railHidden: next });
+    set({ railHidden: next, railPeek: false });
   },
+  setRailPeek: (open) => set({ railPeek: open }),
 }));
 
 export interface ShellApi {

@@ -91,6 +91,23 @@ export interface DashboardRailProps<T> {
 const TRACK_PAD = 'pt-1 pb-3';
 
 /**
+ * A rail's step button, for the mouse (shown on the rail's hover, out of the tab order: the
+ * keyboard has the arrows): a round button on the surface, centred on the cards' artwork (its
+ * wrapper is the artwork's height, from the track's pt-1), so it never sits on a caption and
+ * reads over any picture. A bare chevron on a 48 px fade was barely visible over artwork.
+ * Marked pure: a top-level call kept this whole module in the cards chunk that Search, the
+ * category grid, Live and the guide load (pnpm size:check).
+ */
+const STEP_BUTTON = /* @__PURE__ */ cn(
+  'hidden size-10 items-center justify-center rounded-full bg-surface/90 text-fg shadow-2 ring-1 ring-edge hover:bg-surface-3 active:text-accent-pressed',
+  'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
+);
+
+/** The track's start gutter fades in, once it has scrolled from its start. */
+const GUTTER_FADE =
+  '[mask-image:linear-gradient(to_right,transparent,#000_var(--page-gutter))] rtl:[mask-image:linear-gradient(to_left,transparent,#000_var(--page-gutter))]';
+
+/**
  * One placeholder card, as tall as the cards it stands in for: the art at the rail's aspect,
  * then two caption lines of the cards' text-sm line height (1lh), the first after their mt-2.
  * Thinner bars with gap-2 between them came up 22 px short, so every rail grew as it loaded
@@ -124,6 +141,18 @@ function focusAdjacentRail(from: HTMLElement, dir: 1 | -1, index: number): boole
   return false;
 }
 
+/** Focus that leaves a rail at an edge with no rail beyond it: the first match of `selector`, if any. */
+function focusFirst(selector: string): boolean {
+  const el = document.querySelector<HTMLElement>(selector);
+  el?.focus();
+  return !!el;
+}
+
+/** Above the first rail: the hero's first action (Resume or Play, else Details). */
+const HERO_ACTION = '[data-testid="hero-slide"] button:not(:disabled), [data-testid="hero-slide"] a[href]';
+/** Before a rail's first card: the app rail's link to this page (the rail is not mounted on a phone). */
+const APP_RAIL_CURRENT = '[data-testid="shell-rail"] [aria-current="page"]';
+
 interface RailCardSlotProps<T> {
   item: T;
   tabIndex: number;
@@ -142,7 +171,9 @@ const RailCardSlot = memo(function RailCardSlot<T>({ item, tabIndex, renderCard 
 /**
  * Horizontal, snap-scrolling rail of cards. One tab stop per rail (roving
  * tabindex); ArrowLeft/Right/Home/End move within it, ArrowUp/Down jump to
- * the same position in the neighbouring rail. Empty rails render nothing.
+ * the same position in the neighbouring rail. At the edges the arrows cross
+ * regions: Up from the first rail to the hero's actions, toward the inline
+ * start from the first card to the app rail. Empty rails render nothing.
  */
 export function DashboardRail<T>({
   id,
@@ -181,6 +212,8 @@ export function DashboardRail<T>({
   const deferred = useContext(RailDeferContext) && !settled;
   const drawn = settled ? count : deferred ? 0 : Math.min(count, firstScreenCards(width));
   const trackShown = !error && drawn > 0;
+  /** The cards' artwork height: the step buttons centre on it. */
+  const artHeight = Math.round(width / skeletonAspect);
   // Whether the track sat at its inline start before the last render.
   const atStartRef = useRef(true);
   // The track element and item order the last commit showed.
@@ -287,6 +320,16 @@ export function DashboardRail<T>({
     if (cur < 0) return;
     const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
     let next = -1;
+    // An arrow toward the inline start on the first card leaves for the app rail, so arrows alone
+    // (a remote) reach the navigation.
+    const toStart = e.key === (rtl ? 'ArrowRight' : 'ArrowLeft');
+    if (toStart && cur === 0) {
+      if (focusFirst(APP_RAIL_CURRENT)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
     switch (e.key) {
       case 'ArrowRight':
         next = rtl ? cur - 1 : cur + 1;
@@ -302,7 +345,11 @@ export function DashboardRail<T>({
         break;
       case 'ArrowDown':
       case 'ArrowUp':
-        if (sectionRef.current && focusAdjacentRail(sectionRef.current, e.key === 'ArrowDown' ? 1 : -1, cur)) {
+        // Up from the first rail goes to the hero's actions.
+        if (
+          sectionRef.current &&
+          (focusAdjacentRail(sectionRef.current, e.key === 'ArrowDown' ? 1 : -1, cur) || (e.key === 'ArrowUp' && focusFirst(HERO_ACTION)))
+        ) {
           e.preventDefault();
           e.stopPropagation();
         }
@@ -324,6 +371,8 @@ export function DashboardRail<T>({
       ref={sectionRef}
       aria-labelledby={headingId}
       data-dash-rail={id}
+      // The shell's skip link lands on the first rail's card in focus, past the hero (the first rail wins).
+      data-skip-target=""
       data-testid={`dashboard-rail-${id}`}
       className="group/rail relative flex flex-col gap-3"
     >
@@ -395,6 +444,8 @@ export function DashboardRail<T>({
               // lines up with the header title and the page, and snapping keeps that inset.
               'flex snap-x snap-mandatory scroll-px-(--page-gutter) gap-4 overflow-x-auto overflow-y-visible px-(--page-gutter) scrollbar-none motion-safe:scroll-smooth',
               TRACK_PAD,
+              // Scrolled on, the card cut off in the start gutter fades out instead of showing a sliver.
+              canPrev && GUTTER_FADE,
             )}
           >
             {/* The cards' artwork fills the card, so it loads at this width without measuring (SH-6). */}
@@ -407,32 +458,18 @@ export function DashboardRail<T>({
             </PosterWidthContext.Provider>
           </ul>
           {canPrev && (
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label={t('scrollBack')}
-              onClick={() => scrollBy(-1)}
-              className={cn(
-                'absolute top-0 bottom-3 start-0 hidden w-12 items-center justify-center bg-gradient-to-r rtl:bg-gradient-to-l from-bg to-transparent text-fg active:text-accent-pressed motion-safe:active:translate-x-px',
-                'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
-              )}
-            >
-              <ChevronLeft aria-hidden size={28} className="rtl:rotate-180" />
-            </button>
+            <div className="absolute start-0 top-1 flex items-center ps-2" style={{ height: artHeight }}>
+              <button type="button" tabIndex={-1} aria-label={t('scrollBack')} onClick={() => scrollBy(-1)} className={STEP_BUTTON}>
+                <ChevronLeft aria-hidden size={22} className="rtl:rotate-180" />
+              </button>
+            </div>
           )}
           {canNext && (
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label={t('scrollForward')}
-              onClick={() => scrollBy(1)}
-              className={cn(
-                'absolute top-0 end-0 bottom-3 hidden w-12 items-center justify-center bg-gradient-to-l rtl:bg-gradient-to-r from-bg to-transparent text-fg active:text-accent-pressed motion-safe:active:-translate-x-px',
-                'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
-              )}
-            >
-              <ChevronRight aria-hidden size={28} className="rtl:rotate-180" />
-            </button>
+            <div className="absolute end-0 top-1 flex items-center pe-2" style={{ height: artHeight }}>
+              <button type="button" tabIndex={-1} aria-label={t('scrollForward')} onClick={() => scrollBy(1)} className={STEP_BUTTON}>
+                <ChevronRight aria-hidden size={22} className="rtl:rotate-180" />
+              </button>
+            </div>
           )}
         </div>
       )}

@@ -98,12 +98,13 @@ describe('F1: a stale source facet can be cleared when it has no results', () =>
 });
 
 describe('F5: cards show the title without the year suffix', () => {
-  it('grid cards use titleBase and keep the full title in the tooltip', async () => {
+  it('grid cards use titleBase and drop the tooltip that only adds the year', async () => {
     renderAt('/s/src1/movies/c/c1', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);
     const caption = await screen.findByText('Alpha Movie 1');
     expect(screen.queryByText('Alpha Movie 1 (2021)')).toBeNull();
     // Inside the grid the card is a named group in a listbox option, not a link (axe nested-interactive).
-    expect(caption.closest('[data-poster-card]')?.getAttribute('title')).toBe('Alpha Movie 1 (2021)');
+    // "Alpha Movie 1 (2021)" over that caption and its year line adds nothing: no tooltip.
+    expect(caption.closest('[data-poster-card]')?.getAttribute('title')).toBeNull();
   });
 
   it('search and recently-added rails use titleBase', async () => {

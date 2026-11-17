@@ -2,7 +2,7 @@
 // other groups skipped, network searches classified and deduplicated, 'catalog.' keys), the guide window
 // (chunked refs, the EPG offset both ways), and useGameStreams end to end with the bounded fallback search.
 import { QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -296,6 +296,16 @@ describe('useChannelIndex', () => {
       expect([...new Set(asked.map((a) => a.categoryId))].sort()).toEqual(['c0', 'c1', 'c2', 'c4']);
       expect(asked.filter((a) => a.categoryId === 'c0').map((a) => a.query.offset)).toEqual([0]);
     });
+
+    it('reads a failed part again on retry', async () => {
+      serveMany('c1');
+      const { result } = renderHook(() => useChannelIndex(), { wrapper });
+      await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+      serveMany();
+      result.current.retry();
+      await waitFor(() => expect(result.current.error).toBeNull());
+      await waitFor(() => expect(result.current.channels).toHaveLength(sizes.reduce((a, b) => a + b, 0)));
+    });
   });
 
   it('searches each network once, keeps real network channels and lists every channel once', async () => {
@@ -403,6 +413,26 @@ describe('useGuideWindow', () => {
     for (const c of channels) {
       expect(result.current.programs.get(itemKey(c.channel.ref)), c.channel.name).toEqual([answers[c.channel.ref.itemId]]);
     }
+  });
+
+  it('says a chunk failed, keeps what the others answered, and reads only the failed one again on retry', async () => {
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    let broken = true;
+    handlers['epg.grid'] = (a: GridArgs) => {
+      const first = a.refs[0]!;
+      if (first.itemId === 'c500' && broken) throw new Error('database is locked');
+      return { [itemKey(first)]: [{ channelId: first.itemId, title: 'Knicks at Celtics', start: '2026-10-23T23:00:00Z', end: '2026-10-24T01:30:00Z' }] };
+    };
+    const { result } = renderHook(() => useGuideWindow(index, Date.parse('2026-10-23T22:30Z'), Date.parse('2026-10-24T03:30Z'), true), { wrapper });
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.programs.size).toBe(2);
+    broken = false;
+    const before = callsOf<GridArgs>('epg.grid').length;
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.error).toBeNull());
+    expect(result.current.programs.size).toBe(3);
+    expect(callsOf<GridArgs>('epg.grid').slice(before).map((a) => a.refs[0]!.itemId)).toEqual(['c500']);
   });
 
   it('holds the programmes back until every chunk has answered', async () => {

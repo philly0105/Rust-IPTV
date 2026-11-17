@@ -4,18 +4,17 @@
  * menus, and a list row lacked catch-up, the external players, multi-view and guide matching.
  *
  * Sections, separated by rules (empty ones fold away):
- * - Watch: Play, Browse catch-up, Play in MPV / VLC (desktop app only).
+ * - Watch: Play, Browse catch-up, Play in MPV / VLC (desktop app only), Open in TV guide (the caller's).
  * - Organize: Favorite, Add to multi-view, Add to list…, and the caller's own (Remove from list).
  * - Channel: Copy link, Rename / Reset name / Hide, Match guide channel, Lock.
  */
 
 import { Copy, Download, ExternalLink, Heart, History, Link2, Play } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
-import { rpc, isDesktop } from '@/api/transport';
-import { invalidate } from '@/api/query';
+import { isDesktop } from '@/api/transport';
 import type { Channel, EpgProgram, Source } from '@/api/types';
 import { errorDescription, toast } from '@/ui';
 import { copyText } from '@/lib/clipboard';
@@ -30,10 +29,11 @@ import { canShareSource, isShareableUrl } from '@/features/player/shareable';
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import type { MenuEntry, MenuHeader, MenuItem } from '../components/ContextMenu';
 import { archivePath, canBrowseArchive } from '../lib/archive';
-import { displayChannelName } from '../lib/channelName';
-import { canCatchUp, formatClock, formatDay, ms, programWhen } from '../lib/epgTime';
-import { canDownloadCatchup, catchupDownloadArgs, catchupSource, openCatchupSource, openChannelSource, playCatchup } from '../lib/playback';
+import { displayChannelName, isSeparatorName, separatorLabel } from '../lib/channelName';
+import { canCatchUp, programWhen } from '../lib/epgTime';
+import { openCatchupSource, openChannelSource } from '../lib/playback';
 import { useDisplayPrefs } from './useDisplayPrefs';
+import { useProgrammeActions } from './useProgrammeActions';
 
 export interface ChannelMenuOptions {
   /** The channel's source: its kind decides catch-up and Copy link, and external players resolve through it. */
@@ -46,6 +46,8 @@ export interface ChannelMenuOptions {
   onMapGuide?(channel: Channel): void;
   /** Entries the caller adds at the end of Organize (a list's "Remove from list"). */
   organize?: readonly MenuItem[];
+  /** "Open in TV guide" after the Watch entries, where the menu is not on the guide (Home, Search). */
+  guide?: Omit<MenuItem, 'id'>;
   /**
    * Show F2 and Shift+Delete beside Rename and Hide. Only where the page binds them (the Live and
    * list rows); the guide does not.
@@ -56,7 +58,7 @@ export interface ChannelMenuOptions {
   /** Current wall-clock time, used to avoid offering archive links for future programmes. */
   now?: number;
   /** Receives a resolved programme URL for display when clipboard access is unavailable. */
-  onProgrammeLink?(url: string): void;
+  onProgrammeLink?(url: string, programme: EpgProgram): void;
 }
 
 const sep = (id: string): MenuEntry => ({ id, type: 'separator' });
@@ -67,8 +69,13 @@ function plain(a: MenuItem, hints: boolean): MenuItem {
 }
 
 export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOptions): MenuEntry[] {
-  const { t, i18n } = useTranslation('live');
+  const { t } = useTranslation('live');
   const navigate = useNavigate();
+  // The archive's Back returns to the page the menu was opened on (Live TV or the guide). Read at
+  // the press, so the page's own URL updates (the guide's time) do not rebuild the menu.
+  const here = useLocation();
+  const location = useRef(here);
+  location.current = here;
   const { stripCountryPrefix } = useDisplayPrefs();
   const name = channel ? displayChannelName(channel.name, stripCountryPrefix) : '';
   // C4: radio has no picture, so a station gets no multi-view entry.
@@ -82,11 +89,15 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
     channel ? { sourceId: channel.ref.sourceId, contentType: channel.ref.contentType, kind: 'item', targetId: channel.ref.itemId, name } : null,
     { categoryId: channel?.categoryId },
   );
-  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, editHints = false, programme, now = Date.now(), onProgrammeLink } = opts;
+  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, guide, editHints = false, programme, now = Date.now(), onProgrammeLink } = opts;
+  const programmeActions = useProgrammeActions(channel, source, programme, now, onProgrammeLink);
 
   return useMemo((): MenuEntry[] => {
     if (!channel) return [];
     const ch = channel;
+    // A provider's heading row is no channel (live-04): playing, favouriting or listing it would
+    // plant a dead entry, so its menu keeps only what takes it away (v-live-03).
+    if (isSeparatorName(ch.name)) return editItems.filter((a) => a.id === 'channel-hide' || a.id === 'channel-unhide').map((a) => plain(a, editHints));
     const src = source && source.id === ch.ref.sourceId ? source : undefined;
     const playableProgramme = !!src && !!programme && programWhen(programme, now) === 'past' && canCatchUp(programme, ch, src.kind, now);
     const external = async (player: 'mpv' | 'vlc') => {
@@ -125,70 +136,27 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
         toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
       }
     };
-    const copyProgramme = async () => {
-      if (!src || !programme) return;
-      try {
-        const s = await catchupSource(ch, src.kind, programme, now);
-        // Timeshift URLs from Xtream/Stalker must retain the provider login in their path so that
-        // VLC/MPV can open them. Ordinary channel copies still use the stricter policy.
-        if (!canShareSource(s, () => src.kind, { allowCredentials: true })) {
-          toast({ title: t('copyFailed'), variant: 'error' });
-          return;
-        }
-        if (onProgrammeLink) {
-          onProgrammeLink(s.url);
-          return;
-        }
-        await copyText(s.url);
-        toast({ title: t('urlCopied'), variant: 'success' });
-      } catch (err) {
-        toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
-      }
-    };
-    const downloadProgramme = async () => {
-      if (!src || !programme) return;
-      try {
-        const at = ms(programme.start);
-        const subtitle = `${programme.title} · ${formatDay(at, i18n.language)} ${formatClock(at, i18n.language)}`;
-        const args = await catchupDownloadArgs(ch, src.kind, programme, {
-          now, displayName: name, subtitle, notFileMessage: t('downloadNotFile', { ns: 'vod' }),
-        });
-        if (!args) return;
-        await rpc('downloads.start', args);
-        void invalidate('downloads.');
-        toast({
-          title: t('downloadQueued', { ns: 'vod' }),
-          description: `${name}  ${programme.title}`,
-          variant: 'success',
-          action: { label: t('openDownloads', { ns: 'vod' }), onClick: () => void navigate('/downloads') },
-        });
-      } catch (err) {
-        toast({ title: t('downloadFailed', { ns: 'vod' }), description: errorDescription(err), variant: 'error' });
-      }
-    };
-    const watchProgramme = () => {
-      if (!src || !programme) return;
-      void playCatchup(ch, src.kind, programme, now, name).catch((err: unknown) =>
-        toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
-      );
-    };
+    // Under a header naming a programme that is not airing, "Play" read as "play that show": the
+    // entry plays the channel now and says so (v-guide-07).
+    const playLabel = programme && programWhen(programme, now) !== 'now' ? t('watchChannel') : t('play');
     const out: MenuEntry[] = [
-      { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
-      ...(playableProgramme ? [{ id: 'watch-programme', label: t('watchCatchup'), icon: <Play className="size-4" />, onSelect: watchProgramme }] : []),
-      ...(playableProgramme && src && programme && canDownloadCatchup(ch, src.kind)
-        ? [{ id: 'download-programme', label: t('downloadCatchup', { title: programme.title }), icon: <Download className="size-4" />, onSelect: () => void downloadProgramme() }]
+      { id: 'play', label: playLabel, icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
+      ...(programmeActions.watch ? [{ id: 'watch-programme', label: t('watchCatchup'), icon: <Play className="size-4" />, onSelect: programmeActions.watch }] : []),
+      ...(programmeActions.download && programme
+        ? [{ id: 'download-programme', label: t('downloadCatchup', { title: programme.title }), icon: <Download className="size-4" />, onSelect: programmeActions.download }]
         : []),
       // guide: the channel's catch-up archive browser.
       ...(src && canBrowseArchive(ch, src.kind)
-        ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref)) }]
+        ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref), { state: { from: location.current.pathname + location.current.search } }) }]
         : []),
       // External players run only in the desktop app; the server answers `unsupported` (as InlinePlayer gates them).
       ...(isDesktop && src
         ? [
-            { id: 'mpv', label: t('playIn', { player: 'MPV' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv') },
+            { id: 'mpv', label: t('playIn', { player: 'mpv' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv') },
             { id: 'vlc', label: t('playIn', { player: 'VLC' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('vlc') },
           ]
         : []),
+      ...(guide ? [{ id: 'guide', ...guide }] : []),
       sep('sep-organize'),
       {
         id: 'fav',
@@ -207,15 +175,14 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
       ...(!programme && src?.kind === 'm3u' && !!ch.url && isShareableUrl(ch.url)
         ? [{ id: 'copy', label: t('copyUrl'), icon: <Copy className="size-4" />, onSelect: () => void copy() }]
         : []),
-      ...(src && programme && canCatchUp(programme, ch, src.kind, now)
-        ? [{ id: 'copy-programme', label: t('copyUrl'), icon: <Copy className="size-4" />, onSelect: () => void copyProgramme() }]
-        : []),
+      // Named apart from the channel's own link: this is the programme's archive address.
+      ...(programmeActions.copy ? [{ id: 'copy-programme', label: t('copyProgrammeUrl'), icon: <Copy className="size-4" />, onSelect: programmeActions.copy }] : []),
       ...editItems.map((a) => plain(a, editHints)),
       ...(onMapGuide ? [{ id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => onMapGuide(ch) }] : []),
       ...lockItems.map((a) => plain(a, false)),
     ];
     return out;
-  }, [channel, source, favorite, name, live, t, i18n.language, navigate, onPlay, onToggleFavorite, onMapGuide, organize, editHints, multiviewItem, addToListItem, editItems, lockItems, programme, now, onProgrammeLink]);
+  }, [channel, source, favorite, name, live, t, navigate, onPlay, onToggleFavorite, onMapGuide, organize, guide, editHints, multiviewItem, addToListItem, editItems, lockItems, programme, now, programmeActions]);
 }
 
 /**
@@ -224,6 +191,8 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
  * tag after it, quiet, so "ESPN2 FHD US" beside the row is not headed "US| ESPN2 FHD".
  */
 export function channelMenuHeader(channel: Channel, name: string, nowTitle?: string): MenuHeader {
+  // A heading row is headed by its caption, as the row draws it, with no logo plate (v-live-03).
+  if (isSeparatorName(channel.name)) return { title: <span className="block truncate">{separatorLabel(channel.name)}</span> };
   return {
     title: <ChannelName name={name} className="block truncate" />,
     subtitle: nowTitle,

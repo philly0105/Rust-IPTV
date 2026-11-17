@@ -29,12 +29,12 @@ describe('poster fallback initials fit their tile (L3-cross-XB-2)', () => {
 
   it('a poster tile sizes its letters by its width, other tiles by their height, floored and capped', () => {
     const poster = fallback('poster').letters.className;
-    expect(poster).toContain('text-[length:max(min(40cqmin,0.9rem),min(24cqmin,2.25rem))]');
+    expect(poster).toContain('text-[length:max(min(40cqmin,0.9rem),min(24cqmin,1.875rem))]');
     expect(poster).not.toMatch(/\btext-3xl\b/);
     cleanup();
     for (const aspect of ['square', 'wide'] as const) {
       const cls = fallback(aspect).letters.className;
-      expect(cls).toContain('text-[length:max(min(40cqmin,1rem),min(30cqmin,2.75rem))]');
+      expect(cls).toContain('text-[length:max(min(40cqmin,1rem),min(30cqmin,2.25rem))]');
       expect(cls).not.toMatch(/\btext-2xl\b/);
       cleanup();
     }

@@ -57,6 +57,27 @@ describe('fallback initials', () => {
     expect(monogramText('Planet X 4K')).toBe('PX');
     // A letter outside the Basic Multilingual Plane and an emoji stay whole.
     expect(monogramText('𠀀 Beta')).toBe('𠀀B');
-    expect(monogramText('🏈 Sunday Football')).toBe('🏈S');
+    // A leading emoji is decoration: the name's own letters.
+    expect(monogramText('🏈 Sunday Football')).toBe('SF');
+    expect(monogramText('⚽ ESPNU')).toBe('ES');
+  });
+
+  it('channel monograms skip what providers put before the name, and number empty slots', () => {
+    expect(monogramText('CA EN: SKY SPORTS F1')).toBe('SS');
+    expect(monogramText('PRIME: PBS HD')).toBe('PB');
+    // A feed's backup number is no initial: siblings share the station's letters (w-realdata-10).
+    expect(monogramText('PRIME: PBS HD (BACKUP 2)')).toBe('PB');
+    expect(monogramText('BLOOMBERG HD (BACKUP 2)')).toBe('BL');
+    expect(monogramText('BBC 2')).toBe('B2');
+    expect(monogramText('PRIME: 🎬 ARD SD')).toBe('AR');
+    expect(monogramText('US (ESPN+ 002) | Chelsea vs. Knicks (Matchday #25) Nov 17 02:00AM ET')).toBe('CK');
+    expect(monogramText('NEXT | HAWKS VS ARSENAL | Tue 17 Nov 23:00 EDT (US)')).toBe('HA');
+    expect(monogramText('ENDED | AUCKLAND FC VS BAYERN MUNICH | Mon 16 Nov')).toBe('AB');
+    expect(monogramText('Bulls vs Knicks @ Nov 16 06:00 AM :NCAAB  19')).toBe('BK');
+    expect(monogramText('- NO EVENT STREAMING - | 8K EXCLUSIVE | US: ESPN+ PPV 2')).toBe('2');
+    expect(monogramText(':NCAAB  01')).toBe('01');
+    expect(monogramText('MLB 05 :')).toBe('05');
+    // A channel named with a number is no slot.
+    expect(monogramText('ESPN 2')).toBe('E2');
   });
 });

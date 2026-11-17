@@ -83,7 +83,7 @@ describe('Back to My Videos lands on the opened card (L1-guide-library-13 carry-
     expect(cards.map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Heat']);
     fireEvent.click(cards[1]!);
     expect(await screen.findByTestId('play-offline')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('link', { name: 'Back to My videos' }));
+    fireEvent.click(await within(screen.getByTestId('fake-header')).findByRole('button', { name: 'Back' }));
     await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Heat'));
     // The opened card is the grid's tab stop again.
     expect(screen.getByRole('listitem', { name: 'Heat' }).tabIndex).toBe(0);
@@ -131,6 +131,26 @@ describe('My Videos All includes recordings (L2-guide-library-8)', () => {
     renderAt('/my-videos', libraryRoutes);
     const grid = await screen.findByTestId('my-videos-grid');
     expect(within(grid).getAllByTestId('library-card').map((c) => c.dataset['kind'])).toEqual(['recording']);
+  });
+
+  it('names a recording card\'s channel as the other library rows do, and dates it without this year (v-vod-07)', async () => {
+    rpc.handlers['myvideos.list'] = () => [];
+    const thisYear = new Date();
+    thisYear.setMonth(0, 5);
+    thisYear.setHours(16, 12, 0, 0);
+    rpc.handlers['recordings.library'] = () => [
+      recording({ channelName: 'UK| BBC One News HD', date: thisYear.toISOString() }),
+      recording({ id: 'r.r1.1', channelName: 'Alpha', date: '2024-03-02T18:00:00Z' }),
+    ];
+    renderAt('/my-videos', libraryRoutes);
+    const grid = await screen.findByTestId('my-videos-grid');
+    await waitFor(() => expect(within(grid).getAllByTestId('library-card')).toHaveLength(2));
+    const [recent, old] = within(grid).getAllByTestId('library-card');
+    // The provider's "UK|" becomes the quiet tag after the name (the full name stays for a screen reader).
+    expect(within(recent!).getByTestId('channel-name-tag').textContent).toBe('UK');
+    expect(recent!.textContent).not.toContain(String(thisYear.getFullYear()));
+    expect(recent!.textContent).toContain('Jan 5');
+    expect(old!.textContent).toContain('2024');
   });
 
   it('names the queue link with its label, which shows on a phone too (L2-visual-4)', async () => {
@@ -208,7 +228,8 @@ describe('Downloads folder bar (L2-guide-library-14)', () => {
     rpc.handlers['downloads.list'] = () => [makeDownload({ id: 7, status: 'queued' }), makeDownload({ id: 8, status: 'paused' })];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
     const dir = await screen.findByTestId('downloads-dir');
-    expect(dir.getAttribute('title')).toBe('D:\\Media\\Downloads\\Tsrust');
+    // In a browser the tooltip adds that the folder is on the server.
+    expect(dir.getAttribute('title')?.split('\n')[0]).toBe('D:\\Media\\Downloads\\Tsrust');
     // Once: the fake header renders the subtitle since loop 3, so the summary is there and nowhere else.
     expect(screen.getAllByText(/1 queued/).map((el) => el.dataset.testid)).toEqual(['page-subtitle']);
   });
@@ -265,7 +286,10 @@ describe('Recently watched titles (L2-visual-3, -7, -11)', () => {
     );
     expect(screen.getByText('The Matrix')).toBeTruthy();
     expect(screen.getByText('Le Bureau')).toBeTruthy();
-    expect(screen.getByText('US: News HD')).toBeTruthy();
+    // A channel keeps its whole name, quality word included: drawn with the place tag after it,
+    // and heard as "News HD (US)" (w-a11y-03).
+    expect(screen.getByText('News HD (US)')).toBeTruthy();
+    expect(screen.getByTestId('channel-name-tag').textContent).toBe('US');
     expect(screen.queryByText(/EN - The Matrix/)).toBeNull();
   });
 });

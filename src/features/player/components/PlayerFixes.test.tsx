@@ -551,6 +551,38 @@ describe('short players: Up next and the end of a movie fit above the bar', () =
   });
 });
 
+describe('the end of a movie in a stage with a way out (PV-09)', () => {
+  it('says it finished and offers Replay and the stage’s action', () => {
+    const onClick = vi.fn<() => void>();
+    render(
+      <>
+        <PlayerStage endedAction={{ label: 'Back to details', onClick }} />
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </>,
+    );
+    act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 600, durationSeconds: 600 }));
+    const overlay = screen.getByTestId('ended-overlay');
+    expect(overlay.textContent).toContain('Finished');
+    const [replayButton, back] = Array.from(overlay.querySelectorAll('button'));
+    expect(replayButton?.textContent).toBe('Replay');
+    expect(back?.textContent).toBe('Back to details');
+    fireEvent.click(back!);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands focus to the way out when nothing else holds it (v-player-06)', () => {
+    render(
+      <>
+        <PlayerStage endedAction={{ label: 'Back to details', onClick: () => {} }} />
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </>,
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 600, durationSeconds: 600 }));
+    expect(document.activeElement?.textContent).toBe('Back to details');
+  });
+});
+
 describe('a short player gives its end of item the whole height', () => {
   afterEach(() => vi.restoreAllMocks());
 

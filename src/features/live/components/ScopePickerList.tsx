@@ -10,10 +10,12 @@ import { Check } from 'lucide-react';
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cn, fieldClass, TOUCH_TARGET } from '@/ui';
+import { cn, fieldClass, Select, TOUCH_TARGET } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
+import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
 import { foldForFilter } from './CategorySidebar';
+import { ChannelName } from './ChannelLogo';
 import type { PickerSection } from './ScopePicker';
 
 /** Options drawn at once with no filter typed; typing reaches the rest. Keeps a 3000-group source quick. */
@@ -39,30 +41,43 @@ export interface ScopePickerListProps {
   filterFrom: number;
   listId: string;
   maxHeight: number;
+  /** See ScopePickerProps.regionScope. */
+  regionScope?: string;
   onPick(value: string): void;
 }
 
-export function ScopePickerList({ label, value, sections, filterLabel, filterFrom, listId, maxHeight, onPick }: ScopePickerListProps) {
+export function ScopePickerList({ label, value, sections, filterLabel, filterFrom, listId, maxHeight, regionScope, onPick }: ScopePickerListProps) {
   const { t, i18n } = useTranslation('live');
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const regionRef = useRef<HTMLSelectElement>(null);
   const all = useMemo(() => sections.flatMap((s) => s.options), [sections]);
   const filterable = all.length >= filterFrom;
   const q = foldForFilter(query.trim());
+  // Live TV's region picker over the groups (realdata-15), sharing its pick: a source's 600 groups
+  // under a few dozen country tags narrow to one country here as they do in the group list.
+  const regions = useMemo(
+    () => (regionScope ? groupRegions(sections.find((s) => s.id === 'groups')?.options.map((o) => o.label) ?? []) : []),
+    [sections, regionScope],
+  );
+  const [regionPick, setRegionPick] = useState(() => readRegion(regionScope));
+  const region = regionPick && regions.some((r) => r.tag === regionPick) ? regionPick : null;
   const shown = useMemo(() => {
     let budget = PICKER_RENDER_CAP;
     return sections
       .map((s) => {
-        const options = (q ? s.options.filter((o) => foldForFilter(o.label).includes(q)) : s.options).slice(0, Math.max(0, budget));
+        // The current choice stays listed whatever the region.
+        const inRegion = (o: { value: string; label: string }) => !region || s.id !== 'groups' || o.value === value || groupRegion(o.label) === region;
+        const options = s.options.filter((o) => inRegion(o) && (!q || foldForFilter(o.label).includes(q))).slice(0, Math.max(0, budget));
         budget -= options.length;
         return { ...s, options };
       })
       .filter((s) => s.options.length > 0);
-  }, [sections, q]);
+  }, [sections, q, region, value]);
   const shownCount = shown.reduce((n, s) => n + s.options.length, 0);
-  const capped = !q && shownCount < all.length;
+  const capped = !q && !region && shownCount < all.length;
 
   // Focus goes into the popover's field once it is up. A short list has no visible filter: the
   // field is then visually hidden and read-only, and still holds focus so the arrow keys move
@@ -96,15 +111,49 @@ export function ScopePickerList({ label, value, sections, filterLabel, filterFro
       onKeyDown={onKey}
       className="flex min-h-0 flex-col"
     >
-      <div className={filterable ? 'border-b border-divider p-1.5' : 'sr-only'}>
+      <div
+        className={filterable ? 'flex gap-1.5 border-b border-divider p-1.5' : 'sr-only'}
+        onKeyDown={(e) => {
+          // Tab steps from the filter to the region and back; past either end the popover closes.
+          if (e.key !== 'Tab' || regions.length === 0) return;
+          const to = !e.shiftKey && e.target === inputRef.current ? regionRef.current : e.shiftKey && e.target === regionRef.current ? inputRef.current : null;
+          if (!to) return;
+          e.preventDefault();
+          e.stopPropagation();
+          to.focus();
+        }}
+      >
         <Cmdk.Input
           ref={inputRef}
           value={filterable ? query : ''}
           onValueChange={filterable ? setQuery : undefined}
           readOnly={!filterable}
           placeholder={filterable ? (filterLabel ?? t('filterGroups')) : undefined}
-          className={fieldClass('sm', 'bg-surface-2')}
+          className={fieldClass('sm', 'min-w-0 flex-1 bg-surface-2')}
         />
+        {filterable && regions.length > 0 ? (
+          <Select
+            ref={regionRef}
+            aria-label={t('region')}
+            title={t('region')}
+            className="h-8 w-auto max-w-32 bg-surface-2 ps-2 pe-7 pointer-coarse:max-w-36"
+            value={region ?? ''}
+            onKeyDown={(e) => {
+              // The select's own arrows, not the list's: cmdk moves its highlight on them.
+              if (e.key !== 'Escape' && e.key !== 'Tab') e.stopPropagation();
+            }}
+            onValueChange={(v) => {
+              const next = v || null;
+              writeRegion(regionScope, next);
+              setRegionPick(next);
+            }}
+            options={[
+              { value: '', label: t('allRegions') },
+              ...regions.map((r) => ({ value: r.tag, label: r.tag === region ? r.tag : t('regionOption', { region: r.tag, count: r.groups }) })),
+            ]}
+            data-testid="scope-region"
+          />
+        ) : null}
       </div>
       <Cmdk.List ref={listRef} id={listId} tabIndex={-1} aria-label={label} className="min-h-0 overflow-y-auto overscroll-contain p-1" style={{ maxHeight }}>
         {shownCount === 0 ? <div className="px-3 py-6 text-center text-sm text-fg-muted">{t('noGroupsMatch', { query: query.trim() })}</div> : null}
@@ -123,9 +172,14 @@ export function ScopePickerList({ label, value, sections, filterLabel, filterFro
                   <span aria-hidden className="flex w-4 shrink-0 justify-center text-fg-muted">
                     {o.icon ?? null}
                   </span>
-                  <span dir="auto" className={cn('min-w-0 flex-1 truncate text-match-parent', chosen && 'font-medium text-fg')}>
-                    {o.label}
-                  </span>
+                  {s.id === 'groups' ? (
+                    // A group as a channel row draws its name: the place's tag after it, quiet (w-realdata-13).
+                    <ChannelName name={o.label} title={o.label} className={cn('min-w-0 flex-1 truncate text-match-parent', chosen && 'font-medium text-fg')} />
+                  ) : (
+                    <span dir="auto" className={cn('min-w-0 flex-1 truncate text-match-parent', chosen && 'font-medium text-fg')}>
+                      {o.label}
+                    </span>
+                  )}
                   {o.count !== undefined ? <span className="shrink-0 text-caption tabular-nums text-fg-subtle">{fmt.format(o.count)}</span> : null}
                   <Check aria-hidden size={14} className={cn('shrink-0 text-fg-muted', !chosen && 'invisible')} />
                 </Cmdk.Item>

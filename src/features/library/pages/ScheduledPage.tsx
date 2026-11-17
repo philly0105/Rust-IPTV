@@ -6,14 +6,14 @@
  * state pointing at the guide) goes last.
  */
 
-import { AlarmClock, Bell, CalendarRange, Info, LoaderCircle, Square, Trash2, X } from 'lucide-react';
+import { AlarmClock, Bell, CalendarRange, Info, Library, LoaderCircle, Play, Square, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { invalidate } from '@/api/query';
+import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
-import type { Recording, RecordingStatus, Reminder } from '@/api/types';
+import type { Recording, RecordingFile, RecordingStatus, Reminder } from '@/api/types';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { buttonClass } from '@/ui/Button';
@@ -25,6 +25,7 @@ import {
   EmptyState,
   ErrorState,
   IconButton,
+  NoSourcesActions,
   Page,
   ProgressBar,
   RecordingRulesPanel,
@@ -44,6 +45,7 @@ import {
   stoppedEarly,
   upcoming,
   useCancelPending,
+  useNoSourcesAdding,
   useRecordingCapabilities,
   useRecordingProgress,
   useRecordings,
@@ -55,6 +57,8 @@ import {
   errorDescription,
 } from '../deps';
 import { PageTitle } from '../components/bits';
+import { usePlayRecording } from '../components/RecordingsPanel';
+import { useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { k } from '../lib/keys';
 import { formatBytes } from '../lib/format';
@@ -110,6 +114,12 @@ export function ScheduledPage() {
   const recordings = useRecordings();
   const caps = useRecordingCapabilities();
   const rules = useRecordingRules();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  // With no source there is no guide to schedule from: the page says what every Library page says
+  // then, and keeps saying it while its add dialog is open (the new source is listed before its
+  // import runs).
+  const adding = useNoSourcesAdding();
+  const noSources = sources.size === 0 || adding;
   // Only the day headings read the page's clock ("today", "tomorrow"); the rows recording now
   // run their own second clock (VD-7), so the page does not rebuild every row each second.
   const now = useClock(60_000);
@@ -118,6 +128,9 @@ export function ScheduledPage() {
   const nowList = useMemo(() => recordingNow(recordings.data), [recordings.data]);
   const next = useMemo(() => upcoming(reminders.data, recordings.data), [reminders.data, recordings.data]);
   const done = useMemo(() => finishedRecordings(recordings.data).slice(0, 50), [recordings.data]);
+  // The files of finished recordings (the Recordings tab's query), so a row can play its own.
+  const library = useRpcQuery('recordings.library', undefined, { staleTime: 10_000, enabled: done.length > 0 });
+  const filesByRecording = useMemo(() => firstFiles(library.data), [library.data]);
   // The padding most upcoming recordings share, said once in the section's heading; a row whose
   // padding differs (scheduled before the setting changed) still says its own.
   const padding = useMemo(() => commonPadding(next), [next]);
@@ -127,7 +140,7 @@ export function ScheduledPage() {
   usePageHeader(title, subtitle);
 
   // Rules count toward loading, so the lists appear with the panel already in its place.
-  const loading = reminders.isLoading || recordings.isLoading || rules.isLoading;
+  const loading = reminders.isLoading || recordings.isLoading || rules.isLoading || sourcesLoading;
   const error = reminders.error ?? recordings.error;
   // Run 2 C5: series rules ("Record series" in the guide). Above Upcoming when there are any,
   // since Upcoming and Finished grow with every airing; otherwise last (also while loading, so the
@@ -159,12 +172,17 @@ export function ScheduledPage() {
       <EmptyState
         icon={<AlarmClock size={28} aria-hidden />}
         title={t('scheduledEmptyTitle')}
-        description={t('scheduledEmptyBody')}
+        // Without recording support the guide offers Remind me only; the hint names just that.
+        description={t(noSources ? 'scheduledNoSourcesBody' : caps.data?.supported === false ? 'scheduledEmptyBodyNoRecord' : 'scheduledEmptyBody')}
         action={
-          <Link to="/epg" className={buttonClass('primary', 'md')}>
-            <CalendarRange size={16} aria-hidden />
-            {t('scheduledOpenGuide')}
-          </Link>
+          noSources ? (
+            <NoSourcesActions testId="scheduled-add-source" />
+          ) : (
+            <Link to="/epg" className={buttonClass('primary', 'md')}>
+              <CalendarRange size={16} aria-hidden />
+              {t('scheduledOpenGuide')}
+            </Link>
+          )
         }
       />
     );
@@ -212,7 +230,7 @@ export function ScheduledPage() {
         {done.length > 0 ? (
           <Section title={t('scheduledFinished')} count={done.length} testId="scheduled-finished">
             {done.map((r) => (
-              <FinishedRow key={r.id} recording={r} />
+              <FinishedRow key={r.id} recording={r} file={filesByRecording.get(r.id)} />
             ))}
           </Section>
         ) : null}
@@ -223,14 +241,25 @@ export function ScheduledPage() {
   return (
     <Page width="default" className="flex min-w-0 flex-col gap-6 pb-8">
       <PageTitle>{title}</PageTitle>
-      {caps.data && !caps.data.supported ? (
-        // One quiet line with an info mark, not a page-wide card: it explains why Record is missing
-        // and needs no action, so it should not outweigh the reminders and the empty state below.
-        <p role="note" className="flex items-start gap-2 text-body-sm text-fg-muted" data-testid="scheduled-no-recording">
-          <Info size={16} aria-hidden className="mt-0.5 shrink-0 text-fg-subtle" />
-          <span className="min-w-0">{t('scheduledServerNoMpv')}</span>
-        </p>
-      ) : null}
+      {/* The page's first line, as Downloads keeps its My videos link: where recordings end up. On a
+          phone the note and the link stack, both at the start, the link's icon under the note's. */}
+      <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2 max-sm:flex-col">
+        {caps.data && !caps.data.supported ? (
+          // One quiet line with an info mark, not a page-wide card: it explains why Record is missing
+          // and needs no action, so it should not outweigh the reminders and the empty state below.
+          <p role="note" className="flex min-w-0 flex-1 basis-64 items-start gap-2 self-center text-body-sm text-fg-muted max-sm:basis-auto max-sm:self-stretch" data-testid="scheduled-no-recording">
+            <Info size={16} aria-hidden className="mt-0.5 shrink-0 text-fg-subtle" />
+            <span className="min-w-0">{t('scheduledServerNoMpv')}</span>
+          </p>
+        ) : null}
+        {/* Only once something was recorded or set to record: before that it opens an empty page. */}
+        {recordings.data && recordings.data.length > 0 ? (
+          <Link to="/my-videos?filter=recordings" className={buttonClass('ghost', 'sm', 'ms-auto shrink-0 max-sm:-ms-3')} data-testid="scheduled-recordings-link">
+            <Library size={16} aria-hidden />
+            {t('scheduledRecordingsLink')}
+          </Link>
+        ) : null}
+      </div>
       {body}
       {rulesAboveUpcoming || !showRules ? null : rulesPanel}
     </Page>
@@ -465,9 +494,21 @@ function UpcomingRow({ entry, padding }: { entry: UpcomingEntry; padding: Paddin
   );
 }
 
-function FinishedRow({ recording: r }: { recording: Recording }) {
+/** Each recording's first file still on disk (its lowest part), by recording id. */
+function firstFiles(files: readonly RecordingFile[] | undefined): Map<string, RecordingFile> {
+  const out = new Map<string, RecordingFile>();
+  for (const f of files ?? []) {
+    if (!f.recordingId || !f.fileAvailable || f.status === 'recording') continue;
+    const had = out.get(f.recordingId);
+    if (!had || (f.part ?? 0) < (had.part ?? 0)) out.set(f.recordingId, f);
+  }
+  return out;
+}
+
+function FinishedRow({ recording: r, file }: { recording: Recording; file: RecordingFile | undefined }) {
   const { t, i18n } = useTranslation('library');
   const { toast } = useToast();
+  const playRecording = usePlayRecording();
   const lang = i18n.language;
   const [removing, setRemoving] = useState(false);
   const name = r.title ?? r.channelName;
@@ -475,6 +516,8 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
   const when = dateTimeFormat(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }).format(recordingStartedAt(r));
   const early = stoppedEarly(r);
   const note = recordingNote(r, t);
+  // A series picks up its next airing by itself; a one-off has nothing to try again.
+  const seriesNext = r.ruleId && (r.status === 'failed' || r.status === 'missed');
 
   const remove = async () => {
     if (removing) return;
@@ -515,15 +558,24 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
             {note}
           </span>
         ) : null}
+        {seriesNext ? <span className="truncate text-caption text-fg-subtle">{t('scheduledSeriesNext')}</span> : null}
       </div>
+      {/* Watch it from here; the quiet link finds the rest of its files in My videos. */}
       {r.status === 'completed' && r.fileNames.length > 0 ? (
-        <Link to="/my-videos?filter=recordings" className={buttonClass('ghost', 'sm')}>
+        <Link to="/my-videos?filter=recordings" className={buttonClass('ghost', 'sm', 'max-sm:hidden')}>
           {t('scheduledShowFiles')}
         </Link>
       ) : null}
+      {file ? (
+        <Button size="sm" variant="secondary" icon={<Play size={14} aria-hidden className="fill-current" />} aria-label={t('recPlay', { name })} onClick={() => void playRecording(file)} data-testid="finished-play">
+          {t('playOffline')}
+        </Button>
+      ) : null}
+      {/* X, not a bin: the row leaves this list and its files stay in My videos. */}
       <IconButton
         label={t('scheduledRemove', { title: name })}
-        icon={removing ? <Busy /> : <Trash2 size={16} aria-hidden />}
+        tooltip={t('scheduledRemoveTip')}
+        icon={removing ? <Busy /> : <X size={16} aria-hidden />}
         disabled={removing}
         aria-busy={removing || undefined}
         onClick={() => void remove()}

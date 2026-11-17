@@ -6,7 +6,7 @@
 
 import type { TFunction } from 'i18next';
 import { Bell, BellOff, Circle, Repeat, Square } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { EpgProgram, ItemRef, RecordingRule } from '@/api/types';
@@ -27,6 +27,11 @@ export interface ProgramActionsProps {
   now: number;
   /** `icons`: compact icon buttons without the hint lines (guide search hits). */
   variant?: 'buttons' | 'icons';
+  /**
+   * Without recording support (a server with no mpv), a disabled Record that says why on hover.
+   * Off where the room is short and the detail is a click away (the guide's preview band).
+   */
+  explainNoRecording?: boolean;
 }
 
 /**
@@ -61,8 +66,9 @@ export function ProgramActions(props: ProgramActionsProps) {
   return <ProgramActionsView {...props} shared={useProgramActionsShared()} />;
 }
 
-export function ProgramActionsView({ channelRef, channelName, program, now, variant = 'buttons', shared }: ProgramActionsProps & { shared: ProgramActionsShared }) {
+export function ProgramActionsView({ channelRef, channelName, program, now, variant = 'buttons', explainNoRecording = true, shared }: ProgramActionsProps & { shared: ProgramActionsShared }) {
   const { index, rules, actions, remindersOn, t, tg } = shared;
+  const unavailableId = useId();
   const rule = ruleFor(rules, channelRef, program.title);
   const [seriesTarget, setSeriesTarget] = useState<SeriesTarget | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -198,10 +204,25 @@ export function ProgramActionsView({ channelRef, channelName, program, now, vari
       ) : null}
       {dialogs}
       {reminder && !remindersOn ? <p className="w-full text-xs text-fg-subtle">{t('remindersOffHint')}</p> : null}
-      {options.record && shared.canRecord === false && !recording ? (
-        <p className="w-full text-xs text-fg-subtle" data-testid="record-unavailable">
-          {t('recordUnavailable')}
-        </p>
+      {/* No mpv on the server: Record stays in its place, disabled, with the reason as its tooltip
+          (a disabled button gets no kit tooltip) and its description, not a paragraph under every detail. */}
+      {explainNoRecording && options.record && shared.canRecord === false && !recording ? (
+        <>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled
+            title={t('recordUnavailable')}
+            aria-describedby={unavailableId}
+            icon={<Circle className="size-3.5" />}
+            data-testid="record-unavailable"
+          >
+            {t('record')}
+          </Button>
+          <span id={unavailableId} className="sr-only">
+            {t('recordUnavailable')}
+          </span>
+        </>
       ) : null}
     </>
   );

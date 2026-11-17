@@ -1,12 +1,14 @@
 import { AudioLines, CalendarX2, Download, History, Play, Radio, SearchX } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { sameRef, type Channel, type EpgProgram, type ItemRef, type SourceKind } from '@/api/types';
+import { downloadToastId } from '@/features/library/lib/queue';
 import { PlayerStage, usePlayerStore } from '@/features/player';
+import { plainChannelName } from '@/lib/channelName';
 import { useShell } from '@/shell';
 import { BackButton, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LivePill, Page, Skeleton, Tabs, useToast, errorDescription } from '@/ui';
 
@@ -48,20 +50,30 @@ export function ArchivePage() {
   const name = channel ? displayChannelName(channel.name, prefs.stripCountryPrefix) : '';
 
   const shell = useShell();
-  // The channel's name is the title (the content does not repeat it); the archive's reach and the
-  // source are the subtitle.
-  const title = name || t('archiveTitle');
+  // The channel's name is the title (the content does not repeat it), as the guide and Live TV name
+  // it ("ESPN HD (US)", not the provider's "US| ESPN HD"); the archive's reach and the source are
+  // the subtitle.
+  const title = (channel && plainChannelName(channel.name, prefs.stripCountryPrefix)) || t('archiveTitle');
   const browsable = !!channel && !!kind && canBrowseArchive(channel, kind);
   const subtitle = [browsable ? t('archiveDays', { count: archiveDayCount(channel) }) : '', source.data?.name ?? ''].filter(Boolean).join(' · ') || undefined;
   useEffect(() => {
     shell.setHeader({ title, subtitle });
   }, [shell, title, subtitle]);
 
-  const livePath = `/s/${encodeURIComponent(sourceId)}/live`;
-  // Navigation to the Live TV page, not "Back to live" (which returns a catch-up to the stream), LG-08.
+  const back = useArchiveBack(sourceId);
+  // Navigation to the page it came from (Live TV unless the guide opened it), not "Back to live"
+  // (which returns a catch-up to the stream), LG-08.
   const backLink = (
-    <Link to={livePath} className={buttonClass('secondary', 'md')}>
-      {t('liveTv')}
+    <Link
+      to={back.to}
+      onClick={(e) => {
+        if (!back.goBack || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        back.goBack();
+      }}
+      className={buttonClass('secondary', 'md')}
+    >
+      {back.label}
     </Link>
   );
 
@@ -73,7 +85,7 @@ export function ArchivePage() {
   } else if (item.error || source.error) {
     body = <ErrorState error={item.error ?? source.error} onRetry={() => void Promise.all([item.refetch(), source.refetch()])} action={backLink} />;
   } else if (browsable) {
-    body = <ArchiveBrowser channel={channel} kind={kind} name={name} offsetMinutes={prefs.epgOffsetMinutes} />;
+    body = <ArchiveBrowser channel={channel} kind={kind} name={name} offsetMinutes={prefs.epgOffsetMinutes} back={back} />;
   } else {
     body = <EmptyState icon={<CalendarX2 size={28} />} title={t('archiveUnsupported')} description={t('archiveUnsupportedHint')} action={backLink} />;
   }
@@ -86,6 +98,31 @@ export function ArchivePage() {
       {body}
     </Page>
   );
+}
+
+/** Where the archive was opened from, when the app navigated here (`archiveState`). */
+interface ArchiveBack {
+  to: string;
+  label: string;
+  /** History back, when the app opened the archive. */
+  goBack?(): void;
+}
+
+/**
+ * Back to the page that opened the archive: the guide (at the time and row it showed, since the
+ * guide keeps them in its URL) or Live TV. Opened by a link or a reload, it leads to Live TV.
+ */
+function useArchiveBack(sourceId: string): ArchiveBack {
+  const { t } = useTranslation('live');
+  const navigate = useNavigate();
+  const from = (useLocation().state as { from?: unknown } | null)?.from;
+  if (typeof from !== 'string' || !from.startsWith('/')) return { to: `/s/${encodeURIComponent(sourceId)}/live`, label: t('liveTv') };
+  return {
+    to: from,
+    label: from.startsWith('/epg') ? t('guide') : t('liveTv'),
+    // History back, so the page comes back as it was left (its scroll, its focus).
+    goBack: () => void navigate(-1),
+  };
 }
 
 function ArchiveSkeleton() {
@@ -109,9 +146,10 @@ interface BrowserProps {
   kind: SourceKind;
   name: string;
   offsetMinutes: number;
+  back: ArchiveBack;
 }
 
-function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
+function ArchiveBrowser({ channel, kind, name, offsetMinutes, back }: BrowserProps) {
   const { t, i18n } = useTranslation('live');
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -236,9 +274,11 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
     catchupDownloadArgs(channel, kind, p, { now, displayName: name, subtitle, notFileMessage: t('downloadNotFile', { ns: 'vod' }) })
       .then(async (args) => {
         if (!args) return;
-        await rpc('downloads.start', args);
+        const queued = await rpc('downloads.start', args);
         void invalidate('downloads.');
         toast({
+          // The download's own id: its Downloaded (or failed) toast replaces this one in place.
+          id: downloadToastId(queued.id),
           title: t('downloadQueued', { ns: 'vod' }),
           description: `${name}  ${p.title}`,
           variant: 'success',
@@ -269,11 +309,12 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
     <>
       <div className="@container/archive flex shrink-0 flex-col gap-4 lg:sticky lg:top-0 lg:w-[min(46%,44rem)] lg:self-start">
         <div className="flex flex-wrap items-center gap-3">
-          <BackButton to={`/s/${encodeURIComponent(channel.ref.sourceId)}/live`} label={t('liveTv')} />
+          <BackButton to={back.to} label={back.label} onClick={back.goBack} />
         </div>
         {/* The header names the channel and the archive's reach; here, its logo, what airs now and
             Watch live. A narrow column (a phone, the sticky column of a 1024 px window) puts Watch
-            live on a line of its own. */}
+            live on a line of its own. While a catch-up of the channel plays, the player's bar has
+            Watch live (in Fill window and fullscreen too): one button, not two (v-player-11). */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
           <ChannelLogo src={channel.logoUrl} name={name} size={56} sourceId={channel.ref.sourceId} />
           {/* From lg the details under the player describe the cursor's programme: while that is the
@@ -285,12 +326,19 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
           >
             {watchingTitle ? t('archiveWatching', { title: watchingTitle }) : airing ? t('idleNowOn', { title: airing.title, left: t('minutesLeft', { count: minutesLeft(airing, now) }) }) : null}
           </p>
-          <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">
-            {t('watchLive')}
-          </Button>
+          {!playingStart && (
+            <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">
+              {t('watchLive')}
+            </Button>
+          )}
         </div>
         {/* LG-09: catch-up plays here, in a full player, not in the corner mini player. */}
-        <div className="relative aspect-video max-h-[50vh] w-full overflow-hidden rounded-xl bg-black shadow-2 ring-1 ring-edge" data-testid="archive-stage">
+        {/* Below lg the stage stacks above the list: until something plays it would only say
+            "Nothing playing" and push the programmes half a phone screen down, so it waits. */}
+        <div
+          className={cn('relative aspect-video max-h-[50vh] w-full overflow-hidden rounded-xl bg-black shadow-2 ring-1 ring-edge', !playerSource && 'max-lg:hidden')}
+          data-testid="archive-stage"
+        >
           <PlayerStage className="h-full w-full">
             {/* The idle stage's look on Live with nothing to resume: a slate glow, the mark in a ring, a line and a hint. */}
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(120%_90%_at_50%_18%,hsl(220_20%_18%/0.85),transparent_68%)] px-6 text-center" data-testid="archive-stage-idle">

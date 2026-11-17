@@ -1,7 +1,7 @@
 /** /my-videos: the offline library of completed downloads. */
 
 import { k } from '../lib/keys';
-import { HardDriveDownload, ListOrdered } from 'lucide-react';
+import { AlarmClock, HardDriveDownload, ListOrdered } from 'lucide-react';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
@@ -13,7 +13,7 @@ import { CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
 import { PosterCellWidthContext, usePosterWidthBox } from '@/ui/Poster';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades, useMediaQuery, useScaledPx, type TabsProps } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades, useMediaQuery, useRecordings, useScaledPx, type TabsProps } from '../deps';
 import { moveInRail } from '../components/ContinueRail';
 import { CARD_CAPTION_HEIGHT, LibraryCard } from '../components/LibraryCard';
 import { RecordingCard } from '../components/RecordingCard';
@@ -165,6 +165,21 @@ export function MyVideosPage() {
       ) : null}
     </Link>
   );
+  // The Recordings tab links to what will record next, as the rest of the page links to the queue.
+  const schedule = useRecordings().data;
+  const upcomingRecordings = useMemo(() => (schedule ?? []).filter((r) => r.status === 'scheduled' || r.status === 'recording').length, [schedule]);
+  const scheduledLink = (
+    <Link to="/scheduled" className={buttonClass('ghost', 'sm', 'shrink-0 sm:ms-auto max-sm:-ms-3')} data-testid="my-videos-scheduled">
+      <AlarmClock size={16} aria-hidden />
+      <span>{t('scheduledTitle')}</span>
+      {upcomingRecordings > 0 ? (
+        <span className="tabular rounded-full bg-surface-3 px-1.5 text-xs text-fg-muted" data-testid="my-videos-scheduled-count">
+          <span className="sr-only">, </span>
+          {upcomingRecordings}
+        </span>
+      ) : null}
+    </Link>
+  );
   const libraryEmpty = !!query.data && !!recordingFiles.data && everything.length === 0 && !showRecordings && !search && filter === 'all';
   const title = t('myVideosTitle');
   // Nothing offline yet: the header keeps its usual Search everything instead of searching nothing.
@@ -293,7 +308,7 @@ export function MyVideosPage() {
               },
             ]}
           />
-          {queueLink}
+          {showRecordings ? scheduledLink : queueLink}
         </div>
       )}
       {body}

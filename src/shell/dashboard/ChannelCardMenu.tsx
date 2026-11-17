@@ -12,7 +12,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNod
 import type { Channel, ItemRef, ItemSnapshot } from '@/api/types';
 import { scheduleIdleLoad } from '@/shell/idleLoad';
 
-import { CardMenuContext, ChannelMenuContext, type CardMenuRequest, type ChannelMenuRequest } from './cards';
+import { CardMenuContext, ChannelMenuContext, PosterMenuContext, type CardMenuRequest, type ChannelMenuRequest, type PosterMenuRequest } from './cards';
 
 /**
  * The menus themselves, with the multi-view, list, channel-edit, parental and Live menu code they
@@ -41,13 +41,14 @@ export function snapshotChannel(ref: ItemRef, snapshot: ItemSnapshot): Channel {
 }
 
 /**
- * Provides the card menus to the cards below it and draws them: the channel menu, and the plain
- * action menu of a Continue watching card (CardMenuContext). One menu shows at a time. Mount once
- * around the rails.
+ * Provides the card menus to the cards below it and draws them: the channel menu, the plain
+ * action menu of a Continue watching card (CardMenuContext) and a movie or series poster's menu
+ * (PosterMenuContext, the Movies grids' menu). One menu shows at a time. Mount once around the rails.
  */
 export function ChannelMenuHost({ children }: { children: ReactNode }) {
   const [menu, setMenuState] = useState<ChannelMenuRequest | null>(null);
   const [actions, setActionsState] = useState<CardMenuRequest | null>(null);
+  const [poster, setPoster] = useState<PosterMenuRequest | null>(null);
   // The open action menu, so whatever replaces or closes it tells its opener (the hero pauses for it).
   const openRequest = useRef<CardMenuRequest | null>(null);
   const setActions = useCallback((request: CardMenuRequest | null) => {
@@ -59,6 +60,7 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
   const setMenu = useCallback(
     (request: ChannelMenuRequest) => {
       setActions(null);
+      setPoster(null);
       setMenuState(request);
     },
     [setActions],
@@ -66,10 +68,20 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
   const openActions = useCallback(
     (request: CardMenuRequest) => {
       setMenuState(null);
+      setPoster(null);
       setActions(request);
     },
     [setActions],
   );
+  const openPoster = useCallback(
+    (request: PosterMenuRequest) => {
+      setMenuState(null);
+      setActions(null);
+      setPoster(request);
+    },
+    [setActions],
+  );
+  const closePoster = useCallback(() => setPoster(null), []);
   const close = useCallback(() => {
     setMenuState(null);
     setActions(null);
@@ -80,7 +92,7 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
   // The menus mount with the first request and stay mounted (their closing pop-out); their chunk
   // loads ahead on the player's schedule, or at the first press, so a first menu rarely waits.
   const [bodyMounted, setBodyMounted] = useState(false);
-  if (!bodyMounted && (menu || actions)) setBodyMounted(true);
+  if (!bodyMounted && (menu || actions || poster)) setBodyMounted(true);
   useEffect(() => {
     if (bodyMounted) return;
     return scheduleIdleLoad(() => void loadMenuBody().catch(() => undefined));
@@ -89,12 +101,14 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
   return (
     <ChannelMenuContext.Provider value={setMenu}>
       <CardMenuContext.Provider value={openActions}>
-        {children}
-        {bodyMounted && (
-          <Suspense fallback={null}>
-            <ChannelMenuBody menu={menu} actions={actions} onClose={close} />
-          </Suspense>
-        )}
+        <PosterMenuContext.Provider value={openPoster}>
+          {children}
+          {bodyMounted && (
+            <Suspense fallback={null}>
+              <ChannelMenuBody menu={menu} actions={actions} poster={poster} onClose={close} onPosterClose={closePoster} />
+            </Suspense>
+          )}
+        </PosterMenuContext.Provider>
       </CardMenuContext.Provider>
     </ChannelMenuContext.Provider>
   );

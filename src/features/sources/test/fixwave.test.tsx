@@ -396,8 +396,7 @@ describe('Retrying a failed add reuses the source it created', () => {
   it('shows a translated summary, keeps the raw transport text as detail, and offers a retry', async () => {
     failingCore();
     const alert = await failFirstAdd();
-    expect(alert.textContent).toContain("Couldn't reach the server.");
-    expect(alert.textContent).toContain('Check the address and your connection, then try again.');
+    expect(alert.textContent).toContain("Couldn't reach 127.0.0.1:7399. Check the address and that the server is online.");
     // The raw text is only inside the collapsed technical details.
     const details = alert.querySelector('details')!;
     expect(details.open).toBe(false);
@@ -438,7 +437,7 @@ describe('Retrying a failed add reuses the source it created', () => {
     fireEvent.click(screen.getByTestId('add-source-submit'));
     await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(1));
     const alert = await screen.findByTestId('add-source-error');
-    await waitFor(() => expect(alert.textContent).toContain("The server didn't answer in time."));
+    await waitFor(() => expect(alert.textContent).toContain("127.0.0.1:7399 didn't answer in time."));
     fireEvent.click(screen.getByTestId('add-source-submit'));
     await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(2));
     expect(rpcMock.callsOf('sources.add')).toHaveLength(1);

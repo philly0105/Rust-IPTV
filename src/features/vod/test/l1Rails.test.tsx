@@ -85,6 +85,8 @@ beforeEach(async () => {
   h['sources.list'] = () => [src];
   h['settings.get'] = () => settings();
   h['watchlist.list'] = () => [];
+  // The guide finds nothing (a failed guide search now shows its own error on the page).
+  h['epg.search'] = () => [];
   // The My List toggle reads the app-wide list cache (the harness renders with its own client).
   const { queryClient } = await import('@/api/query');
   queryClient.setQueryData(['watchlist.list', {}], []);
@@ -205,7 +207,7 @@ describe('L1-vod-13 (search): a removed source', () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
     renderAt('/s/gone/search?q=rail', [{ path: '/s/:sourceId/search', element: <SearchPage scoped /> }]);
     expect(await screen.findByText('This source was removed')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Go to dashboard' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Go to Home' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
   });
 });

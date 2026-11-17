@@ -12,13 +12,14 @@ import { resumePoint } from '@/features/library/lib/myvideos';
 import { playDownload } from '@/features/library/lib/playDownload';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 
 import { CatalogRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
 import { DownloadButton, FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { TmdbPromo } from '../components/detail/TmdbPromo';
-import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup } from '../components/detail/DetailHero';
+import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup, WatchedFact } from '../components/detail/DetailHero';
 import { OtherSourcesDialog, OtherSourcesList } from '../components/detail/OtherSourcesDialog';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
@@ -27,8 +28,9 @@ import { WatchStage } from '../components/detail/WatchStage';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import type { RailCardProps } from '../components/PosterRail';
 import { SimilarSection } from '../components/SimilarSection';
-import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
+import { SourceMissing, TitleGone, isSourceMissing } from '../components/SourceMissing';
 import {
+  cachedCatalogRow,
   useIsFavorite,
   useMovieDetail,
   useSettings,
@@ -47,12 +49,13 @@ import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlay
 import { useSourcePin } from '../hooks/useSourcePin';
 import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { formatClock, isResumable, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
 import { ALL_CATEGORIES, effectiveMinRating } from '../lib/paging';
 import { detailHref, isCachedStalkerSeries } from '../lib/search';
-import { Badge, Button, ErrorState, Menu, Page, SectionHeader, Skeleton, errorDescription, useToast, type MenuItem } from '@/ui';
+import { Button, ErrorState, IconButton, Menu, Page, SectionHeader, Skeleton, errorDescription, useToast, type MenuItem } from '@/ui';
 
 export function MovieDetailPage() {
   const { t, i18n } = useTranslation('vod');
@@ -74,6 +77,9 @@ export function MovieDetailPage() {
     return isCachedStalkerSeries(cached, sourceId, itemId);
   }, [qc, source.data?.kind, sourceId, itemId]);
   const detail = useMovieDetail(seriesTwin ? undefined : source.data, ref);
+  // The skeleton keeps the artwork's room only when a backdrop is likely: an M3U title has none
+  // unless its catalog row says so, so its page does not drop 140 px when it loads (vod-detail-08).
+  const skeletonArt = () => source.data?.kind !== 'm3u' || !!cachedCatalogRow(qc, ref)?.backdropUrl;
   // A failed lookup may be a series id on the movie route (cold link, Stalker VOD-as-series): look it up as a series.
   const probeTwin = detail.isError && detail.error.code !== 'auth' && !!source.data;
   const twin = useTwinProbe(source.data, ref, probeTwin);
@@ -151,12 +157,14 @@ export function MovieDetailPage() {
   // it is the title's own name. On screen the header leads with Back and names the section while
   // the hero shows the title large; the title fades into the header once the hero's h1 scrolls
   // away (section). Watching, the stage's own bar names the title and the source right under the
-  // header, so the header names the section and the window keeps the title (documentTitle).
+  // header, so the header names the section and the window keeps the title (documentTitle). Back
+  // stays: it leaves the page and playback carries on in the mini player, as the browser's Back
+  // does, while the stage's X stops it (PV-10).
   // The source is named only when there are others (useShowSourceName); the About facts always name it.
   const showSource = useShowSourceName();
   const headerSource = showSource ? source.data?.name : undefined;
   const header = watching
-    ? { title: t('movies'), documentTitle: pageTitle }
+    ? { title: t('movies'), documentTitle: pageTitle, back: { onClick: goBack } }
     : { title: pageTitle, subtitle: headerSource, section: t('movies'), back: { onClick: goBack } };
   usePageHeader(header, [watching, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'movie'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
@@ -191,7 +199,7 @@ export function MovieDetailPage() {
       <div className="h-full overflow-y-auto" data-testid="vod-movie-detail">
         <h1 className="sr-only">{pageTitle}</h1>
         {gate.state === 'checking' ? (
-          <DetailHeroSkeleton />
+          <DetailHeroSkeleton art={skeletonArt()} />
         ) : (
           <ParentalLocked
             itemRef={ref}
@@ -213,12 +221,21 @@ export function MovieDetailPage() {
       </div>
     );
   }
+  if (detail.isError && detail.error.code === 'not_found' && !(probeTwin && twin.isPending)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <TitleGone itemRef={ref} />
+      </div>
+    );
+  }
   if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
       <div className="h-full overflow-y-auto">
         <h1 className="sr-only">{pageTitle}</h1>
         <ErrorState
           error={source.error ?? detail.error}
+          title={t('titleLoadFailed')}
           onRetry={() => {
             void source.refetch();
             void detail.refetch();
@@ -231,7 +248,7 @@ export function MovieDetailPage() {
     return (
       <div className="h-full overflow-y-auto" data-testid="vod-movie-detail">
         <h1 className="sr-only">{pageTitle}</h1>
-        <DetailHeroSkeleton />
+        <DetailHeroSkeleton art={skeletonArt()} />
       </div>
     );
   }
@@ -267,10 +284,6 @@ export function MovieDetailPage() {
 
   // VL-hero-actions: what is not Play, Trailer or one of the round icon buttons waits in More.
   const moreItems: MenuItem[] = [
-    // Offline as well: the file from its beginning.
-    ...(resumeAt !== undefined
-      ? [{ id: 'start-over', label: t('startOver'), icon: <RotateCcw aria-hidden size={16} />, onSelect: () => (offline ? playOffline(true) : play(true)) }]
-      : []),
     // Offline, the stream is still one choice away (a newer copy, a file that will not play).
     ...(offline ? [{ id: 'stream', label: t('streamInstead'), icon: <Play aria-hidden size={16} />, onSelect: () => play(false) }] : []),
     ...(others.length > 0
@@ -283,13 +296,27 @@ export function MovieDetailPage() {
   // two states share one set and one look.
   const iconActions = (
     <>
-      <HeroIcon caption={t('captionMyList')}>
-        <MyListButton itemRef={ref} snapshot={listSnapshot} variant="round" size="lg" />
+      {/* With a saved spot, the other half of the resume choice sits first among the icons, one
+          press away, not alone in More (vod-detail-07). Offline as well: the file from its beginning. */}
+      {resumeAt !== undefined && (
+        <HeroIcon caption={t('captionStartOver')}>
+          <IconButton
+            size="lg"
+            variant="secondary"
+            label={t('startOver')}
+            icon={<RotateCcw aria-hidden size={18} />}
+            onClick={() => (offline ? playOffline(true) : play(true))}
+            data-testid="vod-start-over"
+          />
+        </HeroIcon>
+      )}
+      <HeroIcon caption={t('captionMyList')} labelled={!watching}>
+        <MyListButton itemRef={ref} snapshot={listSnapshot} variant={watching ? 'round' : 'hero'} size="lg" />
       </HeroIcon>
       <HeroIcon caption={t('captionFavorite')}>
         <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
       </HeroIcon>
-      <HeroIcon caption={t('watched')}>
+      <HeroIcon caption={t('captionWatched')}>
         <WatchedButton itemRef={ref} watched={watched} round />
       </HeroIcon>
       {playback.canDownload && (
@@ -378,19 +405,12 @@ export function MovieDetailPage() {
           model={model}
           sourceId={sourceId}
           castLinks={tmdbOn}
-          chips={[
-            item.containerExtension && (
-              <Badge key="format" variant="outline" className="h-4.5 px-1 text-2xs tracking-wide uppercase">
-                {item.containerExtension}
-              </Badge>
-            ),
-            offline && (
-              <Badge key="offline" variant="success" data-testid="vod-offline-chip">
-                {t('downloaded')}
-              </Badge>
-            ),
-          ]}
-          note={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
+          // The container format is a file fact, in About; the meta line keeps what a viewer acts on (vod-detail-17).
+          // A finished download is said once, quietly: by the download button and the note under the
+          // actions, not by a green pill beside Watched's (v-vod-04).
+          chips={[watched && <WatchedFact key="watched" />]}
+          // Play takes the finished download when its file is there (VL-offline-play), and says so.
+          note={offline ? t('playsDownloaded') : pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           pending={placeholder}
           progress={progress}
@@ -419,7 +439,7 @@ export function MovieDetailPage() {
         )}
         {item.categoryId && source.data && (
           <CatalogRail
-            title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
+            title={categoryName ? t('moreInCategory', { category: plainChannelName(sectionlessCategoryName(categoryName, 'movie'), false) }) : t('moreFromSource', { source: sourceName })}
             seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/movies/c/${encodeURIComponent(item.categoryId || ALL_CATEGORIES)}` }}
             input={{
               sourceKind: source.data.kind,

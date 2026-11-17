@@ -10,6 +10,7 @@ import '@/i18n';
 
 import type { PlayerSource } from '@/api/types';
 import { PHONE_QUERY } from '@/shell/navigation';
+import { focusableIn } from '@/ui/focus';
 
 vi.mock('@/api/transport', () => ({
   rpc: vi.fn(() => Promise.reject(new Error('offline'))),
@@ -25,7 +26,7 @@ vi.mock('../reconnect', async (orig) => ({ ...(await orig<typeof import('../reco
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { resetMedia } = await import('../media');
-const { PlayerDock, PLAYER_BAR_HEIGHT } = await import('./PlayerDock');
+const { PlayerDock, PLAYER_BAR_HEIGHT, LANDSCAPE_PHONE_QUERY } = await import('./PlayerDock');
 const { PlayerStage } = await import('./PlayerStage');
 
 const movie = (itemId: string): PlayerSource => ({
@@ -111,6 +112,99 @@ describe('player window fill', () => {
     act(() => usePlayerStore.getState().stop());
     expect(usePlayerStore.getState()).toMatchObject({ isWindowFilled: false, isFullscreen: false });
   });
+
+  it('takes the page out of reach while it fills the window, and gives focus back after (a11y-keyboard-01)', () => {
+    phone(false);
+    playing(live);
+    render(
+      <>
+        <button type="button">ESPN2 row</button>
+        <PlayerStage className="h-40 w-64" />
+        <PlayerDock />
+      </>,
+    );
+    const row = screen.getByRole('button', { name: 'ESPN2 row' });
+    const host = document.querySelector<HTMLElement>('[data-player-host]')!;
+    const layer = document.querySelector<HTMLElement>('[data-player-window-layer]')!;
+    row.focus();
+    act(() => usePlayerStore.getState().toggleWindowFill());
+    // The row, under the picture now, can take neither focus nor keys; the player has them.
+    expect(row.inert).toBe(true);
+    expect(layer.inert).toBeFalsy();
+    expect(host.contains(document.activeElement)).toBe(true);
+    act(() => usePlayerStore.getState().toggleWindowFill());
+    expect(row.inert).toBe(false);
+    expect(document.activeElement).toBe(row);
+  });
+
+  it('wraps Tab inside the filled player instead of letting it out to the browser (v-player-09)', () => {
+    phone(false);
+    playing(live);
+    render(<><PlayerStage className="h-40 w-64" /><PlayerDock /></>);
+    act(() => usePlayerStore.getState().toggleWindowFill());
+    const host = document.querySelector<HTMLElement>('[data-player-host]')!;
+    const stops = focusableIn(host);
+    const first = stops[0]!;
+    const last = stops[stops.length - 1]!;
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    // Between the ends Tab is the browser's own.
+    stops[1]!.focus();
+    expect(fireEvent.keyDown(stops[1]!, { key: 'Tab' })).toBe(true);
+    expect(document.activeElement).toBe(stops[1]);
+  });
+});
+
+describe('a phone turned sideways', () => {
+  let landscape = false;
+  const listeners = new Set<() => void>();
+  const turn = (on: boolean): void => {
+    landscape = on;
+    act(() => listeners.forEach((l) => l()));
+  };
+  beforeEach(() => {
+    landscape = false;
+    listeners.clear();
+    window.matchMedia = ((query: string) => ({
+      get matches() {
+        return query === LANDSCAPE_PHONE_QUERY && landscape;
+      },
+      media: query,
+      onchange: null,
+      addEventListener: (_: string, l: () => void) => listeners.add(l),
+      removeEventListener: (_: string, l: () => void) => listeners.delete(l),
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+
+  it('fills the window with the video playing in the stage, and gives the page back when turned upright', () => {
+    act(() => usePlayerStore.setState({ source: live, mode: 'inline', status: 'playing', dock: 'stage' }));
+    render(<><PlayerStage className="h-40 w-64" /><PlayerDock /></>);
+    expect(usePlayerStore.getState().isWindowFilled).toBe(false);
+    turn(true);
+    expect(usePlayerStore.getState().isWindowFilled).toBe(true);
+    turn(false);
+    expect(usePlayerStore.getState().isWindowFilled).toBe(false);
+  });
+
+  it('leaves the page alone when nothing plays, and after the user left Fill window by hand', () => {
+    act(() => usePlayerStore.setState({ source: live, mode: 'inline', status: 'paused', dock: 'stage' }));
+    render(<><PlayerStage className="h-40 w-64" /><PlayerDock /></>);
+    turn(true);
+    expect(usePlayerStore.getState().isWindowFilled).toBe(false);
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    expect(usePlayerStore.getState().isWindowFilled).toBe(true);
+    act(() => usePlayerStore.getState().toggleWindowFill());
+    expect(usePlayerStore.getState().isWindowFilled).toBe(false);
+    act(() => usePlayerStore.setState({ status: 'paused' }));
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    expect(usePlayerStore.getState().isWindowFilled).toBe(false);
+  });
 });
 
 describe('the mini player on a phone', () => {
@@ -184,7 +278,7 @@ describe('the mini player on a phone', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
     expect(toggle).toHaveBeenCalledTimes(1);
     act(() => usePlayerStore.setState({ status: 'error', error: 'boom' }));
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(screen.getByTestId('mini-bar-status').textContent).toBe('This stream did not play');
   });
 

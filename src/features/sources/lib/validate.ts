@@ -55,6 +55,11 @@ export function checkHttpUrl(raw: string): UrlCheck {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false, error: 'errorRequired' };
   const withScheme = /^[a-z][a-z0-9+.-]*:\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  // Chrome's parser takes a space in the host ("my provider . com"), and the core then refuses the
+  // address as unreadable. A line break means two lines were pasted. A space in the path stays
+  // allowed: it is sent percent-encoded.
+  const authority = withScheme.replace(/^[a-z][a-z0-9+.-]*:\/*/i, '').split(/[/?#]/)[0] ?? '';
+  if (/\s/.test(authority) || /[\r\n]/.test(trimmed)) return { ok: false, error: 'errorUrlSpaces' };
   let parsed: URL;
   try {
     parsed = new URL(withScheme);

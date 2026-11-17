@@ -48,11 +48,11 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, tintOf, useImageChain, whenIdle } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, TOUCH_TARGET_SQUARE, Tooltip, cn, tintOf, useImageChain, whenIdle } from '@/ui';
 import { formatTenths } from '@/features/vod/lib/rating';
 
 import { useReducedMotion } from '../theme';
-import { buttonMenuAnchor, CardMenuContext, itemPath, usePrefetchTarget, type CardMenuItem } from './cards';
+import { buttonMenuAnchor, CardMenuContext, itemPath, joinList, usePrefetchTarget, type CardMenuItem } from './cards';
 import { HERO_BODY, HERO_FRAME, HERO_PAGE_FADE } from './HeroSkeleton';
 import { HERO_DWELL_MS, titleEndsWithYear, wrapIndex, type HeroSlide } from './heroSlides';
 
@@ -382,10 +382,11 @@ function posterKind(ref: ItemRef): 'movie' | 'live' | 'radio' {
   return ref.contentType === 'live' ? 'live' : ref.contentType === 'radio' ? 'radio' : 'movie';
 }
 
-/** The hero's secondary buttons on glass: Details and the slide's menu. */
+/** The hero's secondary buttons on glass: Details and the slide's menu. 44 px on touch in compact density too. */
 const GLASS_BUTTON = cn(
+  TOUCH_TARGET_SQUARE,
   'inline-flex h-12 shrink-0 items-center justify-center rounded-md border border-glass-border bg-on-glass/10 text-on-glass select-none',
-  'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
+  'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-(--duration-fast) motion-safe:active:translate-y-px',
 );
 
 interface SlideBodyProps {
@@ -442,7 +443,9 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
         ? { id: panelId, role: 'tabpanel', 'aria-roledescription': t('heroSlide'), 'aria-label': t('heroSlideOf', { index: index + 1, total: count }), 'data-testid': 'hero-slide' }
         : { 'aria-hidden': true, inert: true })}
       data-hero-slide={s.key}
-      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, !active && 'invisible')}
+      // HERO_BODY keeps room under a phone's buttons for the slide dots; one slide draws none, and
+      // the empty band was twice the gap between rails.
+      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, count < 2 && 'max-sm:pb-6', !active && 'invisible')}
     >
       {/* The copy column grows with wide heroes, so a title is not wrapped into a corner of an empty frame. */}
       <div className={cn('flex w-full min-w-0 max-w-[36rem] flex-col gap-3 text-on-glass min-[1440px]:max-w-[42rem]', active && 'motion-safe:animate-hero-copy')}>
@@ -477,16 +480,29 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
           </p>
         )}
         {continuing && s.fraction !== undefined && (
-          <div className="flex max-w-md items-center gap-3">
-            <ProgressBar value={s.fraction * 100} tone="glass" label={t('watchedPercent', { percent: Math.round(s.fraction * 100) })} />
-            {s.minutesLeft !== undefined && <span className="shrink-0 text-sm text-on-glass-muted tabular">{t('minutesLeft', { count: s.minutesLeft })}</span>}
+          // A short bar with the time left right after it. The glass track is the scrim's own
+          // colour here, so the track is a light veil instead: a full-width row showed only the
+          // amber fill and left the time left floating at its far end.
+          <div className="flex items-center gap-3">
+            <ProgressBar value={s.fraction * 100} tone="glass" className="w-40 shrink-0 bg-on-glass/25" label={t('watchedPercent', { percent: Math.round(s.fraction * 100) })} />
+            {s.minutesLeft !== undefined && <span className="min-w-0 truncate text-body-sm text-on-glass-muted tabular">{t('minutesLeft', { count: s.minutesLeft })}</span>}
           </div>
         )}
         {/*
           On a phone Play takes the row and Details (and the slide's menu) fold into square icon
           buttons beside it; a slide with nothing to play keeps Details labelled across the row.
         */}
-        <div className="mt-2 flex gap-3 sm:flex-wrap">
+        <div
+          className="mt-2 flex gap-3 sm:flex-wrap"
+          // Down from the actions to the first rail's card that holds its Tab stop (arrows alone, a remote).
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowDown') return;
+            const card = document.querySelector<HTMLElement>('[data-dash-rail] [data-rail-card][tabindex="0"]');
+            if (!card) return;
+            e.preventDefault();
+            card.focus();
+          }}
+        >
           {playable && (
             <button
               type="button"
@@ -494,9 +510,10 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
               disabled={!canPlay}
               aria-describedby={titleId}
               className={cn(
+                TOUCH_TARGET,
                 'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-glass-accent px-6 text-base font-semibold text-glass-accent-fg shadow-2 select-none max-sm:min-w-0 max-sm:flex-1',
                 'hover:brightness-110 active:brightness-90 disabled:cursor-not-allowed disabled:opacity-50',
-                'motion-safe:transition-[filter,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
+                'motion-safe:transition-[filter,translate] motion-safe:duration-(--duration-fast) motion-safe:active:translate-y-px',
               )}
             >
               <Play aria-hidden size={18} fill="currentColor" />
@@ -528,7 +545,9 @@ function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, me
                   const items = menuFor?.(s);
                   if (!items?.length || !openMenu) return;
                   onMenuOpen(true);
-                  openMenu({ pos: buttonMenuAnchor(e.currentTarget), label: title, items, onClose: () => onMenuOpen(false) });
+                  const left = s.minutesLeft !== undefined ? t('minutesLeft', { count: s.minutesLeft }) : undefined;
+                  const subtitle = joinList([s.subtitle, left], i18n.language) || undefined;
+                  openMenu({ pos: buttonMenuAnchor(e.currentTarget), label: title, items, header: { title, subtitle }, onClose: () => onMenuOpen(false) });
                 }}
                 className={cn(GLASS_BUTTON, 'w-12')}
               >
@@ -712,8 +731,33 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-[72%] bg-gradient-to-t from-glass-strong via-glass/60 to-transparent sm:h-3/5" />
       <div aria-hidden className={HERO_PAGE_FADE} />
 
+      {/* Live region: quiet while rotating (no announcement every few seconds), polite once the user drives it. */}
+      {/*
+        One column that may shrink below its content (minmax(0,1fr)): an auto column let the
+        widest slide's button row set the width, so on phones it overflowed the frame and the
+        frame clipped the Details button.
+      */}
+      <div className="relative z-[3] grid grid-cols-[minmax(0,1fr)]" aria-live={running ? 'off' : 'polite'} aria-atomic="false">
+        {slides.map((s, i) => (
+          <SlideBody
+            key={s.key}
+            slide={s}
+            active={i === index}
+            index={i}
+            count={count}
+            panelId={panelId}
+            sourceName={sourceName(s.ref.sourceId)}
+            canPlay={canPlay(s.ref)}
+            onPlay={onPlay}
+            menuFor={menuFor}
+            onMenuOpen={setMenuOpen}
+          />
+        ))}
+      </div>
+
       {count > 1 && (
-        // Top corner on smaller screens, beside the button row from lg up (the copy column has
+        // After the slide in the page's order, so Tab reaches Resume first; placed on screen by
+        // position. Top corner on smaller screens, beside the button row from lg up (the copy column has
         // the room then). On a phone the capsule goes: a 270 px dark pill of six dots over the
         // artwork read as a broken field and outweighed the title. There the toggle and the dots
         // are a plain row under the buttons (HERO_BODY leaves the room), the chevrons go, and the
@@ -721,7 +765,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
         // ticks choose. The toggle stays: a rotation that runs by itself needs a way to stop it.
         <div
           className={cn(
-            'absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-14',
+            'absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-10',
             'max-sm:inset-x-0 max-sm:top-auto max-sm:bottom-1 max-sm:justify-center max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:p-0 max-sm:shadow-none',
           )}
           data-testid="hero-controls"
@@ -765,7 +809,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
                     aria-hidden
                     className={cn(
                       'relative block h-1.5 overflow-hidden rounded-full',
-                      !autoTurn && 'motion-safe:transition-[width,background-color] motion-safe:duration-300',
+                      !autoTurn && 'motion-safe:transition-[width,background-color] motion-safe:duration-(--duration-slow)',
                       on ? 'w-7 bg-on-glass/25' : 'w-1.5 bg-on-glass/45 group-hover/tick:bg-on-glass/80',
                     )}
                   >
@@ -791,30 +835,6 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
           </Tooltip>
         </div>
       )}
-
-      {/* Live region: quiet while rotating (no announcement every few seconds), polite once the user drives it. */}
-      {/*
-        One column that may shrink below its content (minmax(0,1fr)): an auto column let the
-        widest slide's button row set the width, so on phones it overflowed the frame and the
-        frame clipped the Details button.
-      */}
-      <div className="relative z-[3] grid grid-cols-[minmax(0,1fr)]" aria-live={running ? 'off' : 'polite'} aria-atomic="false">
-        {slides.map((s, i) => (
-          <SlideBody
-            key={s.key}
-            slide={s}
-            active={i === index}
-            index={i}
-            count={count}
-            panelId={panelId}
-            sourceName={sourceName(s.ref.sourceId)}
-            canPlay={canPlay(s.ref)}
-            onPlay={onPlay}
-            menuFor={menuFor}
-            onMenuOpen={setMenuOpen}
-          />
-        ))}
-      </div>
     </section>
   );
 });

@@ -172,6 +172,7 @@ export interface ShellHeader {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  stepAside?: boolean;
   search?: {
     value: string;
     onChange: (v: string) => void;

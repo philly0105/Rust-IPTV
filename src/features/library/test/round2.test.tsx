@@ -174,9 +174,47 @@ describe('download rows', () => {
     expect(screen.getByTestId('download-detail').textContent).not.toContain('connections');
   });
 
+  it('on a phone keep the first action as a button and put the rest in the row\'s menu', () => {
+    const before = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <I18nextProvider i18n={i18n}>
+            <DownloadRow
+              download={makeDownload({ id: 4, status: 'queued', title: 'Long Film' })}
+              source={undefined}
+              actions={['pause', 'cancel', 'next']}
+              busy={false}
+              onAction={() => undefined}
+              onSpeedLimit={() => undefined}
+            />
+          </I18nextProvider>
+        </QueryClientProvider>,
+      );
+      const column = screen.getByTestId('download-actions');
+      expect(within(column).getAllByRole('button').map((b) => b.dataset['action'] ?? b.getAttribute('aria-haspopup'))).toEqual(['pause', 'menu']);
+      fireEvent.click(within(column).getByRole('button', { name: 'Actions for Long Film' }));
+      expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Cancel download', 'Download next', 'Download speed']);
+      // The detail line may wrap to a second line instead of cutting the waiting reason to a word.
+      expect(screen.getByTestId('download-detail').className).toContain('line-clamp-2');
+    } finally {
+      window.matchMedia = before;
+    }
+  });
+
   it('reserve the widest row\'s actions column on every row, so bars and badges end on one line', () => {
     row(makeDownload({ id: 3, status: 'paused' }), ['resume', 'remove']);
-    expect(screen.getByTestId('download-actions').className).toContain('pointer-fine:w-[calc(4*2rem+3*0.125rem)]');
+    expect(screen.getByTestId('download-actions').className).toContain('pointer-fine:w-[calc(5*2rem+4*0.125rem)]');
   });
 });
 

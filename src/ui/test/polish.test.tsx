@@ -207,6 +207,8 @@ describe('hit targets and retry feedback', () => {
     const dismiss = document.querySelector('[data-toast-dismiss]')!;
     expect(dismiss.className).toContain('h-8');
     expect(dismiss.className).toContain('w-8');
+    // Its 44 px touch target reaches into the toast's padding, so a one-line toast stays one line tall.
+    expect(dismiss.className).toContain('pointer-coarse:-my-2.5');
     expect(screen.getByRole('button', { name: 'Undo' }).className).toContain('min-h-8');
   });
 

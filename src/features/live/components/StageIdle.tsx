@@ -6,7 +6,7 @@ import { itemKey, type Channel, type EpgNowNext, type ItemRef, type RecentEntry 
 import { Button } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, plainChannelName } from '../lib/channelName';
 import { isValidProgram, minutesLeft, programProgress, programWhen, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 
@@ -27,6 +27,11 @@ export interface StageIdleProps {
    * the programme again when an unlock runs out.
    */
   locked?: boolean;
+  /**
+   * The channel last watched is still being looked up (w-realdata-09): only the backdrop, no
+   * "Nothing playing" prompt that a Resume replaces a moment later.
+   */
+  pending?: boolean;
   now: number;
   stripPrefix?: boolean;
   epgOffsetMinutes?: number;
@@ -62,7 +67,7 @@ const TINY_STAGE = 'md:[@container_(max-height:8rem)]:hidden';
  * stage gets shorter (a laptop's or tablet's stage column is 170 to 230 px tall): the hint first,
  * then the logo, so the name and Resume are never cut off.
  */
-export function StageIdle({ kind, last, resumeProgram, highlighted = false, locked = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
+export function StageIdle({ kind, last, resumeProgram, highlighted = false, locked = false, pending = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
   const channel = last?.channel;
   const name = channel ? displayChannelName(channel.name, stripPrefix) : '';
@@ -88,7 +93,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
         data-hue={hue ?? undefined}
         style={{ backgroundImage: `radial-gradient(120% 90% at 50% 18%, ${glow}, transparent 68%)` }}
       />
-      {channel ? (
+      {pending && !channel ? null : channel ? (
         <div className="relative flex max-w-md min-w-0 flex-col items-center gap-3 px-6 text-center max-md:w-full max-md:max-w-none max-md:flex-row max-md:gap-3 max-md:px-0 max-md:text-start">
           <ChannelLogo src={channel.logoUrl} name={name} size={64} sourceId={channel.ref.sourceId} className={cn('shadow-2 max-md:hidden', SHORT_STAGE)} onHue={onHue} />
           <ChannelLogo src={channel.logoUrl} name={name} size={32} sourceId={channel.ref.sourceId} className="md:hidden" />
@@ -99,7 +104,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
             <p className="max-w-full text-title-sm text-on-glass max-md:text-body-sm max-md:font-medium max-md:text-fg">
               {/* ChannelName's own dir="auto" span truncates, so an RTL name's ellipsis lands at its end.
                   On the dark stage the tag takes the glass's quiet tone; on a phone's idle bar, the theme's. */}
-              <ChannelName name={channel.name} strip={stripPrefix} className="block truncate" tagClassName="text-on-glass-muted max-md:text-fg-subtle" />
+              <ChannelName name={channel.name} strip={stripPrefix} title={channel.name} className="block truncate" tagClassName="text-on-glass-muted max-md:text-fg-subtle" />
             </p>
             {locked ? (
               <p className="mt-1 inline-flex items-center gap-1.5 text-body-sm text-on-glass-muted max-md:mt-0 max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-locked">
@@ -129,13 +134,13 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
             icon={<Play size={16} className="fill-current" />}
             className="mt-2 max-w-full max-md:mt-0 max-md:shrink-0"
             onClick={() => onResume?.(channel)}
-            aria-label={t(highlighted ? 'playChannel' : 'resumeChannel', { name: resumeProgram && !locked ? resumeProgram.title : name })}
+            aria-label={t(highlighted ? 'playChannel' : 'resumeChannel', { name: resumeProgram && !locked ? resumeProgram.title : plainChannelName(channel.name, stripPrefix) })}
             data-testid="stage-resume"
           >
             {t(highlighted ? 'play' : 'resume')}
           </Button>
           <p className={cn('mt-1 text-caption text-on-glass-muted max-md:hidden', LOW_STAGE)} data-testid="stage-idle-hint">
-            {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}
+            {hint ?? <IdleHint radio={kind === 'radio'} />}
           </p>
           {recent && recent.length > 0 && onPlayRef ? (
             <StationShelf
@@ -161,7 +166,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
               {t(kind === 'radio' ? 'radioIdle' : 'stageIdle')}
             </p>
             <p className="text-caption text-on-glass-muted max-md:truncate max-md:text-fg-subtle">
-              {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}
+              {hint ?? <IdleHint radio={kind === 'radio'} />}
             </p>
           </div>
         </div>
@@ -185,7 +190,7 @@ function StationShelf({ heading, items, onPlay }: { heading: string; items: { re
             <button
               type="button"
               onClick={() => onPlay(it.ref)}
-              aria-label={t('playNamed', { name: it.name })}
+              aria-label={t('playNamed', { name: plainChannelName(it.name, false) })}
               className="flex w-24 flex-col items-center gap-1.5 rounded-lg p-2 text-on-glass outline-none hover:bg-on-glass/8 active:bg-on-glass/12 focus-visible:ring-2 focus-visible:ring-focus"
             >
               <ChannelLogo src={it.logo} name={it.name} size={48} sourceId={it.ref.sourceId} />
@@ -198,5 +203,16 @@ function StationShelf({ heading, items, onPlay }: { heading: string; items: { re
         ))}
       </ul>
     </section>
+  );
+}
+
+/** "Pick a channel, or type its number.", without the number on a touch screen, which has no keys for it. */
+function IdleHint({ radio }: { radio: boolean }) {
+  const { t } = useTranslation('live');
+  return (
+    <>
+      <span className="pointer-coarse:hidden">{t(radio ? 'radioIdleHint' : 'stageIdleHint')}</span>
+      <span className="hidden pointer-coarse:inline">{t(radio ? 'radioIdleHintTouch' : 'stageIdleHintTouch')}</span>
+    </>
   );
 }

@@ -9,27 +9,32 @@ import { Tabs, cn } from '../deps';
 import { LEAGUES, type League } from '../lib/types';
 
 export const LEAGUE_KEYS: Record<League, string> = { nfl: 'leagueNfl', cfb: 'leagueCfb', nba: 'leagueNba', mlb: 'leagueMlb' };
-/** Where room is short (a phone's tab row, a card's status line): "NCAAF" for college football. */
+/** Where room is short (the tab row below a 1280 px window, a card's status line): "NCAAF" for college football. */
 export const LEAGUE_SHORT_KEYS: Record<League, string> = { nfl: 'leagueNfl', cfb: 'leagueCfbShort', nba: 'leagueNba', mlb: 'leagueMlb' };
 
 const ALL = 'all';
 
 function Label({ text, short, count, live, liveLabel }: { text: string; short?: string; count?: number; live: boolean; liveLabel: string }) {
+  // A league with no games that day reads as empty before it is picked: its name is quiet too.
+  const empty = count === 0;
   return (
     <>
+      {/* In the pill's top corner, as a notification dot, so it takes no width: in the row it pushed
+          MLB onto a second line on a phone, and the filter chips onto a third toolbar row at 1024. */}
       {live ? (
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-live" data-testid="sports-league-live" />
+        <span aria-hidden className="absolute end-1 top-1 size-1.5 rounded-full bg-live" data-testid="sports-league-live" />
       ) : null}
-      {/* A phone shows the short name, so the five tabs fit one row; the full name is still the tab's name. */}
+      {/* Below a 1280 px window the short name shows, so the five tabs fit one row on a phone and leave
+          the filter chips their row on a tablet; the full name is still the tab's name. */}
       {short && short !== text ? (
         <>
-          <span aria-hidden className="sm:hidden">
+          <span aria-hidden className={cn('xl:hidden', empty && 'text-fg-subtle')}>
             {short}
           </span>
-          <span className="max-sm:sr-only">{text}</span>
+          <span className={cn('max-xl:sr-only', empty && 'text-fg-subtle')}>{text}</span>
         </>
       ) : (
-        <span>{text}</span>
+        <span className={cn(empty && 'text-fg-subtle')}>{text}</span>
       )}
       {/* The spaces are not drawn in the tab's flex row; they keep its name "NBA 7, Live now". */}
       {count !== undefined ? (
@@ -52,14 +57,15 @@ export function LeagueFilter({
 }: {
   value: League | null;
   onChange(next: League | null): void;
-  /** Games of the picked day per league; left out while the day loads. */
-  counts?: Record<League, number>;
+  /** Games of the picked day per league; left out while the day loads, and a league's left out when it failed. */
+  counts?: Partial<Record<League, number>>;
   /** Leagues with a game in progress. */
   live: ReadonlySet<League>;
   className?: string;
 }) {
   const { t } = useTranslation('sports');
-  const total = counts ? LEAGUES.reduce((sum, l) => sum + counts[l], 0) : undefined;
+  // All counts only when every league answered: a sum without a failed league would be too low.
+  const total = counts && LEAGUES.every((l) => counts[l] !== undefined) ? LEAGUES.reduce((sum, l) => sum + (counts[l] ?? 0), 0) : undefined;
   const liveLabel = t('liveNow');
   return (
     <div data-testid="sports-leagues" className={cn('max-w-full min-w-0', className)}>
@@ -69,7 +75,7 @@ export function LeagueFilter({
         variant="pill"
         // Tighter pills on a phone, where the five tabs must share about 360 px. There the track spans
         // the row and the pills share what is left, so it doesn't stop short of the edge by a ragged gap.
-        className="flex-wrap max-sm:[&>button]:grow max-sm:[&>button]:px-2"
+        className="flex-wrap [&>button]:relative max-sm:[&>button]:grow max-sm:[&>button]:px-2"
         label={t('leagues')}
         value={value ?? ALL}
         onChange={(id) => onChange(LEAGUES.find((l) => l === id) ?? null)}

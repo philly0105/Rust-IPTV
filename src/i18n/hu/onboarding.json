@@ -10,8 +10,8 @@
   "tourBack": "Vissza",
   "tourSkip": "Bemutató kihagyása",
   "tourDone": "Kész",
-  "tourHintSearch": "Keresés",
-  "tourHintPalette": "Parancsok",
+  "tourHintSearch": "Keresés ezen az oldalon",
+  "tourHintPalette": "Keresés mindenben",
   "tourHintShortcuts": "Billentyűparancsok",
   "whatsNewTitle": "Újdonságok",
   "whatsNewVersion": "Verzió: {{version}}",
@@ -81,7 +81,8 @@
   "noteGuideSmoothTitle": "Gördülékenyebb műsorújság",
   "noteGuideSmoothText": "A műsorújság sok csatornánál is simán görget, és az XMLTV-adatok hiányait Xtream-fiókja saját műsorújságával pótolja.",
   "tourCoachTitle": "A forrás készen áll",
-  "tourCoachText": "A keresés minden forrásban megtalálja a csatornákat, filmeket és sorozatokat. A parancspaletta bárhová máshová elviszi.",
+  "tourCoachText": "A „Keresés mindenben” minden forrásban megtalálja a csatornákat, filmeket és sorozatokat, és bármelyik oldalt vagy beállítást megnyitja.",
+  "tourCoachTextTouch": "A keresés minden forrásban megtalálja a csatornákat, filmeket és sorozatokat.",
   "tourShowAround": "Körbevezetés",
   "tourGotIt": "Rendben"
 }

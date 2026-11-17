@@ -12,10 +12,11 @@
  * drag, and on touch they stay visible, since there is no hover. Below `sm`
  * (a phone, or a narrow window) the title gets the row's full width: the rank
  * sits on the poster's corner, the grip is gone, and the actions take a line
- * of their own under the title, always visible.
+ * of their own under the title, always visible. On touch the ⋮ stands in for
+ * them beside the title, and a tap anywhere on the row opens it.
  */
 
-import { Check, ChevronDown, ChevronUp, CircleCheck, Clapperboard, Film, GripVertical, Play, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, CircleCheck, Clapperboard, EllipsisVertical, Film, GripVertical, Play, X } from 'lucide-react';
 import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -23,7 +24,7 @@ import type { Source, WatchlistEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 import { joinList } from '@/shell/dashboard/cards';
 
-import { IconButton, Poster, PosterCellWidthContext, ProgressBar, cn, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, ProgressBar, cn, useBusyButtons, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
 
 /**
  * Fixed row height for the virtual list: a 48 x 72 poster plus breathing room,
@@ -68,6 +69,11 @@ export interface MyListRowProps {
   onOpen: (entry: WatchlistEntry) => void;
   onRemove: (entry: WatchlistEntry) => void;
   onToggleWatched: (entry: WatchlistEntry) => void;
+  /**
+   * The title's menu at `pos` (library-05/07): a right click, or on touch the row's one ⋮ button,
+   * which stands in for the inline move, watched and remove buttons.
+   */
+  onMenu?: ((entry: WatchlistEntry, pos: { x: number; y: number }) => void) | undefined;
   /** Plays the title, resuming a saved position; absent when it cannot play from here (a series not started). */
   onPlay?: ((entry: WatchlistEntry) => void) | undefined;
   /** 0..1 of the saved position, drawn as a bar under the facts. */
@@ -83,9 +89,20 @@ export interface MyListRowProps {
 const revealOnFine =
   'sm:pointer-fine:opacity-0 sm:pointer-fine:group-hover:opacity-100 sm:pointer-fine:in-focus-visible:opacity-100 sm:pointer-fine:focus-within:opacity-100 motion-safe:transition-opacity';
 
+/** On touch these sit in the row's one menu (library-07) instead of on the row. */
+const TOUCH_IN_MENU = 'pointer-coarse:hidden';
+
 /** The artwork's box, `w-12 sm:w-14`: spacing steps of 3.75 px at 100 % scale. */
 const ART_PX = 45;
 const ART_SM_PX = 52.5;
+/** Below sm on touch with the ⋮: title and actions side by side, both centred on the poster. */
+const TOUCH_ONE_LINE = 'pointer-coarse:grid-cols-[3rem_minmax(0,1fr)_auto]';
+const TOUCH_ACTIONS_BESIDE = 'relative z-[1] pointer-coarse:col-start-3 pointer-coarse:row-span-2 pointer-coarse:row-start-1 pointer-coarse:self-center';
+/**
+ * On touch the title's button stretches over the whole row, so a tap anywhere on it opens the title
+ * (the row had only onDoubleClick); the actions sit above it.
+ */
+const TOUCH_ROW_TARGET = "pointer-coarse:row-span-2 pointer-coarse:self-center pointer-coarse:after:absolute pointer-coarse:after:inset-0 pointer-coarse:after:content-['']";
 /** Tailwind's `sm` breakpoint. */
 const SM_QUERY = '(min-width: 40rem)';
 
@@ -104,6 +121,7 @@ function MyListRowImpl({
   onOpen: openEntry,
   onRemove: removeEntry,
   onToggleWatched: toggleEntry,
+  onMenu,
   onPlay: playEntry,
   progress,
   progressLabel,
@@ -117,6 +135,7 @@ function MyListRowImpl({
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true));
   const onOpen = () => openEntry(entry);
+  const busyButton = useBusyButtons(busy);
 
   return (
     <div
@@ -124,6 +143,9 @@ function MyListRowImpl({
         // Below sm a grid: the poster spans two lines, the title above the actions. From sm up one flex line.
         'group relative grid h-full grid-cols-[3rem_minmax(0,1fr)] content-center items-center gap-x-3 gap-y-1 rounded-lg px-1.5',
         'sm:flex sm:gap-4 sm:px-3',
+        // Touch with the one ⋮ (library-07): the actions line held nothing else, so the ⋮ (and a
+        // started title's Play) take a third column beside the title instead of the row's far corner.
+        onMenu && TOUCH_ONE_LINE,
         'hover:bg-hover in-focus-visible:bg-hover motion-safe:transition-colors',
         dragging && 'opacity-40',
         busy && 'cursor-progress',
@@ -135,12 +157,20 @@ function MyListRowImpl({
       onDragOver={reorder ? (e) => reorder.onDragOver(entry, e) : undefined}
       onDrop={reorder ? (e) => reorder.onDrop(entry, e) : undefined}
       onDoubleClick={onOpen}
+      onContextMenu={
+        onMenu
+          ? (e) => {
+              e.preventDefault();
+              onMenu(entry, { x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
     >
       {reorder && dropTarget && (
         <div
           aria-hidden
           className={cn(
-            'pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-accent shadow-[0_0_8px_var(--color-glow)]',
+            'pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-accent-mark',
             dropTarget === 'before' ? 'top-0' : 'bottom-0',
           )}
         />
@@ -151,7 +181,7 @@ function MyListRowImpl({
         <span
           aria-hidden
           className={cn(
-            'leading-none font-medium tabular',
+            'pointer-events-none leading-none font-medium tabular',
             // Below sm: a small plate on the poster's top corner, so the title keeps the width.
             'absolute start-2.5 top-[calc(50%-32px)] z-10 min-w-5 rounded-sm bg-glass-strong px-1 py-0.5 text-center text-xs text-on-glass',
             'sm:static sm:w-6 sm:min-w-0 sm:shrink-0 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-end sm:text-sm sm:text-fg-subtle',
@@ -191,14 +221,14 @@ function MyListRowImpl({
         type="button"
         tabIndex={-1}
         onClick={onOpen}
-        className="col-start-2 row-start-1 flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-sm text-start sm:gap-1"
+        className={cn('col-start-2 row-start-1 flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-sm text-start sm:gap-1', onMenu && TOUCH_ROW_TARGET)}
         data-action="open"
         data-testid="mylist-open"
       >
         {/* Two lines before the ellipsis: a phone row is narrow and titles run long. */}
         <span
           dir="auto"
-          className="line-clamp-2 w-full text-match-parent text-[calc(15rem/15)] leading-5 font-medium [overflow-wrap:anywhere] text-fg"
+          className="line-clamp-2 w-full text-match-parent text-body leading-5 font-medium [overflow-wrap:anywhere] text-fg"
           title={title}
           data-testid="mylist-title"
         >
@@ -239,7 +269,7 @@ function MyListRowImpl({
       </button>
 
       {/* Below sm the actions line sits under the title (grid column 2); move first, remove at the far end. */}
-      <div className="col-start-2 row-start-2 flex min-w-0 items-center gap-1 sm:shrink-0" data-testid="mylist-actions">
+      <div className={cn('col-start-2 row-start-2 flex min-w-0 items-center gap-1 sm:shrink-0', onMenu && TOUCH_ACTIONS_BESIDE)} data-testid="mylist-actions">
         {playEntry ? (
           <IconButton
             size="sm"
@@ -247,13 +277,13 @@ function MyListRowImpl({
             tabIndex={-1}
             label={progress ? t('resumeTitle', { title }) : t('playTitle', { title })}
             icon={<Play aria-hidden size={14} className="fill-current" />}
-            disabled={busy}
-            onClick={() => playEntry(entry)}
-            className={cn('rounded-full', revealOnFine)}
+            {...busyButton('play', () => playEntry(entry))}
+            // On touch the Play circle stays only for a title with progress to resume (library-07).
+            className={cn('rounded-full', revealOnFine, onMenu && !(progress && progress > 0) && 'pointer-coarse:hidden')}
             data-action="play"
           />
         ) : (
-          <span aria-hidden className="h-8 w-8 shrink-0" />
+          <span aria-hidden className={cn('h-8 w-8 shrink-0', onMenu && 'pointer-coarse:hidden')} />
         )}
         {movie ? (
           <IconButton
@@ -262,37 +292,38 @@ function MyListRowImpl({
             label={t('markWatched', { title })}
             tooltip={watched ? t('watchedHintOn') : t('watchedHintOff')}
             pressed={watched}
-            disabled={busy}
             // One glyph in both states (an empty circle read as a radio button); the colour and the pressed state carry it.
             icon={<CircleCheck aria-hidden size={18} />}
-            onClick={() => toggleEntry(entry)}
-            className={cn(watched ? 'bg-transparent text-success hover:text-success' : cn('text-fg-subtle', revealOnFine))}
+            {...busyButton('watched', () => toggleEntry(entry))}
+            className={cn(watched ? 'bg-transparent text-success hover:text-success' : cn('text-fg-subtle', revealOnFine), onMenu && TOUCH_IN_MENU)}
             data-action="watched"
           />
         ) : (
           // Series are marked watched on their own page, episode by episode; keep the columns aligned.
-          <span aria-hidden className="h-8 w-8 shrink-0" />
+          <span aria-hidden className={cn('h-8 w-8 shrink-0', onMenu && TOUCH_IN_MENU)} />
         )}
         {reorder && (
-          <div className={cn('order-first flex gap-1 sm:order-none sm:flex-col sm:gap-0', revealOnFine)} data-testid="mylist-move">
+          <div className={cn('order-first flex gap-1 sm:order-none sm:flex-col sm:gap-0', revealOnFine, onMenu && TOUCH_IN_MENU)} data-testid="mylist-move">
             <IconButton
               size="sm"
               tabIndex={-1}
               label={t('moveUp', { title })}
-              icon={<ChevronUp aria-hidden size={16} />}
-              disabled={!canUp || busy}
-              onClick={() => reorder.onMove(entry, -1)}
-              className="sm:h-7 sm:rounded-b-none"
+              icon={<ArrowUp aria-hidden size={14} />}
+              disabled={!canUp}
+              {...busyButton('up', () => reorder.onMove(entry, -1))}
+              // The end a row cannot move past is not drawn (library-08), as on Favorites; invisible,
+              // so the other arrow keeps its place in the stack.
+              className={cn('sm:h-7 sm:rounded-b-none', !canUp && 'invisible')}
               data-action="move-up"
             />
             <IconButton
               size="sm"
               tabIndex={-1}
               label={t('moveDown', { title })}
-              icon={<ChevronDown aria-hidden size={16} />}
-              disabled={!canDown || busy}
-              onClick={() => reorder.onMove(entry, 1)}
-              className="sm:h-7 sm:rounded-t-none"
+              icon={<ArrowDown aria-hidden size={14} />}
+              disabled={!canDown}
+              {...busyButton('down', () => reorder.onMove(entry, 1))}
+              className={cn('sm:h-7 sm:rounded-t-none', !canDown && 'invisible')}
               data-action="move-down"
             />
           </div>
@@ -302,11 +333,26 @@ function MyListRowImpl({
           tabIndex={-1}
           label={t('remove', { title })}
           icon={<X aria-hidden size={16} />}
-          disabled={busy}
-          onClick={() => removeEntry(entry)}
-          className={cn('ms-auto hover:text-danger sm:ms-0', revealOnFine)}
+          {...busyButton('remove', () => removeEntry(entry))}
+          className={cn('ms-auto hover:text-danger sm:ms-0', revealOnFine, onMenu && TOUCH_IN_MENU)}
           data-action="remove"
         />
+        {onMenu && (
+          // Touch: one button for the moves, the watched mark and remove, as a Favorites row has
+          // (library-07): five always-visible targets put remove a thumb away from Play.
+          <IconButton
+            tabIndex={-1}
+            label={t('library:entryMenu', { title })}
+            aria-haspopup="menu"
+            icon={<EllipsisVertical aria-hidden size={18} />}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu(entry, { x: document.documentElement.dir === 'rtl' ? r.right : r.left, y: r.bottom + 2 });
+            }}
+            className="ms-auto shrink-0 not-pointer-coarse:hidden sm:ms-0"
+            data-action="menu"
+          />
+        )}
       </div>
     </div>
   );

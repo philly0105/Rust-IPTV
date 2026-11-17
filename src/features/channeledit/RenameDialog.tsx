@@ -5,10 +5,10 @@ import { useTranslation } from 'react-i18next';
 import { RpcError } from '@/api/transport';
 import type { Channel } from '@/api/types';
 import { trimName } from '@/lib/names';
-import { Button, Dialog, Input, Skeleton, cn } from '@/ui';
+import { Button, Dialog, Input, cn } from '@/ui';
 
 import { failureText, renameChannel, renamedToast } from './actions';
-import { findEdit, useDisplayName, useSourceEdits } from './edits';
+import { findEdit, useToastName, useSourceEdits } from './edits';
 import { NAME_MAX, nameLength, planRename, type RenamePlan } from './name';
 
 export interface RenameDialogProps {
@@ -26,7 +26,7 @@ export interface RenameDialogProps {
  */
 export function RenameDialog({ channel, onClose }: RenameDialogProps) {
   const { t } = useTranslation('channels');
-  const display = useDisplayName();
+  const display = useToastName();
   const formId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const edits = useSourceEdits(channel.ref.sourceId);
@@ -133,7 +133,7 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
         </>
       }
     >
-      <form id={formId} onSubmit={(e) => void save(e)} className="flex flex-col gap-1.5" noValidate>
+      <form id={formId} onSubmit={(e) => void save(e)} className="flex flex-col gap-1.5" noValidate data-edits-known={known || undefined}>
         <div className="flex items-baseline justify-between gap-3">
           <label htmlFor={`${formId}-name`} className="text-sm font-medium text-fg">
             {t('nameLabel')}
@@ -161,10 +161,10 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
           hint={t('renameHint')}
           data-testid="channel-rename-input"
         />
-        <div className="mt-2 min-h-9 rounded-md border border-divider bg-surface-2 px-3 py-2 text-sm" data-testid="channel-rename-provider">
-          {!known ? (
-            <Skeleton className="h-4 w-3/5" />
-          ) : (
+        {/* The provider's name is the way back from an edit: shown once there is one (the channel is
+            renamed, or the field no longer holds it), not as a copy of the field on open. */}
+        {known && (renamed || value.trim() !== provider) ? (
+          <div className="mt-2 min-h-9 rounded-md border border-edge bg-surface-2 px-3 py-2 text-sm" data-testid="channel-rename-provider">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <p className="min-w-0 flex-1 text-fg-muted">
                 {t('providerNameLabel')}{' '}
@@ -176,8 +176,8 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
                 </Button>
               ) : null}
             </div>
-          )}
-        </div>
+          </div>
+        ) : null}
       </form>
     </Dialog>
   );

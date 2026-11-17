@@ -1,29 +1,34 @@
 /**
  * Guide search (Run 2 C5): the header's search field (`/` and Ctrl+F focus it) and a floating
- * results panel under it. Queries `epg.search` for the selected source 120 ms after
- * typing stops, from what airs now to 14 days ahead, and lists the hits by
- * day with channel, time and title. Choosing a hit moves the grid to it; each
- * hit also offers Watch (while it airs), Remind, Record and Record series.
+ * results panel under it. 120 ms after typing stops it asks for the source's channels whose name
+ * matches (a few, listed first: choosing one moves the grid to its row) and `epg.search` for
+ * programmes from what airs now to 14 days ahead, listed by day with time, title and channel. A
+ * show on several channels at the same time is one row, its other channels behind "+N channels",
+ * as the Search page folds them. Choosing a hit moves the grid to it; each hit also offers Watch
+ * (while it airs), Remind, Record and Record series. The last row hands the query to the app's
+ * Search page.
  */
 
 import type { TFunction } from 'i18next';
-import { CalendarOff, Radio, SearchX, X } from 'lucide-react';
+import { CalendarOff, Radio, Search, SearchX, X } from 'lucide-react';
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import type { GuideSearchHit } from '@/api/types';
+import type { Channel, GuideSearchHit } from '@/api/types';
 import { ProgramActionsView, ScheduleMarkView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
 import { useShell } from '@/shell';
-import { buttonClass, cn, EmptyState, ErrorState, IconButton, Skeleton } from '@/ui';
-import { intlLocale } from '@/lib/intl';
+import { SearchEverythingLink } from '@/shell/SearchEverythingLink';
+import { buttonClass, cn, EmptyState, ErrorState, IconButton, Skeleton, TOUCH_TARGET } from '@/ui';
+import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useDebounced } from '../hooks/useDebounced';
-import { displayChannelName } from '../lib/channelName';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { displayChannelName, isSeparatorName, plainChannelName } from '../lib/channelName';
 import { formatClock, formatDay, localDayDiff, ms, programWhen } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
-import { displayHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchWindow } from './search';
+import { displayHits, foldHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchWindow } from './search';
 import { useStable } from './useStable';
 
 /** Debounce before a query is sent (the search itself answers within the 150 ms budget's rest). */
@@ -33,6 +38,8 @@ export const SEARCH_DEBOUNCE_MS = 120;
  * keystroke never mounts a hundred rows in one task (L2-perf-ui-2).
  */
 export const HITS_FIRST_BATCH = 20;
+/** Channels listed above the programmes: enough to find "espn" among its variants, few enough to leave room. */
+export const CHANNEL_HITS = 5;
 
 /** The panel's widest, in rem (it follows the UI scale). */
 const PANEL_MAX_REM = 30;
@@ -74,6 +81,8 @@ interface SharedProps {
   stripCountryPrefix?: boolean;
   /** A hit in display time: move the grid to it. */
   onSelect(hit: GuideSearchHit): void;
+  /** A channel whose name matched: move the grid to its row. */
+  onSelectChannel(channel: Channel): void;
   /** Play the channel of an airing hit. */
   onWatch(hit: GuideSearchHit): void;
 }
@@ -98,7 +107,7 @@ export interface GuideHeaderSearchProps extends SharedProps {
  * the header (title, subtitle and the field) and the query, so typing re-renders this and the
  * header, not the grid. Renders the panel only; place it inside the page (SEARCH_BOUNDS_ATTR).
  */
-export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtitle, inputRef, onSelect, onWatch, disabled, field = true, actions, ...rest }: GuideHeaderSearchProps) {
+export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtitle, inputRef, onSelect, onSelectChannel, onWatch, disabled, field = true, actions, ...rest }: GuideHeaderSearchProps) {
   const { t } = useTranslation('guide');
   const { setHeader } = useShell();
   const [query, setQuery] = useState('');
@@ -152,8 +161,12 @@ export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtit
     if (refocus) inputRef.current?.focus();
   });
 
-  const placeholder = t('searchPlaceholder');
+  // The header field is 24vw wide: below about 1360 px the full hint ("Search programmes and
+  // channels") was cut mid-word, losing the part that says channels are searchable, so a
+  // narrower field shows the field's name instead.
+  const roomy = useMediaQuery('(min-width: 1360px)');
   const label = t('searchLabel');
+  const placeholder = roomy ? t('searchPlaceholder') : label;
   useEffect(() => {
     if (!field) {
       setHeader({ title, subtitle });
@@ -204,6 +217,10 @@ export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtit
         setOpen(false);
         onSelect(hit);
       }}
+      onSelectChannel={(channel) => {
+        setOpen(false);
+        onSelectChannel(channel);
+      }}
       onWatch={(hit) => {
         setOpen(false);
         onWatch(hit);
@@ -236,8 +253,10 @@ function dayHeading(day: number, now: number, locale: string, t: TFunction<'guid
   return t('dayHeading', { rel: `${rel.charAt(0).toLocaleUpperCase(locale)}${rel.slice(1)}`, date });
 }
 
-export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stripCountryPrefix, onSelect, onWatch, onClose, className, style }: GuideSearchPanelProps) {
+export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stripCountryPrefix, onSelect, onSelectChannel, onWatch, onClose, className, style }: GuideSearchPanelProps) {
   const { t, i18n } = useTranslation('guide');
+  const { t: tl } = useTranslation('live');
+  const { t: ts } = useTranslation('shell');
   const lang = i18n.language;
   const debounced = useDebounced(query, SEARCH_DEBOUNCE_MS);
   const q = searchQuery(debounced);
@@ -257,18 +276,37 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
     { sourceId, query: q ?? '', from, to, limit: SEARCH_LIMIT },
     { enabled: !!q && !!sourceId && !guides.isLoading && !noGuide, staleTime: 60_000, keepPrevious: true },
   );
-  const hits = useMemo(() => (search.data ? displayHits(search.data, offsetMinutes) : undefined), [search.data, offsetMinutes]);
+  // A user who types a channel's name to find its row: the source's channels that match, by name.
+  const channelSearch = useRpcQuery(
+    'catalog.channels',
+    { sourceId, query: { offset: 0, limit: CHANNEL_HITS, search: q ?? '' } },
+    { enabled: !!q && !!sourceId, staleTime: 60_000, keepPrevious: true },
+  );
+  // A provider's heading row ("#### SKY SPORTS ####") is no channel to jump to.
+  const channels = q ? (channelSearch.data?.items ?? []).filter((c) => !isSeparatorName(c.name)) : [];
+  // The same show on several channels at once is one row (the Search page's folding).
+  const hits = useMemo(() => (search.data ? foldHits(displayHits(search.data, offsetMinutes)) : undefined), [search.data, offsetMinutes]);
   // A new answer mounts its first hits at once and the rest a batch per frame.
   const [shown, setShown] = useState<{ hits: typeof hits; n: number }>({ hits, n: HITS_FIRST_BATCH });
   const shownN = shown.hits === hits ? shown.n : HITS_FIRST_BATCH;
   if (shown.hits !== hits) setShown({ hits, n: HITS_FIRST_BATCH });
   const total = hits?.length ?? 0;
+  // The core stopped at the limit: later airings exist past the last one listed (one show on 59
+  // channels at once takes 59 of the 100), so the count is a floor and the end says how far it got.
+  const capped = (search.data?.length ?? 0) >= SEARCH_LIMIT;
   useEffect(() => {
     if (shownN >= total) return;
     const id = requestAnimationFrame(() => setShown((s) => (s.hits === hits ? { hits, n: s.n + HITS_FIRST_BATCH } : s)));
     return () => cancelAnimationFrame(id);
   }, [hits, shownN, total]);
   const days = useMemo(() => groupHitsByDay((hits ?? []).slice(0, shownN)), [hits, shownN]);
+  // Rows whose other channels are listed.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = useMemo(() => (key: string) => setOpened((o) => {
+    const next = new Set(o);
+    if (!next.delete(key)) next.add(key);
+    return next;
+  }), []);
   const pending = settling || search.isFetching;
   // One read of the schedule, rules and recording support for every hit's actions.
   const shared = useProgramActionsShared();
@@ -276,6 +314,8 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
   const handlers = useRef({ onSelect, onWatch });
   handlers.current = { onSelect, onWatch };
   const select = useMemo(() => (hit: GuideSearchHit) => handlers.current.onSelect(hit), []);
+  const channelsRef = useRef(onSelectChannel);
+  channelsRef.current = onSelectChannel;
   const watch = useMemo(() => (hit: GuideSearchHit) => handlers.current.onWatch(hit), []);
 
   const focusHit = (from: HTMLElement | null, step: number | 'first' | 'last') => {
@@ -353,11 +393,26 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
     );
   } else if (hits.length === 0) {
     state = 'empty';
-    body = <EmptyState size="inline" icon={<SearchX size={20} aria-hidden />} title={t('searchEmpty', { query: q ?? typed })} description={t('searchEmptyHint')} />;
+    // Under matching channels, one quiet line: the empty state's icon and hint would outweigh them.
+    body =
+      channels.length > 0 ? (
+        <p className="px-4 py-3 text-body-sm text-fg-muted" data-testid="guide-search-no-programmes">
+          {t('searchNoProgrammes', { query: q ?? typed })}
+        </p>
+      ) : (
+        <EmptyState
+          size="inline"
+          icon={<SearchX size={20} aria-hidden />}
+          title={t('searchEmpty', { query: q ?? typed })}
+          description={t('searchEmptyHint')}
+          // The guide holds programmes; the search of everything also finds channels, movies and series.
+          action={<SearchEverythingLink query={q ?? typed} size="sm" />}
+        />
+      );
   } else {
     state = 'results';
     body = (
-      <div ref={listRef} className={cn('flex flex-col', pending && 'opacity-70 motion-safe:transition-opacity')}>
+      <div className={cn('flex flex-col', pending && 'opacity-70 motion-safe:transition-opacity')}>
         {days.map((d) => (
           <section key={d.day} aria-label={dayHeading(d.day, now, lang, t)}>
             <h3 className="sticky top-0 z-10 border-b border-divider bg-surface-2 px-4 py-1.5 text-xs font-medium text-fg-muted" data-testid="guide-search-day">
@@ -365,12 +420,28 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
             </h3>
             <ul className="flex flex-col divide-y divide-divider">
               {d.hits.map((h) => (
-                <HitRow key={hitKey(h)} hit={h} now={now} lang={lang} strip={stripCountryPrefix} shared={shared} onSelect={select} onWatch={watch} />
+                <HitRow
+                  key={hitKey(h)}
+                  hit={h.first}
+                  also={h.also}
+                  opened={opened.has(hitKey(h))}
+                  onToggle={toggle}
+                  now={now}
+                  lang={lang}
+                  strip={stripCountryPrefix}
+                  shared={shared}
+                  onSelect={select}
+                  onWatch={watch}
+                />
               ))}
             </ul>
           </section>
         ))}
-        {hits.length >= SEARCH_LIMIT ? <p className="px-4 py-3 text-center text-xs text-fg-subtle">{t('searchMore', { n: SEARCH_LIMIT })}</p> : null}
+        {capped ? (
+          <p className="px-4 py-3 text-center text-xs text-fg-subtle" data-testid="guide-search-more">
+            {t('searchMore', { time: `${formatDay(ms(hits[hits.length - 1]!.program.start), lang)} ${formatClock(ms(hits[hits.length - 1]!.program.start), lang)}` })}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -396,17 +467,70 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
           {t('searchResults')}
         </h2>
         <span className="font-display text-xs tabular-nums text-fg-subtle" aria-live="polite" data-testid="guide-search-count">
-          {state === 'results' && hits ? t('resultCount', { count: hits.length }) : ''}
+          {state === 'results' && hits ? t(capped ? 'resultCountMore' : 'resultCount', { count: hits.length }) : ''}
         </span>
         <IconButton size="sm" label={t('closeSearch')} icon={<X className="size-4" aria-hidden />} onClick={() => onClose(true)} />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{body}</div>
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {channels.length > 0 && state !== 'hint' ? (
+          <section aria-label={tl('channels')} data-testid="guide-search-channels">
+            <h3 className="sticky top-0 z-10 border-b border-divider bg-surface-2 px-4 py-1.5 text-xs font-medium text-fg-muted">{tl('channels')}</h3>
+            <ul className="flex flex-col divide-y divide-divider">
+              {channels.map((ch) => (
+                <li key={ch.ref.itemId} className="flex hover:bg-hover" data-hit-row="">
+                  <button
+                    type="button"
+                    data-hit=""
+                    onClick={() => channelsRef.current(ch)}
+                    data-testid="guide-search-channel"
+                    className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-2 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+                  >
+                    {/* The programme rows' time column, so the logos line up; the number sits at its
+                        end, beside the logo, as the grid's channel column puts it. */}
+                    <span className="min-w-[4.5rem] shrink-0 text-end font-numeric text-body-sm tabular-nums text-fg-muted">{ch.number ?? ''}</span>
+                    <ChannelLogo src={ch.logoUrl} name={displayChannelName(ch.name, stripCountryPrefix)} size={28} sourceId={ch.ref.sourceId} />
+                    <ChannelName name={ch.name} strip={stripCountryPrefix} className="min-w-0 flex-1 truncate text-sm font-medium" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {body}
+        {/* Not what was meant: the same words across the whole library. */}
+        {typed ? (
+          <div data-hit-row="">
+            <Link
+              to={`/search?q=${encodeURIComponent(typed)}`}
+              onClick={() => onClose(false)}
+              data-hit=""
+              className="flex items-center gap-3 border-t border-divider px-4 py-2.5 text-body-sm text-fg outline-none hover:bg-hover focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+              data-testid="guide-search-everything"
+            >
+              <Search size={16} aria-hidden className="shrink-0 text-fg-muted" />
+              <span dir="auto" className="min-w-0 truncate">
+                {ts('searchFor', { query: typed })}
+              </span>
+            </Link>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
 
+/**
+ * Other channels listed at first when a row's "+N channels" opens, as the Search page lists them:
+ * on a large library one show airs on dozens of regional and backup copies, and all of them at
+ * once pushed the next shows out of the panel. "Show all" lists the rest.
+ */
+export const ALSO_SHOWN = 8;
+
 const HitRow = memo(function HitRow({
   hit,
+  also,
+  opened,
+  onToggle,
   now,
   lang,
   strip,
@@ -415,6 +539,11 @@ const HitRow = memo(function HitRow({
   onWatch,
 }: {
   hit: GuideSearchHit;
+  /** The same show at the same time on other channels. */
+  also: readonly GuideSearchHit[];
+  /** Those channels are listed under the row. */
+  opened: boolean;
+  onToggle(key: string): void;
   now: number;
   lang: string;
   strip?: boolean;
@@ -423,54 +552,136 @@ const HitRow = memo(function HitRow({
   onWatch(hit: GuideSearchHit): void;
 }) {
   const { t } = useTranslation('guide');
+  const { t: tv } = useTranslation('vod');
+  const { t: ts } = useTranslation('shell');
   const { program } = hit;
   const name = displayChannelName(hit.channelName, strip);
+  // Screen readers hear the cleaned name ("ESPN HD (US)").
+  const srName = plainChannelName(hit.channelName, strip);
   const start = ms(program.start);
   const airing = programWhen(program, now) === 'now';
   const time = formatClock(start, lang);
 
+  const key = hitKey(hit);
+  const [all, setAll] = useState(false);
+  if (all && !opened) setAll(false);
+  const alsoList = useRef<HTMLUListElement>(null);
+  // "Show all" goes as it is pressed: focus moves on to the first channel it brought in.
+  const focusFirstMore = useRef(false);
+  useLayoutEffect(() => {
+    if (!all || !focusFirstMore.current) return;
+    focusFirstMore.current = false;
+    alsoList.current?.querySelectorAll<HTMLElement>('[data-hit]')[ALSO_SHOWN]?.focus();
+  }, [all]);
   return (
-    <li className="group flex items-center gap-1 pe-2 hover:bg-hover" data-hit-row="" data-testid="guide-search-hit">
-      <button
-        type="button"
-        data-hit=""
-        onClick={() => onSelect(hit)}
-        aria-label={t('hitLabel', { title: program.title, channel: name, time })}
-        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-1 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
-      >
-        {/* Wide enough for a 12-hour "05:00 AM" on one line; a longer local format widens it, never wraps it. */}
-        <span className="flex min-w-[4.5rem] shrink-0 flex-col items-start">
-          {/* The title leads; the time is a quieter readout beside it. */}
-          <span className={cn('font-numeric text-body-sm leading-tight whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg-muted')}>{time}</span>
-          {airing ? <span className="text-[calc(10rem/15)] leading-tight text-live">{t('airingNow')}</span> : null}
-        </span>
-        <ChannelLogo src={hit.logoUrl} name={name} size={28} sourceId={hit.ref.sourceId} />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span dir="auto" className="truncate text-sm font-medium text-match-parent">
-              {program.title}
+    <li data-testid="guide-search-hit">
+      <div className="group flex items-center gap-1 pe-2 hover:bg-hover" data-hit-row="">
+        <button
+          type="button"
+          data-hit=""
+          onClick={() => onSelect(hit)}
+          aria-label={t('hitLabel', { title: program.title, channel: srName, time })}
+          className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-1 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+        >
+          {/* Wide enough for a 12-hour "05:00 AM" on one line; a longer local format widens it, never wraps it. */}
+          <span className="flex min-w-[4.5rem] shrink-0 flex-col items-start">
+            {/* The title leads; the time is a quieter readout beside it. */}
+            <span className={cn('font-numeric text-body-sm leading-tight whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg-muted')}>{time}</span>
+            {airing ? <span className="text-[calc(10rem/15)] leading-tight text-live">{t('airingNow')}</span> : null}
+          </span>
+          <ChannelLogo src={hit.logoUrl} name={name} size={28} sourceId={hit.ref.sourceId} />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span dir="auto" className="truncate text-sm font-medium text-match-parent">
+                {program.title}
+              </span>
+              {/* recording: what is set shows at rest; the buttons that change it come on hover. */}
+              <ScheduleMarkView index={shared.index} channelRef={hit.ref} program={program} />
             </span>
-            {/* recording: what is set shows at rest; the buttons that change it come on hover. */}
-            <ScheduleMarkView index={shared.index} channelRef={hit.ref} program={program} />
+            <span className="flex min-w-0 gap-1.5 text-xs text-fg-muted">
+              {hit.channelNumber !== undefined ? <span className="shrink-0 tabular-nums text-fg-subtle">{hit.channelNumber}</span> : null}
+              <ChannelName name={hit.channelName} strip={strip} srName={srName} className="min-w-0 truncate" />
+            </span>
           </span>
-          <span className="flex min-w-0 gap-1.5 text-xs text-fg-muted">
-            {hit.channelNumber !== undefined ? <span className="shrink-0 tabular-nums text-fg-subtle">{hit.channelNumber}</span> : null}
-            <ChannelName name={hit.channelName} strip={strip} className="min-w-0 truncate" />
+        </button>
+        <span className="flex shrink-0 items-center">
+          {airing ? (
+            <IconButton size="sm" label={t('watchNow', { channel: srName })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(hit)} data-testid="guide-search-watch" />
+          ) : null}
+          {/* A column of record and remind buttons on every hit read as a list of alerts: they
+              come with hover or focus. A touch screen has neither, and three 44 px buttons per hit
+              left a phone's titles "W..": a tap shows the hit in the grid, and its cell's card has
+              Remind and Record. */}
+          <span className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:hidden" data-testid="guide-search-actions">
+            <ProgramActionsView channelRef={hit.ref} channelName={name} program={program} now={now} variant="icons" shared={shared} />
           </span>
         </span>
-      </button>
-      <span className="flex shrink-0 items-center">
-        {airing ? (
-          <IconButton size="sm" label={t('watchNow', { channel: name })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(hit)} data-testid="guide-search-watch" />
-        ) : null}
-        {/* A column of record and remind buttons on every hit read as a list of alerts: they
-            come with hover or focus. A touch screen has neither, and three 44 px buttons per hit
-            left a phone's titles "W..": a tap shows the hit in the grid, and its cell's card has
-            Remind and Record. */}
-        <span className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:hidden" data-testid="guide-search-actions">
-          <ProgramActionsView channelRef={hit.ref} channelName={name} program={program} now={now} variant="icons" shared={shared} />
-        </span>
-      </span>
+      </div>
+      {also.length > 0 ? (
+        // The same show on other channels at that time: behind one quiet button, under the title.
+        <div className="ps-[calc(7rem+28px)] pe-2 pb-1.5">
+          <button
+            type="button"
+            aria-expanded={opened}
+            onClick={() => onToggle(key)}
+            data-testid="guide-search-also-toggle"
+            className={cn(
+              '-ms-1 inline-flex items-center rounded-xs px-1 text-caption font-medium text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus',
+              TOUCH_TARGET,
+            )}
+          >
+            {opened ? tv('showLess') : `+${ts('countChannels', { count: also.length })}`}
+          </button>
+        </div>
+      ) : null}
+      {opened ? (
+        <ul ref={alsoList} className="flex flex-col pb-1" data-testid="guide-search-also">
+          {(all ? also : also.slice(0, ALSO_SHOWN)).map((a) => {
+            const other = displayChannelName(a.channelName, strip);
+            const otherSr = plainChannelName(a.channelName, strip);
+            return (
+              <li key={hitKey(a)} className="flex items-center gap-1 pe-2 hover:bg-hover" data-hit-row="">
+                <button
+                  type="button"
+                  data-hit=""
+                  onClick={() => onSelect(a)}
+                  aria-label={t('hitLabel', { title: program.title, channel: otherSr, time })}
+                  className="flex min-w-0 flex-1 items-center gap-3 py-1.5 ps-[calc(7rem+28px)] pe-1 text-start text-xs text-fg-muted outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+                >
+                  <ChannelLogo src={a.logoUrl} name={other} size={20} sourceId={a.ref.sourceId} />
+                  <span className="flex min-w-0 gap-1.5">
+                    {a.channelNumber !== undefined ? <span className="shrink-0 tabular-nums text-fg-subtle">{a.channelNumber}</span> : null}
+                    <ChannelName name={a.channelName} strip={strip} className="min-w-0 truncate" />
+                  </span>
+                </button>
+                {airing ? (
+                  <IconButton size="sm" label={t('watchNow', { channel: other })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(a)} />
+                ) : null}
+              </li>
+            );
+          })}
+          {also.length > ALSO_SHOWN && !all ? (
+            <li className="ps-[calc(7rem+28px)] pe-2" data-hit-row="">
+              <button
+                type="button"
+                data-hit=""
+                onClick={() => {
+                  focusFirstMore.current = true;
+                  setAll(true);
+                }}
+                data-testid="guide-search-also-all"
+                className={cn(
+                  '-ms-1 inline-flex items-center rounded-xs px-1 text-caption font-medium text-fg outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus',
+                  TOUCH_TARGET,
+                )}
+              >
+                {/* Counts every channel, the one in the row's title too, as the Search page's does. */}
+                {`${tv('showAll')} (${numberFormat(intlLocale(lang)).format(also.length + 1)})`}
+              </button>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
     </li>
   );
 });

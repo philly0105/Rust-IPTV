@@ -2,6 +2,7 @@ import { cleanup, configure, fireEvent, screen, waitFor, within } from '@testing
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, ItemRef, Page, PageQuery } from '@/api/types';
+import { useToastStore } from '@/ui';
 
 import { EpgGridPage } from '../components/EpgGridPage';
 import { EpgRibbon } from '../components/EpgRibbon';
@@ -156,7 +157,9 @@ describe('EpgGridPage short-EPG fallback', () => {
   it('offers a past archive programme download from its guide context menu', async () => {
     handlers(false);
     const now = Date.now();
-    const past = program('Yesterday news', now - 2 * HOUR, now - HOUR);
+    // An hour that ended a few minutes ago: the guide mounts programmes only from 45 minutes
+    // before its left edge, so one that ended an hour ago was missing at :09-:15 past the hour.
+    const past = program('Yesterday news', now - HOUR - 5 * MINUTE, now - 5 * MINUTE);
     rpcMock.handlers['epg.grid'] = (a) => Object.fromEntries((a as { refs: ItemRef[] }).refs.map((r) => [
       `${r.sourceId}|${r.contentType}|${r.itemId}`, r.itemId === 'c0' ? [past] : [],
     ]));
@@ -175,6 +178,42 @@ describe('EpgGridPage short-EPG fallback', () => {
     });
   });
 
+  it("offers Download and Copy link in a past archive programme's detail", async () => {
+    handlers(false);
+    const now = Date.now();
+    // Ended a few minutes ago: inside the window the guide opens on.
+    const past = program('Yesterday news', now - 40 * MINUTE, now - 5 * MINUTE);
+    rpcMock.handlers['epg.grid'] = (a) => Object.fromEntries((a as { refs: ItemRef[] }).refs.map((r) => [
+      `${r.sourceId}|${r.contentType}|${r.itemId}`, r.itemId === 'c0' ? [past] : [],
+    ]));
+    rpcMock.handlers['xtream.catchupUrl'] = () => ({ url: 'http://provider.test/timeshift/news.ts', kind: 'direct' });
+    rpcMock.handlers['downloads.start'] = () => ({ id: 42 });
+    renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: /Yesterday news/ }));
+    const pop = await screen.findByTestId('program-popover');
+    fireEvent.click(within(pop).getByTestId('program-download'));
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'downloads.start')).toHaveLength(1));
+    // Under the download's own id, so its Downloaded toast replaces this one instead of stacking.
+    await waitFor(() => expect(useToastStore.getState().toasts.map((x) => x.id)).toContain('download-42'));
+
+    // The clipboard takes the link at once when it can.
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    fireEvent.click(within(pop).getByTestId('program-copy-link'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://provider.test/timeshift/news.ts'));
+    expect(screen.queryByTestId('programme-link-field')).toBeNull();
+    // Named as the button names it, not as the channel's own stream address (v-guide-08).
+    await waitFor(() => expect(useToastStore.getState().toasts.map((x) => x.title)).toContain('Programme link copied'));
+
+    // When it refuses, the link is offered in a field with a Copy button.
+    writeText.mockRejectedValue(new Error('denied'));
+    fireEvent.click(within(pop).getByTestId('program-copy-link'));
+    const field = await screen.findByTestId<HTMLInputElement>('programme-link-field');
+    expect(field.value).toBe('http://provider.test/timeshift/news.ts');
+    expect(screen.getByRole('dialog', { name: 'Copy programme link' })).toBeTruthy();
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+  });
+
   it('fills empty rows from the provider and marks them in the programme dialog', async () => {
     renderAt('/epg?source=src1', [
       { path: '/epg', element: <EpgGridPage /> },
@@ -188,7 +227,14 @@ describe('EpgGridPage short-EPG fallback', () => {
     expect(within(pop).getByTestId('program-from-provider').textContent).toBe("From the provider's guide");
     // K6: one archive action in the dialog.
     expect(within(pop).getAllByTestId('program-browse-archive')).toHaveLength(1);
-    fireEvent.click(within(pop).getByTestId('program-browse-archive'));
+    // Not on a programme that has not aired yet: there is nothing of it to catch up on (walkthrough-10).
+    fireEvent.click(screen.getByRole('button', { name: /^Provider next c0,/ }));
+    const next = await screen.findByTestId('program-popover');
+    await waitFor(() => expect(within(next).getByRole('heading', { name: 'Provider next c0' })).toBeTruthy());
+    expect(within(next).queryByTestId('program-browse-archive')).toBeNull();
+    fireEvent.click(within(next).getByRole('button', { name: 'Close' }));
+    fireEvent.click(cell);
+    fireEvent.click(within(await screen.findByTestId('program-popover')).getByTestId('program-browse-archive'));
     expect(await screen.findByText('archive route')).toBeTruthy();
   });
 

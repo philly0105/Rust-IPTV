@@ -2,7 +2,9 @@ import { X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { queryClient, rpcKey } from '@/api/query';
 import { rpc } from '@/api/transport';
+import { intlLocale } from '@/lib/intl';
 import { itemKey, type Channel } from '@/api/types';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { monogramFill, monogramText } from '@/features/live/lib/monogram';
@@ -12,6 +14,7 @@ import { useListVirtualizer } from '@/ui/virtualizer';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
+import { glassButton } from './glassButton';
 import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { peekSettings, playChannel, usePlayerStore } from '../store';
@@ -175,6 +178,37 @@ function useListPages(listId: string | undefined, search: string, enabled: boole
 }
 
 /**
+ * What the panel lists, by name: the zapped group's or list's (read once and shared with the pages
+ * that list them), undefined while unknown. A group or list not found reads as unnamed.
+ */
+function useScopeName(sourceId: string | undefined, categoryId: string | undefined, listId: string | undefined, enabled: boolean): string | undefined {
+  const [name, setName] = useState<string>();
+  useEffect(() => {
+    setName(undefined);
+    if (!enabled || (!categoryId && !listId) || !sourceId) return;
+    let live = true;
+    const found = listId
+      ? queryClient.fetchQuery({ queryKey: rpcKey('lists.list'), queryFn: () => rpc('lists.list'), staleTime: 60_000, retry: false }).then((ls) => ls.find((l) => l.id === listId)?.name)
+      : (() => {
+          const args = { sourceId, contentType: 'live' as const };
+          return queryClient
+            .fetchQuery({ queryKey: rpcKey('catalog.categories', args), queryFn: () => rpc('catalog.categories', args), staleTime: 60_000, retry: false })
+            .then((cs) => cs.find((c) => c.id === categoryId)?.name);
+        })();
+    found.then(
+      (n) => {
+        if (live && n) setName(n);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [sourceId, categoryId, listId, enabled]);
+  return name;
+}
+
+/**
  * Slide-in channel list inside the fullscreen player. Opens with C, a dwell on the left
  * edge, a tap there, or the control bar's Channel list button (`Controls` `channelPanel`; touch
  * screens have no edge to dwell on); closes on pointer leave (with grace), Escape, C, or a click
@@ -182,17 +216,23 @@ function useListPages(listId: string | undefined, search: string, enabled: boole
  */
 export function FullscreenChannelPanel({ available }: { available: boolean }) {
   const { t } = useTranslation('player');
+  const { t: tl, i18n } = useTranslation('live');
   const open = useMediaStore((s) => s.channelPanelOpen);
   const zap = usePlayerStore((s) => s.zapContext);
   const current = usePlayerStore((s) => s.source?.ref);
   const sourceId = zap?.sourceId ?? current?.sourceId;
-  const categoryId = zap && zap.sourceId === sourceId ? zap.categoryId : undefined;
+  const zapCategoryId = zap && zap.sourceId === sourceId ? zap.categoryId : undefined;
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
+  /** A search that found nothing in the group or list was widened to the whole source. */
+  const [searchAll, setSearchAll] = useState(false);
+  const widened = searchAll && debounced !== '';
+  const categoryId = widened ? undefined : zapCategoryId;
   // Played from a channel list: the panel shows that list, in its order, like zapping walks it.
-  const listId = zap?.listId;
+  const listId = widened ? undefined : zap?.listId;
   const list = useListPages(listId, debounced, available && open);
   const inList = !!listId && !list.failed;
+  const scopeName = useScopeName(sourceId, categoryId, inList ? listId : undefined, available && open);
   const pages = useChannelPages(sourceId, categoryId, debounced, available && open && !inList);
   const { cache, error } = inList ? { cache: list.cache, error: null } : pages;
   const ensure = pages.ensure;
@@ -207,6 +247,10 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
     const id = setTimeout(() => setDebounced(search.trim()), 200);
     return () => clearTimeout(id);
   }, [search]);
+  // A new search starts in the group again.
+  useEffect(() => {
+    if (!debounced) setSearchAll(false);
+  }, [debounced]);
 
   useEffect(() => {
     if (!available && open) setOpen(false);
@@ -478,7 +522,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
         aria-hidden={!open}
         inert={!open}
         className={cn(
-          'player-glass-strong glass-blur absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-on-glass shadow-2',
+          'player-glass-strong player-sheet absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-on-glass shadow-2',
           'motion-safe:transition-transform motion-safe:duration-200',
           open ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full',
         )}
@@ -510,19 +554,29 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
             aria-label={t('searchChannels')}
             // Its own border colour outranks the base focus rule (a utility beats @layer base), so
             // it names the focus border itself; --color-focus is the glass accent over the player.
-            className="h-9 min-w-0 flex-1 rounded-md border border-white/15 bg-white/6 px-3 text-body-sm text-on-glass placeholder:text-on-glass-muted focus-visible:border-focus pointer-coarse:h-11"
+            className="h-9 min-w-0 flex-1 rounded-md border border-white/15 bg-white/6 px-3 text-body-sm text-on-glass placeholder:text-on-glass-muted focus-visible:border-focus pointer-coarse:h-[calc(44rem/15)]"
           />
           <Tooltip content={t('close')} tone="glass" describe={false}>
             <button
               type="button"
               aria-label={t('close')}
               onClick={() => setOpen(false)}
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-11"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-[calc(44rem/15)]"
             >
               <X className="size-4" aria-hidden />
             </button>
           </Tooltip>
         </div>
+        {/* What is listed and searched: the group or list zapping walks, else the whole source. */}
+        <p data-testid="panel-scope" dir="auto" className="truncate border-b border-white/10 px-4 py-1.5 text-caption text-on-glass-muted">
+          {inList || categoryId ? (scopeName ?? '\u00a0') : tl('allChannels')}
+          {!searching && cache.total !== null && (inList || categoryId ? scopeName !== undefined : true) && (
+            <span className="tabular-nums">
+              {' · '}
+              {tl('channelCount', { count: cache.total, formatted: cache.total.toLocaleString(intlLocale(i18n.language)) })}
+            </span>
+          )}
+        </p>
         <div
           ref={scrollRef}
           tabIndex={-1}
@@ -537,9 +591,17 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
             </p>
           ) : cache.total === 0 ? (
             // A search that found nothing says what it looked for; an empty list says so plainly.
-            <p role="status" className="px-4 py-6 text-center text-body-sm [overflow-wrap:anywhere] text-on-glass-muted">
-              {searching ? t('noChannelsMatch', { query: debounced }) : t('noChannelsInList')}
-            </p>
+            <div className="px-4 py-6 text-center">
+              <p role="status" className="text-body-sm [overflow-wrap:anywhere] text-on-glass-muted">
+                {searching ? t('noChannelsMatch', { query: debounced }) : t('noChannelsInList')}
+              </p>
+              {/* The search looked in one group or list: one press looks in every channel. */}
+              {searching && (inList || !!categoryId) && (
+                <button type="button" onClick={() => setSearchAll(true)} className={cn(glassButton('secondary', 'sm'), 'mt-3')}>
+                  {t('searchAllChannels')}
+                </button>
+              )}
+            </div>
           ) : cache.total === null ? (
             <div className="space-y-1 p-2" aria-busy>
               {Array.from({ length: 8 }, (_, i) => (

@@ -1,11 +1,14 @@
-import { Download, ListVideo, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
+import { CircleCheck, Download, ListVideo, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigationType, useParams } from 'react-router';
 
+import { useQueryClient } from '@tanstack/react-query';
+
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import { sameRef, type Episode, type ItemRef, type SeriesItem, type VodItem } from '@/api/types';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
@@ -13,21 +16,22 @@ import { usePlayerStore } from '@/features/player';
 
 import { CatalogRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
-import { FavoriteButton, WatchedButton } from '../components/detail/actions';
+import { FavoriteButton, WatchedButton, useWatchedToggle } from '../components/detail/actions';
 import { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 import { TmdbPromo } from '../components/detail/TmdbPromo';
-import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup } from '../components/detail/DetailHero';
+import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup, WatchedFact } from '../components/detail/DetailHero';
 import { EpisodeList, SeasonTabs, offlineDownload } from '../components/detail/EpisodeList';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { NextEpisodeCard, UpNextRail, upcoming } from '../components/detail/UpNext';
-import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
+import { SourceMissing, TitleGone, isSourceMissing } from '../components/SourceMissing';
 import { WatchStage } from '../components/detail/WatchStage';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import type { RailCardProps } from '../components/PosterRail';
 import { SimilarSection } from '../components/SimilarSection';
 import {
+  cachedCatalogRow,
   useIsFavorite,
   useSeriesDetail,
   useSetWatched,
@@ -44,6 +48,7 @@ import { recallSeason, rememberSeason, useScrollMemory } from '../hooks/useScrol
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
+import { sectionlessCategoryName } from '../lib/categoryName';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { effectiveMinRating } from '../lib/paging';
@@ -67,7 +72,11 @@ export function SeriesDetailPage() {
   // stays one line instead of stacking two text buttons under it.
   const phone = useMediaQuery('(width < 40rem)', false);
   const source = useSource(sourceId);
+  const qc = useQueryClient();
   const detail = useSeriesDetail(source.data, ref);
+  // The skeleton keeps the artwork's room only when a backdrop is likely: an M3U title has none
+  // unless its catalog row says so, so its page does not drop 140 px when it loads (vod-detail-08).
+  const skeletonArt = () => source.data?.kind !== 'm3u' || !!cachedCatalogRow(qc, ref)?.backdropUrl;
   // A failed lookup may be a movie id on the series route (cold link): look it up as a movie.
   const probeTwin = detail.isError && detail.error.code !== 'auth' && !!source.data;
   const twin = useTwinProbe(source.data, ref, probeTwin);
@@ -94,13 +103,17 @@ export function SeriesDetailPage() {
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
 
   // Panels often name episodes "Show - S01E02 - Title"; the list already shows the code, so keep only the title.
+  // A title that is only the show and the code ("Show S01E02") names no episode: those rows read
+  // "Episode 2", not the show's name down the whole list (vod-detail-04).
   const seasons = useMemo(() => {
     const show = detail.data?.item.title;
-    return sortSeasons(detail.data?.seasons ?? []).map((s) => ({
-      ...s,
-      episodes: s.episodes.map((e) => ({ ...e, title: cleanEpisodeTitle(e.title, show, e.season, e.episode) || e.title })),
-    }));
-  }, [detail.data?.seasons, detail.data?.item.title]);
+    const base = detail.data?.item.titleBase?.trim().toLowerCase();
+    const name = (e: Episode) => {
+      const clean = cleanEpisodeTitle(e.title, show, e.season, e.episode);
+      return clean && clean.toLowerCase() !== base ? clean : t('episodeNumber', { number: e.episode });
+    };
+    return sortSeasons(detail.data?.seasons ?? []).map((s) => ({ ...s, episodes: s.episodes.map((e) => ({ ...e, title: name(e) })) }));
+  }, [detail.data?.seasons, detail.data?.item.title, detail.data?.item.titleBase, t]);
   const order = useMemo(() => episodeOrder(seasons), [seasons]);
   const positionsQ = useRpcQuery('positions.forSeries', { ref }, { staleTime: 5_000 });
   const positionList = useMemo(() => positionsQ.data ?? [], [positionsQ.data]);
@@ -212,7 +225,7 @@ export function SeriesDetailPage() {
   // The source is named only when there are others (useShowSourceName); the About facts always name it.
   const headerSource = useShowSourceName() ? source.data?.name : undefined;
   const header = watch.active
-    ? { title: t('series'), documentTitle: pageTitle }
+    ? { title: t('series'), documentTitle: pageTitle, back: { onClick: goBack } }
     : { title: pageTitle, subtitle: headerSource, section: t('series'), back: { onClick: goBack } };
   usePageHeader(header, [watch.active, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
@@ -227,7 +240,7 @@ export function SeriesDetailPage() {
 
   // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
   const playEpisode = (ep: Episode, fromStart = false) => {
-    const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), fromStart };
+    const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title, snapshot.title), fromStart };
     // VL-offline-play, per episode: a finished download whose file is on disk plays from the file
     // (offline, and past a provider's connection limit); the episodes after it still queue as streams.
     // It resumes at the episode's saved position, the one the Resume label and the row show.
@@ -269,7 +282,7 @@ export function SeriesDetailPage() {
       <div className="h-full overflow-y-auto" data-testid="vod-series-detail">
         <h1 className="sr-only">{pageTitle}</h1>
         {gate.state === 'checking' ? (
-          <DetailHeroSkeleton />
+          <DetailHeroSkeleton art={skeletonArt()} />
         ) : (
           <ParentalLocked
             itemRef={ref}
@@ -291,12 +304,21 @@ export function SeriesDetailPage() {
       </div>
     );
   }
+  if (detail.isError && detail.error.code === 'not_found' && !(probeTwin && twin.isPending)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <TitleGone itemRef={ref} />
+      </div>
+    );
+  }
   if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
       <div className="h-full overflow-y-auto">
         <h1 className="sr-only">{pageTitle}</h1>
         <ErrorState
           error={source.error ?? detail.error}
+          title={t('titleLoadFailed')}
           onRetry={() => {
             void source.refetch();
             void detail.refetch();
@@ -309,7 +331,7 @@ export function SeriesDetailPage() {
     return (
       <div className="h-full overflow-y-auto" data-testid="vod-series-detail">
         <h1 className="sr-only">{pageTitle}</h1>
-        <DetailHeroSkeleton />
+        <DetailHeroSkeleton art={skeletonArt()} />
       </div>
     );
   }
@@ -346,27 +368,43 @@ export function SeriesDetailPage() {
           label: `${startCode} · ${t('minutesLeft', { count: Math.max(1, Math.round((startDuration - startPos.positionSeconds) / 60)) })}`,
         }
       : undefined;
+  // Play and Resume name the episode in words, not as "S01E02" (w-walkthrough-09); with one
+  // season, or for a special, the episode's number alone.
+  const episodeAction = (action: 'play' | 'resume', ep: Episode) =>
+    seasons.length <= 1 || ep.season <= 0
+      ? t(action === 'play' ? 'playEpisodeNumber' : 'resumeEpisodeNumber', { episode: ep.episode })
+      : t(action === 'play' ? 'playEpisode' : 'resumeEpisode', { season: ep.season, episode: ep.episode });
   const firstEpisode = order[0];
-  // VL-hero-actions: Start over, Play from the first episode and the lock wait in More.
+  // VL-hero-actions: Play from the first episode and the lock wait in More.
   const moreItems: MenuItem[] = [
-    ...(start?.resume
-      ? [{ id: 'start-over', label: t('startOverEpisode', { code: startCode }), icon: <RotateCcw aria-hidden size={16} />, onSelect: () => playEpisode(start.episode, true) }]
-      : []),
     ...(firstEpisode && start && firstEpisode.id !== start.episode.id
-      ? [{ id: 'play-first', label: t('playEpisode', { code: episodeCode(firstEpisode.season, firstEpisode.episode) }), icon: <Play aria-hidden size={16} />, onSelect: () => playEpisode(firstEpisode) }]
+      ? [{ id: 'play-first', label: episodeAction('play', firstEpisode), icon: <Play aria-hidden size={16} />, onSelect: () => playEpisode(firstEpisode) }]
       : []),
     ...(lockItems.length > 0 ? [{ id: 'sep-lock', type: 'separator' as const }, ...lockItems] : []),
   ];
   // The series' round icon buttons: in the hero beside Resume, and under the player in watch state.
   const iconActions = (more: MenuItem[]) => (
     <>
-      <HeroIcon caption={t('captionMyList')}>
-        <MyListButton itemRef={ref} snapshot={listSnapshot} variant="round" size="lg" />
+      {/* With a saved spot, Start over is one press away beside Resume, not alone in More (vod-detail-07). */}
+      {start?.resume && !watch.active && (
+        <HeroIcon caption={t('captionStartOver')}>
+          <IconButton
+            size="lg"
+            variant="secondary"
+            label={t('startOverEpisode', { code: startCode })}
+            icon={<RotateCcw aria-hidden size={18} />}
+            onClick={() => playEpisode(start.episode, true)}
+            data-testid="vod-start-over"
+          />
+        </HeroIcon>
+      )}
+      <HeroIcon caption={t('captionMyList')} labelled={!watch.active}>
+        <MyListButton itemRef={ref} snapshot={listSnapshot} variant={watch.active ? 'round' : 'hero'} size="lg" />
       </HeroIcon>
       <HeroIcon caption={t('captionFavorite')}>
         <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
       </HeroIcon>
-      <HeroIcon caption={t('watched')}>
+      <HeroIcon caption={t('captionWatched')}>
         {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too,
             so it waits for the seasons (from the list row alone it would write the series row only). */}
         <WatchedButton
@@ -404,7 +442,7 @@ export function SeriesDetailPage() {
           onClick={() => playEpisode(start.episode)}
           className="max-sm:flex-1"
         >
-          {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: startCode })}
+          {episodeAction(start.resume ? 'resume' : 'play', start.episode)}
         </Button>
       ) : null}
       {trailer ? (
@@ -445,7 +483,7 @@ export function SeriesDetailPage() {
       {watch.active ? (
         <WatchStage
           title={model.titleBase ?? model.title}
-          subtitle={playing ? episodeSubtitle(playing.season, playing.episode, playing.title) : headerSource}
+          subtitle={playing ? episodeSubtitle(playing.season, playing.episode, playing.title, snapshot.title) : headerSource}
           onClose={playback.stop}
           aside={
             settings.playerUpNextRail ? (
@@ -458,7 +496,7 @@ export function SeriesDetailPage() {
           model={model}
           sourceId={sourceId}
           castLinks={tmdbOn}
-          chips={model.status ? [<span key="status">{model.status}</span>] : undefined}
+          chips={[model.status && <span key="status">{model.status}</span>, seriesWatched && <WatchedFact key="watched" />]}
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           pending={placeholder}
           progress={progress}
@@ -505,19 +543,28 @@ export function SeriesDetailPage() {
             <h2 id="vod-episodes-heading" className="text-title-sm text-fg">
               {t('episodes')}
             </h2>
-            {episodes.length > 0 && (
-              // The season's own actions sit with its list, small, so they never outweigh the heading.
-              <div className="flex flex-wrap items-center gap-1">
-                {playback.canDownload &&
-                  (watch.active || phone ? (
-                    <IconButton
-                      label={t('downloadSeason')}
-                      icon={<Download aria-hidden size={18} />}
-                      disabled={playback.pendingSeason}
-                      onClick={downloadSeason}
-                      data-testid="vod-download-season"
-                    />
-                  ) : (
+            {episodes.length > 0 &&
+              (watch.active || phone ? (
+                // Touch shows no tooltips, and a bare season tick beside the rows' own ticks read as
+                // one of them: on a phone (and under the player) the season's actions are a menu that
+                // says what each does (vod-detail-11).
+                <SeasonMenu
+                  seasonName={seasonName}
+                  onDownload={playback.canDownload ? downloadSeason : undefined}
+                  downloadPending={playback.pendingSeason}
+                  watched={{
+                    itemRef: ref,
+                    episodeIds: seasonWrite.episodeIds,
+                    series: seasonWrite.series,
+                    name: seasonName,
+                    watched: seasonWatched,
+                    labels: { mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') },
+                  }}
+                />
+              ) : (
+                // The season's own actions sit with its list, small, so they never outweigh the heading.
+                <div className="flex flex-wrap items-center gap-1">
+                  {playback.canDownload && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -528,20 +575,19 @@ export function SeriesDetailPage() {
                     >
                       {t('downloadSeason')}
                     </Button>
-                  ))}
-                <WatchedButton
-                  key={selectedSeason}
-                  itemRef={ref}
-                  episodeIds={seasonWrite.episodeIds}
-                  series={seasonWrite.series}
-                  name={seasonName}
-                  watched={seasonWatched}
-                  compact={watch.active || phone}
-                  size="sm"
-                  labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
-                />
-              </div>
-            )}
+                  )}
+                  <WatchedButton
+                    key={selectedSeason}
+                    itemRef={ref}
+                    episodeIds={seasonWrite.episodeIds}
+                    series={seasonWrite.series}
+                    name={seasonName}
+                    watched={seasonWatched}
+                    size="sm"
+                    labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
+                  />
+                </div>
+              ))}
           </div>
           {placeholder ? (
             // Rows of the episode list's height (112 px each with the gap, 84 on a phone) until the seasons come.
@@ -566,6 +612,7 @@ export function SeriesDetailPage() {
                 positions={positions}
                 downloads={downloads}
                 playingEpisodeId={watch.current ? watch.episodeId : undefined}
+                nextEpisodeId={start?.episode.id}
                 onPlay={playEpisode}
                 canDownload={playback.canDownload}
                 pendingDownload={playback.pendingDownload}
@@ -580,7 +627,7 @@ export function SeriesDetailPage() {
 
         {item.categoryId && source.data && (
           <CatalogRail
-            title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
+            title={categoryName ? t('moreInCategory', { category: plainChannelName(sectionlessCategoryName(categoryName, 'series'), false) }) : t('moreFromSource', { source: sourceName })}
             seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/series/c/${encodeURIComponent(item.categoryId)}` }}
             input={{
               sourceKind: source.data.kind,
@@ -644,4 +691,27 @@ export function SeriesDetailPage() {
       {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.titleBase ?? model.title} />}
     </div>
   );
+}
+
+/** The season's actions as one menu, named for the season, which opens as a sheet on a phone. */
+function SeasonMenu({
+  seasonName,
+  onDownload,
+  downloadPending,
+  watched,
+}: {
+  seasonName: string;
+  onDownload: (() => void) | undefined;
+  downloadPending: boolean;
+  watched: Parameters<typeof useWatchedToggle>[0];
+}) {
+  const { t } = useTranslation('vod');
+  const mark = useWatchedToggle(watched);
+  const items: MenuItem[] = [
+    ...(onDownload
+      ? [{ id: 'download-season', label: t('downloadSeason'), icon: <Download aria-hidden size={16} />, disabled: downloadPending, onSelect: onDownload }]
+      : []),
+    { id: 'season-watched', label: mark.label, icon: <CircleCheck aria-hidden size={16} />, disabled: mark.pending, onSelect: mark.toggle },
+  ];
+  return <Menu label={t('seasonActions')} items={items} sheetHeader={{ title: seasonName }} />;
 }

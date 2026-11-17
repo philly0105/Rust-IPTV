@@ -141,13 +141,15 @@ describe('the toolbar at narrow widths', () => {
     renderGuide({ path: `/epg?source=src1&category=g2&at=${defaultStart(Date.now())}`, routes: GRID });
     await screen.findByText('Channel 0');
     const group = screen.getByTestId('guide-group');
-    await waitFor(() => expect(group.textContent).toBe('US| SPORTS BACKUP'));
+    // The group reads as the groups list draws it: the name, the place's tag after it (live4 follow-up).
+    await waitFor(() => expect(within(group).getByText('SPORTS BACKUP (US)')).toBeTruthy());
+    expect(within(group).getByTestId('channel-name-tag').textContent).toBe('US');
     // fit-content (at most the row) and no flex-basis of 0: the toolbar's flex-wrap moves the time
     // controls under a name that does not fit beside them, instead of shrinking the name.
     expect(group.className.split(' ')).toEqual(expect.arrayContaining(['min-w-fit', 'w-auto', 'grow', 'h-auto']));
     expect(group.className).not.toMatch(/(^| )(flex-1|min-w-0|min-w-24)( |$)/);
     // A name longer than the row wraps onto a second line rather than ending in an ellipsis.
-    const name = within(group).getByText('US| SPORTS BACKUP');
+    const name = group.querySelector<HTMLElement>('[aria-hidden="true"]:has([data-testid="channel-name-tag"])')!;
     expect(name.className).not.toContain('truncate');
     expect(name.className.split(' ')).toEqual(expect.arrayContaining(['line-clamp-2', 'break-words']));
     // Wider layouts keep their one-line, cut-to-fit trigger.
@@ -156,7 +158,7 @@ describe('the toolbar at narrow widths', () => {
     pageWidth(1208);
     renderGuide({ path: `/epg?source=src1&category=g2&at=${defaultStart(Date.now())}`, routes: GRID });
     await screen.findByText('Channel 0');
-    await waitFor(() => expect(within(screen.getByTestId('guide-group')).getByText('US| SPORTS BACKUP').className).toContain('truncate'));
+    await waitFor(() => expect(within(screen.getByTestId('guide-group')).getByTestId('channel-name-tag').closest('.truncate')).toBeTruthy());
   });
 
   it("the guide's search is the header's field at every width, so the toolbar has no search control (round 4)", async () => {
@@ -168,10 +170,10 @@ describe('the toolbar at narrow widths', () => {
       expect(within(toolbar).queryByRole('searchbox')).toBeNull();
       expect(within(toolbar).queryByRole('button', { name: 'Search the guide' })).toBeNull();
       const field = within(screen.getByTestId('shell-header')).getByRole('searchbox', { name: 'Search the guide' });
-      expect(field.getAttribute('placeholder')).toBe('Search guide');
-      // `/` still reaches it (on a phone the header's folded field unfolds as it takes focus).
-      fireEvent.keyDown(document.body, { key: '/' });
-      expect(document.activeElement).toBe(field);
+      expect(field.getAttribute('placeholder')).toBe('Search programmes and channels');
+      // The shell's `/` and Ctrl+F reach it as the page's search field (shell tests cover the keys;
+      // on a phone the header's folded field unfolds as it takes focus).
+      expect(field.hasAttribute('data-shell-search')).toBe(true);
       cleanup();
     }
   });
@@ -239,7 +241,7 @@ describe('the toolbar at narrow widths', () => {
   it("the genre chips' row fades out at its end, so a chip cut at the edge reads as more to come", async () => {
     pageWidth(560);
     await openGuide();
-    const chips = within(screen.getByTestId('guide-genres')).getByRole('group');
+    const chips = within(screen.getByTestId('guide-genres')).getByRole('group', { name: 'Filter by genre' });
     expect(chips.className).toContain('overflow-x-auto');
     expect(chips.className).toContain('[mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)]');
   });
@@ -258,13 +260,39 @@ describe('the toolbar at narrow widths', () => {
     expect(picker.className).not.toContain('bg-fg');
     fireEvent.click(picker);
     fireEvent.click(await screen.findByRole('option', { name: 'Sports' }));
-    // Chosen: the trigger names the genre and is inverted, as a chosen chip is.
+    // Chosen: the trigger names the genre to screen readers and fills quietly, not inverted (it
+    // was the loudest thing on the screen); the toolbar shows the genre as its pressed chip (v-guide-15).
     await waitFor(() => expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).textContent).toBe('Sports'));
-    expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).className).toContain('bg-fg');
+    expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).className).not.toContain('bg-fg');
     expect(localStorage.getItem('guide.genreFilter')).toBe('sports');
+    const active = screen.getByTestId('guide-genre-active');
+    expect(within(active).getByRole('button', { name: 'Sports', pressed: true })).toBeTruthy();
     fireEvent.click(within(time).getByRole('combobox', { name: 'Filter by genre' }));
     fireEvent.click(await screen.findByRole('option', { name: 'All genres' }));
     await waitFor(() => expect(localStorage.getItem('guide.genreFilter')).toBeNull());
+    expect(screen.queryByTestId('guide-genre-active')).toBeNull();
+    // A tap on the chip clears the filter too.
+    fireEvent.click(within(time).getByRole('combobox', { name: 'Filter by genre' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Sports' }));
+    fireEvent.click(within(await screen.findByTestId('guide-genre-active')).getByRole('button', { name: 'Sports' }));
+    await waitFor(() => expect(localStorage.getItem('guide.genreFilter')).toBeNull());
+    expect(screen.queryByTestId('guide-genre-active')).toBeNull();
+  });
+
+  it("a phone's time scale is one button in the ruler's corner that switches between the widest view and the default (guide-14, v-themes-locales-04)", async () => {
+    localStorage.removeItem('tsrust.guideZoom');
+    pageWidth(318);
+    await openGuide();
+    // Not a header action: a third icon there cut the longer locales' page title. Nor on the
+    // toolbar, where it sent the time controls to a second row.
+    expect(within(await screen.findByTestId('header-actions')).queryByRole('button', { name: /^Zoom/ })).toBeNull();
+    expect(within(screen.getByTestId('guide-time')).queryByRole('button', { name: /^Zoom/ })).toBeNull();
+    const actions = screen.getAllByRole('columnheader')[0]!;
+    fireEvent.click(within(actions).getByRole('button', { name: 'Zoom out' }));
+    await waitFor(() => expect(localStorage.getItem('tsrust.guideZoom')).toBe('0'));
+    fireEvent.click(within(actions).getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => expect(localStorage.getItem('tsrust.guideZoom')).toBe('2'));
+    expect(within(actions).getByRole('button', { name: 'Zoom out' })).toBeTruthy();
   });
 
   it('a narrow page stacks the controls but keeps the day buttons', async () => {
@@ -285,6 +313,9 @@ describe('the toolbar at narrow widths', () => {
     expect(time.className).toContain('ms-auto');
     expect(screen.getByTestId('guide-window').className).toContain('whitespace-nowrap');
     expect(within(time).getByRole('button', { name: 'Next day' })).toBeTruthy();
+    // The time scale sits at the chips' end, so the time controls fit beside the picker (guide-11).
+    expect(within(time).queryByRole('group', { name: 'Time scale' })).toBeNull();
+    expect(within(screen.getByTestId('guide-genres')).getByRole('group', { name: 'Time scale' })).toBeTruthy();
     // The group picker starts at 9rem and grows to 12rem with the room the time controls leave,
     // so a touch tablet's 44 px time controls stay on its row instead of wrapping onto their own.
     const group = screen.getByTestId('guide-group');

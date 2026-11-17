@@ -71,7 +71,7 @@
   "lockoutActive": "Te veel onjuiste pincodes. De pincode kan over {{time}} opnieuw worden geprobeerd.",
   "behaviourTitle": "Hoe vergrendelen werkt",
   "behaviourPinNote": "Wijzigingen hier vragen om de pincode.",
-  "modeLabel": "Vergrendelde inhoud",
+  "modeLabel": "Als iets vergrendeld is",
   "modeHide": "Verbergen",
   "modeAsk": "Om pincode vragen",
   "modeHideText": "Vergrendelde groepen en titels verdwijnen uit lijsten, zoeken, favorieten en Verder kijken.",

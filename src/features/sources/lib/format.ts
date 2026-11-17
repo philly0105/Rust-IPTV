@@ -1,6 +1,7 @@
 /** Locale-aware number and relative-time helpers (no date-fns locale bundles needed). */
 
 import { dateTimeFormat, intlLocale, numberFormat, relativeTimeFormat } from '@/lib/intl';
+import { formatCount } from '@/lib/numbers';
 
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['year', 365 * 24 * 3600],
@@ -50,6 +51,19 @@ export function formatUnit(value: number, unit: 'hour' | 'day', lang: string): s
     return numberFormat(intlLocale(lang), { style: 'unit', unit, unitDisplay: 'long' }).format(value);
   } catch {
     return numberFormat('en', { style: 'unit', unit, unitDisplay: 'long' }).format(value);
+  }
+}
+
+/**
+ * A count in a source card's column: compact from 10,000 ("57K"), so a big account's numbers keep
+ * their columns apart; exact below. Callers give the exact count to screen readers and the tooltip.
+ */
+export function formatStatCount(n: number, lang: string): string {
+  if (n < 10_000) return formatCount(n, lang);
+  try {
+    return numberFormat(intlLocale(lang), { notation: 'compact' }).format(n);
+  } catch {
+    return formatCount(n, lang);
   }
 }
 

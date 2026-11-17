@@ -91,6 +91,18 @@ describe('arrow-key seek readout', () => {
     key('ArrowLeft');
     expect(useMediaStore.getState().osd).toBeUndefined();
   });
+
+  it('says seeking is unavailable on an archive with no length or window, and never "/ 0:00" (PV-11)', () => {
+    const archive = { ...vod, catchupProgramStart: '2026-11-16T10:00:00Z' };
+    act(() => usePlayerStore.setState({ source: archive, mode: 'inline', status: 'playing', dock: 'stage', positionSeconds: 6, durationSeconds: undefined }));
+    render(<Shortcuts />);
+    key('l');
+    expect(usePlayerStore.getState().positionSeconds).toBe(6);
+    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Seeking is not available on this stream' });
+    act(() => useMediaStore.setState({ seekable: { start: 0, end: 120 } }));
+    key('l');
+    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Forward 10 seconds', secondary: '0:16' });
+  });
 });
 
 describe('page keys while the player is only the mini dock', () => {
@@ -193,9 +205,9 @@ describe('large seek and next-item keys', () => {
 describe('seek preview position', () => {
   it('keeps the time label inside the bar at both ends', async () => {
     const { clampTip } = await import('./SeekBar');
-    expect(clampTip(0, 400)).toBe(28);
+    expect(clampTip(0, 400)).toBe(36);
     expect(clampTip(200, 400)).toBe(200);
-    expect(clampTip(400, 400)).toBe(372);
+    expect(clampTip(400, 400)).toBe(364);
     expect(clampTip(10, 40)).toBe(20);
   });
 
@@ -235,6 +247,7 @@ describe('positionReadout', () => {
     expect(positionReadout(t, { position: 65, duration: 3600 })).toBe('1:05 / 1:00:00');
     expect(positionReadout(t, { position: 99, liveEnd: 100 })).toBe('Live');
     expect(positionReadout(t, { position: 40, liveEnd: 100 })).toBe('1:00 behind');
+    expect(positionReadout(t, { position: 16 })).toBe('0:16');
   });
 });
 
@@ -397,21 +410,26 @@ describe('resume notice', () => {
   };
 
   it.each([
-    ['a watched episode starts at 0 with no notice', true, undefined],
-    ['an unfinished one resumes with the notice', false, 'Resumed at 5:00'],
-  ])('%s', async (_name, watched, osd) => {
+    ['a watched episode starts at 0 with no notice', true, 300, 1200, undefined],
+    ['an unfinished one resumes with the notice', false, 300, 1200, 'Resumed at 5:00'],
+    // PV-03: the file is shorter than the saved spot, so playback starts at 0 and says so.
+    ['a saved spot past the end of the file is not announced as resumed', false, 1800, 600, 'Saved spot is past the end of this file, playing from the start'],
+  ])('%s', async (_name, watched, saved, fileLength, osd) => {
     const { rpc } = await import('@/api/transport');
     vi.mocked(rpc).mockImplementation((async (name: string) => {
-      if (name === 'positions.get') return { ref: episode.ref, episodeId: 'e5', positionSeconds: watched ? 1200 : 300, durationSeconds: 1200, updatedAt: '', watched };
+      if (name === 'positions.get') return { ref: episode.ref, episodeId: 'e5', positionSeconds: watched ? 1200 : saved, durationSeconds: watched ? 1200 : 5400, updatedAt: '', watched };
       if (name === 'settings.get') return { player: 'html5' };
       return undefined;
     }) as unknown as typeof rpc);
-    const { playSource } = await import('../store');
+    const { playSource, reportProgress } = await import('../store');
     render(<PlayerSurface compact={false} channelPanelAvailable={false} />);
     await act(async () => {
-      await playSource({ ...episode, resumeSeconds: watched ? 1200 : 300 });
+      await playSource({ ...episode, resumeSeconds: watched ? 1200 : saved });
     });
-    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(watched ? undefined : 300);
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(watched ? undefined : saved);
+    // The notice waits for the file's length.
+    expect(useMediaStore.getState().osd?.primary).toBeUndefined();
+    act(() => reportProgress(0, fileLength));
     expect(useMediaStore.getState().osd?.primary).toBe(osd);
   });
 });

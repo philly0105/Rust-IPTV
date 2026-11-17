@@ -10,8 +10,8 @@
   "tourBack": "Indietro",
   "tourSkip": "Salta il tour",
   "tourDone": "Fine",
-  "tourHintSearch": "Cerca",
-  "tourHintPalette": "Comandi",
+  "tourHintSearch": "Cerca in questa pagina",
+  "tourHintPalette": "Cerca ovunque",
   "tourHintShortcuts": "Scorciatoie",
   "whatsNewTitle": "Novità",
   "whatsNewVersion": "Versione {{version}}",
@@ -81,7 +81,8 @@
   "noteGuideSmoothTitle": "Una guida TV più fluida",
   "noteGuideSmoothText": "La guida TV scorre fluida anche con molti canali e colma i vuoti dei dati XMLTV con la guida del tuo account Xtream.",
   "tourCoachTitle": "La tua sorgente è pronta",
-  "tourCoachText": "La ricerca trova canali, film e serie in tutte le tue sorgenti. La tavolozza dei comandi ti porta ovunque.",
+  "tourCoachText": "«Cerca ovunque» trova canali, film e serie in tutte le tue sorgenti e apre qualsiasi pagina o impostazione.",
+  "tourCoachTextTouch": "La ricerca trova canali, film e serie in tutte le tue sorgenti.",
   "tourShowAround": "Fammi fare un giro",
   "tourGotIt": "Ho capito"
 }

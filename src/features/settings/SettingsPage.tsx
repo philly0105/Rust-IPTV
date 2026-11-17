@@ -23,9 +23,10 @@ import { Link, Navigate, NavLink, useLocation, useNavigate, useParams } from 're
 import { isDesktop } from '@/api/transport';
 import { ParentalSection } from '@/features/parental/ParentalSection';
 import { useShell } from '@/shell';
+import { settingTarget } from '@/shell/settingTargets';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { Page } from '@/ui';
-import { SaveFeedback, SectionError, SectionSkeleton, type SaveState } from './components';
+import { SaveFeedback, SectionError, SectionSkeleton, TOUCH_ONLY_QUERY, type SaveState } from './components';
 import type { SettingsPatch } from './lib/patch';
 import { useSettingsQuery, useUpdateSettings } from './lib/useUpdateSettings';
 import { AboutSection } from './sections/AboutSection';
@@ -77,13 +78,8 @@ export const NAV_GROUPS: readonly { id: string; label: string; sections: readonl
   { id: 'system', label: 'navGroupSystem', sections: ['backup', 'about'] },
 ];
 
-/**
- * A device with touch and nothing that hovers: a phone or a tablet without a trackpad. Its nav
- * leaves out Keyboard shortcuts, a list of keys it has no keyboard for. A tablet with a keyboard
- * case or trackpad reports a fine pointer or hover and keeps it. The route itself stays, so a
- * link or the command palette still opens the section.
- */
-export const TOUCH_ONLY_QUERY = '(hover: none) and (pointer: coarse)';
+/** Defined beside the rows, which use it too (Playback's Double-click to play). */
+export { TOUCH_ONLY_QUERY };
 
 /**
  * Below this width Settings is a list of sections that opens one at a time (the phone layout);
@@ -171,7 +167,7 @@ export function SettingsNav({ current, variant = 'sidebar' }: { current?: Sectio
                     )}
                   >
                     <Icon aria-hidden size={16} className={clsx('shrink-0', active && 'text-accent')} />
-                    <span className="min-w-0 truncate">{t(label)}</span>
+                    <span className="line-clamp-2 min-w-0">{t(label)}</span>
                   </NavLink>
                 </li>
               );
@@ -181,6 +177,68 @@ export function SettingsNav({ current, variant = 'sidebar' }: { current?: Sectio
       ))}
     </nav>
   );
+}
+
+/** How long a group opened at one of its settings (`#<setting>`) stays marked: long enough to find on a slow paint. */
+const MARK_MS = 2500;
+/**
+ * The mark: the selected fill, spread a little past the group's edges by a shadow of the same
+ * colour, so it frames the title and rows without moving them. It fades out (`MARK_FADE` stays).
+ */
+const MARK = ['bg-selected', 'shadow-[0_0_0_0.5rem_var(--color-selected)]'];
+/** What a deep link may focus in a settings row or group. */
+const SETTING_CONTROL = 'button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
+const MARK_FADE = ['rounded-lg', 'motion-safe:transition-[background-color,box-shadow]', 'motion-safe:duration-(--duration-slow)'];
+
+/**
+ * `#<setting>` in the URL (the palette's single-setting entries, `src/shell/settingTargets.ts`):
+ * scrolls to the group that holds the setting and marks it for a moment. The group is found by
+ * an element with that id, else by the label the setting's row (or the group's heading) draws,
+ * so the link holds wherever the setting moves. A section fills in over a few frames, so it
+ * looks for up to 1.5 s. Keyboard focus moves to the setting's control (the group's first control
+ * for a group heading), so a keyboard user who asked for a setting starts on it (v-setup-04).
+ */
+function useSettingAnchor(ready: boolean) {
+  const { hash, key } = useLocation();
+  const { i18n } = useTranslation();
+  useEffect(() => {
+    const id = decodeURIComponent(hash.slice(1));
+    if (!ready || !id) return;
+    const target = settingTarget(id);
+    const label = target ? i18n.t(target.label) : undefined;
+    const find = (): HTMLElement | null => {
+      const page = document.querySelector('[data-testid="settings-page"]');
+      const own = document.getElementById(id);
+      const byId = own && page?.contains(own) ? own : undefined;
+      const el = byId ?? (label ? [...(page?.querySelectorAll<HTMLElement>('h3, label') ?? [])].find((n) => n.textContent?.trim() === label) : undefined);
+      return el ?? null;
+    };
+    const deadline = Date.now() + 1500;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let marked: HTMLElement | null = null;
+    const step = () => {
+      const found = find();
+      if (!found) {
+        if (Date.now() < deadline) timer = setTimeout(step, 50);
+        return;
+      }
+      marked = found.closest<HTMLElement>('[data-settings-group]') ?? found;
+      marked.scrollIntoView({ block: 'start' });
+      // A row's label names its control; a heading or an id leads to the first control under it.
+      const scope = found.closest<HTMLElement>('[data-settings-row]') ?? marked;
+      const forId = found instanceof HTMLLabelElement ? found.htmlFor : '';
+      const control = (forId ? document.getElementById(forId) : null) ?? scope.querySelector<HTMLElement>(SETTING_CONTROL);
+      control?.focus({ preventScroll: true });
+      marked.classList.add(...MARK_FADE, ...MARK);
+      const el = marked;
+      timer = setTimeout(() => el.classList.remove(...MARK), MARK_MS);
+    };
+    step();
+    return () => {
+      clearTimeout(timer);
+      marked?.classList.remove(...MARK);
+    };
+  }, [ready, hash, key, i18n]);
 }
 
 /** How long the "Saved" confirmation stays up after the last successful save. */
@@ -265,6 +323,7 @@ export function SettingsPage() {
   // A phone shows one section at a time: the header names it and holds the way back to the list.
   const phoneSection = phone && valid;
   const fromList = (location.state as { fromSettingsList?: boolean } | null)?.fromSettingsList === true;
+  useSettingAnchor(valid && !!query.data);
 
   useEffect(() => {
     if (phoneSection) {
@@ -305,14 +364,18 @@ export function SettingsPage() {
       <div className="flex items-start gap-8 lg:gap-12">
         {phone ? null : (
           // Sticky inside the shell's scrolling main, so the nav stays put down a long section.
-          <aside className="sticky top-6 w-48 shrink-0 lg:w-52" data-testid="settings-sidebar">
+          <aside className="sticky top-6 w-48 shrink-0 lg:w-52 xl:w-60" data-testid="settings-sidebar">
             <SettingsNav current={current} />
           </aside>
         )}
         {/* Its own container: rows lay out by the column's width, not the window's. Keyboard
             shortcuts is a read-only reference with short rows, so it may take the width beside the
             nav for two columns; every other section keeps a readable 46rem. */}
-        <div className={clsx('@container min-w-0 flex-1', current === 'shortcuts' ? 'max-w-[72rem]' : 'max-w-[46rem]')}>
+        <div
+          className={clsx('@container min-w-0 flex-1', current === 'shortcuts' ? 'max-w-[72rem]' : 'max-w-[46rem]')}
+          // The shell's skip link lands on the section's first control, past the section nav.
+          data-skip-target="first"
+        >
           <SaveFeedback.Provider value={save.status}>
             {query.isPending ? (
               <SectionSkeleton />

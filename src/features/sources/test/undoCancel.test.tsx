@@ -606,14 +606,15 @@ describe('review round 1', () => {
     const [m, a] = screen.getAllByTestId('source-card');
     // The list's columns on every card, right-aligned against the actions, so each column holds one
     // kind of count (review round 2); only the columns some card uses (no radio here, SS-10). The
-    // playlist has no movies or series: a dash there.
+    // playlist never imported: no count is known yet, so every column is a dash.
     const columns = (card: HTMLElement) => within(card).getAllByTestId('source-stat').map((e) => e.dataset['stat']);
     expect(columns(m!)).toEqual(['channels', 'movies', 'series']);
     expect(columns(a!)).toEqual(['channels', 'movies', 'series']);
     const empty = (card: HTMLElement) => within(card).getAllByTestId('source-stat').filter((e) => e.dataset['empty'] === '').map((e) => e.dataset['stat']);
-    expect(empty(m!)).toEqual(['movies', 'series']);
+    expect(empty(m!)).toEqual(['channels', 'movies', 'series']);
+    expect(within(m!).queryByTestId('source-stats-line')).toBeNull();
     expect(empty(a!)).toEqual([]);
-    for (const slot of [...within(m!).getAllByTestId('source-stat'), ...within(a!).getAllByTestId('source-stat')]) expect(slot.className).toContain('w-14');
+    for (const slot of [...within(m!).getAllByTestId('source-stat'), ...within(a!).getAllByTestId('source-stat')]) expect(slot.className).toContain('min-w-16');
     // The same three action places on every card (Refresh, Edit, More), so they line up down the list.
     expect(within(m!).getByTestId('source-actions').children).toHaveLength(3);
     expect(within(a!).getByTestId('source-actions').children).toHaveLength(3);

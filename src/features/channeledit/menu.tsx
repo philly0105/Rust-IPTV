@@ -6,7 +6,7 @@ import type { Channel } from '@/api/types';
 import { comboKeys, type MenuAction } from '@/ui';
 
 import { hideChannel, resetName, unhideChannel } from './actions';
-import { findEdit, isEditable, prefetchSourceEdits, useDisplayName, useSourceEdits } from './edits';
+import { findEdit, isEditable, prefetchSourceEdits, useToastName, useSourceEdits } from './edits';
 import { openRenameDialog } from './store';
 
 /** Combos bound by {@link useChannelEditShortcuts}, shown as menu hints. */
@@ -29,7 +29,7 @@ const hint = (combo: string) => comboKeys(combo).join('+');
  */
 export function useChannelEditMenuItems(channel: Channel | null): MenuAction[] {
   const { t } = useTranslation('channels');
-  const display = useDisplayName();
+  const display = useToastName();
   const editable = channel !== null && isEditable(channel.ref);
   const edits = useSourceEdits(editable ? channel.ref.sourceId : undefined);
   const edit = editable ? findEdit(edits.data, channel.ref) : undefined;

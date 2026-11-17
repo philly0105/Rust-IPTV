@@ -66,6 +66,8 @@ beforeEach(() => {
   h['settings.get'] = () => settings();
   h['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
   h['catalog.search'] = () => ({ live: [], movies: [movie(0), movie(1), movie(2)], series: [] });
+  // The guide finds nothing (a failed guide search now shows its own error on the page).
+  h['epg.search'] = () => [];
 });
 afterEach(() => cleanup());
 
@@ -161,7 +163,8 @@ describe('L1-vod-3: search focus and keyboard', () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
     renderApp('/start');
     fireEvent.click(screen.getByRole('link', { name: 'Rail search' }));
-    await screen.findByText('No results for "movie"');
+    // "movie" matches a setting, so the page says in one line that nothing else did (v-shell-home-03).
+    await screen.findByText('No channels, movies, series or programmes match "movie".');
     await waitFor(() => expect(document.activeElement).toBe(field()));
     const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
     field().dispatchEvent(ev);
@@ -305,7 +308,34 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     // The source is quiet text in the channel's second line now (no outlined chip); it still gives way first.
     const name = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
     expect(name.className).toContain('truncate');
-    expect(name.className).toContain('min-w-0');
+    expect(name.className).toContain('max-w-[60%]');
+  });
+
+  it('a long group name truncates on its own, between the number and the source (realdata-01)', async () => {
+    const group = 'ALL CHANNELS | EVERYTHING ᴴᴰ/ᴿᴬᵂ (MIXED COUNTRIES, NO EPG ON MOST, UPDATED DAILY)';
+    rpcMock.handlers['catalog.search'] = () => ({ live: [{ ...channel(1, 'src2'), number: 930, categoryName: group }], movies: [], series: [] });
+    renderApp('/search?q=news');
+    const grid = await screen.findByTestId('vod-search-channels');
+    const meta = grid.querySelector<HTMLElement>('[data-testid="search-channel-meta"]')!;
+    expect(meta.className).toContain('overflow-hidden');
+    const parts = [...meta.children] as HTMLElement[];
+    expect(parts.map((p) => p.textContent)).toEqual(['930', group, '·', 'Zed M3U with a very long provider name']);
+    expect(parts[0]!.className).toContain('shrink-0');
+    expect(parts[1]!.title).toBe(group);
+    expect(parts[1]!.className).toContain('min-w-0');
+    expect(parts[1]!.className).toContain('truncate');
+  });
+
+  it("draws a group's place tag after its name, quiet, as Live TV's groups column does (shell4)", async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [{ ...channel(1, 'src2'), number: 1, categoryName: 'US| SPORTS' }], movies: [], series: [] });
+    renderApp('/search?q=news');
+    const grid = await screen.findByTestId('vod-search-channels');
+    const meta = grid.querySelector<HTMLElement>('[data-testid="search-channel-meta"]')!;
+    const tag = within(meta).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.previousElementSibling!.textContent).toBe('SPORTS');
+    expect(within(meta).getByText('SPORTS (US)')).toBeTruthy();
+    expect(within(meta).getByTitle('US| SPORTS')).toBeTruthy();
   });
 });
 

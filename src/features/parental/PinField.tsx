@@ -100,7 +100,8 @@ export function PinField({
                 className={cn(
                   'relative flex h-12 w-10 min-w-0 shrink items-center justify-center rounded-md border bg-surface-2 font-numeric text-xl text-fg tabular',
                   'motion-safe:transition-[border-color,background-color] motion-safe:duration-150',
-                  invalid ? 'border-danger' : digit !== undefined || caret ? 'border-accent' : 'border-border',
+                  // A filled cell firms up neutrally; only the cell taking the next digit wears the focus colour.
+                  invalid ? 'border-danger' : caret ? 'border-focus' : digit !== undefined ? 'border-fg-muted' : 'border-border',
                   digit !== undefined && !invalid && 'bg-surface-3',
                 )}
               >

@@ -90,7 +90,11 @@ describe("the guide's Favorites view (GD-FAV-GRID)", () => {
       for (let i = 0; i < 12; i++) expect(screen.getByText(`c${i} show`)).toBeTruthy();
     });
     const commitsToCells = commits;
-    await new Promise((r) => setTimeout(r, 200));
+    // The adjacent time slices are warmed at rest after at least 500 ms; wait for them, then a
+    // little longer so a repeated request would show up too.
+    const isFirstChunk = (g: { refs: ItemRef[] }) => indexOf(g.refs[0]!) === 0;
+    await waitFor(() => expect((rpc.of('epg.grid') as { refs: ItemRef[] }[]).filter(isFirstChunk)).toHaveLength(3));
+    await new Promise((r) => setTimeout(r, 300));
     const grids = rpc.of('epg.grid') as { refs: ItemRef[]; from: string; to: string }[];
     console.log(
       `[measure GD-FAV-GRID] epg.grid ${grids.length} (${grids.map((g) => g.refs.length).join(', ')} refs), ` +

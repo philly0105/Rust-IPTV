@@ -18,6 +18,7 @@ import { intlLocale } from '@/lib/intl';
 import {
   Button,
   ChannelLogo,
+  ChannelName,
   Dialog,
   EmptyState,
   ErrorState,
@@ -29,8 +30,10 @@ import {
   buttonClass,
   cn,
   displayChannelName,
+  isSeparatorName,
   nowTitleOf,
   scopeOfList,
+  separatorLabel,
   useBrowseSections,
   useChannelBrowse,
   useDisplayPrefs,
@@ -162,6 +165,14 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
         <ul ref={listRef} onKeyDown={onListKey} className="flex flex-col gap-0.5" aria-label={t('addChannels')} data-testid="add-channels-list">
           {browse.channels.map((ch) => {
             const key = itemKey(ch.ref);
+            // A provider's heading row ("#### ESPN+ ####") is no channel: a quiet caption, as Live TV draws it.
+            if (isSeparatorName(ch.name)) {
+              return (
+                <li key={key} dir="auto" className="truncate px-2.5 pt-3 pb-1 text-caption font-semibold tracking-wide text-fg-subtle uppercase" data-testid="add-channels-separator">
+                  {separatorLabel(ch.name)}
+                </li>
+              );
+            }
             const name = displayChannelName(ch.name, stripCountryPrefix);
             const on = inList(ch);
             const busy = pending === key;
@@ -184,9 +195,10 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
                 >
                   <ChannelLogo src={ch.logoUrl} name={name} size={36} sourceId={ch.ref.sourceId} />
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span dir="auto" className="truncate text-sm font-medium text-fg">
-                      {ch.number !== undefined ? <span className="me-2 font-numeric tabular-nums text-fg-muted">{ch.number}</span> : null}
-                      {name}
+                    <span className="flex min-w-0 items-baseline text-sm font-medium text-fg">
+                      {ch.number !== undefined ? <span className="me-2 shrink-0 font-numeric tabular-nums text-fg-muted">{ch.number}</span> : null}
+                      {/* The provider's place tag after the name, quiet, as in Live TV's rows. */}
+                      <ChannelName name={ch.name} strip={stripCountryPrefix} className="min-w-0 flex-1 truncate" />
                     </span>
                     <span dir="auto" className="truncate text-xs text-fg-muted">
                       {nowTitle ?? ch.categoryName}
@@ -256,7 +268,15 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
             <span className="text-sm font-medium text-fg" aria-hidden>
               {tl('pickerShow')}
             </span>
-            <ScopePicker label={tl('pickerShow')} value={scope} sections={sections} onChange={setScope} className="h-10" testId="add-channels-scope" />
+            <ScopePicker
+              label={tl('pickerShow')}
+              value={scope}
+              sections={sections}
+              onChange={setScope}
+              regionScope={source ? `${source}:live` : undefined}
+              className="h-10"
+              testId="add-channels-scope"
+            />
           </div>
           <SearchInput
             ref={searchRef}
@@ -281,8 +301,10 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
         </p>
       ) : null}
       {/* One height whatever the search finds: a sheet on a phone grows from its top edge, so a
-          box that shrank with the results would carry the search field down under the keyboard. */}
-      <div className="h-[min(26rem,55dvh)] overflow-y-auto" data-testid="add-channels-results">
+          box that shrank with the results would carry the search field down under the keyboard.
+          From sm it takes what the dialog's height cap leaves (realdata-15): a dozen rows of a
+          30,000-channel source on a laptop screen, not seven. */}
+      <div className="h-[min(26rem,55dvh)] overflow-y-auto sm:h-[min(44rem,calc(88dvh-18rem))]" data-testid="add-channels-results">
         {body}
       </div>
       <p className="sr-only" role="status" aria-live="polite">

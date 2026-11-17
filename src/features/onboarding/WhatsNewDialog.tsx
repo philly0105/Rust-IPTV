@@ -242,13 +242,17 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
               {t('whatsNewTour')}
             </Button>
           )}
-          <Button variant="primary" data-autofocus="" onClick={() => close()} data-testid="whats-new-close">
+          {/* Opened by hand, Got it takes focus; opened at startup, see below. */}
+          <Button variant="primary" data-autofocus={auto ? undefined : ''} onClick={() => close()} data-testid="whats-new-close">
             {t('whatsNewClose')}
           </Button>
         </>
       }
     >
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      {/* Opened at startup, before the user did anything, focus waits here, out of the Tab order
+          and with no ring: on Got it, the focus ring greeted every user like an alert. Tab then
+          reaches the list and the buttons, ringed. */}
+      <div className="relative flex min-h-0 flex-1 flex-col outline-none" tabIndex={auto ? -1 : undefined} data-autofocus={auto ? '' : undefined}>
         <div
           ref={listRef}
           role="region"

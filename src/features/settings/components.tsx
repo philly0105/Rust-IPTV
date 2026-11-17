@@ -1,9 +1,17 @@
 import { clsx } from 'clsx';
 import { Check, Info } from 'lucide-react';
-import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useState, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ErrorState, SegmentedControl, Skeleton, Switch, cn, fieldClass } from '@/ui';
+
+/**
+ * A device with touch and nothing that hovers: a phone or a tablet without a trackpad. Its nav
+ * leaves out Keyboard shortcuts, a list of keys it has no keyboard for. A tablet with a keyboard
+ * case or trackpad reports a fine pointer or hover and keeps it. The route itself stays, so a
+ * link or the command palette still opens the section.
+ */
+export const TOUCH_ONLY_QUERY = '(hover: none) and (pointer: coarse)';
 
 /** Where a save stands, for the inline confirmation (SS-17). */
 export type SaveState = 'idle' | 'saving' | 'saved';
@@ -126,7 +134,9 @@ export function SettingsGroup({
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-0.5">
             {title ? (
-              <h3 className={clsx('text-body font-semibold', tone === 'danger' ? 'text-danger' : 'text-fg')}>
+              // A quiet label over its card (13.5 px, muted), so it does not compete with the
+              // 15 px row labels inside: section 18, group 13.5 muted, row 15 (visual-system-11).
+              <h3 className={clsx('text-body-sm font-semibold', tone === 'danger' ? 'text-danger' : 'text-fg-muted')}>
                 {title}
               </h3>
             ) : null}
@@ -144,15 +154,20 @@ export function SettingsGroup({
   );
 }
 
-/** A row's label column: the label and the help text (capped for reading, not by a percentage). */
-function RowLabel({ htmlFor, label, description, descId }: { htmlFor: string; label: ReactNode; description?: ReactNode; descId: string }) {
+/**
+ * A row's label column: the label and the help text (capped for reading, not by a percentage).
+ * `quiet`: the row does nothing right now, so the label steps down to the muted tone and the help
+ * to the subtle one. Text is never faded with opacity: the help often says how to turn the row
+ * on, and must stay readable (4.5:1 in every theme).
+ */
+function RowLabel({ htmlFor, label, description, descId, quiet }: { htmlFor: string; label: ReactNode; description?: ReactNode; descId: string; quiet?: boolean }) {
   return (
     <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5">
-      <label htmlFor={htmlFor} className="text-body font-medium text-fg">
+      <label htmlFor={htmlFor} className={clsx('text-body font-medium', quiet ? 'text-fg-muted' : 'text-fg')}>
         {label}
       </label>
       {description ? (
-        <p id={descId} className="max-w-[38rem] text-body-sm text-pretty text-fg-muted">
+        <p id={descId} className={clsx('max-w-[38rem] text-body-sm text-pretty', quiet ? 'text-fg-subtle' : 'text-fg-muted')}>
           {description}
         </p>
       ) : null}
@@ -179,7 +194,7 @@ export function SettingsRow({
   children: (ids: { id: string; describedBy?: string; invalid?: boolean }) => ReactNode;
   /** Control below the label at every width (long inputs). */
   stack?: boolean;
-  /** The row's setting does nothing right now (its feature is off): the whole row dims, as a disabled SwitchRow does. The control still needs its own `disabled`. */
+  /** The row's setting does nothing right now (its feature is off): its text steps down a tone, as a disabled SwitchRow's does. The control needs its own `disabled`, which draws it faded. */
   dimmed?: boolean;
 }) {
   const id = useId();
@@ -190,10 +205,12 @@ export function SettingsRow({
     <div
       data-settings-row={id}
       data-dimmed={dimmed || undefined}
-      className={clsx('relative flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3.5 motion-safe:transition-opacity', dimmed && 'opacity-60')}
+      className="relative flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3.5"
     >
-      <RowLabel htmlFor={id} label={label} description={description} descId={descId} />
-      <div className={clsx('flex min-w-0 max-w-full flex-col gap-1.5', stack ? 'basis-full' : '@max-md:basis-full @md:items-end')}>
+      <RowLabel htmlFor={id} label={label} description={description} descId={descId} quiet={dimmed} />
+      {/* A control that wraps under its label still keeps to the end edge from @md (ms-auto), as
+          its neighbours on one line do. */}
+      <div className={clsx('flex min-w-0 max-w-full flex-col gap-1.5', stack ? 'basis-full' : '@max-md:basis-full @md:ms-auto @md:items-end')}>
         {children({ id, describedBy, invalid: error ? true : undefined })}
         {error ? (
           <p id={errId} role="alert" className="text-body-sm text-danger">
@@ -206,7 +223,15 @@ export function SettingsRow({
   );
 }
 
-/** A switch row: label and description, and the kit Switch on the end (a label click toggles it). */
+/** Matches a device whose main pointer is a finger, where a tap anywhere on a switch row toggles it. */
+const COARSE_POINTER_QUERY = '(pointer: coarse)';
+
+/**
+ * A switch row: label and description, and the kit Switch on the end (a label click toggles it).
+ * On touch the whole row is the target: a tap on the help text or the padding toggles too, since
+ * the switch alone is under 44 px and people tap the row. Links and buttons inside keep their own
+ * clicks, and the label and switch already toggle, so they are left to the browser.
+ */
 export function SwitchRow({
   label,
   description,
@@ -223,9 +248,16 @@ export function SwitchRow({
   testId?: string;
 }) {
   const id = useId();
+  const onRowClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (disabled || !window.matchMedia?.(COARSE_POINTER_QUERY).matches) return;
+    if ((e.target as Element).closest('label, a, button, input, select, textarea')) return;
+    onChange(!checked);
+  };
   return (
-    <div data-settings-row={id} className={clsx('relative flex items-center justify-between gap-6 px-4 py-3.5', disabled && 'opacity-60')}>
-      <RowLabel htmlFor={id} label={label} description={description} descId={`${id}-desc`} />
+    // The row's own click is only a larger target for the switch, which stays the one control
+    // for the keyboard and screen readers.
+    <div data-settings-row={id} className={clsx('relative flex items-center justify-between gap-6 px-4 py-3.5', !disabled && 'pointer-coarse:cursor-pointer')} onClick={onRowClick}>
+      <RowLabel htmlFor={id} label={label} description={description} descId={`${id}-desc`} quiet={disabled} />
       <Switch
         id={id}
         checked={checked}
@@ -340,19 +372,22 @@ export function Segmented<T extends string>({
   onChange,
   label,
   id,
+  disabled,
 }: {
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
   label: string;
   id?: string;
+  /** The row does nothing right now: every segment is out of use. */
+  disabled?: boolean;
 }) {
   return (
     <SegmentedControl<T>
       id={id}
       label={label}
       value={value}
-      options={options}
+      options={disabled ? options.map((o) => ({ ...o, disabled: true })) : options}
       onChange={onChange}
       className="w-full @md:inline-flex @md:w-fit"
       itemClassName="flex-1 py-1.5 text-center text-balance break-words @md:flex-none"

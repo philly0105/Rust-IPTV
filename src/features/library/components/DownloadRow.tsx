@@ -1,27 +1,41 @@
 /** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
-import { ArrowUpToLine, FolderOpen, Gauge, MonitorPlay, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowUpToLine, Download as DownloadIcon, FolderOpen, Gauge, Library, MonitorPlay, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 
 import type { Download, Source } from '@/api/types';
+import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 
-import { IconButton, Poster, PosterCellWidthContext, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
-import { etaSeconds, formatBytes, formatDuration, formatSpeed, percentOf } from '../lib/format';
+import { Badge, Button, IconButton, Menu, Poster, PosterCellWidthContext, useBusyButtons, useMediaQuery, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
+import { etaSeconds, formatBytes, formatDuration, formatSpeed, formatSpeedLimit, percentOf } from '../lib/format';
 import { useLiveProgress } from '../lib/progress';
-import type { QueueAction } from '../lib/queue';
+import { downloadNames, type QueueAction } from '../lib/queue';
 import { SourceBadge, StatusBadge } from './bits';
 import { REVEAL_ON_FINE } from './EntryRow';
 
 export const DOWNLOAD_ROW_HEIGHT = 84;
 
+/**
+ * A row's height. A failed row gives its reason two lines (the advice in it is what the row is
+ * for, and a tooltip never shows on touch). Below sm every row does: the detail line under the bar
+ * wraps rather than cut "Waits until playback from this source stops" to "Wait...", and the
+ * subtitle (an episode, a programme's channel and air time) takes a line of its own under the title.
+ */
+export function downloadRowHeight(d: Pick<Download, 'status' | 'title' | 'subtitle' | 'episodeId'>, wide: boolean): number {
+  if (wide) return d.status === 'failed' ? DOWNLOAD_ROW_HEIGHT + 16 : DOWNLOAD_ROW_HEIGHT;
+  return downloadNames(d).subtitle ? 112 : 96;
+}
+
 const ICONS: Record<QueueAction, typeof Pause> = {
   pause: Pause,
-  resume: Play,
+  // Not the play triangle: on a list of films that reads as "watch it".
+  resume: DownloadIcon,
   cancel: X,
   retry: RotateCcw,
   remove: Trash2,
@@ -109,7 +123,7 @@ export function DialProgress({
           style={{ '--dial': percent } as CSSProperties}
         >
           {tone === 'accent' && percent > 0 && percent < 100 && (
-            <div aria-hidden data-testid="dial-needle" className="absolute -end-px inset-y-0 w-0.5 rounded-full bg-fg shadow-[0_0_6px_var(--color-glow)]" />
+            <div aria-hidden data-testid="dial-needle" className="absolute -end-px inset-y-0 w-0.5 rounded-full bg-fg" />
           )}
         </div>
       )}
@@ -138,14 +152,19 @@ function waitingDetail(d: Download, t: TFunction<'library'>, lang: string): stri
 const ART_PX = 37.5;
 const ART_SM_PX = 45;
 /** Tailwind's `sm` breakpoint. */
-const SM_QUERY = '(min-width: 40rem)';
+export const SM_QUERY = '(min-width: 40rem)';
+
+/** Rows still moving bytes or waiting to: the ones a speed limit applies to. */
+const TRANSFER = new Set<Download['status']>(['downloading', 'queued', 'paused']);
 
 function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, globalRateLimitBps = 0 }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
+  const busyButton = useBusyButtons(busy);
   const lang = i18n.language;
   const pct = percentOf(progress.bytesDownloaded, progress.totalBytes);
   const isActive = d.status === 'downloading';
+  const names = downloadNames(d);
   const canPlayCatchup = d.ref.contentType === 'live' && d.episodeId?.startsWith('catchup:') &&
     (d.status === 'queued' || d.status === 'downloading' || d.status === 'paused');
   const eta = isActive ? etaSeconds(progress.bytesDownloaded, progress.totalBytes, progress.bytesPerSecond) : undefined;
@@ -154,12 +173,14 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
     : progress.bytesDownloaded > 0
       ? formatBytes(progress.bytesDownloaded, lang)
       : '';
+  const canLimit = onSpeedLimit !== undefined && TRANSFER.has(d.status);
   const limit = d.rateLimitBps ?? globalRateLimitBps;
-  const speed = limit === 0 ? t('speedUnlimited') : t('speedValue', { value: (limit / (1024 * 1024)).toLocaleString(lang, { maximumFractionDigits: 6 }) });
+  const speed = limit === 0 ? t('speedUnlimited') : formatSpeedLimit(limit, lang);
   const speedLabel = d.rateLimitBps === undefined ? t('speedInherited', { speed }) : speed;
   const tone = isActive ? 'accent' : d.status === 'failed' ? 'danger' : 'muted';
+  const wide = useMediaQuery(SM_QUERY);
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
-  const artWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true));
+  const artWidth = usePosterWidthBox(useScaledPx(wide ? ART_SM_PX : ART_PX, true));
 
   let detail: string;
   if (d.status === 'downloading') {
@@ -176,6 +197,101 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
   else if (d.status === 'paused') detail = t('pausedHint');
   else if (d.status === 'failed') detail = d.errorMessage ?? t('failedHint');
   else detail = t('canceledHint');
+  // Keep in step with downloadRowHeight.
+  const twoLines = !wide || d.status === 'failed';
+
+  const watchLabel = t('actionWatchCatchupAria', { title: names.title });
+  const speedAria = t('speedEditAria', { title: names.title, speed: speedLabel });
+  const iconFor = (a: QueueAction) => {
+    const Icon = ICONS[a];
+    return <Icon size={16} aria-hidden />;
+  };
+
+  let buttons;
+  if (wide) {
+    buttons = (
+      <>
+        {canPlayCatchup && onPlayCatchup && (
+          <IconButton
+            size="sm"
+            label={watchLabel}
+            tooltip={t('actionWatchCatchup')}
+            icon={<MonitorPlay size={16} aria-hidden />}
+            tabIndex={tabbable ? 0 : -1}
+            data-action="watch"
+            {...busyButton('watch', () => onPlayCatchup(d))}
+          />
+        )}
+        {/* Before the queue actions, so Pause and Cancel keep their places at the end of the row. */}
+        {canLimit && (
+          <IconButton
+            size="sm"
+            label={speedAria}
+            tooltip={t('actionSpeed')}
+            icon={<Gauge size={16} aria-hidden />}
+            tabIndex={tabbable ? 0 : -1}
+            data-action="speed"
+            onClick={() => onSpeedLimit(d)}
+          />
+        )}
+        {actions.map((a) => (
+          <IconButton
+            key={a}
+            size="sm"
+            label={t(k('action', a) + 'Aria', { title: names.title })}
+            tooltip={t(k('action', a))}
+            shortcut={SHORTCUT_KEYS[a]?.toLowerCase()}
+            icon={iconFor(a)}
+            tabIndex={tabbable ? 0 : -1}
+            data-action={a}
+            className={a === 'remove' || a === 'cancel' ? 'hover:text-danger' : undefined}
+            {...busyButton(a, () => onAction(a, d))}
+          />
+        ))}
+      </>
+    );
+  } else {
+    // A phone has room for the text or for four buttons, not both: the first action (Pause,
+    // Resume, Retry) stays a button and the rest go in the row's menu.
+    const [primary, ...rest] = actions;
+    const items: MenuItem[] = [
+      ...(canPlayCatchup && onPlayCatchup
+        ? [{ id: 'watch', label: t('actionWatchCatchup'), icon: <MonitorPlay size={16} aria-hidden />, disabled: busy, onSelect: () => onPlayCatchup(d) }]
+        : []),
+      ...rest.map((a) => ({
+        id: a,
+        label: t(k('action', a)),
+        icon: iconFor(a),
+        disabled: busy,
+        danger: a === 'remove' || a === 'cancel',
+        onSelect: () => onAction(a, d),
+      })),
+      ...(canLimit ? [{ id: 'speed', label: t('actionSpeed'), icon: <Gauge size={16} aria-hidden />, onSelect: () => onSpeedLimit(d) }] : []),
+    ];
+    buttons = (
+      <>
+        {primary && (
+          <IconButton
+            size="sm"
+            label={t(k('action', primary) + 'Aria', { title: names.title })}
+            tooltip={t(k('action', primary))}
+            icon={iconFor(primary)}
+            tabIndex={tabbable ? 0 : -1}
+            data-action={primary}
+            {...busyButton(primary, () => onAction(primary, d))}
+          />
+        )}
+        {items.length > 0 && (
+          <Menu
+            items={items}
+            label={t('entryMenu', { title: names.title })}
+            sheetHeader={{ title: names.title, ...(names.subtitle ? { subtitle: names.subtitle } : {}) }}
+            triggerClassName="size-8"
+          />
+        )}
+      </>
+    );
+  }
 
   return (
     <div
@@ -193,90 +309,204 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
         </PosterCellWidthContext.Provider>
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <span dir="auto" className="min-w-0 truncate text-body-sm font-medium text-fg" title={d.title}>
-            {d.title}
-          </span>
-          {d.subtitle && (
-            <span dir="auto" className="hidden min-w-0 truncate text-caption text-fg-muted md:inline">
-              {d.subtitle}
+        <div className="flex min-w-0 flex-col">
+          <div className="flex min-w-0 items-center gap-2">
+            <span dir="auto" className="min-w-0 truncate text-body-sm font-medium text-fg" title={names.title}>
+              {names.title}
+            </span>
+            {names.subtitle && wide && (
+              <span dir="auto" className="min-w-0 truncate text-caption text-fg-muted" title={names.subtitle}>
+                {names.subtitle}
+              </span>
+            )}
+            {/* Below sm the detail line under the bar says the state; the badge would only squeeze the title. */}
+            <StatusBadge status={d.status} className="ms-auto shrink-0 max-sm:hidden" />
+          </div>
+          {/* A phone gives the subtitle its own line: four programmes of one channel each say which. */}
+          {names.subtitle && !wide && (
+            <span dir="auto" className="min-w-0 truncate text-caption text-fg-muted">
+              {names.subtitle}
             </span>
           )}
-          {/* Below sm the detail line under the bar says the state; the badge would only squeeze the title. */}
-          <StatusBadge status={d.status} className="ms-auto shrink-0 max-sm:hidden" />
         </div>
-        <DialProgress percent={pct} tone={tone} indeterminate={isActive && pct === undefined} label={t('progressFor', { title: d.title })} />
-        {/* One line at any width: the numbers never wrap, the detail gives way first. */}
-        <div className="flex min-w-0 items-center gap-3 whitespace-nowrap text-caption text-fg-muted">
+        <DialProgress percent={pct} tone={tone} indeterminate={isActive && pct === undefined} label={t('progressFor', { title: names.title })} />
+        {/* The numbers never wrap; the detail gives way first, on one line (two for a failure's
+            advice, and on a phone, where one line cut it to a word). */}
+        <div className={cn('flex min-w-0 gap-3 whitespace-nowrap text-caption text-fg-muted', twoLines ? 'items-baseline' : 'items-center')}>
           {pct !== undefined && <span className="shrink-0 font-medium tabular-nums text-fg">{`${pct}%`}</span>}
           {sizeText && <span className="hidden shrink-0 tabular-nums sm:inline">{sizeText}</span>}
           <span
-            className={cn('min-w-0 truncate whitespace-pre', d.status === 'failed' && 'text-danger')}
+            className={cn('min-w-0', twoLines ? 'line-clamp-2 whitespace-pre-wrap' : 'truncate whitespace-pre', d.status === 'failed' && 'text-danger')}
             title={detail}
             data-testid="download-detail"
           >
             {detail}
           </span>
-          {onSpeedLimit && (
-            <button
-              type="button"
-              className="ms-auto inline-flex shrink-0 items-center gap-1 rounded-sm text-caption text-fg-muted hover:text-fg focus-visible:text-fg"
-              aria-label={t('speedEditAria', { title: d.subtitle || d.title, speed: speedLabel })}
-              title={t('speedEditAria', { title: d.subtitle || d.title, speed: speedLabel })}
-              tabIndex={tabbable ? 0 : -1}
-              onClick={() => onSpeedLimit(d)}
-            >
+          {/* A limit of its own is worth saying; the default, on every row, was not. */}
+          {canLimit && wide && d.rateLimitBps !== undefined && (
+            <span className="ms-auto inline-flex shrink-0 items-center gap-1" data-testid="download-speed-limit">
               <Gauge size={12} aria-hidden />
-              <span>{speedLabel}</span>
-            </button>
+              <span className="sr-only">{t('speedOverride')}</span>
+              <span className="tabular-nums">{speed}</span>
+            </span>
           )}
           {showSource && <SourceBadge source={source} className="ms-auto hidden shrink-0 lg:inline-flex" />}
         </div>
       </div>
       {/* Ghost icon buttons. A row that is waiting or paused shows them on hover or focus (fine
-          pointers); a failed row always shows Retry and Remove, since it is there to be dealt with.
-          The column is as wide as the most a row has (four), shown or not, so every bar, badge
-          and button ends on the same line. */}
+          pointers); a failed or canceled row always shows them, since it is there to be dealt with.
+          From sm the column is as wide as the most a row has (five), shown or not, so every bar,
+          badge and button ends on the same line. */}
       <div
         className={cn(
-          'flex shrink-0 items-center justify-end gap-0.5 pointer-fine:w-[calc(4*2rem+3*0.125rem)]',
-          !isActive && d.status !== 'failed' && REVEAL_ON_FINE,
+          'flex shrink-0 items-center justify-end gap-0.5',
+          wide && 'pointer-fine:w-[calc(5*2rem+4*0.125rem)]',
+          !isActive && d.status !== 'failed' && d.status !== 'canceled' && REVEAL_ON_FINE,
         )}
         data-testid="download-actions"
       >
-        {canPlayCatchup && onPlayCatchup && (
-          <IconButton
-            size="sm"
-            label={t('actionWatchCatchupAria', { title: d.subtitle?.split(' · ')[0] || d.title })}
-            tooltip={t('actionWatchCatchup')}
-            icon={<MonitorPlay size={16} aria-hidden />}
-            disabled={busy}
-            tabIndex={tabbable ? 0 : -1}
-            data-action="watch"
-            onClick={() => onPlayCatchup(d)}
-          />
-        )}
-        {actions.map((a) => {
-          const Icon = ICONS[a];
-          return (
-            <IconButton
-              key={a}
-              size="sm"
-              label={t(k('action', a) + 'Aria', { title: d.title })}
-              tooltip={t(k('action', a))}
-              shortcut={SHORTCUT_KEYS[a]?.toLowerCase()}
-              icon={<Icon size={16} aria-hidden />}
-              disabled={busy}
-              tabIndex={tabbable ? 0 : -1}
-              data-action={a}
-              className={a === 'remove' || a === 'cancel' ? 'hover:text-danger' : undefined}
-              onClick={() => onAction(a, d)}
-            />
-          );
-        })}
+        {buttons}
       </div>
     </div>
   );
 }
 
 export const DownloadRow = memo(DownloadRowImpl);
+
+/** A finished row's height: a transfer's from sm (the artwork sets it); on a phone a line per name, file name and detail, with no bar. */
+export function finishedRowHeight(d: Pick<Download, 'title' | 'subtitle' | 'episodeId' | 'fileName'>, wide: boolean): number {
+  if (wide) return DOWNLOAD_ROW_HEIGHT;
+  return (downloadNames(d).subtitle ? 84 : 72) + (d.fileName ? 16 : 0);
+}
+
+export interface FinishedRowProps {
+  download: Download;
+  busy: boolean;
+  tabbable?: boolean;
+  onPlay: (d: Download) => void;
+  onRedownload: (d: Download) => void;
+}
+
+/**
+ * A finished download under the queue (walkthrough-07): where it ended up, so the user who
+ * started it finds it here, with Play (or Download again when its file is gone) and the way to
+ * its page in My videos.
+ */
+function FinishedRowImpl({ download: d, busy, tabbable = false, onPlay, onRedownload }: FinishedRowProps) {
+  const { t, i18n } = useTranslation('library');
+  const lang = i18n.language;
+  const names = downloadNames(d);
+  const wide = useMediaQuery(SM_QUERY);
+  const artWidth = usePosterWidthBox(useScaledPx(wide ? ART_SM_PX : ART_PX, true));
+  const missing = d.fileAvailable === false;
+  const at = Date.parse(d.completedAt ?? d.updatedAt);
+  const detail = [
+    formatBytes(d.totalBytes ?? d.bytesDownloaded, lang),
+    Number.isNaN(at) ? '' : dateTimeFormat(intlLocale(lang), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const file = d.fileName ? <FileName name={d.fileName} path={d.filePath} /> : null;
+  const tabIndex = tabbable ? 0 : -1;
+
+  return (
+    <div
+      className="group flex h-full items-center gap-3 rounded-md px-2 hover:bg-hover in-focus-visible:bg-hover focus-within:bg-hover motion-safe:transition-colors sm:gap-4"
+      data-testid="finished-row"
+      data-download-id={d.id}
+      data-status={d.status}
+    >
+      <div className="w-10 shrink-0 overflow-hidden rounded-sm ring-1 ring-edge sm:w-12">
+        <PosterCellWidthContext.Provider value={artWidth}>
+          <Poster src={d.posterUrl} sourceId={d.ref.sourceId} alt="" label={d.title} aspect="poster" />
+        </PosterCellWidthContext.Provider>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 items-center gap-2">
+          <span dir="auto" className="min-w-0 truncate text-body-sm font-medium text-fg" title={names.title}>
+            {names.title}
+          </span>
+          {names.subtitle && wide && (
+            <span dir="auto" className="min-w-0 truncate text-caption text-fg-muted" title={names.subtitle}>
+              {names.subtitle}
+            </span>
+          )}
+        </div>
+        {names.subtitle && !wide && (
+          <span dir="auto" className="min-w-0 truncate text-caption text-fg-muted">
+            {names.subtitle}
+          </span>
+        )}
+        {/* The file to look for (walkthrough-13): on a phone on a line of its own, from sm before the
+            size and date, where it gives way first. The full path is in the tooltip. */}
+        {file && !wide && <span className="flex min-w-0 text-caption text-fg-muted">{file}</span>}
+        <div className="flex min-w-0 items-center gap-2 text-caption text-fg-muted">
+          {missing && <Badge variant="warning">{t('fileMissing')}</Badge>}
+          <span className="flex min-w-0 tabular-nums">
+            {file && wide && (
+              <>
+                {file}
+                <span className="shrink-0 whitespace-pre">{' · '}</span>
+              </>
+            )}
+            <span className={file && wide ? 'shrink-0' : 'min-w-0 truncate'}>{detail}</span>
+          </span>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1" data-testid="finished-actions">
+        {/* Its page in My videos: icon only on a phone, where the row has room for one labelled button. */}
+        <Link
+          to={`/my-videos/${d.id}`}
+          className={buttonClass('ghost', 'sm')}
+          aria-label={t('showInMyVideosAria', { title: names.title })}
+          tabIndex={tabIndex}
+          data-action="open"
+        >
+          <Library size={16} aria-hidden />
+          <span className="max-sm:hidden">{t('scheduledShowFiles')}</span>
+        </Link>
+        {missing ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<RotateCcw size={14} aria-hidden />}
+            aria-label={t('episodeRedownloadAria', { title: names.title })}
+            loading={busy}
+            tabIndex={tabIndex}
+            data-action="redownload"
+            onClick={() => onRedownload(d)}
+          >
+            {t('redownload')}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Play size={14} aria-hidden className="fill-current" />}
+            aria-label={t('playTitle', { title: names.title })}
+            disabled={busy}
+            tabIndex={tabIndex}
+            data-action="play"
+            onClick={() => onPlay(d)}
+          >
+            {t('playOffline')}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A file name on one line, cut before its extension when it does not fit ("Ember Protoc….mkv"). */
+function FileName({ name, path }: { name: string; path: string | undefined }) {
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 && name.length - dot <= 6 ? name.slice(dot) : '';
+  return (
+    <span dir="auto" className="flex min-w-0" title={path ?? name} data-testid="finished-file">
+      <span className="min-w-0 truncate">{ext ? name.slice(0, dot) : name}</span>
+      {ext && <span className="shrink-0">{ext}</span>}
+    </span>
+  );
+}
+
+export const FinishedRow = memo(FinishedRowImpl);

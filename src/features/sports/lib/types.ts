@@ -36,6 +36,16 @@ export interface GameBroadcast {
   kind: 'tv' | 'streaming' | 'unknown';
 }
 
+/**
+ * A live game's clock, read from ESPN's status (its type, period and clock), so the card can say it in
+ * the user's language. Periods count from 1; past the fourth quarter they are overtimes.
+ */
+export type GameClock =
+  | { kind: 'running'; period: number; clock: string | null }
+  | { kind: 'halftime' }
+  | { kind: 'endOfPeriod'; period: number }
+  | { kind: 'inning'; half: 'top' | 'bottom' | 'middle' | 'end'; inning: number };
+
 export interface Game {
   /** `${league}:${id}` */
   key: string;
@@ -68,4 +78,6 @@ export interface Game {
   gamecastUrl: string | null;
   /** While a football game is on: ESPN's down and distance ("2nd & 7 at NO 35"). Absent otherwise. */
   situation?: string;
+  /** While the game is on, its clock when ESPN's status reads as one; absent otherwise (a delay, a type it doesn't know). */
+  clock?: GameClock;
 }

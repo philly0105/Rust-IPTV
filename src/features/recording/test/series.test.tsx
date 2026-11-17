@@ -130,7 +130,7 @@ describe('Record series', () => {
     actions();
     fireEvent.click(await seriesButton());
     fireEvent.click(await screen.findByTestId('series-confirm-ok'));
-    await waitFor(() => expect(toastTitles()).toContain('Could not add the series'));
+    await waitFor(() => expect(toastTitles()).toContain('Couldn\'t add the series'));
     expect(render(<>{useToastStore.getState().toasts.at(-1)!.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('disk is full');
   });
 
@@ -212,5 +212,29 @@ describe('ScheduleMark', () => {
     const mark = await screen.findByTestId('mark-recording');
     expect(mark.hasAttribute('data-series')).toBe(false);
     expect(mark.textContent).not.toContain('Series');
+  });
+});
+
+describe('Record toasts', () => {
+  it('say where the recording went, and a provider limit warning is not a success', async () => {
+    rpc.handlers['recordings.schedule'] = () => ({ recording: recording(), warning: { overlapping: 3, maxConnections: 2 } });
+    actions();
+    fireEvent.click(await screen.findByTestId('program-record'));
+    await waitFor(() => expect(rpc.of('recordings.schedule')).toHaveLength(1));
+    const toast = await waitFor(() => {
+      const found = useToastStore.getState().toasts.at(-1);
+      expect(found?.title).toBe('Evening News will be recorded');
+      return found!;
+    });
+    expect(toast.variant).toBe('info');
+    expect(toast.action?.label).toBe('See schedule');
+  });
+
+  it('Record series offers the schedule too', async () => {
+    rpc.handlers['recordings.addRule'] = (args) => rule({ ...(args as object), id: 'new', upcoming: 4 });
+    actions();
+    fireEvent.click(await seriesButton());
+    fireEvent.click(await screen.findByTestId('series-confirm-ok'));
+    await waitFor(() => expect(useToastStore.getState().toasts.at(-1)?.action?.label).toBe('See schedule'));
   });
 });

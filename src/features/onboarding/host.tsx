@@ -11,10 +11,14 @@
  * imports all failed does not, see `countUsableSources`). Each
  * automatic overlay opens at most once per session, even when storing its
  * marker fails, and only while the app is idle: no modal dialog open (the
- * add-source dialog, a PIN prompt), no fullscreen video, the window visible.
+ * add-source dialog, a PIN prompt), no video playing, the window visible.
+ * What's new opens only in the first moments after launch
+ * (`WHATS_NEW_WINDOW_MS`): an app that is busy until later in the session
+ * (a dialog open, a channel playing) gets it at the next launch instead of
+ * over a page in use.
  */
 
-import { lazy, Suspense, useEffect, useMemo, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
 
 import { useRpcQuery } from '@/api/query';
 
@@ -30,6 +34,9 @@ export const START_DELAY_MS = 600;
 /** How often a waiting overlay checks whether the app became idle. */
 export const IDLE_POLL_MS = 400;
 
+/** How long after launch What's new may still open; past it, it waits for the next launch. */
+export const WHATS_NEW_WINDOW_MS = 5000;
+
 /** Automatic overlays already shown (or written) this session, so a failed write never reopens one in a loop. */
 const handled = new Set<string>();
 
@@ -38,11 +45,12 @@ export function resetOnboardingSession(): void {
   handled.clear();
 }
 
-/** True when an overlay may open now: nothing modal on screen, no fullscreen video, the window visible. */
+/** True when an overlay may open now: nothing modal on screen, no fullscreen or playing video, the window visible. */
 export function appIsIdle(): boolean {
   if (typeof document === 'undefined') return false;
   if (document.querySelector('[aria-modal="true"]')) return false;
   if (document.fullscreenElement) return false;
+  for (const video of document.querySelectorAll('video')) if (!video.paused && !video.ended) return false;
   return document.visibilityState !== 'hidden';
 }
 
@@ -62,6 +70,8 @@ function useStartupDecision(): void {
   const info = useRpcQuery('app.info', undefined, { staleTime: Infinity });
   const sources = useRpcQuery('sources.list', undefined);
   const busy = useOnboardingStore((s) => s.overlay !== null);
+  // The host mounts once, with the shell: its mount is the launch.
+  const [launchedAt] = useState(() => Date.now());
 
   const version = info.data?.version;
   const lastSeenVersion = settings.data?.lastSeenVersion;
@@ -105,11 +115,13 @@ function useStartupDecision(): void {
         }
         return whenIdle(() => {
           handled.add(key);
+          // Too late in the session: the version stays unseen, so the next launch shows it.
+          if (Date.now() - launchedAt > WHATS_NEW_WINDOW_MS) return;
           showOverlay({ kind: 'whatsNew', since: action.since, auto: true });
         });
       }
     }
-  }, [action, busy, version, tourCompleted]);
+  }, [action, busy, version, tourCompleted, launchedAt]);
 }
 
 export function OnboardingHost(): JSX.Element | null {

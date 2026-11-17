@@ -22,6 +22,7 @@ export {
   Page,
   SectionHeader,
   Skeleton,
+  TEXT_LINK,
   Tabs,
   Tooltip,
   buttonClass,
@@ -30,6 +31,7 @@ export {
   tabPanelProps,
   useToast,
 } from '@/ui';
+export { SearchEverythingLink } from '@/shell/SearchEverythingLink';
 export { useShell } from '@/shell/store';
 export { useSettingsValue } from '@/shell/useSettings';
 export { useVisibleSources } from '@/shell/useVisibleSources';
@@ -38,14 +40,16 @@ export { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 export { displayChannelName } from '@/features/live/lib/channelName';
 export { canCatchUp, formatClock, formatDay, formatTimeRange, ms } from '@/features/live/lib/epgTime';
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';
-export { useLiveQuality } from '@/features/live/components/QualityFilterButton';
-export { useRecordingCapabilities, useScheduleActions, useScheduleIndex } from '@/features/recording/hooks';
+export { useRecordingCapabilities, useRemindersEnabled, useScheduleActions, useScheduleIndex } from '@/features/recording/hooks';
 export { markFor } from '@/features/recording/lib/schedule';
 export { openExternalUrl } from '@/features/settings/lib/links';
 export { intlLocale } from '@/lib/intl';
+export { PHONE_QUERY } from '@/shell/navigation';
 export { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
 
 /** Live's playChannel and playCatchup, which load the player: only ever behind a press. */
 export const loadPlayback = () => import('@/features/live/lib/playback');
-/** The player store, for the zap context after a Watch. */
+/** The player store, for the zap context after a Watch and the row that plays. */
 export const loadPlayerStore = () => import('@/features/player/store');
+/** Where the mini player's Expand goes, for Watch on a phone. */
+export const loadPlayerStage = () => import('@/features/player/stage');

@@ -7,7 +7,7 @@
  */
 
 import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
@@ -91,6 +91,26 @@ function SearchingPage() {
   return <Page>movies page</Page>;
 }
 
+/** A page with its own search field in the page, as Live TV's channel search. */
+function PageSearchPage() {
+  const [v, setV] = useState('');
+  return (
+    <Page>
+      own search page
+      <input aria-label="Search channels" data-page-search="" value={v} onChange={(e) => setV(e.target.value)} />
+    </Page>
+  );
+}
+
+/** The Search page: its field is the global search, so no palette button sits beside it. */
+function GlobalSearchPage() {
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Search', search: { value: '', onChange: () => undefined, placeholder: 'Search everything', hidePalette: true } });
+  }, [shell]);
+  return <Page>search page</Page>;
+}
+
 /** A page whose results hang under the header's field (the guide's search panel). */
 const guideField = { current: null as HTMLInputElement | null };
 const onGuideFocus = vi.fn();
@@ -103,6 +123,43 @@ function GuideLikePage() {
     });
   }, [shell]);
   return <Page>guide page</Page>;
+}
+
+/** A page that asks the header to step aside while `aside` is set (Multi-view on a short window). */
+function AsidePage() {
+  const [aside, setAside] = useState(true);
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Multi-view', stepAside: aside });
+  }, [shell, aside]);
+  return (
+    <Page>
+      aside page
+      <button type="button" onClick={() => setAside(false)}>
+        back in
+      </button>
+    </Page>
+  );
+}
+
+/** A page-level error whose Try again swaps itself for a skeleton (the round-2 focus follow-up). */
+function RetryPage() {
+  const [failed, setFailed] = useState(true);
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({ title: 'Live TV', subtitle: 'A very long source name · Sports · 30,132 channels', subtitleEnd: '30,132 channels' });
+  }, [shell]);
+  return (
+    <Page>
+      {failed ? (
+        <button type="button" onClick={() => setFailed(false)}>
+          Try again
+        </button>
+      ) : (
+        <p>loading</p>
+      )}
+    </Page>
+  );
 }
 
 const onBack = vi.fn();
@@ -118,7 +175,12 @@ function routes() {
         { path: 'my-list', element: <Page>my list page</Page> },
         { path: 'searching', element: <SearchingPage /> },
         { path: 'guide-like', element: <GuideLikePage /> },
+        { path: 'global-search', element: <GlobalSearchPage /> },
+        { path: 'page-search', element: <PageSearchPage /> },
+        { path: 'search', element: <Page>search page</Page> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
+        { path: 'aside', element: <AsidePage /> },
+        { path: 'retry', element: <RetryPage /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
       ],
@@ -143,7 +205,7 @@ let matchMedia: typeof window.matchMedia;
 function media(...queries: string[]) {
   window.matchMedia = ((query: string) => ({ ...matchMedia(query), matches: queries.includes(query) })) as typeof window.matchMedia;
 }
-const PHONE = ['(max-width: 639px)', '(max-width: 1023px)'];
+const PHONE = ['(max-width: 639px)', '(max-width: 1099px)'];
 
 beforeAll(() => {
   installDomStubs();
@@ -154,6 +216,7 @@ beforeEach(() => {
   localStorage.clear();
   playerMock.playItem.mockClear();
   onBack.mockClear();
+  onGuideFocus.mockClear();
   queue.calls.length = 0;
   io.callback = null;
   io.observed = [];
@@ -243,6 +306,89 @@ describe('detail pages: Back in the header, the title once its h1 scrolls away',
   });
 });
 
+describe('a page can ask the header to step aside', () => {
+  it('draws no header bar while the page asks, keeps the window title, and comes back after', async () => {
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(screen.queryByTestId('shell-header')).toBeNull();
+    expect(document.title).toBe('Multi-view · Tsrust IPTV');
+    fireEvent.click(screen.getByRole('button', { name: 'back in' }));
+    expect(await screen.findByTestId('shell-header')).toBeTruthy();
+  });
+
+  it('stays while the rail is hidden, whose Show button is in the header', async () => {
+    media('(max-width: 1099px)');
+    useShellStore.setState({ railHidden: true });
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(within(screen.getByTestId('shell-header')).getByTestId('rail-show')).toBeTruthy();
+  });
+
+  it('takes the docked icon rail with it, leaving a floating Expand sidebar that opens it and gets focus back (v-player-07)', async () => {
+    media('(max-width: 1099px)');
+    useShellStore.setState({ railPeek: false });
+    renderRoutes(routes(), '/aside');
+    await screen.findByText('aside page');
+    expect(screen.queryByTestId('shell-rail')).toBeNull();
+    const expand = screen.getByTestId('rail-aside');
+    expect(expand.getAttribute('aria-label')).toBe('Expand sidebar');
+    fireEvent.click(expand);
+    const rail = await screen.findByTestId('shell-rail');
+    expect(rail.hasAttribute('data-peek')).toBe(true);
+    // The opener went with the rail's arrival: focus is on the rail's own toggle.
+    expect(rail.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape', code: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('shell-rail')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByTestId('rail-aside'));
+    // Back in, the docked rail returns.
+    fireEvent.click(screen.getByRole('button', { name: 'back in' }));
+    expect(await screen.findByTestId('shell-rail')).toBeTruthy();
+    expect(screen.queryByTestId('rail-aside')).toBeNull();
+  });
+});
+
+describe('the page under the header', () => {
+  it('the subtitle keeps the end the page names whole, and only the text before it truncates (v-live-15)', async () => {
+    renderRoutes(routes(), '/retry');
+    const sub = await screen.findByTestId('page-subtitle');
+    expect(sub.getAttribute('title')).toBe('A very long source name · Sports · 30,132 channels');
+    const [head, end] = [...sub.children] as HTMLElement[];
+    expect(head!.className).toContain('truncate');
+    expect(head!.textContent).toBe('A very long source name · Sports · ');
+    expect(end!.className).toContain('shrink-0');
+    expect(end!.textContent).toBe('30,132 channels');
+  });
+
+  it('when Try again goes away under focus, focus moves to the main region, not <body>', async () => {
+    renderRoutes(routes(), '/retry');
+    const retry = await screen.findByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
+    await screen.findByText('loading');
+    await waitFor(() => expect(document.activeElement?.id).toBe('main'));
+  });
+
+  it('the header pads the top safe area, which is 0 in a browser tab', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const header = await screen.findByTestId('shell-header');
+    expect(header.className).toContain('pt-[env(safe-area-inset-top,0px)]');
+    expect(header.className).toContain('h-[calc(var(--header-height)+env(safe-area-inset-top,0px))]');
+  });
+
+  it('on a phone the global search field stays a whole box without focus, a page field folds (v-shell-home-10)', async () => {
+    media(...PHONE);
+    renderRoutes(routes(), '/global-search');
+    await screen.findByText('search page');
+    const box = screen.getByRole('searchbox', { name: 'Search everything' }).parentElement!;
+    expect(box.className).not.toContain('max-sm:w-8');
+    expect(box.className).toContain('max-sm:flex-[2]');
+    cleanup();
+    renderRoutes(routes(), '/guide-like');
+    await screen.findByText('guide page');
+    expect(screen.getByRole('searchbox', { name: 'Search the guide' }).parentElement!.className).toContain('max-sm:w-8');
+  });
+});
+
 describe('the header search slot', () => {
   it("a page's own field wears the trigger's fill and a Ctrl F hint, and the palette keeps a button", async () => {
     renderRoutes(routes(), '/searching');
@@ -255,14 +401,53 @@ describe('the header search slot', () => {
     expect(screen.queryByTestId('open-palette')).toBeNull();
     // The palette button comes before the field, so the slot keeps its place. It stands in for
     // the "Search everything" box (the rail has no Search row), so it carries that name.
+    // From lg it is the worded chip with its Ctrl K hint; below, an icon whose glyph is not the
+    // field's magnifier (v-guide-05, v-vod-09). CSS shows one of the two.
+    const chip = screen.getByTestId('header-palette-chip');
     const palette = screen.getByTestId('header-palette');
-    expect(palette).toBe(screen.getByRole('button', { name: 'Search everything' }));
+    expect(chip.textContent).toContain('Search everything');
+    expect(chip.textContent).toContain('Ctrl');
+    expect(chip.className).toContain('lg:flex');
+    expect(palette.className).toContain('lg:hidden');
+    expect(palette.getAttribute('aria-label')).toBe('Search everything');
+    expect(palette.querySelector('svg')?.getAttribute('class')).not.toMatch(/\blucide-search\b/);
+    expect(chip.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(palette.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(chip);
+    expect(useShellStore.getState().paletteOpen).toBe(true);
+    useShellStore.getState().setPaletteOpen(false);
     fireEvent.click(palette);
     expect(useShellStore.getState().paletteOpen).toBe(true);
   });
 
-  it("hands a page its field: the ref, focus, a name beyond the placeholder and the results it controls", async () => {
+  it('leaves the palette button out beside the global search field, which keeps its Ctrl F hint', async () => {
+    renderRoutes(routes(), '/global-search');
+    await screen.findByText('search page');
+    const field = screen.getByRole('searchbox', { name: 'Search everything' });
+    expect(field.parentElement!.parentElement!.textContent).toContain('Ctrl');
+    expect(screen.queryByTestId('header-palette')).toBeNull();
+    expect(screen.queryByTestId('open-palette')).toBeNull();
+  });
+
+  it('"/" and Ctrl+F focus the page\'s own search field, and open the Search page where there is none', async () => {
+    const { router } = renderRoutes(routes(), '/page-search');
+    await screen.findByText('own search page');
+    const field = screen.getByRole('textbox', { name: 'Search channels' });
+    fireEvent.keyDown(document.body, { key: '/', code: 'Slash' });
+    expect(document.activeElement).toBe(field);
+    // Typed in a field, "/" is text: nothing moves.
+    fireEvent.keyDown(field, { key: '/', code: 'Slash' });
+    expect(router.state.location.pathname).toBe('/page-search');
+    field.blur();
+    fireEvent.keyDown(document.body, { key: 'f', code: 'KeyF', ctrlKey: true });
+    expect(document.activeElement).toBe(field);
+    await act(() => router.navigate('/favorites'));
+    await screen.findByText('favorites page');
+    fireEvent.keyDown(document.body, { key: '/', code: 'Slash' });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+  });
+
+    it("hands a page its field: the ref, focus, a name beyond the placeholder and the results it controls", async () => {
     renderRoutes(routes(), '/guide-like');
     await screen.findByText('guide page');
     const field = screen.getByRole('searchbox', { name: 'Search the guide' });
@@ -312,6 +497,28 @@ describe('the rail', () => {
     await act(() => router.navigate('/live/archive/s1/ch1'));
     await waitFor(() => expect(links('Live TV').map((l) => l.getAttribute('aria-current'))).toEqual(['page', 'page']));
     for (const link of links('Movies')) expect(link.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('marks the TV guide, not Live TV, on the catch-up archive the guide opened', async () => {
+    const { router } = renderRoutes(routes(), '/dashboard');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await act(() => router.navigate('/live/archive/s1/ch1', { state: { from: '/epg?at=2026-11-16T20:00' } }));
+    const links = (name: string) => within(nav).getAllByRole('link', { name });
+    await waitFor(() => expect(links('Live TV')).toHaveLength(2));
+    for (const link of links('Live TV')) expect(link.getAttribute('aria-current')).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBe('page');
+    // The phone's tab bar says the same.
+    cleanup();
+    media(...PHONE);
+    const phone = renderRoutes(routes(), '/dashboard');
+    await act(() => phone.router.navigate('/live/archive/s1/ch1', { state: { from: '/epg' } }));
+    const bar = await screen.findByTestId('tab-bar');
+    expect(within(bar).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBe('page');
+    expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBeNull();
+    // Opened from Live TV (or a link), the archive is Live TV's.
+    await act(() => phone.router.navigate('/live/archive/s1/ch1', { state: { from: '/s/s1/live' } }));
+    await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page'));
+    expect(within(bar).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBeNull();
   });
 
   it('railLinkCurrent counts the paths beside a link, never another source or section', () => {
@@ -368,8 +575,10 @@ describe('the rail', () => {
   it("group labels stay in view while their links scroll, and Library's More is a whole row", async () => {
     renderRoutes(routes(), '/dashboard');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    // The labels name their groups; they are not headings, which would come before the page's h1.
+    expect(within(nav).queryAllByRole('heading')).toEqual([]);
     for (const name of ['Library', 'Sources']) {
-      const label = within(nav).getByRole('heading', { name }).parentElement!;
+      const label = document.getElementById(within(nav).getByRole('group', { name }).getAttribute('aria-labelledby')!)!.parentElement!;
       expect(label.className, name).toMatch(/\bsticky\b/);
       expect(label.className, name).toContain('bg-surface');
     }

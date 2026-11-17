@@ -18,7 +18,7 @@ import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, plainChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
 import {
   HOUR,
@@ -224,6 +224,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
     return mergePrograms([fallback], shifted);
   }, [archiveTable.data, programs.programs, prefs.epgOffsetMinutes, from, to, offsetMs, watchingCatchup, catchupStart, catchupStartMs, channel?.ref.itemId, channel?.name, playback.subtitle, playback.title, playback.durationSeconds]);
   const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
+  // For screen readers and plain text: the name as the rows draw it, "ESPN HD (US)" (w-a11y-03).
+  const plainName = plainChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
   const catchupProgram = playbackAt === undefined ? undefined : list.find((p) => programWhen(p, playbackAt) === 'now') ?? list.find((p) => p.start === catchupStart);
   const playingProgramStart = watchingCatchup ? catchupProgram?.start : channelPlaying && playback.isLive ? current?.start : undefined;
@@ -302,7 +304,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
   // With nothing of this channel playing, the button names the channel it starts: something else
   // plays, and the ribbon follows the list's cursor.
-  const liveName = props.watchingArchive || !channelName ? liveLabel : [liveLabel, channelName].join(listSeparator(i18n.language));
+  const liveName = props.watchingArchive || !plainName ? liveLabel : [liveLabel, plainName].join(listSeparator(i18n.language));
   const details = !!props.details;
   const compact = details && !!props.compact;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
@@ -505,7 +507,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
         {shownIsLive ? <LivePill size="sm" dot="none" /> : null}
         {showingCatchup ? <span className="shrink-0 text-caption text-accent">{t('playingNow')}</span> : null}
         <p dir="auto" className="min-w-0 flex-1 truncate text-match-parent text-body-sm font-medium text-fg">
-          {shown?.title ?? (channelName || t('guide'))}
+          {shown?.title ?? (plainName || t('guide'))}
         </p>
         {shown && shownHasProgress ? (
           <span className="shrink-0 text-caption tabular-nums text-fg-muted">{t('minutesLeftShort', { count: minutesLeft(shown, shownTime) })}</span>
@@ -530,7 +532,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
           size="sm"
           variant="secondary"
           icon={<Lock className="size-3.5" />}
-          onClick={() => void ensureUnlocked([{ ref: channel.ref, categoryId: channel.categoryId, title: channelName }])}
+          onClick={() => void ensureUnlocked([{ ref: channel.ref, categoryId: channel.categoryId, title: plainName }])}
         >
           {t('unlock')}
         </Button>

@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Channel, EpgProgram } from '@/api/types';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { LiveStageColumn } from '../components/LiveStageColumn';
+import { StageIdle } from '../components/StageIdle';
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { HOUR, MINUTE } from '../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
@@ -175,5 +176,19 @@ describe("the stage timeline's focus (w-a11y-07)", () => {
     const block = await screen.findByRole('button', { name: /^Midday Report,/ }, { timeout: 10_000 });
     expect(block.className).not.toContain('outline-none');
     expect(block.className).not.toContain('focus-visible:ring');
+  });
+});
+
+describe('channel names for screen readers (w-a11y-03)', () => {
+  const espn = { ...makeChannel(1), name: 'US| ESPN HD' };
+  it("the stage's Resume says the name as the row draws it, not the provider's prefix", () => {
+    renderAt('/', [{ path: '/', element: <StageIdle kind="live" last={{ channel: espn }} now={now} onResume={() => undefined} /> }]);
+    expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe('Resume ESPN HD (US)');
+  });
+  it("the ribbon's live button does too", async () => {
+    rpcMock.handlers['epg.programs'] = () => day;
+    renderAt('/', [{ path: '/', element: <EpgRibbon channel={espn} sourceKind="xtream" watchingLive={false} onPlayLive={() => undefined} onMapEpg={() => undefined} details /> }]);
+    const live = await screen.findByRole('button', { name: /ESPN HD \(US\)$/ }, { timeout: 10_000 });
+    expect(live.getAttribute('aria-label')).not.toContain('US|');
   });
 });

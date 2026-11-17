@@ -6,7 +6,7 @@ import { itemKey, type Channel, type EpgNowNext, type ItemRef, type RecentEntry 
 import { Button } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, plainChannelName } from '../lib/channelName';
 import { isValidProgram, minutesLeft, programProgress, programWhen, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 
@@ -129,7 +129,7 @@ export function StageIdle({ kind, last, resumeProgram, highlighted = false, lock
             icon={<Play size={16} className="fill-current" />}
             className="mt-2 max-w-full max-md:mt-0 max-md:shrink-0"
             onClick={() => onResume?.(channel)}
-            aria-label={t(highlighted ? 'playChannel' : 'resumeChannel', { name: resumeProgram && !locked ? resumeProgram.title : name })}
+            aria-label={t(highlighted ? 'playChannel' : 'resumeChannel', { name: resumeProgram && !locked ? resumeProgram.title : plainChannelName(channel.name, stripPrefix) })}
             data-testid="stage-resume"
           >
             {t(highlighted ? 'play' : 'resume')}
@@ -185,7 +185,7 @@ function StationShelf({ heading, items, onPlay }: { heading: string; items: { re
             <button
               type="button"
               onClick={() => onPlay(it.ref)}
-              aria-label={t('playNamed', { name: it.name })}
+              aria-label={t('playNamed', { name: plainChannelName(it.name, false) })}
               className="flex w-24 flex-col items-center gap-1.5 rounded-lg p-2 text-on-glass outline-none hover:bg-on-glass/8 active:bg-on-glass/12 focus-visible:ring-2 focus-visible:ring-focus"
             >
               <ChannelLogo src={it.logo} name={it.name} size={48} sourceId={it.ref.sourceId} />

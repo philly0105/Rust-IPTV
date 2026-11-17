@@ -1321,7 +1321,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         pos={menu?.pos ?? null}
         items={menuItems}
         header={menuHeader}
-        label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
+        // Spoken: the name as the row draws it, not the provider's "US| " (w-a11y-03).
+        label={plainChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
         onClose={closeMenu}
       />
       <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu?.category.name ?? ''} onClose={closeGroupMenu} />

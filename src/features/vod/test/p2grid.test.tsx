@@ -142,7 +142,9 @@ describe('P2-GRID-2: search', () => {
     const channel = { ref: { sourceId: 'src1', contentType: 'live', itemId: 'c1' }, name: 'Film News', categoryId: 'g', isRadio: false, logoUrl: 'http://cdn.example/news.png' } as Channel;
     rpcMock.handlers['catalog.search'] = () => ({ live: [channel], movies: [film(0)], series: [] });
     renderAt('/search?q=film', [{ path: '/search', element: <SearchPage /> }]);
-    const logo = await screen.findByRole('img', { name: 'Film News' });
+    // Live TV's tile (w-realdata-04): a decorative image inside the card the channel's name labels.
+    const card = await screen.findByRole('button', { name: /Film News/ });
+    const logo = await waitFor(() => card.querySelector('img')!);
     // w-12 is 45 px at 100 %: the 64 px copy, as the measured frame asked for.
     expect(sizeOf(logo as HTMLImageElement)).toBe('64');
     expect(pictureReads).toEqual([]);

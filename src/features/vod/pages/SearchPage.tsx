@@ -11,7 +11,7 @@ import { isDesktop, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type GuideSearchHit, type Page as PageOf, type RecentEntry, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
-import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { ChannelLogo, ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { displayChannelName } from '@/features/live/lib/channelName';
 import { ms } from '@/features/live/lib/epgTime';
@@ -67,7 +67,7 @@ import {
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, LivePill, Page, Poster, PosterCellWidthContext, SectionHeader, Skeleton, TOUCH_TARGET, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, LivePill, Page, PosterCellWidthContext, SectionHeader, Skeleton, TOUCH_TARGET, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -1483,8 +1483,9 @@ function ChannelHitButton({
       className="flex w-full items-center gap-3 rounded-lg border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors"
     >
       <div className="w-12 shrink-0">
-        {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
-        <Poster src={h.imageUrl} sourceId={c.ref.sourceId} width={logoWidth} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
+        {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2).
+            Live TV's tile, so a channel without a logo has the same letters here as in its list. */}
+        <ChannelLogo src={h.imageUrl} name={h.title} size={logoWidth} sourceId={c.ref.sourceId} />
       </div>
       <div className="min-w-0 flex-1">
         {/* As Live TV's list names it: the country tag after the name, quiet, or none with the setting. */}

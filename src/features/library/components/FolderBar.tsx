@@ -70,7 +70,7 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
     // On a phone the line is the page row's whole width and the path wraps under its label, lined
     // up with it, so it keeps its folder and the parents that fit.
     <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-muted max-sm:basis-full" data-testid="downloads-folder">
-      <span className="flex min-w-0 flex-1 items-center gap-2 max-sm:flex-wrap max-sm:gap-y-0.5 sm:flex-none">
+      <span className="flex min-w-0 flex-1 items-center gap-2 max-sm:flex-wrap max-sm:gap-y-0.5 sm:flex-initial">
         <HardDrive aria-hidden size={14} className="shrink-0 text-fg-subtle" />
         {/* In a browser the folder is on the server's disk, not on the device in hand. */}
         <span className="shrink-0">{t(isDesktop ? 'savingTo' : 'savingToServer')}</span>

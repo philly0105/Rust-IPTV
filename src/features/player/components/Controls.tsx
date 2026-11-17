@@ -4,6 +4,7 @@ import {
   Captions,
   CaptionsOff,
   CircleDot,
+  CircleStop,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -24,7 +25,6 @@ import {
   Settings2,
   SkipBack,
   SkipForward,
-  Square,
   Volume1,
   Volume2,
   VolumeX,
@@ -1063,7 +1063,7 @@ function OptionsMenu({
           )}
           {commandsShown.record && <RecordMenuAction onDone={() => setView(null)} />}
           {commandsShown.stop && (
-            <MenuAction icon={<Square className="fill-current" aria-hidden />} label={t('stop')} onClick={() => pick(() => usePlayerStore.getState().stop())} />
+            <MenuAction icon={<CircleStop aria-hidden />} label={t('stop')} onClick={() => pick(() => usePlayerStore.getState().stop())} />
           )}
         </>
       )}

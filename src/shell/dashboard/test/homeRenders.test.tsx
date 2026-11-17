@@ -76,9 +76,16 @@ function handlers() {
   h['watchlist.list'] = (): WatchlistEntry[] => [
     { ref: { sourceId: 's1', contentType: 'movie', itemId: '50' }, snapshot: snap('Saved Film'), addedAt: '2026-10-02T00:00:00Z', watched: false },
   ];
-  h['positions.continueWatching'] = (): PlaybackPosition[] => [
-    { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snap('The Long Signal') },
-  ];
+  // Four in progress, one more than the hero holds, so Continue watching keeps its rail (home-08).
+  h['positions.continueWatching'] = (): PlaybackPosition[] =>
+    ['The Long Signal', 'Paper Moons', 'Cold Harbor', 'North Light'].map((title, i) => ({
+      ref: { sourceId: 's1', contentType: 'movie', itemId: String(10 + i) },
+      positionSeconds: 1800,
+      durationSeconds: 5400,
+      watched: false,
+      updatedAt: `2026-10-${10 - i}T20:00:00Z`,
+      snapshot: snap(title),
+    }));
   h['favorites.list'] = (): FavoriteEntry[] => [
     { ref: { sourceId: 's1', contentType: 'live', itemId: '1' }, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: snap('Harbor News', 'live') },
   ];

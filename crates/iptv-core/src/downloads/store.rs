@@ -319,10 +319,13 @@ pub fn set_destination(
 }
 
 /// Clears the destination (after its `.part` was removed) and the progress.
+/// The origin goes too: with no bytes left, the row is no longer bound to
+/// the equivalent copy it held, so a retry may pick its own item again.
 pub fn clear_destination(conn: &Connection, id: i64) -> CoreResult<()> {
     conn.execute(
         "UPDATE downloads SET file_name = NULL, file_path = NULL, bytes_downloaded = 0, \
-         total_bytes = NULL, resume_validator = NULL, updated_at = ?2 WHERE id = ?1",
+         total_bytes = NULL, resume_validator = NULL, origin_json = NULL, updated_at = ?2 \
+         WHERE id = ?1",
         params![id, now_rfc3339()],
     )?;
     Ok(())

@@ -6,8 +6,9 @@
 //! - [`transfer`]: streaming GET with source headers, Range resume validated
 //!   by ETag/Last-Modified (`resume_validator`), in-task retry with backoff,
 //!   throttled `downloads.progress` events.
-//! - [`segments`]: one file over several Range connections, with a ranges
-//!   sidecar next to the `.part`.
+//! - [`segments`]: one file over up to 8 Range connections, from its own
+//!   source and identical copies, with a version 2 ranges sidecar next to
+//!   the `.part`.
 //! - [`naming`]: Windows-safe names, atomic numbered `.part` reservation,
 //!   finalize without overwrite.
 //! - [`store`]: SQL for the `downloads` table.

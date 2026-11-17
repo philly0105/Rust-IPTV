@@ -65,13 +65,34 @@ async function addSample(path: string, existing: ReturnType<typeof makeSource>[]
   return view;
 }
 
-describe('add toast total (L2-sources-home-6)', () => {
-  it('counts radio and formats the number, so it matches the progress bar', async () => {
+describe('add toast counts (L2-sources-home-6, w-walkthrough-06)', () => {
+  it('says what arrived per kind, radio included, with formatted numbers', async () => {
     rpcMock.handlers['sources.add'] = () =>
       makeSource('new', { name: 'Sample', channelCount: 19_500, radioCount: 500, movieCount: 60_000, seriesCount: 8_000 });
     await addSample('/sources?add=1&kind=m3u');
     await waitFor(() => expect(lastToast()?.title).toBe('Added Sample'));
-    expect(lastToast()?.description).toBe('88,000 items imported');
+    expect(lastToast()?.description).toBe('19,500 channels, 500 stations, 60,000 movies, and 8,000 series imported');
+  });
+
+  it('leaves out kinds the source has none of', async () => {
+    rpcMock.handlers['sources.add'] = () => makeSource('new', { name: 'Sample', channelCount: 1, radioCount: 0, movieCount: 0, seriesCount: 0 });
+    await addSample('/sources?add=1&kind=m3u');
+    await waitFor(() => expect(lastToast()?.description).toBe('1 channel imported'));
+  });
+});
+
+describe('default name of a second source from the same file (w-walkthrough-06)', () => {
+  it('numbers a name another source already has, in the placeholder and in what is added', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('a', { name: 'tv' }), makeSource('b', { name: 'TV (2)' })];
+    rpcMock.handlers['sources.add'] = (args) => makeSource('new', { name: (args as { name: string }).name });
+    renderAt(routes(), '/sources?add=1&kind=m3u');
+    await screen.findByRole('dialog');
+    type(/^Playlist URL/, 'lists.example.com/tv.m3u?walk=3');
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /^Name/ }).getAttribute('placeholder')).toBe('tv (3)'));
+    fireEvent.click(screen.getByTestId('add-source-submit'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.add')).toHaveLength(1));
+    expect((rpcMock.callsOf('sources.add')[0] as { name: string }).name).toBe('tv (3)');
+    await waitFor(() => expect(lastToast()?.title).toBe('Added tv (3)'));
   });
 });
 

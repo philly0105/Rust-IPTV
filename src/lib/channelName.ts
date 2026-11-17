@@ -57,29 +57,56 @@ export function splitCountryTag(name: string): { name: string; tag?: string } {
 }
 
 /**
- * Words a playlist files names under in capitals that are kinds of content or quality, not places
- * ("NBA: Lakers vs Celtics", "PPV| UFC 300", "MOVIES | ACTION"). The groups' region picker offers no
- * region for them, and a channel's name keeps them in front.
+ * Words a playlist files names under in capitals that are kinds of content or quality, an event's
+ * state or a service, not places ("NBA: Lakers vs Celtics", "PPV| UFC 300", "MOVIES | ACTION",
+ * "NEXT | HAWKS VS ARSENAL", "PRIME: PBS HD"). The groups' region picker offers no region for them,
+ * and a channel's name keeps them in front.
  */
 export const CATEGORY_TAGS: ReadonlySet<string> = new Set([
   'MOVIES', 'MOVIE', 'FILMS', 'FILM', 'VOD', 'SERIES', 'SHOWS', 'TV', 'SPORT', 'SPORTS', 'NEWS', 'KIDS', 'MUSIC', 'DOCU',
   'DOCS', 'ADULT', 'XXX', 'PPV', 'EVENT', 'EVENTS', 'RADIO', 'LIVE', 'LOCAL', 'NFL', 'NBA', 'MLB', 'NHL', 'NCAA', 'NCAAF',
-  'UFC', 'WWE', '24/7', 'HD', 'FHD', 'UHD', 'SD', 'VIP', 'RAW',
+  'UFC', 'WWE', '24/7', 'HD', 'FHD', 'UHD', 'SD', 'VIP', 'RAW', 'NEXT', 'ENDED', 'REPLAY', 'PRIME', 'SLING', 'TUBI',
+  'PLUTO', 'PEACOCK',
 ]);
 
 /**
+ * Place words longer than a code that playlists lead names with ("LATAM| FOX SPORTS", "EXYU: ZEE
+ * TV"). A longer capital word is otherwise taken for part of the name: moving "NEXT" or "ENDED" after
+ * an event's name hid the one word that says whether it is on.
+ */
+const REGION_WORDS: ReadonlySet<string> = new Set([
+  'LATAM', 'LATINO', 'EXYU', 'CARIB', 'ARAB', 'ARABIC', 'MENA', 'NORDIC', 'AFRICA', 'ASIA', 'EUROPE', 'INTL', 'CANADA',
+]);
+/** A 2-3 character code ("US", "LAT", "4K"), or short codes joined by dashes ("EX-YU", "4K-DE"). */
+const PLACE_CODE = /^(?=[\d+]*\p{Lu})[\p{Lu}\d+]{2,3}$|^(?=.*\p{Lu})[\p{Lu}\d+]{2,3}(?:-[\p{Lu}\d+]{2,3}){1,2}$/u;
+/** A country and its language before a colon ("CA EN: SKY SPORTS F1"), or a place word ("CARIB: GLOBO"). */
+const PLACE_COLON = /^(\p{Lu}{2} \p{Lu}{2}|\p{Lu}{4,8}):\s+(?=\S)/u;
+
+/** Whether a provider's tag (from `splitCountryTag`) names a place. */
+function isPlaceTag(tag: string): boolean {
+  const code = tag.normalize('NFKC');
+  if (CATEGORY_TAGS.has(code)) return false;
+  if (REGION_WORDS.has(code)) return true;
+  const pair = /^(\p{Lu}{2}) (\p{Lu}{2})$/u.exec(code);
+  if (pair) return !CATEGORY_TAGS.has(pair[1]!) && !CATEGORY_TAGS.has(pair[2]!);
+  return code.length <= 8 && PLACE_CODE.test(code);
+}
+
+/**
  * `splitCountryTag` for drawing the tag after the name (ChannelName), which every user sees, so it
- * moves only a tag shaped like a place's code: capitals, no spaces, 2 to 8 characters ("US",
- * "LATAM", "4K-DE"), and no kind of content. Anything else is part of the name and stays where the
- * provider put it: "Sky Sports | Main Event", "ESPN HD | Backup" and "NBA: Lakers vs Celtics" come
- * back whole, with no `tag`. The strip setting keeps its own wider rule.
+ * moves only a tag that names a place: a 2-3 character code in capitals ("US", "LAT"), short codes
+ * joined by dashes ("EX-YU", "4K-DE"), a country and its language ("CA EN: SKY SPORTS F1"), or a
+ * known place word ("LATAM", "CARIB"), and no kind of content. Anything else is part of the name
+ * and stays where the provider put it: "Sky Sports | Main Event", "ESPN HD | Backup", "NBA: Lakers
+ * vs Celtics" and "NEXT | HAWKS VS ARSENAL" come back whole, with no `tag`. The strip setting keeps
+ * its own wider rule.
  */
 export function splitPlaceTag(name: string): { name: string; tag?: string } {
-  const split = splitCountryTag(name);
-  if (!split.tag) return split;
-  const code = split.tag.normalize('NFKC');
-  const placeLike = code.length >= 2 && code.length <= 8 && !/\s/.test(code) && code === code.toUpperCase() && !CATEGORY_TAGS.has(code);
-  return placeLike ? split : { name: name.trim() };
+  const trimmed = name.trim();
+  const colon = PLACE_COLON.exec(trimmed);
+  if (colon && isPlaceTag(colon[1]!)) return { name: trimmed.slice(colon[0].length).trim(), tag: colon[1]! };
+  const split = splitCountryTag(trimmed);
+  return split.tag && isPlaceTag(split.tag) ? split : { name: trimmed };
 }
 
 export function stripCountryPrefix(name: string): string {

@@ -55,6 +55,21 @@ describe('splitPlaceTag', () => {
     expect(splitPlaceTag('VIP | Sky Cinema')).toEqual({ name: 'VIP | Sky Cinema' });
   });
 
+  it('keeps an event state or a service in front, and takes a country with its language', () => {
+    expect(splitPlaceTag('NEXT | HAWKS VS ARSENAL | Tue 17 Nov 23:00')).toEqual({ name: 'NEXT | HAWKS VS ARSENAL | Tue 17 Nov 23:00' });
+    expect(splitPlaceTag('ENDED | AUCKLAND FC VS BAYERN MUNICH')).toEqual({ name: 'ENDED | AUCKLAND FC VS BAYERN MUNICH' });
+    expect(splitPlaceTag('PRIME: NICKELODEON ᴿᴬᵂ')).toEqual({ name: 'PRIME: NICKELODEON ᴿᴬᵂ' });
+    expect(splitPlaceTag('US (ESPN+ 002) | Chelsea vs. Knicks')).toEqual({ name: 'US (ESPN+ 002) | Chelsea vs. Knicks' });
+    expect(splitPlaceTag('CA EN: SKY SPORTS F1 ᴿᴬᵂ')).toEqual({ tag: 'CA EN', name: 'SKY SPORTS F1 ᴿᴬᵂ' });
+    expect(splitPlaceTag('EXYU: ZEE TV ᴴᴰ')).toEqual({ tag: 'EXYU', name: 'ZEE TV ᴴᴰ' });
+    expect(splitPlaceTag('EX-YU| RTS 1')).toEqual({ tag: 'EX-YU', name: 'RTS 1' });
+    expect(splitPlaceTag('LAT: ITV 2')).toEqual({ tag: 'LAT', name: 'ITV 2' });
+    // Capital words that are no place stay part of the name.
+    expect(splitPlaceTag('NCIS: LA')).toEqual({ name: 'NCIS: LA' });
+    expect(splitPlaceTag('HD SD: Test')).toEqual({ name: 'HD SD: Test' });
+    expect(plainChannelName('CA EN: ESPN 4K', false)).toBe('ESPN 4K (CA EN)');
+  });
+
   it('leaves the strip setting its own wider rule', () => {
     expect(stripCountryPrefix('Sky Sports | Main Event')).toBe('Main Event');
     expect(stripCountryPrefix('NBA: Lakers vs Celtics')).toBe('Lakers vs Celtics');

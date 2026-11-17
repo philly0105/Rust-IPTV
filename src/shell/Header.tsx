@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { BackButton, IconButton, Kbd, SearchInput, TOUCH_TARGET, cn } from '@/ui';
 
+import { bufferPaletteKeys } from './paletteKeys';
 import { useShellStore, type HeaderState } from './store';
 import { useTheme } from './theme';
 
@@ -43,6 +44,10 @@ export const Header = memo(function Header({
   const panelOpen = useShellStore((s) => s.panelOpen);
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);
+  const openPalette = () => {
+    bufferPaletteKeys();
+    setPaletteOpen(true);
+  };
   const titleScrolledAway = useShellStore((s) => s.titleScrolledAway);
   const { resolved, toggle } = useTheme();
   const windowTitle = header?.documentTitle || header?.title;
@@ -170,7 +175,7 @@ export const Header = memo(function Header({
               shortcut="mod+k"
               icon={<Search size={18} />}
               aria-haspopup="dialog"
-              onClick={() => setPaletteOpen(true)}
+              onClick={openPalette}
               data-testid="header-palette"
             />
           )}
@@ -188,7 +193,7 @@ export const Header = memo(function Header({
               type="button"
               // One way in: the palette searches favourites, history, the guide and commands, and
               // hands anything else to the search page. Ctrl+F still opens the search page.
-              onClick={() => setPaletteOpen(true)}
+              onClick={openPalette}
               aria-haspopup="dialog"
               data-tour="search"
               data-testid="open-palette"

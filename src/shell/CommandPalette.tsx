@@ -53,6 +53,7 @@ import { useCommandList } from './commands';
 import { containsWords, SETTING_TARGETS, SETTINGS_SECTIONS } from './settingTargets';
 import { LIBRARY_LINKS, readLastSource, watchLinks } from './navigation';
 import { playFromShell, type PlayItemArgs } from './playFromShell';
+import { takePaletteKeys } from './paletteKeys';
 import { railFadeMask } from './Rail';
 import { railLinks, routeSourceId } from './railLinks';
 import { useShellStore } from './store';
@@ -666,6 +667,14 @@ export function CommandPalette() {
     if (open && query !== '') setQuery('');
     if (open) setSelected('');
   }
+
+  // Keys typed between Ctrl+K and the field taking focus (the dialog focused it in its own layout
+  // effect, which runs before this one) are the query's start (paletteKeys.ts).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const typed = takePaletteKeys();
+    if (typed) setQuery(typed);
+  }, [open]);
 
   // Favourites and recent items lead: a tie with a command goes to the content. With nothing
   // typed, the recent channels, the titles to resume and the suggestions lead, then the

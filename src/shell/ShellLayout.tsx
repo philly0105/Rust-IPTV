@@ -22,6 +22,7 @@ import { LIBRARY_LINKS, PHONE_QUERY, RAIL_DOCK_QUERY, RAIL_WATCH_LINKS, remember
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
+import { bufferPaletteKeys } from './paletteKeys';
 import { modalOpen, useShortcut } from './shortcuts';
 import { PLAYER_PREFETCH_DELAY_MS, scheduleIdleLoad, schedulePlayerLoad } from './idleLoad';
 import { useShellStore, type ShellStore } from './store';
@@ -149,6 +150,7 @@ const OnboardingHost = lazy(() => import('@/features/onboarding/host').then((m) 
 
 /** Opens the command palette from anywhere. */
 export function openPalette(): void {
+  bufferPaletteKeys();
   useShellStore.getState().setPaletteOpen(true);
 }
 
@@ -204,6 +206,8 @@ function GlobalShortcuts() {
       const s = useShellStore.getState();
       // Inside the palette it closes it; over another dialog it does not open.
       if (!s.paletteOpen && modalOpen()) return;
+      // What is typed right after the press belongs in the palette's field, on its first open too.
+      if (!s.paletteOpen) bufferPaletteKeys();
       s.setPaletteOpen(!s.paletteOpen);
     },
     { description: t('scPalette'), area, allowInInput: true, allowInModal: true },

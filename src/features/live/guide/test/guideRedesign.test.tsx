@@ -374,13 +374,14 @@ describe('the preview band (CB-GUIDE-PREVIEW)', () => {
 
     // The toggle's name says what a press does, with no pressed or expanded state beside it.
     const toggle = screen.getByTestId('guide-preview-toggle');
-    expect(toggle.textContent).toBe('Hide preview');
+    // By name: the other label sits invisible beside it, holding the button's width (v-guide-13).
+    expect(screen.getByRole('button', { name: 'Hide preview' })).toBe(toggle);
     expect(toggle.hasAttribute('aria-pressed')).toBe(false);
     expect(toggle.hasAttribute('aria-expanded')).toBe(false);
     fireEvent.click(toggle);
     expect(screen.queryByTestId('guide-preview')).toBeNull();
     expect(localStorage.getItem('guide.preview')).toBe('0');
-    expect(screen.getByTestId('guide-preview-toggle').textContent).toBe('Show preview');
+    expect(screen.getByRole('button', { name: 'Show preview' })).toBe(screen.getByTestId('guide-preview-toggle'));
   });
 
   it('starts hidden on a window under 1000 px tall until the user opens it (review round 2)', async () => {

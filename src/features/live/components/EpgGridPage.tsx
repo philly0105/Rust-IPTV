@@ -2901,9 +2901,11 @@ const GuideToolbar = memo(function GuideToolbar({
           {/* The time scale (Ctrl+scroll over the grid too): one − / + control at the chips' end,
               so the time controls fit one row beside the group picker on a touch tablet. A phone's
               is one button in the ruler's corner. */}
-          <div role="group" aria-label={tg('zoom')} className="flex shrink-0 items-center rounded-md border border-edge bg-surface-2 p-0.5">
-            <IconButton size="sm" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} label={tg('zoomOut')} data-testid="guide-zoom-out" className="h-7 w-7" />
-            <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" className="h-7 w-7" />
+          {/* The frame is a ring outside the kit's buttons, so the group is exactly as tall as the
+              row's other buttons (a bordered, padded frame shrank them to 28 px). */}
+          <div role="group" aria-label={tg('zoom')} className="flex shrink-0 items-center rounded-md bg-surface-2 ring-1 ring-edge">
+            <IconButton size="sm" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} label={tg('zoomOut')} data-testid="guide-zoom-out" />
+            <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" />
           </div>
           {previewOpen !== undefined ? (
             // The label says what a press does, so no state as well: "Hide preview, pressed"
@@ -2917,7 +2919,12 @@ const GuideToolbar = memo(function GuideToolbar({
               className="shrink-0"
               data-testid="guide-preview-toggle"
             >
-              <span className="max-xl:sr-only">{previewOpen ? tg('hidePreview') : tg('showPreview')}</span>
+              {/* Both labels share one cell, the other one invisible, so the button keeps the longer
+                  one's width and the controls beside it do not move when it is pressed. */}
+              <span className="grid max-xl:sr-only">
+                <span className="col-start-1 row-start-1">{previewOpen ? tg('hidePreview') : tg('showPreview')}</span>
+                <span aria-hidden className="invisible col-start-1 row-start-1">{previewOpen ? tg('showPreview') : tg('hidePreview')}</span>
+              </span>
             </Button>
           ) : null}
         </div>

@@ -122,7 +122,8 @@ pub fn still_matches(fp: &Fingerprint, total: i64, validator: Option<&str>) -> b
 
 /// Verified identical copies of `item` (exact total and all three samples
 /// equal to `fp`), excluding sources in `exclude`, at most one per source,
-/// ordered by spare allowance, then the catalog's order.
+/// ordered by spare allowance, then fewest holders, then the catalog's
+/// order.
 ///
 /// Standing verdicts and cached fingerprints decide first; every other
 /// candidate is sampled under `mgr.try_hold(.., Verify)` on its source, and

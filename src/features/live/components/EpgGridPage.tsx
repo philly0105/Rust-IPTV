@@ -50,7 +50,7 @@ import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, fieldClass, Fi
 import { portalContainer } from '@/ui/portal';
 import { copyText } from '@/lib/clipboard';
 import { formatDurationParts } from '@/lib/duration';
-import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
+import { dateTimeFormat, intlLocale, listSeparator, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
@@ -3326,14 +3326,13 @@ function ProgramPopover({
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             {/* The channel as the grid's column names it: the place tag after the name, quiet. */}
-            <p className="flex min-w-0 items-baseline text-caption tabular-nums text-fg-muted">
+            {/* The time on its own line: after the quiet place tag, the locale's list comma read as
+                "US, 2:00 – 3:00 PM" (v-guide-09). Screen readers still hear the two parts joined by
+                that separator. Each part isolated (the name by its dir="auto"). */}
+            <p className="flex min-w-0 flex-col text-caption tabular-nums text-fg-muted">
               <ChannelName name={channel.name} strip={stripCountryPrefix} className="min-w-0 truncate" />
-              {/* Each part isolated (the name by its dir="auto"). A middot, not the locale's list
-                  comma: after the quiet place tag a comma read as "US, 2:00 – 3:00 PM" (v-guide-09). */}
-              <span className="shrink-0 whitespace-pre">
-                <span aria-hidden className="px-1.5 text-fg-subtle">·</span>
-                <bdi>{formatRange(program, i18n.language)}</bdi>
-              </span>
+              <span className="sr-only">{listSeparator(i18n.language)}</span>
+              <bdi>{formatRange(program, i18n.language)}</bdi>
             </p>
             <h3 dir="auto" className="mt-0.5 text-base font-semibold text-match-parent">{program.title}</h3>
             {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}

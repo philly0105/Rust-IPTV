@@ -18,7 +18,7 @@ import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 
 import { useTranslation } from 'react-i18next';
 
 import type { ParentalMode } from '@/api/types';
-import { plainChannelName } from '@/features/live/lib/channelName';
+import { plainChannelName } from '@/lib/channelName';
 import { glassButton } from '@/features/player/components/glassButton';
 import { GLASS_FOCUS } from '@/ui/focus';
 

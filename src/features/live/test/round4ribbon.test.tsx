@@ -99,6 +99,6 @@ describe('the Now card without a guide (review round 4)', () => {
     const tag = within(heading).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
     expect(tag.previousElementSibling?.textContent).toBe('ESPN (Backup)');
-    expect(within(heading).getByText('US| ESPN (Backup)').className).toContain('sr-only');
+    expect(within(heading).getByText('ESPN (Backup) (US)').className).toContain('sr-only');
   });
 });

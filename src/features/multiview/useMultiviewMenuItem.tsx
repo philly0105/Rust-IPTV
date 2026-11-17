@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, type NavigateFunction } from 'react-router';
 
 import { sameRef } from '@/api/types';
-import { plainChannelName } from '@/features/live/lib/channelName';
+import { plainChannelName } from '@/lib/channelName';
 import { toast, type MenuAction } from '@/ui';
 
 import { wallOverLimit } from './accountStatus';

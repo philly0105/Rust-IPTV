@@ -1054,8 +1054,8 @@ describe('sports page', () => {
     const tag = within(row).getByTestId('channel-name-tag');
     expect([tag.previousElementSibling!.textContent, tag.textContent]).toEqual(['ESPN HD', 'US']);
     expect(tag.className).toContain('text-fg-subtle');
-    // Screen readers get the provider's name as it is.
-    expect(within(row).getByTestId('sports-stream-name').querySelector('.sr-only')!.textContent).toBe('US| ESPN HD');
+    // Screen readers get the name as plain text says it.
+    expect(within(row).getByTestId('sports-stream-name').querySelector('.sr-only')!.textContent).toBe('ESPN HD (US)');
   });
 
   it("puts the rows that can act first: a final game's one archived copy is not hidden behind Show all", async () => {

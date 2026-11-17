@@ -319,8 +319,8 @@ describe('fullscreen channel panel names (round 5)', () => {
     expect(tag.textContent).toBe('US');
     expect(tag.previousElementSibling!.textContent).toMatch(/^Channel \d+$/);
     expect(tag.className).toContain('text-on-glass-muted');
-    // The option is still named by the provider's name.
-    expect(tag.closest('[role=option]')!.textContent).toContain('US| Channel');
+    // The option is named as plain text names the channel.
+    expect(tag.closest('[role=option]')!.textContent).toMatch(/Channel \d+ \(US\)/);
   });
 
   it('leaves the tag out with "Hide country tags" on', async () => {

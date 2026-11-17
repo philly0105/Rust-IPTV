@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey } from '@/api/types';
-import { plainChannelName } from '@/features/live/lib/channelName';
+import { plainChannelName } from '@/lib/channelName';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';

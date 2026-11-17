@@ -62,7 +62,7 @@ describe("Home's channel cards name a channel as Live TV does", () => {
     const tag = card.querySelector('[data-testid=channel-name-tag]')!;
     expect(tag.className).toContain('text-fg-subtle');
     expect(tag.parentElement!.getAttribute('aria-hidden')).toBe('true');
-    expect(card.querySelector('[title="US| ESPN HD"]')!.querySelector('.sr-only')!.textContent).toBe('US| ESPN HD');
+    expect(card.querySelector('[title="US| ESPN HD"]')!.querySelector('.sr-only')!.textContent).toBe('ESPN HD (US)');
   });
 
   it('an On now card draws the channel line the same way; with its source after it the name goes bare, then a dot', async () => {

@@ -1,7 +1,7 @@
 import { MonitorPlay, TriangleAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { plainChannelName } from '@/features/live/lib/channelName';
+import { plainChannelName } from '@/lib/channelName';
 
 import { Button, cn, IconButton } from '../deps';
 import type { MultiviewTile } from '../types';

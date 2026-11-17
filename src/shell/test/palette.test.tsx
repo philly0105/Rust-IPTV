@@ -314,7 +314,7 @@ describe('palette library matches', () => {
     await within(palette).findByText('NBA 05');
     await waitFor(() => {
       const first = palette.querySelector('[cmdk-item]');
-      expect(first?.textContent).toContain('US| NBA TV FHD');
+      expect(first?.textContent).toContain('NBA TV FHD (US)');
       expect(first?.getAttribute('data-selected')).toBe('true');
     });
     const headings = [...palette.querySelectorAll('[cmdk-group-heading]')].map((h) => h.textContent);

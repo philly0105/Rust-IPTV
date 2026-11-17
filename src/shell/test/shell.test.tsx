@@ -1870,7 +1870,7 @@ describe('dashboard base titles (L2-visual-3)', () => {
     expect(within(vod).getByText('Quiet Coast')).toBeTruthy();
     // The stripped year moves under the title.
     expect(within(vod).getByText('2021')).toBeTruthy();
-    // A channel's prefix is part of its name and stays.
-    expect(within(await screen.findByTestId('dashboard-rail-live-favorites')).getByText('US: Harbor News')).toBeTruthy();
+    // A channel's prefix is part of its name and stays (after it, as plain text says it, for screen readers).
+    expect(within(await screen.findByTestId('dashboard-rail-live-favorites')).getByText('Harbor News (US)')).toBeTruthy();
   });
 });

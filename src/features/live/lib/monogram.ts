@@ -1,7 +1,7 @@
 import { initialWords, isNameMarker, twoInitials } from '@/ui/Poster';
 import { tintFill, tintOf } from '@/ui/tint';
 
-import { channelNameParts } from './channelName';
+import { channelNameParts } from '@/lib/channelName';
 
 /**
  * A channel's monogram (LG-14): two letters on its name's tint (src/ui/tint.ts), the one every

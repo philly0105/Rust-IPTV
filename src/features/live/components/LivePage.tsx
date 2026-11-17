@@ -922,7 +922,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     () => (
       // On a phone the groups button's icon and the quality button sit on the page gutter, under
       // the title's edge, not 8 px from the screen's.
-      <div className="flex items-center gap-1 border-b border-divider px-2 py-2 max-sm:ps-[calc(var(--page-gutter)-0.5rem)] max-sm:pe-(--page-gutter)">
+      <div
+        className="flex items-center gap-1 border-b border-divider px-2 py-2 max-sm:ps-[calc(var(--page-gutter)-0.5rem)] max-sm:pe-(--page-gutter)"
+        style={searchFit.textWidth ? ({ '--search-text': `${searchFit.textWidth}px` } as CSSProperties) : undefined}
+      >
         {groupOnToolbar ? (
           // The group being browsed, as the button that changes it: one press opens the groups.
           <Button
@@ -960,9 +963,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         )}
         <SearchInput
           size="sm"
-          // Beside the group's name the field keeps room for its whole "Search"; a long name is
-          // what gives way on a narrow phone.
-          className={groupOnToolbar ? 'min-w-32 flex-1' : 'min-w-0 flex-1'}
+          // Beside the group's name the field keeps room for its whole "Search" in any language
+          // (its icon, the text, and the clear button's room on touch); a long name is what gives
+          // way on a narrow phone.
+          className={
+            groupOnToolbar
+              ? 'min-w-[calc(var(--search-text,3.5rem)+4.5rem+2px)] flex-1 pointer-coarse:min-w-[calc(var(--search-text,3.5rem)+5.25rem+2px)]'
+              : 'min-w-0 flex-1'
+          }
           value={search}
           // Clearing (the clear button) commits at once, like Escape.
           onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}

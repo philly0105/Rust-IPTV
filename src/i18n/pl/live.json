@@ -74,6 +74,8 @@
   "loadingChannels": "Ładowanie kanałów",
   "loadingGroups": "Ładowanie grup",
   "groupsLoadFailed": "Nie udało się załadować grup",
+  "channelsLoadFailed": "Nie udało się wczytać kanałów",
+  "guideGridLoadFailed": "Nie udało się wczytać przewodnika",
   "loadingGuide": "Ładowanie przewodnika",
   "guide": "Przewodnik TV",
   "openGuide": "Przewodnik TV",

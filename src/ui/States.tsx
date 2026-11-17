@@ -129,6 +129,9 @@ export function isServerUnreachable(err: RpcError): boolean {
 function hintKey(err: RpcError): string {
   if (isServerUnreachable(err)) return 'errorHintServerUnreachable';
   if (err.code === 'unsupported' && !isDesktop) return 'errorHintUnsupportedWeb';
+  // In the browser there is no app to restart, and a backup restore is too much for what is
+  // usually a passing lock: reload, then restart the server.
+  if (err.code === 'db' && !isDesktop) return 'errorHintDbWeb';
   return ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal';
 }
 

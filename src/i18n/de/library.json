@@ -214,6 +214,8 @@
   "playTitle": "{{title}} abspielen",
   "openFailed": "{{title}} konnte nicht geöffnet werden",
   "removeFailed": "Der Eintrag konnte nicht entfernt werden",
+  "favoritesLoadFailed": "Favoriten konnten nicht geladen werden",
+  "recentLoadFailed": "Der Verlauf konnte nicht geladen werden",
   "sourceRemoved": "Quelle entfernt",
   "sourceRemovedHint": "Die Quelle dieses Eintrags wurde entfernt. Fügen Sie sie erneut hinzu, um den Eintrag zu öffnen.",
   "tryAgain": "Erneut versuchen",

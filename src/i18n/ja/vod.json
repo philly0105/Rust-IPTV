@@ -195,6 +195,8 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "これらのタイトルを読み込めませんでした",
+  "titleLoadFailed": "このタイトルを開けませんでした",
+  "searchFailed": "検索できませんでした",
   "searchPartialError": "一部の結果を読み込めませんでした。",
   "previousEpisode": "前のエピソード",
   "previousEpisodeCode": "前のエピソード（{{code}}）",

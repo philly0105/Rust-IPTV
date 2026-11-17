@@ -49,6 +49,7 @@
   "errorHintConflict": "Rechargez pour voir la dernière version, puis réessayez.",
   "errorHintIo": "Vérifiez que le dossier existe et que vous avez le droit d'y écrire.",
   "errorHintDb": "Redémarrez l'application. Si le problème persiste, restaurez une sauvegarde depuis les Paramètres.",
+  "errorHintDbWeb": "Rechargez la page. Si le problème persiste, redémarrez le serveur Tsrust.",
   "errorHintInternal": "Réessayez. Si le problème persiste, redémarrez l'application.",
   "errorCode": "Code d'erreur : {{code}}",
   "errorTitleEngineMissing": "Impossible de démarrer le moteur de lecture",

@@ -74,6 +74,8 @@
   "loadingChannels": "Загрузка каналов",
   "loadingGroups": "Загрузка групп",
   "groupsLoadFailed": "Группы не загрузились",
+  "channelsLoadFailed": "Не удалось загрузить каналы",
+  "guideGridLoadFailed": "Не удалось загрузить телегид",
   "loadingGuide": "Загрузка телегида",
   "guide": "Телегид",
   "openGuide": "Телегид",

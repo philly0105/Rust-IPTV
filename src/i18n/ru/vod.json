@@ -215,6 +215,8 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Не удалось загрузить эти названия",
+  "titleLoadFailed": "Не удалось открыть это название",
+  "searchFailed": "Не удалось выполнить поиск",
   "searchPartialError": "Не удалось загрузить часть результатов.",
   "previousEpisode": "Предыдущий эпизод",
   "previousEpisodeCode": "Предыдущий эпизод ({{code}})",

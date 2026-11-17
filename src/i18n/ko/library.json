@@ -214,6 +214,8 @@
   "playTitle": "{{title}} 재생",
   "openFailed": "{{title}}을(를) 열 수 없습니다",
   "removeFailed": "항목을 삭제할 수 없습니다",
+  "favoritesLoadFailed": "즐겨찾기를 불러오지 못했습니다",
+  "recentLoadFailed": "시청 기록을 불러오지 못했습니다",
   "sourceRemoved": "소스가 삭제됨",
   "sourceRemovedHint": "이 항목의 소스가 삭제되었습니다. 항목을 열려면 소스를 다시 추가하세요.",
   "tryAgain": "다시 시도",

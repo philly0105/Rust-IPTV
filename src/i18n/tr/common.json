@@ -49,6 +49,7 @@
   "errorHintConflict": "En son sürümü görmek için yeniden yükleyin, ardından tekrar deneyin.",
   "errorHintIo": "Klasörün var olduğunu ve klasöre yazma izniniz olduğunu kontrol edin.",
   "errorHintDb": "Uygulamayı yeniden başlatın. Sorun sürerse Ayarlar'dan bir yedeği geri yükleyin.",
+  "errorHintDbWeb": "Sayfayı yeniden yükleyin. Sorun sürerse Tsrust sunucusunu yeniden başlatın.",
   "errorHintInternal": "Tekrar deneyin. Sorun sürerse uygulamayı yeniden başlatın.",
   "errorCode": "Hata kodu: {{code}}",
   "errorTitleEngineMissing": "Oynatıcı motoru başlatılamadı",

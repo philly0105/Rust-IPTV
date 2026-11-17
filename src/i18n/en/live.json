@@ -64,6 +64,8 @@
   "loadingChannels": "Loading channels",
   "loadingGroups": "Loading groups",
   "groupsLoadFailed": "Groups didn't load",
+  "channelsLoadFailed": "Couldn't load channels",
+  "guideGridLoadFailed": "Couldn't load the guide",
   "loadingGuide": "Loading guide",
   "guide": "TV guide",
   "openGuide": "TV guide",

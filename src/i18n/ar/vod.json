@@ -235,6 +235,8 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "تعذر تحميل هذه العناوين",
+  "titleLoadFailed": "تعذر فتح هذا العنوان",
+  "searchFailed": "تعذر البحث",
   "searchPartialError": "تعذّر تحميل بعض النتائج.",
   "previousEpisode": "الحلقة السابقة",
   "previousEpisodeCode": "الحلقة السابقة ({{code}})",

@@ -214,6 +214,8 @@
   "playTitle": "Play {{title}}",
   "openFailed": "Could not open {{title}}",
   "removeFailed": "Could not remove the item",
+  "favoritesLoadFailed": "Couldn't load favorites",
+  "recentLoadFailed": "Couldn't load your history",
   "sourceRemoved": "Source removed",
   "sourceRemovedHint": "The source for this item was removed. Add it again to open the item.",
   "tryAgain": "Try again",

@@ -214,6 +214,8 @@
   "playTitle": "{{title}} afspelen",
   "openFailed": "Kan {{title}} niet openen",
   "removeFailed": "Kan het item niet verwijderen",
+  "favoritesLoadFailed": "Favorieten konden niet worden geladen",
+  "recentLoadFailed": "De geschiedenis kon niet worden geladen",
   "sourceRemoved": "Bron verwijderd",
   "sourceRemovedHint": "De bron van dit item is verwijderd. Voeg de bron opnieuw toe om het item te openen.",
   "tryAgain": "Opnieuw proberen",

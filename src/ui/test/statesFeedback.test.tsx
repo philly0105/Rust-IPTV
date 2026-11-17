@@ -97,3 +97,11 @@ describe('ErrorState retry (states-feedback-04)', () => {
     expect(btn.closest('[role="alert"]')!.querySelector('p.text-fg')).not.toBe(hint);
   });
 });
+
+describe('ErrorState in the browser (states-feedback-09)', () => {
+  it('says to reload the page for a library error, not to restart an app or restore a backup', () => {
+    render(<ErrorState error={new RpcError('db', 'database is locked')} title="Couldn't load favorites" />);
+    expect(screen.getByRole('heading').textContent).toBe("Couldn't load favorites");
+    expect(screen.getByText('Reload the page. If it keeps happening, restart the Tsrust server.')).toBeTruthy();
+  });
+});

@@ -235,6 +235,8 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "ما قدرناش نحمّلو هاد العناوين",
+  "titleLoadFailed": "ما قدرناش نحلّو هاد العنوان",
+  "searchFailed": "ما قدرناش نقلّبو",
   "searchPartialError": "شي نتائج ما تشارجاوش.",
   "previousEpisode": "الحلقة اللي قبل",
   "previousEpisodeCode": "الحلقة اللي قبل ({{code}})",

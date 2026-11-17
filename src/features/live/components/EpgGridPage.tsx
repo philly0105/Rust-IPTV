@@ -2091,7 +2091,7 @@ export function EpgGridPage() {
     return (
       <>
         {heading}
-        <ErrorState error={sources.error} onRetry={() => sources.refetch()} />
+        <ErrorState error={sources.error} title={t('guideGridLoadFailed')} onRetry={() => sources.refetch()} />
       </>
     );
   }
@@ -2176,7 +2176,7 @@ export function EpgGridPage() {
       ) : null}
 
       {paged.error ? (
-        <ErrorState error={paged.error} onRetry={paged.retry} />
+        <ErrorState error={paged.error} title={t('guideGridLoadFailed')} onRetry={paged.retry} />
       ) : paged.isLoading || !sourceId ? (
         <div className="flex flex-col gap-2 p-3" aria-busy="true" aria-label={t('loadingGuide')}>
           {Array.from({ length: 10 }, (_, i) => (

@@ -214,6 +214,8 @@
   "playTitle": "{{title}} lejátszása",
   "openFailed": "Nem sikerült megnyitni: {{title}}",
   "removeFailed": "Nem sikerült eltávolítani az elemet",
+  "favoritesLoadFailed": "Nem sikerült betölteni a kedvenceket",
+  "recentLoadFailed": "Nem sikerült betölteni az előzményeket",
   "sourceRemoved": "Forrás eltávolítva",
   "sourceRemovedHint": "Az elem forrását eltávolították. Az elem megnyitásához adja hozzá újra a forrást.",
   "tryAgain": "Újrapróbálkozás",

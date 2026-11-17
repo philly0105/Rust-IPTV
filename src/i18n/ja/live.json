@@ -64,6 +64,8 @@
   "loadingChannels": "チャンネルを読み込み中",
   "loadingGroups": "グループを読み込み中",
   "groupsLoadFailed": "グループを読み込めませんでした",
+  "channelsLoadFailed": "チャンネルを読み込めませんでした",
+  "guideGridLoadFailed": "番組表を読み込めませんでした",
   "loadingGuide": "番組表を読み込み中",
   "guide": "番組表",
   "openGuide": "番組表",

@@ -214,6 +214,8 @@
   "playTitle": "播放 {{title}}",
   "openFailed": "无法打开 {{title}}",
   "removeFailed": "无法移除该项目",
+  "favoritesLoadFailed": "无法加载收藏",
+  "recentLoadFailed": "无法加载观看记录",
   "sourceRemoved": "播放源已移除",
   "sourceRemovedHint": "此项目的播放源已被移除。请重新添加该播放源以打开此项目。",
   "tryAgain": "重试",

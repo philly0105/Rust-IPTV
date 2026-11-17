@@ -64,6 +64,8 @@
   "loadingChannels": "Csatornák betöltése",
   "loadingGroups": "Csoportok betöltése",
   "groupsLoadFailed": "A csoportok nem töltődtek be",
+  "channelsLoadFailed": "Nem sikerült betölteni a csatornákat",
+  "guideGridLoadFailed": "Nem sikerült betölteni a műsorújságot",
   "loadingGuide": "Műsorújság betöltése",
   "guide": "Műsorújság",
   "openGuide": "Műsorújság",

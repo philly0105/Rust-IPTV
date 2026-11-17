@@ -278,6 +278,8 @@
   "playTitle": "تشغيل {{title}}",
   "openFailed": "تعذّر فتح {{title}}",
   "removeFailed": "تعذّرت إزالة العنصر",
+  "favoritesLoadFailed": "تعذر تحميل المفضلة",
+  "recentLoadFailed": "تعذر تحميل السجل",
   "sourceRemoved": "أُزيل المصدر",
   "sourceRemovedHint": "أُزيل مصدر هذا العنصر. أضفه مجددًا لفتح العنصر.",
   "tryAgain": "إعادة المحاولة",

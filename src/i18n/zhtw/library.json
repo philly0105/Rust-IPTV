@@ -214,6 +214,8 @@
   "playTitle": "播放 {{title}}",
   "openFailed": "無法開啟 {{title}}",
   "removeFailed": "無法移除此項目",
+  "favoritesLoadFailed": "無法載入我的最愛",
+  "recentLoadFailed": "無法載入觀看記錄",
   "sourceRemoved": "播放來源已移除",
   "sourceRemovedHint": "此項目的播放來源已被移除。請重新新增該播放來源以開啟此項目。",
   "tryAgain": "重試",

@@ -64,6 +64,8 @@
   "loadingChannels": "正在載入頻道",
   "loadingGroups": "正在載入群組",
   "groupsLoadFailed": "群組未能載入",
+  "channelsLoadFailed": "無法載入頻道",
+  "guideGridLoadFailed": "無法載入節目表",
   "loadingGuide": "正在載入節目表",
   "guide": "節目表",
   "openGuide": "節目表",

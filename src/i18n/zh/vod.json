@@ -195,6 +195,8 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "无法加载这些影片",
+  "titleLoadFailed": "无法打开这部影片",
+  "searchFailed": "无法搜索",
   "searchPartialError": "部分结果无法加载。",
   "previousEpisode": "上一集",
   "previousEpisodeCode": "上一集（{{code}}）",

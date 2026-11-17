@@ -49,6 +49,7 @@
   "errorHintConflict": "Laden Sie neu, um den aktuellen Stand zu sehen, und versuchen Sie es dann erneut.",
   "errorHintIo": "Prüfen Sie, ob der Ordner existiert und ob Sie darin schreiben dürfen.",
   "errorHintDb": "Starten Sie die App neu. Tritt der Fehler weiter auf, stellen Sie in den Einstellungen ein Backup wieder her.",
+  "errorHintDbWeb": "Laden Sie die Seite neu. Tritt der Fehler weiter auf, starten Sie den Tsrust-Server neu.",
   "errorHintInternal": "Versuchen Sie es erneut. Tritt der Fehler weiter auf, starten Sie die App neu.",
   "errorCode": "Fehlercode: {{code}}",
   "errorTitleEngineMissing": "Die Player-Engine konnte nicht gestartet werden",

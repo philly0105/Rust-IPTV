@@ -195,6 +195,8 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Δεν ήταν δυνατή η φόρτωση αυτών των τίτλων",
+  "titleLoadFailed": "Δεν ήταν δυνατό το άνοιγμα αυτού του τίτλου",
+  "searchFailed": "Δεν ήταν δυνατή η αναζήτηση",
   "searchPartialError": "Ορισμένα αποτελέσματα δεν φορτώθηκαν.",
   "previousEpisode": "Προηγούμενο επεισόδιο",
   "previousEpisodeCode": "Προηγούμενο επεισόδιο ({{code}})",

@@ -49,6 +49,7 @@
   "errorHintConflict": "새로 고쳐 최신 버전을 확인한 후 다시 시도하세요.",
   "errorHintIo": "폴더가 있는지, 그리고 쓰기 권한이 있는지 확인하세요.",
   "errorHintDb": "앱을 다시 시작하세요. 문제가 계속되면 설정에서 백업을 복원하세요.",
+  "errorHintDbWeb": "페이지를 새로 고치세요. 문제가 계속되면 Tsrust 서버를 다시 시작하세요.",
   "errorHintInternal": "다시 시도하세요. 문제가 계속되면 앱을 다시 시작하세요.",
   "errorCode": "오류 코드: {{code}}",
   "errorTitleEngineMissing": "플레이어 엔진을 시작하지 못했습니다",

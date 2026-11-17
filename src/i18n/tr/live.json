@@ -64,6 +64,8 @@
   "loadingChannels": "Kanallar yükleniyor",
   "loadingGroups": "Gruplar yükleniyor",
   "groupsLoadFailed": "Gruplar yüklenemedi",
+  "channelsLoadFailed": "Kanallar yüklenemedi",
+  "guideGridLoadFailed": "Rehber yüklenemedi",
   "loadingGuide": "Rehber yükleniyor",
   "guide": "TV rehberi",
   "openGuide": "TV rehberi",

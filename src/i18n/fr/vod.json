@@ -205,6 +205,8 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Impossible de charger ces titres",
+  "titleLoadFailed": "Impossible d'ouvrir ce titre",
+  "searchFailed": "Impossible de lancer la recherche",
   "searchPartialError": "Certains résultats n’ont pas pu être chargés.",
   "previousEpisode": "Épisode précédent",
   "previousEpisodeCode": "Épisode précédent ({{code}})",

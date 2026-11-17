@@ -502,11 +502,11 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       />
     );
   } else if (catalog.isError && !anyResults) {
-    body = <ErrorState error={catalog.error} onRetry={() => catalog.refetch()} />;
+    body = <ErrorState error={catalog.error} title={t('searchFailed')} onRetry={() => catalog.refetch()} />;
   } else if (loading && programmeHits.length === 0) {
     body = <SearchSkeleton />;
   } else if (!anyResults && stalker.error) {
-    body = <ErrorState error={stalker.error} onRetry={stalker.retry} />;
+    body = <ErrorState error={stalker.error} title={t('searchFailed')} onRetry={stalker.retry} />;
   } else if (!anyResults && facet) {
     // A facet kept from an earlier query: say so, and offer the way out (the chips only render with results).
     const facetName = allSources.find((s) => s.id === facet)?.name ?? facets.find((f) => f.sourceId === facet)?.sourceName;

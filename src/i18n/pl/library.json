@@ -246,6 +246,8 @@
   "playTitle": "Odtwórz {{title}}",
   "openFailed": "Nie udało się otworzyć: {{title}}",
   "removeFailed": "Nie udało się usunąć elementu",
+  "favoritesLoadFailed": "Nie udało się wczytać ulubionych",
+  "recentLoadFailed": "Nie udało się wczytać historii",
   "sourceRemoved": "Usunięto źródło",
   "sourceRemovedHint": "Źródło tego elementu zostało usunięte. Dodaj je ponownie, aby otworzyć element.",
   "tryAgain": "Spróbuj ponownie",

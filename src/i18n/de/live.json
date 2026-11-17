@@ -64,6 +64,8 @@
   "loadingChannels": "Sender werden geladen",
   "loadingGroups": "Gruppen werden geladen",
   "groupsLoadFailed": "Gruppen wurden nicht geladen",
+  "channelsLoadFailed": "Sender konnten nicht geladen werden",
+  "guideGridLoadFailed": "Der Programmführer konnte nicht geladen werden",
   "loadingGuide": "Programmführer wird geladen",
   "guide": "Programmführer",
   "openGuide": "Programmführer",

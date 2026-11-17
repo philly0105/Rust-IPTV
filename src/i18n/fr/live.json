@@ -69,6 +69,8 @@
   "loadingChannels": "Chargement des chaînes",
   "loadingGroups": "Chargement des groupes",
   "groupsLoadFailed": "Les groupes n'ont pas été chargés",
+  "channelsLoadFailed": "Impossible de charger les chaînes",
+  "guideGridLoadFailed": "Impossible de charger le guide",
   "loadingGuide": "Chargement du guide",
   "guide": "Guide TV",
   "openGuide": "Guide TV",

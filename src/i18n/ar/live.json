@@ -84,6 +84,8 @@
   "loadingChannels": "جارٍ تحميل القنوات",
   "loadingGroups": "جارٍ تحميل المجموعات",
   "groupsLoadFailed": "لم يتم تحميل المجموعات",
+  "channelsLoadFailed": "تعذر تحميل القنوات",
+  "guideGridLoadFailed": "تعذر تحميل الدليل",
   "loadingGuide": "جارٍ تحميل الدليل",
   "guide": "دليل البرامج",
   "openGuide": "دليل البرامج",

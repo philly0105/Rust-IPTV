@@ -64,6 +64,8 @@
   "loadingChannels": "Kanalen laden",
   "loadingGroups": "Groepen laden",
   "groupsLoadFailed": "Groepen zijn niet geladen",
+  "channelsLoadFailed": "Zenders konden niet worden geladen",
+  "guideGridLoadFailed": "De gids kon niet worden geladen",
   "loadingGuide": "Gids laden",
   "guide": "Programmagids",
   "openGuide": "Programmagids",

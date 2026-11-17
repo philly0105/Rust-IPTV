@@ -215,6 +215,8 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Nie udało się wczytać tych tytułów",
+  "titleLoadFailed": "Nie udało się otworzyć tego tytułu",
+  "searchFailed": "Nie udało się wyszukać",
   "searchPartialError": "Nie udało się wczytać części wyników.",
   "previousEpisode": "Poprzedni odcinek",
   "previousEpisodeCode": "Poprzedni odcinek ({{code}})",

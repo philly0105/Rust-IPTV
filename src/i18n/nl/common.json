@@ -49,6 +49,7 @@
   "errorHintConflict": "Laad opnieuw om de nieuwste versie te zien en probeer het dan nog eens.",
   "errorHintIo": "Controleer of de map bestaat en of je er schrijfrechten voor hebt.",
   "errorHintDb": "Start de app opnieuw. Blijft het gebeuren, zet dan een backup terug via Instellingen.",
+  "errorHintDbWeb": "Laad de pagina opnieuw. Blijft het gebeuren, start dan de Tsrust-server opnieuw.",
   "errorHintInternal": "Probeer het opnieuw. Blijft het gebeuren, start de app dan opnieuw.",
   "errorCode": "Foutcode: {{code}}",
   "errorTitleEngineMissing": "De spelerengine kon niet starten",

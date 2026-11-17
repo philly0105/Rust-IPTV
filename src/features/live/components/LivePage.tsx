@@ -954,7 +954,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     return (
       <div className="flex h-full items-center justify-center">
         {heading}
-        <ErrorState error={source.error} onRetry={() => source.refetch()} />
+        <ErrorState error={source.error} title={t('channelsLoadFailed')} onRetry={() => source.refetch()} />
       </div>
     );
   }
@@ -1009,7 +1009,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const listEmpty = paged.total === 0;
   let listBody;
   if (paged.error) {
-    listBody = <ErrorState error={paged.error} onRetry={paged.retry} />;
+    listBody = <ErrorState error={paged.error} title={t('channelsLoadFailed')} onRetry={paged.retry} />;
   } else if (paged.isLoading) {
     listBody = (
       <div className="min-h-0 flex-1 overflow-hidden" role="status" aria-busy="true" aria-label={t('loadingChannels')} data-testid="channel-list-loading">

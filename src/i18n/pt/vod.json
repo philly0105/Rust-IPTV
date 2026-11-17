@@ -205,6 +205,8 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Não foi possível carregar estes títulos",
+  "titleLoadFailed": "Não foi possível abrir este título",
+  "searchFailed": "Não foi possível pesquisar",
   "searchPartialError": "Não foi possível carregar alguns resultados.",
   "previousEpisode": "Episódio anterior",
   "previousEpisodeCode": "Episódio anterior ({{code}})",

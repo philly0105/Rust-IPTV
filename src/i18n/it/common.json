@@ -49,6 +49,7 @@
   "errorHintConflict": "Ricarica per vedere la versione più recente, poi riprova.",
   "errorHintIo": "Verifica che la cartella esista e di avere i permessi di scrittura.",
   "errorHintDb": "Riavvia l'app. Se il problema persiste, ripristina un backup dalle Impostazioni.",
+  "errorHintDbWeb": "Ricarica la pagina. Se il problema persiste, riavvia il server Tsrust.",
   "errorHintInternal": "Riprova. Se il problema persiste, riavvia l'app.",
   "errorCode": "Codice errore: {{code}}",
   "errorTitleEngineMissing": "Impossibile avviare il motore del lettore",

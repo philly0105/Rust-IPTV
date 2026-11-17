@@ -74,6 +74,8 @@
   "loadingChannels": "Загрузка каналаў",
   "loadingGroups": "Загрузка груп",
   "groupsLoadFailed": "Групы не загрузіліся",
+  "channelsLoadFailed": "Не ўдалося загрузіць каналы",
+  "guideGridLoadFailed": "Не ўдалося загрузіць праграму перадач",
   "loadingGuide": "Загрузка праграмы перадач",
   "guide": "Праграма перадач",
   "openGuide": "Праграма перадач",

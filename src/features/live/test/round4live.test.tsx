@@ -57,9 +57,9 @@ describe('channel rows without ruled lines (review round 4)', () => {
 });
 
 describe('the country tag after the name (review round 4)', () => {
-  it('draws the name first and the tag as a quiet suffix, and reads the provider name as it is', () => {
+  it('draws the name first and the tag as a quiet suffix, and reads it so: "ESPN HD (US)" (w-a11y-03)', () => {
     row();
-    const button = screen.getByRole('button', { name: /US\| ESPN HD/ });
+    const button = screen.getByRole('button', { name: /ESPN HD \(US\)/ });
     const tag = within(button).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
     expect(tag.className).toContain('text-fg-subtle');
@@ -121,7 +121,7 @@ describe('the country tag after the name (review round 4)', () => {
 describe('channel rows on touch (review round 4)', () => {
   it('steps the name and the programme up a size under a coarse pointer and keeps the number quiet', () => {
     row();
-    const button = screen.getByRole('button', { name: /US\| ESPN HD/ });
+    const button = screen.getByRole('button', { name: /ESPN HD \(US\)/ });
     const drawnName = within(button).getByTestId('channel-name-tag').parentElement!.parentElement!;
     expect(drawnName.className).toContain('text-body-sm');
     expect(drawnName.className).toContain('pointer-coarse:text-body');
@@ -131,7 +131,7 @@ describe('channel rows on touch (review round 4)', () => {
 
   it('keeps the playing row number in the text colour', () => {
     row({ playing: true });
-    const number = within(screen.getByRole('button', { name: /US\| ESPN HD/ })).getByText('1');
+    const number = within(screen.getByRole('button', { name: /ESPN HD \(US\)/ })).getByText('1');
     expect(number.className).toMatch(/\btext-fg\b(?!-)/);
   });
 });

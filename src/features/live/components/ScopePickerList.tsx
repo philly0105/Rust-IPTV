@@ -15,6 +15,7 @@ import { intlLocale } from '@/lib/intl';
 
 import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
 import { foldForFilter } from './CategorySidebar';
+import { ChannelName } from './ChannelLogo';
 import type { PickerSection } from './ScopePicker';
 
 /** Options drawn at once with no filter typed; typing reaches the rest. Keeps a 3000-group source quick. */
@@ -171,9 +172,14 @@ export function ScopePickerList({ label, value, sections, filterLabel, filterFro
                   <span aria-hidden className="flex w-4 shrink-0 justify-center text-fg-muted">
                     {o.icon ?? null}
                   </span>
-                  <span dir="auto" className={cn('min-w-0 flex-1 truncate text-match-parent', chosen && 'font-medium text-fg')}>
-                    {o.label}
-                  </span>
+                  {s.id === 'groups' ? (
+                    // A group as a channel row draws its name: the place's tag after it, quiet (w-realdata-13).
+                    <ChannelName name={o.label} title={o.label} className={cn('min-w-0 flex-1 truncate text-match-parent', chosen && 'font-medium text-fg')} />
+                  ) : (
+                    <span dir="auto" className={cn('min-w-0 flex-1 truncate text-match-parent', chosen && 'font-medium text-fg')}>
+                      {o.label}
+                    </span>
+                  )}
                   {o.count !== undefined ? <span className="shrink-0 text-caption tabular-nums text-fg-subtle">{fmt.format(o.count)}</span> : null}
                   <Check aria-hidden size={14} className={cn('shrink-0 text-fg-muted', !chosen && 'invisible')} />
                 </Cmdk.Item>

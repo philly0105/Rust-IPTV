@@ -9,6 +9,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -30,7 +31,7 @@ import {
   type PlayerSource,
 } from '@/api/types';
 
-import { Button, buttonClass, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canZap, isPendingZap } from '@/features/player/store';
 import { catchupResumeFor } from '@/features/player/catchupResume';
@@ -70,7 +71,7 @@ import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 import { ChannelList } from './ChannelList';
-import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, NUMBER_WIDTH, RowSkeleton } from './ChannelRow';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
@@ -263,6 +264,18 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // empty or error state, the old cursor channel no longer drives the ribbon.
   const listKey = `${contentType}|${sourceId}|${routeCategory ?? ''}|${debouncedSearch}`;
   const listShown = !paged.error && !paged.isLoading && paged.total !== 0;
+  // The number's channel already leads the matches: a caption over that row says so, in place of
+  // a card that repeated it (v-live-10).
+  const firstRow = numberHit ? paged.getChannel(0) : undefined;
+  const hitLeads = !!numberHit && !!firstRow && sameRef(firstRow.ref, numberHit.ref);
+  // The card's number column is as wide as the list's: ChannelList widens it past 3 digits by the
+  // count and the numbers it has shown.
+  const hitDigits = useMemo(() => {
+    if (!numberHit) return 0;
+    let digits = (paged.total ?? 0) >= 1000 ? String(paged.total).length : 0;
+    for (const { channel } of paged.loaded) digits = Math.max(digits, String(channel.number ?? '').length);
+    return digits;
+  }, [numberHit, paged.total, paged.loaded]);
   const [reported, setReported] = useState<{ key: string; channel: Channel | undefined }>({ key: '', channel: undefined });
   const listKeyRef = useRef(listKey);
   listKeyRef.current = listKey;
@@ -835,6 +848,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       resumeProgram={resumeCatchup?.program && { title: resumeCatchup.program.title, positionSeconds: resumeCatchup.positionSeconds }}
       highlighted={!isRadio && !!cursorChannel}
       locked={locks.channelLocked(idleCard?.channel)}
+      pending={!!last?.pending}
       now={now}
       stripPrefix={prefs.stripCountryPrefix}
       epgOffsetMinutes={prefs.epgOffsetMinutes}
@@ -863,11 +877,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         onPlayLive={onPlayLive}
         onMapEpg={setMapping}
         guideHref={ribbon.guideHref}
+        guideInHeader
         playback={ribbon.playback}
         details
+        compact={stacked}
       />
     ),
-    [ribbon, ribbonSourceKind, onPlayLive],
+    [ribbon, ribbonSourceKind, onPlayLive, stacked],
   );
 
   // The list's toolbar, made once per change: a zap re-renders the page, and the groups button,
@@ -892,9 +908,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             data-testid="live-groups-toggle"
           >
             <span className="sr-only">{`${t('groups')}: `}</span>
-            <span dir="auto" className="truncate">
-              {groupLabel}
-            </span>
+            {category && groupLabel === category.name ? (
+              // The group as the sidebar draws it: its place's tag after the name, quiet (w-realdata-13).
+              <ChannelName name={groupLabel} className="min-w-0 truncate" />
+            ) : (
+              <span dir="auto" className="truncate">
+                {groupLabel}
+              </span>
+            )}
             <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
           </Button>
         ) : (
@@ -955,12 +976,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         />
         {/* Radio has no picture: its stations are never filtered by quality. */}
         {isRadio ? null : <QualityFilterButton min={quality.min} hideUntagged={quality.hideUntagged} onChange={quality.update} />}
-        {/* The header's TV guide button, while the header steps aside for a playing channel on a phone. */}
+        {/* The header's TV guide button, while the header steps aside for a playing channel on a phone.
+            Under 400 px it squeezed the groups button and the search field to a few letters: there
+            the opened ribbon's guide link (and the tab bar's TV guide) are the way. */}
         {toolbarGuideHref ? (
           <Link
             to={toolbarGuideHref}
             aria-label={t('openGuide')}
-            className={buttonClass('ghost', 'sm', 'w-8 shrink-0 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)]')}
+            className={buttonClass('ghost', 'sm', 'w-8 shrink-0 px-0 text-fg-muted hover:text-fg pointer-coarse:min-w-[calc(44rem/15)] max-[399px]:hidden')}
             data-testid="live-toolbar-guide"
           >
             <CalendarClock className="size-4" aria-hidden />
@@ -1023,6 +1046,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           hideLoneGroup={isRadio}
           regionScope={regionScope}
           onRegionChange={onRegionChange}
+          inDrawer={!wide}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
           afterPinned={hiddenChannelsRow}
@@ -1092,6 +1116,25 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           <Link to={hrefFor(undefined)} className={buttonClass('secondary', 'sm')}>
             {isRadio ? t('allStations') : t('allChannels')}
           </Link>
+        }
+      />
+    );
+  } else if (listEmpty && categoryId && groups && !category) {
+    // A stale link (the group was hidden or the provider dropped it): say so, not "no channels".
+    listBody = (
+      <EmptyState
+        icon={<ListTree className="size-6" />}
+        title={t('groupGone')}
+        description={t('groupGoneHint')}
+        action={
+          <>
+            <Link to={hrefFor(undefined)} className={buttonClass('primary', 'sm')}>
+              {isRadio ? t('allStations') : t('allChannels')}
+            </Link>
+            <Button size="sm" onClick={openManage}>
+              {t('manageCategoriesEllipsis')}
+            </Button>
+          </>
         }
       />
     );
@@ -1168,6 +1211,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         onActiveChange={onActiveChange}
         locks={locks}
         showGroup={!!debouncedSearch && !categoryId && !liveView}
+        leadCaption={hitLeads ? t('channelNumberHit', { number: searchNumber }) : undefined}
         groupId={categoryId}
         hideFavoriteMark={liveView === 'favorites'}
       />
@@ -1231,7 +1275,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           </p>
         ) : null}
         {qualityFiltering && !qualityEmpty ? <QualityFilterBar quality={quality} /> : null}
-        {numberHit && searchNumber && !paged.error ? (
+        {numberHit && searchNumber && !paged.error && !hitLeads ? (
           <button
             type="button"
             onClick={() => play(numberHit)}
@@ -1241,9 +1285,12 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
             }}
             data-testid="live-number-hit"
-            className="flex w-full min-w-0 shrink-0 items-center gap-3 border-b border-divider px-3 py-2 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+            // The list's own columns (number, 40 px logo, name), so it reads as a channel row (v-live-10).
+            style={hitDigits > 3 ? ({ '--num-w': `${hitDigits}ch` } as CSSProperties) : undefined}
+            className="flex w-full min-w-0 shrink-0 items-center gap-3 border-b border-divider py-2 ps-2.5 pe-3 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
           >
-            <ChannelLogo src={numberHit.logoUrl} name={displayChannelName(numberHit.name, prefs.stripCountryPrefix)} size={32} sourceId={numberHit.ref.sourceId} />
+            <span className={cn('shrink-0 text-end font-numeric text-sm text-fg-subtle tabular-nums', NUMBER_WIDTH)}>{numberHit.number ?? searchNumber}</span>
+            <ChannelLogo src={numberHit.logoUrl} name={displayChannelName(numberHit.name, prefs.stripCountryPrefix)} size={40} sourceId={numberHit.ref.sourceId} />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-caption text-fg-subtle">{t('channelNumberHit', { number: searchNumber })}</span>
               <ChannelName name={numberHit.name} strip={prefs.stripCountryPrefix} title={numberHit.name} className="truncate text-body-sm font-medium text-fg" />
@@ -1281,7 +1328,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         pos={menu?.pos ?? null}
         items={menuItems}
         header={menuHeader}
-        label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
+        // Spoken: the name as the row draws it, not the provider's "US| " (w-a11y-03).
+        label={plainChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
         onClose={closeMenu}
       />
       <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu?.category.name ?? ''} onClose={closeGroupMenu} />

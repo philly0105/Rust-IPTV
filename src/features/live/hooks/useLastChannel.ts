@@ -8,7 +8,10 @@ const RECENT_LIMIT = 30;
 const OTHERS = 6;
 
 export interface LastChannel {
-  entry: RecentEntry;
+  /** Undefined only while `pending`. */
+  entry?: RecentEntry;
+  /** The history or the channel's catalog row is still on its way: the stage shows neither a Resume nor a prompt yet. */
+  pending?: boolean;
   /** The next few of the same kind that `accept` takes, newest first (Radio's recent stations). */
   others: RecentEntry[];
   /** The catalog row, once it is in; undefined when the channel is gone from the source. */
@@ -43,6 +46,7 @@ export function useLastChannel(opts: {
     enabled: !!entry && contentType === 'live',
     staleTime: 60_000,
   });
+  if (recent.isLoading || (entry && item.isLoading)) return { pending: true, others: [] };
   if (!entry) return undefined;
   const channel = item.data && 'isRadio' in item.data ? (item.data as Channel) : undefined;
   const others = (recent.data ?? [])

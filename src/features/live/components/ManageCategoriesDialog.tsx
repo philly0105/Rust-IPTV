@@ -122,12 +122,15 @@ export function ManageCategoriesDialog({
       }
     >
       <p className="mb-3 text-sm text-fg-muted">{t('manageCategoriesHint')}</p>
+      {/* The filter on its own line, the region and the bulk buttons under it: in one row a long
+          "All regions" (de, el, es) squeezed the field to its icon and drew over it. The two buttons
+          wrap as one pair, never one of them alone. */}
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <SearchInput size="sm" className="min-w-0 flex-1" value={filter} onChange={setFilter} placeholder={t('filterGroups')} label={t('filterGroups')} />
+        <SearchInput size="sm" className="basis-full" value={filter} onChange={setFilter} placeholder={t('filterGroups')} label={t('filterGroups')} />
         {regions.length > 0 ? (
           <Select
             aria-label={t('region')}
-            className="h-8 w-auto max-w-36 ps-2 pe-7"
+            className="h-8 w-auto max-w-48 ps-2 pe-7"
             value={region}
             onValueChange={setRegion}
             options={[
@@ -137,12 +140,14 @@ export function ManageCategoriesDialog({
             data-testid="manage-groups-region"
           />
         ) : null}
-        <Button size="sm" variant="ghost" onClick={() => setMany(true)}>
-          {t(narrowed ? 'showThese' : 'selectAll')}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setMany(false)}>
-          {t(narrowed ? 'hideThese' : 'selectNone')}
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setMany(true)}>
+            {t(narrowed ? 'showThese' : 'selectAll')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setMany(false)}>
+            {t(narrowed ? 'hideThese' : 'selectNone')}
+          </Button>
+        </div>
       </div>
       <p className="mb-2 text-xs text-fg-subtle" aria-live="polite">
         {t('groupsVisibleOf', { visible: visibleIds.size, total })}

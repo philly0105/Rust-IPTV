@@ -244,7 +244,8 @@ export function ListPage() {
   const removeItem = useMemo((): MenuItem[] => {
     const entry = menu ? entryOf(menu.channel) : undefined;
     if (!menu || !list || !entry) return [];
-    const name = displayChannelName(menu.channel.name, prefs.stripCountryPrefix);
+    // The toast's text: the name as the row draws it (w-a11y-03).
+    const name = plainChannelName(menu.channel.name, prefs.stripCountryPrefix);
     return [{ id: 'remove', label: t('removeFromList'), icon: <X className="size-4" />, onSelect: () => actions.removeEntries(list, [entry], name) }];
   }, [menu, list, entryOf, prefs.stripCountryPrefix, t, actions]);
   const menuItems = useChannelMenuItems(menu?.channel ?? null, {
@@ -619,6 +620,7 @@ export function ListPage() {
             resumeProgram={resumeCatchup?.program && { title: resumeCatchup.program.title, positionSeconds: resumeCatchup.positionSeconds }}
             highlighted={!!cursorChannel}
             locked={locks.channelLocked(idleCard?.channel)}
+            pending={!!last?.pending}
             now={now}
             stripPrefix={prefs.stripCountryPrefix}
             epgOffsetMinutes={prefs.epgOffsetMinutes}
@@ -637,6 +639,7 @@ export function ListPage() {
             onMapEpg={setMapping}
             guideHref={ribbonChannel ? `/epg?${new URLSearchParams({ source: ribbonChannel.ref.sourceId, view: `list:${listId}`, focus: ribbonChannel.ref.itemId }).toString()}` : undefined}
             details
+            compact={stacked}
           />
         }
       />
@@ -645,7 +648,8 @@ export function ListPage() {
         pos={menu?.pos ?? null}
         items={menuItems}
         header={menuHeader}
-        label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
+        // Spoken: the name as the row draws it, not the provider's "US| " (w-a11y-03).
+        label={plainChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
         onClose={closeMenu}
       />
       <EpgMappingDialog channel={mapping} onClose={() => setMapping(null)} />
@@ -684,7 +688,13 @@ function UnavailableEntries({
                 <span dir="auto" className="min-w-0 flex-1 truncate text-sm line-through decoration-fg-subtle/50">
                   {name}
                 </span>
-                <IconButton size="sm" variant="ghost" label={t('removeNamed', { name })} icon={<Trash2 className="size-4" />} onClick={() => onRemove([e], name)} />
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  label={t('removeNamed', { name: plainChannelName(e.snapshot.title, strip) })}
+                  icon={<Trash2 className="size-4" />}
+                  onClick={() => onRemove([e], plainChannelName(e.snapshot.title, strip))}
+                />
               </li>
             );
           })}

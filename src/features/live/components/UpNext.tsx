@@ -80,9 +80,10 @@ export function UpNext({ programs, now, guideTime = now, after, channel, channel
       <div ref={box} className="absolute inset-0 overflow-hidden">
         {upcoming.length > 0 ? (
           <section aria-labelledby="up-next-h" className="flex flex-col border-t border-divider px-2 pt-2" data-testid="up-next">
-            <h3 id="up-next-h" className="px-2 pb-1 text-caption font-medium text-fg-muted">
+            {/* An h2 beside Channel lists and Groups: as an h3 it sat under Groups in the outline (w-a11y-12). */}
+            <h2 id="up-next-h" className="px-2 pb-1 text-caption font-medium text-fg-muted">
               {t('upNext')}
-            </h3>
+            </h2>
             {/* A reading width: on a wide stage the length sat a whole window away from its title. */}
             <ul className="flex max-w-3xl flex-col">
               {upcoming.map((p) => {

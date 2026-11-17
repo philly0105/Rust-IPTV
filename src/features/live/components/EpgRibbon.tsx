@@ -18,7 +18,7 @@ import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, plainChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
 import {
   HOUR,
@@ -52,6 +52,12 @@ import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;
 /**
+ * A timeline block shows its title and time only with this much of it in view (v-live-14):
+ * narrower, both truncate to a letter and an ellipsis, which reads as noise. The block keeps its
+ * tooltip and accessible name.
+ */
+const CELL_TEXT_SHOWN_PX = 56;
+/**
  * An hour label ("10:00 PM" at 11 px) and the now line's dot, in px: the timeline keeps this much
  * before now when it rests, so the dot never sits under the label at the edge.
  */
@@ -66,6 +72,8 @@ type Mode = 'timeline' | 'list';
  * an error, no channel yet), so the video above never resizes on a zap or a source switch.
  */
 const BODY_HEIGHT: Record<Mode, string> = { timeline: 'h-[104px]', list: 'h-56' };
+/** The compact ribbon's body: one height for both views (the list shows two whole rows of 52 px). */
+const COMPACT_BODY_HEIGHT = 'h-[104px]';
 
 export interface EpgRibbonProps {
   channel?: Channel;
@@ -83,6 +91,11 @@ export interface EpgRibbonProps {
   onMapEpg(channel: Channel): void;
   guideHref?: string;
   /**
+   * The page header has its own labelled TV guide button from md up (Live): the ribbon's guide
+   * link is then for phones only. A channel list's header has none, so there it stays at every width.
+   */
+  guideInHeader?: boolean;
+  /**
    * The player's item as it concerns `channel` (`ribbonPlayback`), when the page hands it over
    * with the channel, in the same background render (Live): a zap then re-renders the ribbon once,
    * for the new channel, instead of also when the stream changes under the old one. Without it the
@@ -96,6 +109,12 @@ export interface EpgRibbonProps {
    * (LG-17).
    */
   details?: boolean;
+  /**
+   * The stage column stacked over the list (a portrait tablet): the Now card without its
+   * description, the timeline (or two rows of the list) and no Up next, so the ribbon is always
+   * whole under the full-width picture instead of a strip cut through its text.
+   */
+  compact?: boolean;
 }
 
 /** What the ribbon reads from the player, for `channel`: primitives, compared one by one. */
@@ -205,6 +224,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
     return mergePrograms([fallback], shifted);
   }, [archiveTable.data, programs.programs, prefs.epgOffsetMinutes, from, to, offsetMs, watchingCatchup, catchupStart, catchupStartMs, channel?.ref.itemId, channel?.name, playback.subtitle, playback.title, playback.durationSeconds]);
   const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
+  // For screen readers and plain text: the name as the rows draw it, "ESPN HD (US)" (w-a11y-03).
+  const plainName = plainChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
   const catchupProgram = playbackAt === undefined ? undefined : list.find((p) => programWhen(p, playbackAt) === 'now') ?? list.find((p) => p.start === catchupStart);
   const playingProgramStart = watchingCatchup ? catchupProgram?.start : channelPlaying && playback.isLive ? current?.start : undefined;
@@ -234,7 +255,10 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const locks = useParentalLocks(channel?.ref.sourceId, channel?.ref.contentType === 'radio' ? 'radio' : 'live');
   const locked = locks.channelLocked(channel);
   const chosen = pinned && !(current && samePrograms(pinned, current)) ? pinned : undefined;
-  const restingProgram = catchupProgram ?? current;
+  // In a gap in the guide the card rests on what comes next, marked as such, rather than on the
+  // channel's name over an empty card that read as a guide that failed to load (v-live-06).
+  const upcoming = useMemo(() => (current || catchupProgram ? undefined : list.find((p) => programWhen(p, now) === 'future')), [current, catchupProgram, list, now]);
+  const restingProgram = catchupProgram ?? current ?? upcoming;
   const shown = locked ? undefined : (hovered ?? chosen ?? restingProgram);
   const awayFromRest = !!shown && !!restingProgram && !samePrograms(shown, restingProgram);
   // LG-17: below md the ribbon is one line until it is opened, so a phone keeps room for the list.
@@ -280,11 +304,12 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
   // With nothing of this channel playing, the button names the channel it starts: something else
   // plays, and the ribbon follows the list's cursor.
-  const liveName = props.watchingArchive || !channelName ? liveLabel : [liveLabel, channelName].join(listSeparator(i18n.language));
+  const liveName = props.watchingArchive || !plainName ? liveLabel : [liveLabel, plainName].join(listSeparator(i18n.language));
   const details = !!props.details;
+  const compact = details && !!props.compact;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
   const titleLine = shown ? (
-    <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:text-title-sm')}>
+    <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold', shown === upcoming ? 'text-fg-muted' : 'text-fg', details && 'md:text-title-sm')}>
       {shown.title}
     </p>
   ) : null;
@@ -340,6 +365,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
               <p className={cn('flex min-w-0 items-center gap-2 overflow-hidden text-fg-muted', details ? 'text-caption md:mt-0.5' : 'text-xs')}>
                 {shownIsLive ? <LivePill size="sm" dot="none" /> : null}
                 {showingCatchup ? <span className="shrink-0 text-accent" data-testid="ribbon-playing">{t('playingNow')}</span> : null}
+                {shown === upcoming ? <span className="shrink-0" data-testid="ribbon-up-next">{t('upNext')}</span> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                   {shownWhen !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ? `${formatDay(ms(shown.start), i18n.language)} ` : ''}
                   {formatRange(shown, i18n.language)}
@@ -437,9 +463,10 @@ export function EpgRibbon(props: EpgRibbonProps) {
               to={props.guideHref}
               aria-label={t('openGuide')}
               // The icon buttons' 44 px touch square, so the row reads 44 px across on a touch screen.
-              // From md the shell header's labelled TV guide button is a little above: one is enough.
+              // From md Live's header has a labelled TV guide button a little above: one is enough.
               className={cn(
-                'inline-flex size-8 md:hidden items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus',
+                'inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus',
+                props.guideInHeader && 'md:hidden',
                 TOUCH_TARGET,
                 'pointer-coarse:min-w-[calc(44rem/15)]',
               )}
@@ -462,7 +489,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       {/* The Now card's description spans the card under the art, the title and the buttons, so a
           narrow stage column does not wrap it a few words to a line beside them. Three lines are
           kept from md up whether or not there is one, so a zap never moves what is under it. */}
-      {details ? (
+      {details && !compact ? (
         <p
           dir="auto"
           className="line-clamp-1 basis-full text-match-parent text-xs text-fg-muted md:line-clamp-3 md:min-h-[3.75rem] md:text-body-sm"
@@ -480,7 +507,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
         {shownIsLive ? <LivePill size="sm" dot="none" /> : null}
         {showingCatchup ? <span className="shrink-0 text-caption text-accent">{t('playingNow')}</span> : null}
         <p dir="auto" className="min-w-0 flex-1 truncate text-match-parent text-body-sm font-medium text-fg">
-          {shown?.title ?? (channelName || t('guide'))}
+          {shown?.title ?? (plainName || t('guide'))}
         </p>
         {shown && shownHasProgress ? (
           <span className="shrink-0 text-caption tabular-nums text-fg-muted">{t('minutesLeftShort', { count: minutesLeft(shown, shownTime) })}</span>
@@ -505,7 +532,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
           size="sm"
           variant="secondary"
           icon={<Lock className="size-3.5" />}
-          onClick={() => void ensureUnlocked([{ ref: channel.ref, categoryId: channel.categoryId, title: channelName }])}
+          onClick={() => void ensureUnlocked([{ ref: channel.ref, categoryId: channel.categoryId, title: plainName }])}
         >
           {t('unlock')}
         </Button>
@@ -587,17 +614,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
   }
 
   // The list view already lists every programme, so Up next comes with the timeline only.
-  const showUpNext = details && mode === 'timeline' && !!channel && !locked && list.length > 0;
+  // The compact ribbon leaves it out: the List view lists them.
+  const showUpNext = details && !compact && mode === 'timeline' && !!channel && !locked && list.length > 0;
   return (
     <section
       aria-label={t('guide')}
       data-testid="epg-ribbon"
       // The Now card lays itself out by the stage column's width (`now`), not the window's.
-      className={cn('flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface', details && '@container/now md:flex-1')}
+      className={cn('flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface', details && '@container/now', details && !compact && 'md:flex-1')}
     >
       {phoneLine}
       {header}
-      <div className={cn(BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
+      <div className={cn(compact ? COMPACT_BODY_HEIGHT : BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
         {body}
       </div>
       {showUpNext ? <UpNext programs={list} now={now} guideTime={playbackAt} after={timelineEnd} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
@@ -823,6 +851,7 @@ function Timeline(
               key={`${b.program.start}|${b.program.title}`}
               block={b}
               textMax={cellTextMaxPx(view.left, b.left, b.width)}
+              bare={Math.min(b.left + b.width, view.left + view.width) - Math.max(b.left, view.left) < CELL_TEXT_SHOWN_PX}
               now={now}
               channel={channel}
               kind={kind}
@@ -861,6 +890,7 @@ function Timeline(
 const TimelineBlock = memo(function TimelineBlock({
   block,
   textMax,
+  bare,
   now,
   channel,
   kind,
@@ -877,6 +907,8 @@ const TimelineBlock = memo(function TimelineBlock({
   block: Block;
   /** The text's width cap while the block began before the visible edge (cellTextMaxPx). */
   textMax: number | undefined;
+  /** Too little of the block is in view for its text: it keeps the tooltip and the label only. */
+  bare: boolean;
   now: number;
   channel: Channel;
   kind?: SourceKind;
@@ -933,7 +965,9 @@ const TimelineBlock = memo(function TimelineBlock({
       onFocus={() => onFocusProgram(p)}
       // overflow-clip, not hidden: the block is then no scroll container, so its text can stick.
       // A picked block (the header describes it, LG-06) carries a ring in the text colour.
-      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus ${tone} ${
+      // Focus is the app's own outline, a separate frame outside the block (w-a11y-07): the playing
+      // block already wears an amber inset ring, and a 2 px ring in its place read as the same mark.
+      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start ${tone} ${
         pinned ? 'ring-2 ring-fg-muted ring-inset' : ''
       }`}
       style={{ ...inlineStart(block.left + 1, rtl), width: Math.max(2, block.width - 2) }}
@@ -950,20 +984,22 @@ const TimelineBlock = memo(function TimelineBlock({
       {/* A show that began before the visible edge keeps its title in view: the text sticks 8 px
           past the edge until the block's end pushes it out, and ends in an ellipsis inside the
           block (L3-live-5). */}
-      <span data-testid="ribbon-block-text" className="sticky block w-max max-w-full" style={{ insetInlineStart: 8, maxWidth: textMax }}>
-        <span className="relative flex items-center gap-1 truncate text-xs font-medium">
-          {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
-          <span dir="auto" className="truncate text-match-parent">
-            {p.title}
+      {bare ? null : (
+        <span data-testid="ribbon-block-text" className="sticky block w-max max-w-full" style={{ insetInlineStart: 8, maxWidth: textMax }}>
+          <span className="relative flex items-center gap-1 truncate text-xs font-medium">
+            {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
+            <span dir="auto" className="truncate text-match-parent">
+              {p.title}
+            </span>
+            {/* recording: */}
+            <ScheduleMarkView index={schedule} channelRef={channel.ref} program={p} />
           </span>
-          {/* recording: */}
-          <ScheduleMarkView index={schedule} channelRef={channel.ref} program={p} />
+          {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
+          <span className={`relative block truncate text-caption tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
+            {formatClock(ms(p.start), i18n.language)}
+          </span>
         </span>
-        {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
-        <span className={`relative block truncate text-caption tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
-          {formatClock(ms(p.start), i18n.language)}
-        </span>
-      </span>
+      )}
     </button>
   );
 });

@@ -12,6 +12,7 @@ import { useLongPress } from '../hooks/useLongPress';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { groupRegion, groupRegions, readRegion, regionLabel, writeRegion } from '../lib/groupRegion';
 import { documentIsRtl } from '../lib/rtl';
+import { ChannelName } from './ChannelLogo';
 
 /** A group row's slot at 100 %. */
 const ROW = 36;
@@ -60,6 +61,11 @@ export interface CategorySidebarProps {
   regionScope?: string;
   /** Told when the user picks a region (the page reads the pick again from storage). */
   onRegionChange?(): void;
+  /**
+   * In the groups drawer, whose title already says "Groups": the section heading is for screen
+   * readers only, and the region select takes the row, so "All regions" reads in full in every locale.
+   */
+  inDrawer?: boolean;
 }
 
 export function linkClass(active: boolean): string {
@@ -259,13 +265,14 @@ export function CategorySidebar(props: CategorySidebarProps) {
   return (
     <nav ref={navRef} aria-label={t('groups')} className="flex h-full min-h-0 flex-col" onKeyDown={onListKey} data-testid="group-nav">
       <div className="flex items-center gap-1 px-3 pt-3 pb-2">
-        <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>
+        {/* The drawer's own title already says Groups, to sight and to screen readers. */}
+        {props.inDrawer ? null : <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>}
         {regions.length > 0 && !lone ? (
           <Select
             aria-label={t('region')}
             title={t('region')}
             // The toolbar's one height: 30 px, as the Manage button beside it.
-            className="h-8 w-auto max-w-28 ps-2 pe-7"
+            className={cn('h-8 ps-2 pe-7', props.inDrawer ? 'min-w-0 flex-1' : 'w-auto max-w-28')}
             value={region ?? ''}
             onValueChange={(v) => {
               const next = v || null;
@@ -275,7 +282,9 @@ export function CategorySidebar(props: CategorySidebarProps) {
               props.onRegionChange?.();
             }}
             options={[
-              { value: '', label: t('allRegions') },
+              // In the column's narrow header the closed select says "All" ("Todas las regiones"
+              // did not fit 105 px); the drawer has the room for the full words.
+              { value: '', label: t(!region && !props.inDrawer ? 'allRegionsShort' : 'allRegions') },
               // "UK · United Kingdom · 3 groups" in the list (a bare 3 read as a count of channels);
               // the picked one reads "UK" alone, which is what the closed select shows in its narrow header.
               ...regions.map((r) => ({
@@ -286,7 +295,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
             data-testid="group-region"
           />
         ) : null}
-        <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} />
+        <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} className="ms-auto" />
       </div>
       {lone ? null : (
         <div className="px-3 pb-2">
@@ -382,7 +391,9 @@ export function CategorySidebar(props: CategorySidebarProps) {
           </Button>
         </div>
       ) : (
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" data-testid="group-list">
+        // tabIndex -1: with the roving stop on a pinned row above, Chrome made the scroller its own
+        // unnamed Tab stop (w-a11y-01); the arrows reach every group from that stop.
+        <div ref={scrollRef} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" data-testid="group-list">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((v) => {
               const c = visible[v.index]!;
@@ -516,7 +527,8 @@ const GroupLink = memo(function GroupLink({
         className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
         title={locked ? `${c.name} (${lockedLabel})` : c.name}
       >
-        <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
+        {/* Drawn as a channel row draws its name: "PRIME ᴿᴬᵂ" and a quiet "US" after it (w-realdata-13). */}
+        <ChannelName name={c.name} className="min-w-0 flex-1 truncate text-match-parent" />
         {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} /> : null}
         <span className={countClass(active)}>{count}</span>
       </Link>

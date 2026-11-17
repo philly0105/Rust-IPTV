@@ -162,6 +162,26 @@ function variantStart(name: string): number {
   return start;
 }
 
+/** A pipe-separated part of an event's name that says when it is on ("Tue 17 Nov 23:00 EDT (US)"). */
+const WHEN_PART = /(?:^|\s)\d{1,2}[:.]\d{2}(?:\s|$)/;
+
+/**
+ * An event channel's name cut before the part that says when it is on: "NEXT | HAWKS VS ARSENAL"
+ * and "| Tue 23:00 EDT". A narrow row cuts the teams, never the kick-off, and leaves out the
+ * provider's words after it ("| 8K EXCLUSIVE | US: ESPN+ PPV 1"), the same on every row of the group
+ * and still in the title and the spoken name. The time keeps its weekday and zone ("Tue 23:00 EDT"):
+ * the date and the zone's place in brackets would leave the teams a few letters.
+ */
+function splitEventWhen(name: string): { name: string; when: string } | null {
+  const parts = name.split(/\s*\|\s*/);
+  const i = parts.findIndex((part, k) => k > 0 && WHEN_PART.test(part));
+  if (i < 1) return null;
+  const head = parts.slice(0, i).join(' | ').trim();
+  if (!head) return null;
+  const when = parts[i]!.replace(/\s*\([^)]*\)\s*$/, '').replace(/^(\p{L}{3,}\.?)\s+\d{1,2}\s+\p{L}{3,}\.?(?=\s)/u, '$1');
+  return { name: head, when: `| ${when}` };
+}
+
 /** A name's leading word before a colon ("PRIME: PBS HD"); left out only when it is a `CATEGORY_TAGS` word. */
 const LEAD_WORD = /^(\p{Lu}[\p{Lu}\d+]{2,9}):\s+(?=\S)/u;
 
@@ -169,7 +189,7 @@ const LEAD_WORD = /^(\p{Lu}[\p{Lu}\d+]{2,9}):\s+(?=\S)/u;
 export interface ChannelNameParts {
   /** The station's name: what may be cut. */
   name: string;
-  /** The trailing quality and copy words ("HD (BACKUP 2)"), kept whole after the name. */
+  /** The trailing quality and copy words ("HD (BACKUP 2)"), or an event's time, kept whole after the name. */
   variant?: string;
   /** A place's tag, drawn quiet after the rest (`splitPlaceTag`). */
   tag?: string;
@@ -196,8 +216,11 @@ export function channelNameParts(name: string | null | undefined, strip: boolean
   let rest = split.name;
   const lead = group ? LEAD_WORD.exec(rest) : null;
   if (lead && CATEGORY_TAGS.has(lead[1]!) && group!.normalize('NFKC').toUpperCase().split(/[^\p{L}\p{N}+]+/u).includes(lead[1]!)) rest = rest.slice(lead[0].length);
-  const cut = variantStart(rest);
-  parts = cut > 0 ? { name: rest.slice(0, cut).trimEnd(), variant: rest.slice(cut).trim(), full } : { name: rest, full };
+  const event = splitEventWhen(rest);
+  const cut = event ? -1 : variantStart(rest);
+  parts = event
+    ? { name: event.name, variant: event.when, full }
+    : cut > 0 ? { name: rest.slice(0, cut).trimEnd(), variant: rest.slice(cut).trim(), full } : { name: rest, full };
   if (split.tag) parts.tag = split.tag;
   if (partsCache.size >= 20000) partsCache.clear();
   partsCache.set(key, parts);

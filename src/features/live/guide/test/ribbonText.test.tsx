@@ -180,6 +180,21 @@ describe('ribbon timeline text', () => {
     expect(later.style.maxWidth).toBe('');
   });
 
+  it('a block with too little of it in view draws no text slivers, but keeps its name (v-live-14)', async () => {
+    const now = Date.now();
+    rpcMock.handlers['epg.programs'] = () => [
+      program('Midday Report', now - 30 * MINUTE, now + 30 * MINUTE),
+      // 10 minutes: 40 px wide.
+      program('Short Bulletin', now + 30 * MINUTE, now + 40 * MINUTE),
+      program('Afternoon Movie', now + 40 * MINUTE, now + 160 * MINUTE),
+    ];
+    renderRibbon();
+    const short = await screen.findByRole('button', { name: /^Short Bulletin,/ });
+    expect(within(short).queryByTestId('ribbon-block-text')).toBeNull();
+    expect(short.getAttribute('title')).toBe('Short Bulletin');
+    expect(within(screen.getByRole('button', { name: /^Afternoon Movie,/ })).getByTestId('ribbon-block-text')).toBeTruthy();
+  });
+
   it('draws the now line before the blocks, so it passes under their text', async () => {
     const now = Date.now();
     rpcMock.handlers['epg.programs'] = () => [program('Midday Report', now - 30 * MINUTE, now + 30 * MINUTE)];

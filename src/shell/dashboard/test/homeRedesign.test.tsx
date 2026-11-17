@@ -89,10 +89,12 @@ function onAir(title: string, icon?: string): EpgNowNext {
   return { now: { channelId: title, title, start: new Date(now - 30 * 60_000).toISOString(), end: new Date(now + 30 * 60_000).toISOString(), ...(icon ? { icon } : {}) } };
 }
 
-function home(over: { continue?: PlaybackPosition[]; favorites?: FavoriteEntry[]; recent?: RecentEntry[]; channels?: Channel[]; nowNext?: Record<string, EpgNowNext> } = {}) {
+function home(
+  over: { continue?: PlaybackPosition[]; favorites?: FavoriteEntry[]; recent?: RecentEntry[]; channels?: Channel[]; nowNext?: Record<string, EpgNowNext>; hero?: false } = {},
+) {
   rpcMock.reset();
   const h = rpcMock.handlers;
-  h['settings.get'] = () => settings();
+  h['settings.get'] = () => (over.hero === false ? settings({ dashboardRails: { ...settings().dashboardRails, hero: false } }) : settings());
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   h['sources.list'] = () => [makeSource('s1', { name: 'Night Portal' })];
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
@@ -122,7 +124,8 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
   const cards = [position(movie, 'The Long Signal'), position(series, 'Harbor Nine', { episodeId: 'e4', snapshot: { title: 'Harbor Nine', subtitle: 'S2 E4 · Calm Before', contentType: 'series' } })];
 
   it('shows 16:9 stills with the episode and the time left in the caption, and See all leads to Recently watched', async () => {
-    home({ continue: cards });
+    // The rail's own cards: with the hero on, both titles would be hero slides and the rail would go.
+    home({ continue: cards, hero: false });
     renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-continue-watching');
     const card = await within(rail).findByRole('button', { name: 'Resume Harbor Nine' });
@@ -146,7 +149,8 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
   });
 
   it('a series resumed from its card or the hero gets the series queue, so the next episode follows', async () => {
-    home({ continue: cards });
+    // The rail's own cards: with the hero on, both titles would be hero slides and the rail would go.
+    home({ continue: cards, hero: false });
     renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-continue-watching');
     fireEvent.click(await within(rail).findByRole('button', { name: 'Resume Harbor Nine' }));
@@ -160,7 +164,8 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
   });
 
   it('right click, Shift+F10 and the card button open Go to details, Mark watched and Remove', async () => {
-    home({ continue: cards });
+    // The rail's own cards: with the hero on, both titles would be hero slides and the rail would go.
+    home({ continue: cards, hero: false });
     const { router } = renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-continue-watching');
     const card = await within(rail).findByRole('button', { name: 'Resume The Long Signal' });
@@ -183,7 +188,8 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
   });
 
   it('Remove takes every unfinished episode of a series card, with an Undo that puts them back', async () => {
-    home({ continue: cards });
+    // The rail's own cards: with the hero on, both titles would be hero slides and the rail would go.
+    home({ continue: cards, hero: false });
     const rows = [position(series, 'Harbor Nine', { episodeId: 'e4' }), position(series, 'Harbor Nine', { episodeId: 'e3', updatedAt: '2026-10-11T00:00:00Z' })];
     rpcMock.handlers['positions.forSeries'] = () => rows;
     rpcMock.handlers['positions.remove'] = () => null;
@@ -203,7 +209,8 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
   });
 
   it('Mark watched marks the episode the card resumes, not the whole series', async () => {
-    home({ continue: cards });
+    // The rail's own cards: with the hero on, both titles would be hero slides and the rail would go.
+    home({ continue: cards, hero: false });
     rpcMock.handlers['positions.forSeries'] = () => [];
     rpcMock.handlers['userstate.setWatched'] = () => null;
     renderRoutes(routes(), '/dashboard');
@@ -212,6 +219,24 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
     fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Mark as watched' }));
     await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'userstate.setWatched').map((c) => c.args)).toEqual([{ ref: series, episodeId: 'e4', watched: true }]));
     await waitFor(() => expect(useToastStore.getState().toasts.some((t) => t.title === 'Harbor Nine marked watched')).toBe(true));
+  });
+
+  it('on a wide window drops the rail when every title in progress is a hero slide, and keeps it whole past that (home-08)', async () => {
+    home({ continue: cards });
+    renderRoutes(routes(), '/dashboard');
+    const hero = await screen.findByTestId('dashboard-hero');
+    expect(within(hero).getByRole('tab', { name: 'Harbor Nine' })).toBeTruthy();
+    await screen.findByTestId('dashboard');
+    expect(screen.queryByTestId('dashboard-rail-continue-watching')).toBeNull();
+    cleanup();
+    queryClient.clear();
+
+    const more = ['Paper Moons', 'Cold Harbor'].map((title, i) => position({ sourceId: 's1', contentType: 'movie', itemId: `x${i}` }, title, { updatedAt: `2026-10-0${i + 1}T00:00:00Z` }));
+    home({ continue: [...cards, ...more] });
+    renderRoutes(routes(), '/dashboard');
+    // Four in progress, three in the hero: the rail shows all four at once beside it.
+    const rail = await screen.findByTestId('dashboard-rail-continue-watching');
+    expect(within(rail).getAllByRole('button', { name: /^Resume / })).toHaveLength(4);
   });
 
   describe('on a phone', () => {

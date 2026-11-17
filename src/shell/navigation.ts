@@ -165,6 +165,16 @@ export function liveTabTarget(sources: readonly Source[] | undefined, lastSource
   return sourceHomePath(last ?? list[0]!);
 }
 
+/**
+ * The catch-up archive opened from the TV guide (the guide passes `state.from`, and the archive's
+ * Back leads there): the rail and the tab bar mark the guide on it rather than Live TV.
+ */
+export function archiveFromGuide(pathname: string, state: unknown): boolean {
+  if (!pathname.startsWith('/live/archive/')) return false;
+  const from = (state as { from?: unknown } | null)?.from;
+  return typeof from === 'string' && /^\/epg(?:[/?#]|$)/.test(from);
+}
+
 /** True for the routes the Live TV tab stands for: a source's live or radio pages and the archive. */
 export function isLiveRoute(pathname: string): boolean {
   return /^\/s\/[^/]+\/(live|radio)(\/|$)/.test(pathname) || pathname.startsWith('/live/archive/');

@@ -10,8 +10,8 @@ import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/
 
 import { ActivityMark, ActivityText } from './activityMarks';
 import { useOffline } from './connection';
-import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
-import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
+import { archiveFromGuide, LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
+import { railLinkCurrent, railLinks, routeSourceId, type RailLink } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
 import { useShellStore } from './store';
@@ -229,7 +229,9 @@ function RailGroup({
   /** The page on show is of a source that is not there (SourceGuard's page): no section claims it. */
   pageGone?: boolean;
 }) {
-  const { pathname, search } = useLocation();
+  const { pathname, search, state } = useLocation();
+  // The archive the guide opened is the guide's page here, not Live TV's.
+  const fromGuide = archiveFromGuide(pathname, state);
   const moreId = useId();
   const main = links.filter((l) => !l.more);
   const more = links.filter((l) => l.more);
@@ -258,7 +260,13 @@ function RailGroup({
         collapsed={collapsed}
         // `dim` is the group's: with no sources, the rows whose pages need one.
         dim={(dim && !l.noSourceNeeded) || l.dim}
-        current={l.section ? !pageGone && sectionCurrent(l.section, pathname, noSources ? search : '') : undefined}
+        current={
+          l.section
+            ? !pageGone && !(fromGuide && l.section === 'live') && sectionCurrent(l.section, pathname, noSources ? search : '')
+            : fromGuide && l.to === '/epg'
+              ? true
+              : undefined
+        }
       />
     </li>
   );
@@ -425,7 +433,9 @@ function SourceEntry({
     if (was === 'open') trigger.click();
   }, [RailMenu]);
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, state } = useLocation();
+  // The archive the guide opened marks the guide, not the source's Live TV.
+  const linkCurrent = (l: RailLink) => railLinkCurrent(l, pathname) && !(l.id === 'live' && archiveFromGuide(pathname, state));
   // The collapsed rail's menu lists Radio only once the m3u radio probe has answered: hovering
   // or focusing the monogram starts it, so a narrow window pays for no probe it never opens.
   const [warm, setWarm] = useState(false);
@@ -486,7 +496,7 @@ function SourceEntry({
             tooltip={label}
             tooltipSide="inline-end"
             items={links.map((l) => {
-              const current = railLinkCurrent(l, pathname);
+              const current = linkCurrent(l);
               return {
                 id: l.id,
                 label: t(l.labelKey),
@@ -567,7 +577,7 @@ function SourceEntry({
         <ul id={listId} className="mt-0.5 mb-1 ms-[1.375rem] flex flex-col gap-0.5 border-s border-divider ps-2">
           {links.map((l) => {
             // A movie's page and the catch-up archive count too (railLinkCurrent), which NavLink's prefix match missed.
-            const current = railLinkCurrent(l, pathname);
+            const current = linkCurrent(l);
             return (
               <li key={l.id}>
                 <SourceLink to={l.to} current={current}>

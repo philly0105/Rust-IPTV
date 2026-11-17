@@ -364,6 +364,28 @@ describe('the rail', () => {
     for (const link of links('Movies')) expect(link.getAttribute('aria-current')).toBeNull();
   });
 
+  it('marks the TV guide, not Live TV, on the catch-up archive the guide opened', async () => {
+    const { router } = renderRoutes(routes(), '/dashboard');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await act(() => router.navigate('/live/archive/s1/ch1', { state: { from: '/epg?at=2026-11-16T20:00' } }));
+    const links = (name: string) => within(nav).getAllByRole('link', { name });
+    await waitFor(() => expect(links('Live TV')).toHaveLength(2));
+    for (const link of links('Live TV')) expect(link.getAttribute('aria-current')).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBe('page');
+    // The phone's tab bar says the same.
+    cleanup();
+    media(...PHONE);
+    const phone = renderRoutes(routes(), '/dashboard');
+    await act(() => phone.router.navigate('/live/archive/s1/ch1', { state: { from: '/epg' } }));
+    const bar = await screen.findByTestId('tab-bar');
+    expect(within(bar).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBe('page');
+    expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBeNull();
+    // Opened from Live TV (or a link), the archive is Live TV's.
+    await act(() => phone.router.navigate('/live/archive/s1/ch1', { state: { from: '/s/s1/live' } }));
+    await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page'));
+    expect(within(bar).getByRole('link', { name: 'TV guide' }).getAttribute('aria-current')).toBeNull();
+  });
+
   it('railLinkCurrent counts the paths beside a link, never another source or section', () => {
     const [live, , movies, series] = railLinks(makeSource('a b'));
     expect(movies!.to).toBe('/s/a%20b/movies');

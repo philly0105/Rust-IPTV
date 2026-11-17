@@ -95,8 +95,10 @@ const TRACK_PAD = 'pt-1 pb-3';
  * keyboard has the arrows): a round button on the surface, centred on the cards' artwork (its
  * wrapper is the artwork's height, from the track's pt-1), so it never sits on a caption and
  * reads over any picture. A bare chevron on a 48 px fade was barely visible over artwork.
+ * Marked pure: a top-level call kept this whole module in the cards chunk that Search, the
+ * category grid, Live and the guide load (pnpm size:check).
  */
-const STEP_BUTTON = cn(
+const STEP_BUTTON = /* @__PURE__ */ cn(
   'hidden size-10 items-center justify-center rounded-full bg-surface/90 text-fg shadow-2 ring-1 ring-edge hover:bg-surface-3 active:text-accent-pressed',
   'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
 );

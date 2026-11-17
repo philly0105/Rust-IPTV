@@ -49,7 +49,8 @@ export function progressFraction(pos: ProgressInput | undefined | null): number 
  * threshold (`MIN_RESUME_SECONDS`, so the label matches what playback does)
  * and before 95 %. A watched row is not, except a watched movie replayed
  * part-way to between 5 % and 95 % (`isWatchedReplay`, the player's rule):
- * it resumes there and keeps its watched tick.
+ * it resumes there (the player clears such a replay's mark once it gets past
+ * 5 %, so this is a row saved before that, or whose clearing failed).
  */
 export function isResumable(pos: ProgressInput | undefined | null): boolean {
   if (!pos || !(pos.positionSeconds > MIN_RESUME_SECONDS)) return false;

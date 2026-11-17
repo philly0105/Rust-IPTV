@@ -116,4 +116,4 @@ Edits are keyed by catalog id, so a refresh that rewrites the catalog keeps them
 
 ## Finished movies (C2, userstate)
 
-A movie (empty episode id) that reaches the completion ratio is no longer deleted. Its row becomes `watched = 1` with `position_seconds` at the duration, as finished episodes already were. That watched row keeps it out of Continue Watching and is the movie's watched mark for the C4 "hide watched" filter. Replaying part of the movie later keeps the mark (see [vod-browsing.md](vod-browsing.md#what-watched-means)).
+A movie (empty episode id) that reaches the completion ratio is no longer deleted. Its row becomes `watched = 1` with `position_seconds` at the duration, as finished episodes already were. That watched row keeps it out of Continue Watching and is the movie's watched mark for the C4 "hide watched" filter. The core keeps the mark on a later partial save; the player clears it once a replay gets past 5% (see [vod-browsing.md](vod-browsing.md#what-watched-means)).

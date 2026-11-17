@@ -1466,22 +1466,23 @@ describe('the open page after a stop from the player (L4-player-1)', () => {
     await vi.waitFor(() => expect(queryClient.getQueryState(key)?.status).toBe('success'));
     await usePlayerStore.getState().play(vod('1'));
     store.reportStatus('playing');
-    store.reportProgress(80, 1000);
+    // Under 5 %: past it, the first save also asks whether a watched film is being rewatched.
+    store.reportProgress(30, 1000);
     rpcMock.mockClear();
     store.flushProgress(); // what the 5 s saver runs
     land();
     await flush();
-    expect(calls('positions.set')).toEqual([expect.objectContaining({ positionSeconds: 80 })]);
+    expect(calls('positions.set')).toEqual([expect.objectContaining({ positionSeconds: 30 })]);
     expect(calls('positions.get')).toEqual([]);
     expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
 
-    store.reportProgress(120, 1000);
+    store.reportProgress(45, 1000);
     usePlayerStore.getState().stop();
     await flush();
     // Not while the save is in flight: that would bring back the previous position.
     expect(calls('positions.get')).toEqual([]);
     land();
-    await vi.waitFor(() => expect(queryClient.getQueryData(key)).toMatchObject({ positionSeconds: 120 }));
+    await vi.waitFor(() => expect(queryClient.getQueryData(key)).toMatchObject({ positionSeconds: 45 }));
     expect(calls('positions.get')).toHaveLength(1);
     unsub();
   });
@@ -1653,6 +1654,47 @@ describe('watched movies (Run 2 C4)', () => {
     handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds: 1200, durationSeconds: 1200, updatedAt: '', watched: true });
     await playSource(vod('201', { resumeSeconds: 1200 }));
     expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+  });
+
+  it('a watched movie replayed past 5 % loses its mark, so Continue watching offers it (w-walkthrough-01)', async () => {
+    let row: { watched: boolean } | null = { watched: true };
+    handlers['positions.get'] = () => row && { ref: movieRef, positionSeconds: 4, durationSeconds: 1200, updatedAt: '', ...row };
+    handlers['positions.remove'] = () => {
+      row = null;
+    };
+    await usePlayerStore.getState().play(vod('201'));
+    // Under 5 %: the mark stays (a peek at a watched film is not a rewatch).
+    store.reportProgress(30, 1200);
+    store.flushProgress();
+    await flush();
+    expect(calls('positions.remove')).toHaveLength(0);
+    // Past 5 %: the row goes, then the save writes it again unwatched, and the ticks refresh.
+    store.reportProgress(152, 1200);
+    store.flushProgress();
+    await flush();
+    expect(calls('positions.remove')).toEqual([{ ref: movieRef }]);
+    expect(calls('positions.set').at(-1)).toMatchObject({ ref: movieRef, positionSeconds: 152 });
+    const order = rpcMock.mock.calls.map((c) => c[0]).filter((c) => c === 'positions.remove' || c === 'positions.set');
+    expect(order.slice(-2)).toEqual(['positions.remove', 'positions.set']);
+    expect(invalidateWatched).toHaveBeenCalledTimes(1);
+    // Once per playback: later saves only save.
+    const gets = calls('positions.get').length;
+    store.reportProgress(160, 1200);
+    store.flushProgress();
+    await flush();
+    expect(calls('positions.get')).toHaveLength(gets);
+    expect(calls('positions.remove')).toHaveLength(1);
+  });
+
+  it('an unwatched movie past 5 % keeps its row: nothing is removed', async () => {
+    handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds: 100, durationSeconds: 1200, updatedAt: '', watched: false });
+    await usePlayerStore.getState().play(vod('201'));
+    store.reportProgress(300, 1200);
+    store.flushProgress();
+    await flush();
+    expect(calls('positions.remove')).toHaveLength(0);
+    expect(calls('positions.set').at(-1)).toMatchObject({ positionSeconds: 300 });
+    expect(invalidateWatched).not.toHaveBeenCalled();
   });
 
   it('isWatchedReplay holds for item-level movie rows only', () => {

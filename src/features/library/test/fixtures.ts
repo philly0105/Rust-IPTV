@@ -1,4 +1,4 @@
-import type { ContentType, Download, FavoriteEntry, PlaybackPosition, RecentEntry } from '@/api/types';
+import type { ContentType, Download, FavoriteEntry, PlaybackPosition, RecentEntry, TransferStats } from '@/api/types';
 
 let nextId = 1;
 
@@ -16,6 +16,11 @@ export function makeDownload(over: Partial<Download> = {}): Download {
     positionSeconds: 0,
     ...over,
   };
+}
+
+/** A running transfer's speed breakdown, empty unless `over` fills it. */
+export function makeStats(id: number, over: Partial<Omit<TransferStats, 'id'>> = {}): TransferStats {
+  return { id, bytesPerSecond: 0, connections: [], sources: [], notes: [], ...over };
 }
 
 export function makeEpisode(seriesId: string, title: string, subtitle: string, over: Partial<Download> = {}): Download {

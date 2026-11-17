@@ -1,7 +1,7 @@
 /** /downloads: the transfer queue, then the latest finished downloads. My Videos keeps every finished one. */
 
 import { Download as DownloadIcon, Eraser, Gauge, Library, Pause } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -15,15 +15,19 @@ import { formatList } from '@/lib/intl';
 import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useMediaQuery, useSettings, useShortcut } from '../deps';
 import { BrowseMoviesAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { DownloadRow, FinishedRow, SM_QUERY, downloadRowHeight, finishedRowHeight } from '../components/DownloadRow';
+import { DownloadDetailsPopover } from '../components/DownloadDetailsPopover';
 import { DownloadSpeedDialog } from '../components/DownloadSpeedDialog';
 import { FolderBar } from '../components/FolderBar';
+import { SpeedSparkline } from '../components/SpeedSparkline';
 import { VirtualRows, type RowRenderInfo } from '../components/VirtualRows';
 import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useDownloads, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatSpeedLimit } from '../lib/format';
+import { statsStore } from '../lib/progress';
 import { actionsFor, buildQueueRows, downloadNames, queueCounts, type QueueAction, type QueueRow } from '../lib/queue';
 import { playActiveCatchupDownload, playDownload } from '../lib/playDownload';
+import type { NameOf } from '../lib/transferText';
 
 const HEADER_HEIGHT = 52;
 
@@ -45,6 +49,11 @@ export function DownloadsPage() {
   const [speedTarget, setSpeedTarget] = useState<Download | 'global' | null>(null);
   const editSpeed = useCallback((download: Download) => setSpeedTarget(download), []);
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  // The speed details dialog's row, by id: it reads the row as the list has it now.
+  const [detailsId, setDetailsId] = useState<number | null>(null);
+  const openDetails = useCallback((d: Download) => setDetailsId(d.id), []);
+  // Mirrors are other sources: rows name them through this.
+  const nameOf: NameOf = useCallback((id: string) => sources.get(id)?.name ?? t('sourceRemoved'), [sources, t]);
   const { pending, perform } = useDownloadActions();
 
   const [confirm, setConfirm] = useState<Pending | null>(null);
@@ -52,6 +61,10 @@ export function DownloadsPage() {
   const [clearing, setClearing] = useState(false);
 
   const all = useMemo(() => query.data ?? [], [query.data]);
+  // A breakdown only means something while its row downloads.
+  useEffect(() => {
+    if (query.data) statsStore.prune(query.data.filter((d) => d.status === 'downloading').map((d) => d.id));
+  }, [query.data]);
   const wide = useMediaQuery(SM_QUERY);
   // `wide`: a new array when the breakpoint flips, so the list measures its rows again (downloadRowHeight).
   const rows = useMemo(() => buildQueueRows(all), [all, wide]);
@@ -143,12 +156,16 @@ export function DownloadsPage() {
     </Link>
   );
   const title = t('title');
-  usePageHeader(title, summary || undefined);
+  // The total speed and its last minute, in the header beside the summary; it hides itself while nothing moves.
+  const headerActions = useMemo(() => <SpeedSparkline />, []);
+  usePageHeader(title, summary || undefined, headerActions);
   const speedText = settings.data ? (globalLimit === 0 ? t('speedUnlimited') : formatSpeedLimit(globalLimit, i18n.language)) : '…';
   const speedButtonLabel = t('speedGlobalButton', { speed: speedText });
 
   // The download the dialog is about as the list shows it now: it may have
   // finished since the dialog opened.
+  const detailsRow = detailsId !== null ? all.find((x) => x.id === detailsId) : undefined;
+
   const opened = confirm?.download;
   const confirmTarget = opened ? (all.find((x) => x.id === opened.id) ?? opened) : undefined;
   const confirmUnfinished = confirmTarget !== undefined && confirmTarget.status !== 'completed';
@@ -227,12 +244,14 @@ export function DownloadsPage() {
           onAction={onAction}
           onPlayCatchup={onPlayCatchup}
           onSpeedLimit={editSpeed}
+          onDetails={openDetails}
+          nameOf={nameOf}
           globalRateLimitBps={globalLimit}
         />
       );
     },
     // Each row subscribes to its own live sample (VD-4): a progress event re-renders that row only.
-    [mixedSources, onAction, onPlayCatchup, onPlayFinished, onRedownload, pending, sources, t, editSpeed, globalLimit, bulk, perform],
+    [mixedSources, onAction, onPlayCatchup, onPlayFinished, onRedownload, pending, sources, t, editSpeed, openDetails, nameOf, globalLimit, bulk, perform],
   );
 
   let body;
@@ -330,6 +349,8 @@ export function DownloadsPage() {
           onClose={() => setSpeedTarget(null)}
         />
       )}
+      {/* A row that left the list (removed, or the list reloaded without it) closes its dialog. */}
+      {detailsRow && <DownloadDetailsPopover download={detailsRow} sources={sources} onClose={() => setDetailsId(null)} />}
       <ConfirmDialog
         open={confirm !== null}
         onClose={() => setConfirm(null)}

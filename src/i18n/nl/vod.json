@@ -21,6 +21,7 @@
   "categoryCount_one": "{{count, number}} categorie",
   "categoryCount_other": "{{count, number}} categorieën",
   "filterCategories": "Categorieën filteren",
+  "allLanguages": "Alle talen",
   "manageCategories": "Categorieën beheren",
   "manageCategoriesHidden_one": "Categorieën beheren ({{count, number}} verborgen)",
   "manageCategoriesHidden_other": "Categorieën beheren ({{count, number}} verborgen)",

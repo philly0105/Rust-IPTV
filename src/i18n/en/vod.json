@@ -21,6 +21,7 @@
   "categoryCount_one": "{{count, number}} category",
   "categoryCount_other": "{{count, number}} categories",
   "filterCategories": "Filter categories",
+  "allLanguages": "All languages",
   "manageCategories": "Manage categories",
   "manageCategoriesHidden_one": "Manage categories ({{count, number}} hidden)",
   "manageCategoriesHidden_other": "Manage categories ({{count, number}} hidden)",

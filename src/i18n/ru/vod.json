@@ -23,6 +23,7 @@
   "categoryCount_many": "{{count, number}} категорий",
   "categoryCount_other": "{{count, number}} категории",
   "filterCategories": "Фильтр категорий",
+  "allLanguages": "Все языки",
   "manageCategories": "Управлять категориями",
   "manageCategoriesHidden_one": "Управление категориями (скрыта {{count, number}})",
   "manageCategoriesHidden_few": "Управление категориями (скрыто {{count, number}})",

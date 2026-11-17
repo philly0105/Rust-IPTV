@@ -22,6 +22,7 @@
   "categoryCount_many": "{{count, number}} categorías",
   "categoryCount_other": "{{count, number}} categorías",
   "filterCategories": "Filtrar categorías",
+  "allLanguages": "Todos los idiomas",
   "manageCategories": "Gestionar categorías",
   "manageCategoriesHidden_one": "Gestionar categorías ({{count, number}} oculta)",
   "manageCategoriesHidden_many": "Gestionar categorías ({{count, number}} ocultas)",

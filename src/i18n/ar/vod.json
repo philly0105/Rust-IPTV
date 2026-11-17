@@ -25,6 +25,7 @@
   "categoryCount_many": "{{count, number}} فئة",
   "categoryCount_other": "{{count, number}} فئة",
   "filterCategories": "تصفية الفئات",
+  "allLanguages": "كل اللغات",
   "manageCategories": "إدارة الفئات",
   "manageCategoriesHidden_zero": "إدارة الفئات (المخفية: {{count, number}})",
   "manageCategoriesHidden_one": "إدارة الفئات (المخفية: {{count, number}})",

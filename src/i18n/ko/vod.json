@@ -21,6 +21,7 @@
   "categoryCount_one": "카테고리 {{count, number}}개",
   "categoryCount_other": "카테고리 {{count, number}}개",
   "filterCategories": "카테고리 필터",
+  "allLanguages": "모든 언어",
   "manageCategories": "카테고리 관리",
   "manageCategoriesHidden_one": "카테고리 관리 ({{count, number}}개 숨김)",
   "manageCategoriesHidden_other": "카테고리 관리 ({{count, number}}개 숨김)",

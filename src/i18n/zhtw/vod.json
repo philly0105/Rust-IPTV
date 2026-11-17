@@ -21,6 +21,7 @@
   "categoryCount_one": "{{count, number}} 個類別",
   "categoryCount_other": "{{count, number}} 個類別",
   "filterCategories": "篩選類別",
+  "allLanguages": "所有語言",
   "manageCategories": "管理類別",
   "manageCategoriesHidden_one": "管理類別（已隱藏 {{count, number}} 個）",
   "manageCategoriesHidden_other": "管理類別（已隱藏 {{count, number}} 個）",

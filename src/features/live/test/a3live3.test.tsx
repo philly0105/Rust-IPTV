@@ -3,8 +3,9 @@
 import { cleanup, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { EpgProgram } from '@/api/types';
+import type { Channel, EpgProgram } from '@/api/types';
 import { EpgRibbon } from '../components/EpgRibbon';
+import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { HOUR, MINUTE } from '../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
@@ -97,5 +98,51 @@ describe("the ribbon's TV guide link (v-vod-02)", () => {
     ribbon({ guideHref: '/epg', guideInHeader: true });
     const link = await screen.findByRole('link', { name: 'TV guide' }, { timeout: 10_000 });
     expect(link.className).toContain('md:hidden');
+  });
+});
+
+function MenuProbe({ channel, programme }: { channel: Channel; programme?: EpgProgram }) {
+  const items = useChannelMenuItems(channel, { source: { id: 'src1', kind: 'm3u', m3u: undefined }, favorite: false, onPlay: () => undefined, onToggleFavorite: () => undefined, onMapGuide: () => undefined, programme, now });
+  const header = channelMenuHeader(channel, channel.name, 'Now on');
+  return (
+    <div>
+      <div data-testid="probe-header">
+        {header.title}
+        {header.media ? <span data-testid="probe-media" /> : null}
+        {header.subtitle}
+      </div>
+      <ul>
+        {items.map((i) => ('label' in i ? <li key={i.id}>{i.label}</li> : null))}
+      </ul>
+    </div>
+  );
+}
+
+function menuOf(channel: Channel, programme?: EpgProgram) {
+  renderAt('/', [{ path: '/', element: <MenuProbe channel={channel} programme={programme} /> }]);
+  return [...screen.getAllByRole('listitem')].map((li) => li.textContent);
+}
+
+describe('the channel menu (v-live-03, v-guide-07)', () => {
+  it("a provider's heading row offers Hide only, headed by its caption with no logo", () => {
+    const heading = { ...makeChannel(5), name: '######## ALL CHANNELS ########' };
+    // (This harness loads only the live strings: the edit entry shows its key.)
+    expect(menuOf(heading)).toEqual(['menuHide']);
+    const header = screen.getByTestId('probe-header');
+    expect(header.textContent).toBe('ALL CHANNELS');
+    expect(screen.queryByTestId('probe-media')).toBeNull();
+  });
+
+  it('opened on a later programme, the play entry says it watches the channel', () => {
+    const later = program('College GameDay', now + 2 * HOUR, now + 3 * HOUR);
+    const labels = menuOf(makeChannel(5), later);
+    expect(labels[0]).toBe('Watch channel');
+    expect(labels).toContain('Add to favorites');
+  });
+
+  it('on the airing programme or the channel, it stays Play', () => {
+    expect(menuOf(makeChannel(5), day[0])[0]).toBe('Play');
+    cleanup();
+    expect(menuOf(makeChannel(5))[0]).toBe('Play');
   });
 });

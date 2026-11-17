@@ -29,7 +29,7 @@ import { canShareSource, isShareableUrl } from '@/features/player/shareable';
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import type { MenuEntry, MenuHeader, MenuItem } from '../components/ContextMenu';
 import { archivePath, canBrowseArchive } from '../lib/archive';
-import { displayChannelName } from '../lib/channelName';
+import { displayChannelName, isSeparatorName, separatorLabel } from '../lib/channelName';
 import { canCatchUp, programWhen } from '../lib/epgTime';
 import { openCatchupSource, openChannelSource } from '../lib/playback';
 import { useDisplayPrefs } from './useDisplayPrefs';
@@ -93,6 +93,9 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
   return useMemo((): MenuEntry[] => {
     if (!channel) return [];
     const ch = channel;
+    // A provider's heading row is no channel (live-04): playing, favouriting or listing it would
+    // plant a dead entry, so its menu keeps only what takes it away (v-live-03).
+    if (isSeparatorName(ch.name)) return editItems.filter((a) => a.id === 'channel-hide' || a.id === 'channel-unhide').map((a) => plain(a, editHints));
     const src = source && source.id === ch.ref.sourceId ? source : undefined;
     const playableProgramme = !!src && !!programme && programWhen(programme, now) === 'past' && canCatchUp(programme, ch, src.kind, now);
     const external = async (player: 'mpv' | 'vlc') => {
@@ -131,8 +134,11 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
         toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
       }
     };
+    // Under a header naming a programme that is not airing, "Play" read as "play that show": the
+    // entry plays the channel now and says so (v-guide-07).
+    const playLabel = programme && programWhen(programme, now) !== 'now' ? t('watchChannel') : t('play');
     const out: MenuEntry[] = [
-      { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
+      { id: 'play', label: playLabel, icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
       ...(programmeActions.watch ? [{ id: 'watch-programme', label: t('watchCatchup'), icon: <Play className="size-4" />, onSelect: programmeActions.watch }] : []),
       ...(programmeActions.download && programme
         ? [{ id: 'download-programme', label: t('downloadCatchup', { title: programme.title }), icon: <Download className="size-4" />, onSelect: programmeActions.download }]
@@ -182,6 +188,8 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
  * tag after it, quiet, so "ESPN2 FHD US" beside the row is not headed "US| ESPN2 FHD".
  */
 export function channelMenuHeader(channel: Channel, name: string, nowTitle?: string): MenuHeader {
+  // A heading row is headed by its caption, as the row draws it, with no logo plate (v-live-03).
+  if (isSeparatorName(channel.name)) return { title: <span className="block truncate">{separatorLabel(channel.name)}</span> };
   return {
     title: <ChannelName name={name} className="block truncate" />,
     subtitle: nowTitle,

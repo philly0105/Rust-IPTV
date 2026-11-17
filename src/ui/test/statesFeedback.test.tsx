@@ -11,7 +11,7 @@ import '@/i18n';
 
 import { RpcError } from '@/api/transport';
 
-import { ErrorState, IconButton, ToastViewport, toast, useBusyButtons, useToastStore } from '..';
+import { ErrorState, IconButton, Toggle, ToastViewport, toast, useBusyButtons, useToastStore } from '..';
 
 afterEach(() => {
   cleanup();
@@ -103,5 +103,25 @@ describe('ErrorState in the browser (states-feedback-09)', () => {
     render(<ErrorState error={new RpcError('db', 'database is locked')} title="Couldn't load favorites" />);
     expect(screen.getByRole('heading').textContent).toBe("Couldn't load favorites");
     expect(screen.getByText('Reload the page. If it keeps happening, restart the Tsrust server.')).toBeTruthy();
+  });
+});
+
+describe('Toggle on touch (round 1 follow-up)', () => {
+  it('toggles from a tap on its description, and only from the switch with a mouse', () => {
+    const onChange = vi.fn();
+    const coarse = { matches: true };
+    vi.stubGlobal('matchMedia', () => coarse);
+    try {
+      render(<Toggle checked={false} onChange={onChange} label="Refresh automatically" description="Every day at 4:00" />);
+      fireEvent.click(screen.getByText('Every day at 4:00'));
+      expect(onChange).toHaveBeenLastCalledWith(true);
+      fireEvent.click(screen.getByRole('switch'));
+      expect(onChange).toHaveBeenCalledTimes(2);
+      coarse.matches = false;
+      fireEvent.click(screen.getByText('Every day at 4:00'));
+      expect(onChange).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

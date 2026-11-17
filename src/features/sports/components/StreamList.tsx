@@ -4,15 +4,17 @@
  * stream tall. Each row names the channel, the picture quality its name gives, why it matched (the
  * guide, an event channel's name, a team's own channel, or a network carrying the game) and offers
  * what fits the game's phase: Watch from 15 minutes before the start, Replay from the channel's
- * archive once it is over, Record before it starts. The player loads on the press.
+ * archive once it is over, Record before it starts. Before Watch comes, where nothing can be recorded, a
+ * row offers Remind me (a guide reminder, as the guide's own) or, with reminders off, says when Watch
+ * comes. The player loads on the press.
  */
 
-import { ChevronDown, ChevronUp, Circle, Clock, History, Play, TriangleAlert, Volume2 } from 'lucide-react';
+import { Bell, BellOff, ChevronDown, ChevronUp, Circle, Clock, History, Play, TriangleAlert, Volume2 } from 'lucide-react';
 import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type PlayerSource, type Settings } from '@/api/types';
+import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type PlayerSource, type Reminder, type Settings } from '@/api/types';
 // Straight from its module (sports/deps.ts re-exports only ChannelLogo from it), the same chunk.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { channelQuality } from '@/lib/channelQuality';
@@ -36,6 +38,7 @@ import {
   ms,
   useDisplayPrefs,
   useRecordingCapabilities,
+  useRemindersEnabled,
   useScheduleActions,
   useScheduleIndex,
   useSettingsValue,
@@ -74,15 +77,23 @@ export interface StreamContext {
   /** More than one source: rows name theirs. */
   multiSource: boolean;
   canRecord: boolean;
-  /** The Live TV quality filter is on, so a missing event channel may be its doing. */
+  /** Guide reminders are on (Settings, Recording): an upcoming game's rows offer Remind me. */
+  remindersOn: boolean;
+  /** Live TV's quality filter or the page's "1080p+" is on, so a missing stream may be its doing. */
   qualityFiltered: boolean;
+  /** Part of the channel index failed: a game with no stream may have one that wasn't looked through. */
+  streamsFailed: boolean;
   /** What the player plays, once a Watch or Replay on this page has loaded it; the row it came from says so. */
   playing: PlayerSource | undefined;
   /** A recording is waiting or running for this programme on this channel. */
   isRecording(ref: ItemRef, program: EpgProgram): boolean;
+  /** The pending reminder for this programme on this channel. */
+  reminderFor(ref: ItemRef, program: EpgProgram): Reminder | undefined;
   watch(match: StreamMatch, title: string, name: string): Promise<void>;
   replay(match: StreamMatch, program: EpgProgram, name: string): Promise<void>;
   record(match: StreamMatch, program: EpgProgram, name: string): Promise<boolean>;
+  /** Sets a reminder for the programme, or removes `existing`. */
+  remind(match: StreamMatch, program: EpgProgram, name: string, existing: Reminder | undefined): Promise<void>;
 }
 
 const selectMinQuality = (s: Settings) => s.liveMinQuality ?? null;
@@ -98,14 +109,15 @@ function usePlayingSource(store: PlayerStore | null): PlayerSource | undefined {
   return useSyncExternalStore(store ? store.subscribe : noSubscription, () => store?.getState().source);
 }
 
-export function useStreamContext(now: number, sourceCount: number): StreamContext {
+export function useStreamContext(now: number, sourceCount: number, hdOnly = false, streamsFailed = false): StreamContext {
   const { t } = useTranslation('sports');
   const { toast } = useToast();
   const prefs = useDisplayPrefs();
   const canRecord = useRecordingCapabilities().data?.supported === true;
+  const remindersOn = useRemindersEnabled();
   const index = useScheduleIndex();
   const actions = useScheduleActions();
-  const qualityFiltered = useSettingsValue(selectMinQuality).data != null;
+  const qualityFiltered = useSettingsValue(selectMinQuality).data != null || hdOnly;
   const navigate = useNavigate();
   const [store, setStore] = useState<PlayerStore | null>(null);
   const playing = usePlayingSource(store);
@@ -149,18 +161,40 @@ export function useStreamContext(now: number, sourceCount: number): StreamContex
     [t, toast],
   );
 
-  const { record: schedule } = actions;
+  const { record: schedule, toggleReminder } = actions;
   const record = useCallback(
     (m: StreamMatch, program: EpgProgram, name: string) =>
       schedule({ ref: m.channel.ref, channelName: name, program: { title: program.title, start: program.start, end: program.end } }),
     [schedule],
   );
 
+  const remind = useCallback(
+    (m: StreamMatch, program: EpgProgram, name: string, existing: Reminder | undefined) =>
+      toggleReminder({ ref: m.channel.ref, channelName: name, program: { title: program.title, start: program.start, end: program.end } }, existing),
+    [toggleReminder],
+  );
+
   const isRecording = useCallback((ref: ItemRef, program: EpgProgram) => !!markFor(index, ref, program).recording, [index]);
+  const reminderFor = useCallback((ref: ItemRef, program: EpgProgram) => markFor(index, ref, program).reminder, [index]);
 
   return useMemo(
-    () => ({ now, strip: prefs.stripCountryPrefix, multiSource: sourceCount > 1, canRecord, qualityFiltered, playing, isRecording, watch, replay, record }),
-    [now, prefs.stripCountryPrefix, sourceCount, canRecord, qualityFiltered, playing, isRecording, watch, replay, record],
+    () => ({
+      now,
+      strip: prefs.stripCountryPrefix,
+      multiSource: sourceCount > 1,
+      canRecord,
+      remindersOn,
+      qualityFiltered,
+      streamsFailed,
+      playing,
+      isRecording,
+      reminderFor,
+      watch,
+      replay,
+      record,
+      remind,
+    }),
+    [now, prefs.stripCountryPrefix, sourceCount, canRecord, remindersOn, qualityFiltered, streamsFailed, playing, isRecording, reminderFor, watch, replay, record, remind],
   );
 }
 
@@ -215,13 +249,12 @@ export function streamAction(game: Game, m: StreamMatch, now: number, canRecord:
 
 function WatchFrom({ time }: { time: string }) {
   const { t } = useTranslation('sports');
-  const label = t('watchFrom', { time });
-  // A clock, not a play mark: nothing here can be pressed yet, and a play mark beside a time read as a button.
+  // A clock, not a play mark: nothing here can be pressed yet, and a play mark beside a time read as a
+  // button. The words are on screen, not only the time: a bare clock left people pressing the row.
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-caption text-fg-subtle tabular-nums" title={label} data-testid="sports-watch-from">
+    <span className="inline-flex shrink-0 items-center gap-1 text-caption text-fg-muted tabular-nums" data-testid="sports-watch-from">
       <Clock aria-hidden size={12} />
-      <span aria-hidden>{time}</span>
-      <span className="sr-only">{label}</span>
+      {t('watchFrom', { time })}
     </span>
   );
 }
@@ -232,6 +265,7 @@ function StreamRow({
   title,
   ctx,
   first,
+  best,
   toggle,
 }: {
   game: Game;
@@ -239,6 +273,8 @@ function StreamRow({
   title: string;
   ctx: StreamContext;
   first: boolean;
+  /** The first of several rows: the stream the order puts first says it is the best one. */
+  best: boolean;
   /** The first row's Show all toggle, at the end of its metadata. */
   toggle?: ReactNode;
 }) {
@@ -316,6 +352,31 @@ function StreamRow({
     );
   }
 
+  // Before Watch comes, with nothing to record: a guide reminder for the game's programme, which fires
+  // with "Watch now" as the guide's own do. A press again takes it away.
+  const later = action === null && watchesLater(game, ctx.now);
+  const watchTime = later ? formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language) : '';
+  const remindProgram = later && ctx.remindersOn ? gameProgram(game, match, title) : null;
+  const reminder = remindProgram ? ctx.reminderFor(match.channel.ref, remindProgram) : undefined;
+  if (!button && remindProgram && (reminder || ms(remindProgram.start) > ctx.now)) {
+    button = (
+      <Tooltip content={t('watchFrom', { time: watchTime })}>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={reminder ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
+          aria-pressed={!!reminder}
+          loading={busy}
+          aria-label={reminder ? undefined : t('remindLabel', { title, name })}
+          onClick={() => run(() => ctx.remind(match, remindProgram, name, reminder))}
+          data-testid="sports-remind"
+        >
+          {reminder ? t('reminderOn') : t('remindMe')}
+        </Button>
+      </Tooltip>
+    );
+  }
+
   const program = match.program;
   const quality = channelQuality(match.channel.name);
   // The guide slot's times say what the card doesn't: when a live game's broadcast runs, which slot a
@@ -344,6 +405,13 @@ function StreamRow({
               // First, so the rows' qualities line up down the list; the name's own marker is often cut
               // off or a superscript ("ᴴᴰ").
               quality ? <QualityTag key="quality" quality={quality} /> : null,
+              // After the quality, which stays lined up down the list. Quiet words, not another badge: the
+              // order already puts the surest, sharpest stream first.
+              best ? (
+                <span key="best" className="font-medium text-fg-muted" title={t('bestHint')} data-testid="sports-best">
+                  {t('best')}
+                </span>
+              ) : null,
               // The regional warning, since it may be the wrong game: warning-toned text, not a filled
               // badge, as on an NFL Sunday nearly every card carries it. Before the reason, so where the
               // line runs short the warning is never what truncates.
@@ -381,10 +449,9 @@ function StreamRow({
         </span>
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
-      {!button && first && watchesLater(game, ctx.now) ? (
-        // Where nothing can be done yet (no recording here), the best row says when Watch comes: a clock
-        // and the time, small enough to leave the channel's name its room; the sentence is its name.
-        <WatchFrom time={formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language)} />
+      {!button && first && later ? (
+        // Where nothing can be done yet (no recording, reminders off), the best row says when Watch comes.
+        <WatchFrom time={watchTime} />
       ) : null}
     </li>
   );
@@ -429,6 +496,13 @@ export function StreamList({
         </p>
       );
     }
+    if (ctx.streamsFailed) {
+      return (
+        <p className="text-caption text-fg-subtle" data-testid="sports-streams-failed">
+          {t('streamsFailed')}
+        </p>
+      );
+    }
     return (
       <p className="text-caption text-fg-subtle" data-testid="sports-no-streams">
         {t('noStreams')}
@@ -470,6 +544,7 @@ export function StreamList({
           title={title}
           ctx={ctx}
           first={i === 0}
+          best={i === 0 && list.length > 1}
           {...(i === 0 ? { toggle } : {})}
         />
       ))}

@@ -8,7 +8,7 @@
  */
 
 import { useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import type { CatalogSearchResult } from '@/api/rpc';
@@ -281,9 +281,10 @@ const NO_SOURCES: Source[] = [];
 
 /**
  * The sports channel index of every visible source. `loading` until each part has answered once (rows
- * appear as parts arrive); `error` is the first failure, with the other parts' rows still listed.
+ * appear as parts arrive); `error` is the first failure, with the other parts' rows still listed, and
+ * `retry` reads the failed parts again.
  */
-export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; loading: boolean; error: unknown } {
+export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; loading: boolean; error: unknown; retry: () => void } {
   const client = useQueryClient();
   const sources = useVisibleSources();
   const list = sources.data ?? NO_SOURCES;
@@ -304,5 +305,11 @@ export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; l
   });
   const channels = useMemo(() => buildIndex(list, groups.lists, networks.data), [list, groups.lists, networks.data]);
   const loading = enabled && (sources.isPending || groups.pending || (list.length > 0 && networks.isPending));
-  return { channels, loading, error: sources.error ?? groups.error ?? networks.error ?? null };
+  const { refetch: refetchSources } = sources;
+  const retry = useCallback(() => {
+    if (sources.error) void refetchSources();
+    const parts = new Set<unknown>([sportsGroupsKey('')[0], sportsNetworksKey[0]]);
+    void client.refetchQueries({ predicate: (q) => q.state.status === 'error' && parts.has(q.queryKey[0]) });
+  }, [client, sources.error, refetchSources]);
+  return { channels, loading, error: sources.error ?? groups.error ?? networks.error ?? null, retry };
 }

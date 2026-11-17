@@ -30,6 +30,8 @@ const data = vi.hoisted(() => ({
   live: [] as unknown[],
   streams: new Map<string, unknown[]>(),
   streamsLoading: false,
+  streamsError: null as unknown,
+  streamRetries: 0,
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
   weekCalls: [] as string[][],
@@ -61,7 +63,10 @@ vi.mock('../hooks/useGames', () => ({
 vi.mock('../hooks/useGameStreams', () => ({
   useGameStreams: (games: readonly { key: string }[], enabled = true) => {
     data.streamCalls.push({ keys: games.map((g) => g.key), enabled });
-    return enabled ? { streams: data.streams, loading: data.streamsLoading } : { streams: new Map(), loading: false };
+    const retry = () => void data.streamRetries++;
+    return enabled
+      ? { streams: data.streams, loading: data.streamsLoading, error: data.streamsError, retry }
+      : { streams: new Map(), loading: false, error: null, retry };
   },
 }));
 
@@ -171,6 +176,8 @@ beforeEach(() => {
   data.live = [];
   data.streams = new Map();
   data.streamsLoading = false;
+  data.streamsError = null;
+  data.streamRetries = 0;
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
   data.weekCalls.length = 0;
@@ -183,6 +190,7 @@ beforeEach(() => {
   localStorage.removeItem('tsrust.sportsTeams');
   localStorage.removeItem('tsrust.sportsMyTeamsOnly');
   localStorage.removeItem('tsrust.sportsStreamsOnly');
+  localStorage.removeItem('tsrust.sportsHdOnly');
   localStorage.removeItem('tsrust.sportsLeague');
   forgetFollowedTeamsForTests();
   useMultiviewStore.setState({ tiles: [] });
@@ -719,51 +727,71 @@ describe('sports page', () => {
     expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
   });
 
-  it('turns the quality filter to 1080p and up from its chip, and off again', async () => {
-    rpc.handlers['settings.update'] = (args) => ({ stripCountryPrefix: true, ...(args as { patch: object }).patch });
-    setDay([h.game('1')]);
+  it("hides this page's streams below 1080p from its chip, and leaves Live TV's filter alone", async () => {
+    const g = h.liveGame('1');
+    setDay([g]);
+    // 720p, then 4K, an untagged event channel and SD: the chip keeps 4K and the untagged one.
+    setStreams(g, [h.match(ESPN), h.match(h.channel('4', '4K: ESPN ᵁᴴᴰ')), h.match(EVENT), h.match(h.channel('5', 'NBA: BOSTON CELTICS SD'))]);
     await openReady();
     const chip = screen.getByTestId('sports-quality');
     expect(chip.getAttribute('aria-pressed')).toBe('false');
-    expect(chip.getAttribute('title')).toBe('Hide streams whose channel name marks a quality below 1080p. Live TV and the TV guide use the same filter.');
+    expect(chip.getAttribute('title')).toBe('Hide streams whose channel name marks a quality below 1080p. Only on this page: Live TV keeps its own filter.');
     // On a phone it is its icon, its label hidden but still its name.
     expect(chip.querySelector('svg')).toBeTruthy();
     expect(within(chip).getByText('1080p+').className.split(' ')).toContain('max-sm:sr-only');
+    const names = () => {
+      const list = within(card(g)).getByTestId('sports-streams');
+      const toggle = within(list).queryByTestId('sports-show-all');
+      if (toggle?.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
+      return within(list).getAllByTestId('sports-stream-name').map((n) => n.textContent);
+    };
+    expect(names()).toEqual(['ESPN HD', 'ESPN ᵁᴴᴰ', 'NBA 05: Celtics vs Knicks', 'BOSTON CELTICS SD']);
     fireEvent.click(chip);
-    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'));
-    expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: 'fhd' } }]);
-    fireEvent.click(chip);
-    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('false'));
-    expect(rpc.callsOf('settings.update').at(-1)).toEqual({ patch: { liveMinQuality: null } });
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    expect(names()).toEqual(['ESPN ᵁᴴᴰ', 'NBA 05: Celtics vs Knicks']);
+    expect(localStorage.getItem('tsrust.sportsHdOnly')).toBe('1');
+    expect(rpc.callsOf('settings.update')).toEqual([]);
+    cleanup();
+
+    // Kept on this device for the next visit; a press turns it off again.
+    await openReady();
+    const again = screen.getByTestId('sports-quality');
+    expect(again.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(again);
+    expect(again.getAttribute('aria-pressed')).toBe('false');
+    expect(names()).toHaveLength(4);
+    expect(localStorage.getItem('tsrust.sportsHdOnly')).toBe('0');
+    expect(rpc.callsOf('settings.update')).toEqual([]);
   });
 
-  it('shows the quality chip pressed while the filter hides everything below 1080p, whatever set it', async () => {
-    rpc.handlers['settings.update'] = (args) => ({ stripCountryPrefix: true, ...(args as { patch: object }).patch });
-    // 720p and up, picked on Live TV, still shows 720p streams: the chip is off, and tightens it to 1080p.
+  it("shows the quality chip on while Live TV's filter hides everything below 1080p, and says where to change it", async () => {
+    // 720p and up, picked on Live TV, still shows 720p streams: the chip is off.
     rpc.handlers['settings.get'] = () => ({ liveMinQuality: 'hd' });
     setDay([h.game('1')]);
     await openReady();
     // The game has no stream, so its card says the filter may be why once the settings are in.
     await within(card(h.game('1'))).findByTestId('sports-quality-note');
-    const chip = screen.getByTestId('sports-quality');
-    expect(chip.getAttribute('aria-pressed')).toBe('false');
-    fireEvent.click(chip);
-    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'));
-    expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: 'fhd' } }]);
-    // Its name stays "1080p+" pressed or not.
-    expect(within(chip).getByText('1080p+')).toBeTruthy();
+    expect(screen.getByTestId('sports-quality').getAttribute('aria-pressed')).toBe('false');
     cleanup();
 
-    // 4K only hides everything below 1080p too: pressed, and a press turns the filter off.
-    h.resetShared();
-    rpc.calls.length = 0;
-    rpc.handlers['settings.get'] = () => ({ liveMinQuality: 'uhd' });
-    await openReady();
-    const uhd = screen.getByTestId('sports-quality');
-    await waitFor(() => expect(uhd.getAttribute('aria-pressed')).toBe('true'));
-    expect(within(uhd).getByText('1080p+')).toBeTruthy();
-    fireEvent.click(uhd);
-    await waitFor(() => expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: null } }]));
+    // 1080p or 4K only: on, named the same, and a press explains instead of changing the setting.
+    for (const min of ['fhd', 'uhd']) {
+      h.resetShared();
+      rpc.calls.length = 0;
+      rpc.handlers['settings.get'] = () => ({ liveMinQuality: min });
+      await openReady();
+      const chip = screen.getByTestId('sports-quality');
+      await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'));
+      expect(within(chip).getByText('1080p+')).toBeTruthy();
+      const hint = "Live TV's quality filter hides channels below 1080p everywhere. Change it on Live TV.";
+      expect(chip.getAttribute('title')).toBe(hint);
+      fireEvent.click(chip);
+      expect(h.lastToast()?.title).toBe(hint);
+      expect(chip.getAttribute('aria-pressed')).toBe('true');
+      expect(rpc.callsOf('settings.update')).toEqual([]);
+      expect(localStorage.getItem('tsrust.sportsHdOnly')).toBeNull();
+      cleanup();
+    }
   });
 
   it('tags each stream with the quality its name gives, and lists a name a source repeats once', async () => {
@@ -782,6 +810,16 @@ describe('sports page', () => {
     const rows = within(list).getAllByTestId('sports-stream');
     expect(rows.map((r) => within(r).getByTestId('sports-stream-name').textContent)).toEqual(['ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ', 'ESPN HD', 'TSN 1 ⁽ᴮᴷ⁾ ᴿᴬᵂ', 'BOSTON CELTICS SD']);
     expect(rows.map((r) => within(r).queryByTestId('sports-stream-quality')?.textContent ?? null)).toEqual(['4K', '720p', null, 'SD']);
+    // The first of several says it is the best, in words after its quality.
+    expect(rows.map((r) => within(r).queryByTestId('sports-best')?.textContent ?? null)).toEqual(['Best', null, null, null]);
+    const tag = within(rows[0]!).getByTestId('sports-stream-quality');
+    expect(tag.compareDocumentPosition(within(rows[0]!).getByTestId('sports-best')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    cleanup();
+
+    // A lone stream is not "best" of anything.
+    setStreams(g, [h.match(ESPN)]);
+    await openReady();
+    expect(within(card(g)).queryByTestId('sports-best')).toBeNull();
   });
 
   it('lists matched streams with their reason, the best one first', async () => {
@@ -910,19 +948,61 @@ describe('sports page', () => {
     player.fail = new Error('Stream offline');
     await openReady();
     expect(within(card(later)).queryByTestId('sports-watch')).toBeNull();
-    // With nothing to do yet, the best row says when Watch comes.
-    const from = within(card(later)).getByTestId('sports-watch-from');
-    const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
-    // A clock and the time on screen, nothing that looks like a button; the sentence is what it reads and its tooltip.
-    expect(from.getAttribute('title')).toBe(`Watch from ${at}`);
-    expect(within(from).getByText(`Watch from ${at}`).className).toContain('sr-only');
-    expect(from.querySelector('svg')?.getAttribute('class')).toContain('lucide-clock');
     expect(within(card(soon)).queryByTestId('sports-watch-from')).toBeNull();
+    expect(within(card(soon)).queryByTestId('sports-remind')).toBeNull();
     fireEvent.click(within(card(soon)).getByTestId('sports-watch'));
     await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't play ESPN HD"));
     expect(h.lastToast()?.variant).toBe('error');
     // A failed play leaves the zap context alone.
     expect(player.state.zapContext).toBeUndefined();
+  });
+
+  it("offers Remind me on an upcoming game's streams before Watch comes, and says when Watch comes with reminders off", async () => {
+    const later = h.game('2', { startMs: Date.now() + 40 * h.MINUTE });
+    setDay([later]);
+    setStreams(later, [h.match(ESPN)]);
+    rpc.handlers['recordings.capabilities'] = () => ({ supported: false });
+    const reminders: object[] = [];
+    rpc.handlers['reminders.list'] = () => [...reminders];
+    rpc.handlers['reminders.add'] = (args) => {
+      reminders.push({ id: 'r1', status: 'pending', ...(args as object) });
+      return reminders[0];
+    };
+    rpc.handlers['reminders.remove'] = () => {
+      reminders.length = 0;
+      return null;
+    };
+    await openReady();
+    const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
+    // Not a row that looks pressable and does nothing: the row's one action is a reminder.
+    const remind = await within(card(later)).findByRole('button', { name: 'Remind me about Boston Celtics at New York Knicks on ESPN HD' });
+    expect(remind.textContent).toBe('Remind me');
+    expect(remind.getAttribute('aria-pressed')).toBe('false');
+    expect(within(card(later)).queryByTestId('sports-watch-from')).toBeNull();
+    fireEvent.click(remind);
+    await waitFor(() => expect(rpc.callsOf('reminders.add')).toHaveLength(1));
+    // The game's programme, as Record would take it: ten minutes before the start.
+    expect(rpc.callsOf('reminders.add')[0]).toMatchObject({
+      ref: ESPN.ref,
+      channelName: 'ESPN HD',
+      title: 'Boston Celtics at New York Knicks',
+      start: new Date(later.startMs - 10 * h.MINUTE).toISOString(),
+    });
+    const set = await within(card(later)).findByRole('button', { name: 'Reminder set' });
+    expect(set.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(set);
+    await waitFor(() => expect(rpc.callsOf('reminders.remove')).toEqual([{ id: 'r1' }]));
+    cleanup();
+
+    // Reminders off: the best row says when Watch comes, in words, with nothing that looks like a button.
+    h.resetShared();
+    rpc.handlers['settings.get'] = () => ({ stripCountryPrefix: true, remindersEnabled: false });
+    await openReady();
+    const from = await within(card(later)).findByTestId('sports-watch-from');
+    await waitFor(() => expect(within(card(later)).queryByTestId('sports-remind')).toBeNull());
+    expect(from.textContent).toBe(`Watch from ${at}`);
+    expect(from.querySelector('svg')?.getAttribute('class')).toContain('lucide-clock');
+    expect(within(card(later)).queryByRole('button', { name: /Remind me/ })).toBeNull();
   });
 
   it('replays a final game from a channel archive, and offers nothing without one', async () => {
@@ -1082,6 +1162,30 @@ describe('sports page', () => {
     rpc.handlers['settings.get'] = () => ({ liveMinQuality: 'hd' });
     await openReady();
     await waitFor(() => expect(within(card(g)).getByTestId('sports-quality-note').textContent).toBe(' The quality filter may be hiding streams.'));
+  });
+
+  it("says the streams couldn't be checked when the channel index fails, not that none was found", async () => {
+    const found = h.liveGame('1');
+    const missing = h.game('2', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([found, missing]);
+    setStreams(found, [h.match(ESPN)]);
+    data.streamsError = Object.assign(new Error('database is locked'), { code: 'db' });
+    localStorage.setItem('tsrust.sportsStreamsOnly', '1');
+    await openReady();
+    // One message for the page with a retry; the card without a stream says it couldn't check.
+    const alert = screen.getAllByRole('alert').find((a) => a.textContent?.includes("Couldn't check your channels for these games"));
+    expect(alert).toBeTruthy();
+    expect(within(card(missing)).getByTestId('sports-streams-failed').textContent).toBe("Couldn't check for streams");
+    expect(within(card(missing)).queryByTestId('sports-no-streams')).toBeNull();
+    // What the parts that answered found still shows.
+    expect(within(card(found)).getByTestId('sports-watch')).toBeTruthy();
+    // With streams hides nothing and counts nothing while it can't know.
+    const chip = screen.getByTestId('sports-streams-only');
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    expect(chip.textContent).toBe('With streams');
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
+    fireEvent.click(within(alert!).getByRole('button', { name: 'Try again' }));
+    expect(data.streamRetries).toBeGreaterThan(0);
   });
 
   it('says streams are being looked for while matching runs', async () => {

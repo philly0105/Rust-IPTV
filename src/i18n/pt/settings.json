@@ -378,7 +378,7 @@
   "resetAction": "Redefinir…",
   "resetConfirmTitle": "Redefinir todas as configurações?",
   "resetConfirmBody": "Cada configuração volta ao padrão, incluindo idioma, tema e caminhos dos players. Fontes, favoritos, histórico e downloads ficam. Os endereços do guia e a chave do TMDB também ficam.",
-  "resetConfirm": "Redefinir",
+  "resetConfirm": "Redefinir configurações",
   "resetDone": "Configurações redefinidas",
   "resetFailed": "Não foi possível redefinir as configurações",
   "streamReconnect": "Reconectar transmissões interrompidas",

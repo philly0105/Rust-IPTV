@@ -373,7 +373,7 @@
   "resetAction": "Herstellen…",
   "resetConfirmTitle": "Alle instellingen herstellen?",
   "resetConfirmBody": "Elke instelling gaat terug naar de standaard, ook taal, thema en spelerpaden. Bronnen, favorieten, geschiedenis en downloads blijven. Gidsadressen en de TMDB-sleutel blijven ook.",
-  "resetConfirm": "Herstellen",
+  "resetConfirm": "Instellingen herstellen",
   "resetDone": "Instellingen hersteld naar standaard",
   "resetFailed": "Kan instellingen niet herstellen",
   "streamReconnect": "Onderbroken streams opnieuw verbinden",

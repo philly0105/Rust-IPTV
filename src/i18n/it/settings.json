@@ -378,7 +378,7 @@
   "resetAction": "Ripristina…",
   "resetConfirmTitle": "Ripristinare tutte le impostazioni?",
   "resetConfirmBody": "Ogni impostazione torna al valore predefinito, compresi lingua, tema e percorsi dei player. Sorgenti, preferiti, cronologia e download restano. Restano anche gli indirizzi della guida e la chiave TMDB.",
-  "resetConfirm": "Ripristina",
+  "resetConfirm": "Ripristina impostazioni",
   "resetDone": "Impostazioni ripristinate",
   "resetFailed": "Impossibile ripristinare le impostazioni",
   "streamReconnect": "Riconnetti i flussi interrotti",

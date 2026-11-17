@@ -251,9 +251,14 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
                 <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
                 <span className="shrink-0">{t(k('type', type))}</span>
                 {resume.episode && (
-                  <span dir="auto" className="truncate text-match-parent">
-                    {resume.episode}
-                  </span>
+                  <>
+                    <span aria-hidden className="shrink-0 text-fg-subtle">
+                      ·
+                    </span>
+                    <span dir="auto" className="truncate text-match-parent">
+                      {resume.episode}
+                    </span>
+                  </>
                 )}
                 {/* The first part to give way: on a phone "N min left" and the bar already say where it
                     stopped, and in Greek or Russian the three parts did not fit beside the time left
@@ -291,10 +296,16 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           <span className="flex w-full min-w-0 items-center gap-1.5 text-caption text-fg-muted pointer-coarse:text-body-sm">
             <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
             <span className="shrink-0">{t(k('type', type))}</span>
+            {/* A dot between the type and the subtitle, as the resume line has: "Movie 2019" read as one phrase. */}
             {snapshot.subtitle && (
-              <span dir="auto" className="truncate text-match-parent">
-                {snapshot.subtitle}
-              </span>
+              <>
+                <span aria-hidden className="shrink-0 text-fg-subtle">
+                  ·
+                </span>
+                <span dir="auto" className="truncate text-match-parent">
+                  {snapshot.subtitle}
+                </span>
+              </>
             )}
           </span>
         )}

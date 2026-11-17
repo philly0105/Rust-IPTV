@@ -95,6 +95,19 @@ describe('Favorites rows say what is on air', () => {
     expect(screen.queryByTestId('entry-now')).toBeNull();
   });
 
+  it('sets the subtitle off from the type with a quiet dot ("Movie · 2019", v-phone-11)', async () => {
+    const fav = makeFavorite('movie', 'm1', 0);
+    rpc.handlers['favorites.list'] = () => [{ ...fav, snapshot: { ...fav.snapshot, subtitle: '2019' } }];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    const row = await screen.findByTestId('entry-row');
+    const year = within(row).getByText('2019');
+    const dot = year.previousElementSibling!;
+    expect(dot.textContent).toBe('·');
+    expect(dot.getAttribute('aria-hidden')).toBe('true');
+    expect(dot.previousElementSibling!.textContent).toBe('Movie');
+  });
+
   it('floats the row actions over the row end on a fine pointer, the grip last, and gives touch one menu with all of them', async () => {
     rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('live', 'ch2', 1)];
     rpc.handlers['epg.nowNext'] = () => ({});

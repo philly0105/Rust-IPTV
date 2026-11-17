@@ -433,6 +433,12 @@ struct Inner {
     batched: HashSet<i64>,
     /// Endpoints resolved ahead, per row.
     preresolved: HashMap<i64, spread::Pre>,
+    /// Running rows whose origin's source was removed: their run discards
+    /// the bytes it held from that copy when it ends ([`forget_source`]).
+    discard: HashSet<i64>,
+    /// A note the row's next run shows: why it starts over from its own
+    /// copy.
+    carried: HashMap<i64, TransferNote>,
 }
 
 /// A source's connection limit as the runtime knows it.
@@ -885,6 +891,8 @@ impl Inner {
         self.plans.remove(&id);
         self.batched.remove(&id);
         self.preresolved.remove(&id);
+        self.discard.remove(&id);
+        self.carried.remove(&id);
     }
 
     /// Running ids in start order, then the queue: the order `init` restores.
@@ -1625,7 +1633,8 @@ impl DownloadManager {
     /// or becomes `Failed` once the row waited [`WAIT_LIMIT`] without new
     /// bytes. Bytes from the source (a completed or progressing run, one
     /// that yielded to playback included) end its streak and the row's
-    /// waiting clock.
+    /// waiting clock. A `Respread` books nothing: the copy was at fault,
+    /// not the source, and the retired verdict keeps the row off it.
     fn settle(&self, id: i64, source: &str, outcome: Outcome) -> Outcome {
         let now = Instant::now();
         let (base, limit) = self.wait_timing();
@@ -1918,6 +1927,9 @@ fn pump(
                     .iter()
                     .any(|q| inner.home(*q) == Some(home.as_str()));
             let ctl = Arc::new(TaskCtl::placed(inner.started, source, own, copy));
+            if let Some(note) = inner.carried.remove(&id) {
+                ctl.push_note(note);
+            }
             inner.started += 1;
             inner.active.insert(id, ctl.clone());
             starts.push((
@@ -2373,30 +2385,41 @@ async fn run_task(
             }
             state.emit("downloads.update", serde_json::json!({}));
             spread::preresolve_next(&state, &mgr);
+            let elsewhere = ctl
+                .copy
+                .as_ref()
+                .filter(|c| c.source_id() != ctl.row_source);
+            let gone = match elsewhere {
+                Some(copy) => copy_gone(&state, &mgr, id, &ctl, copy).await,
+                None => None,
+            };
             // A panic in the transfer must still free the concurrency slot
             // and leave the row in a final state.
-            let mut outcome = match futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+            let run = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
                 transfer::run(&state, id, &ctl, &mgr),
-            ))
-            .await
-            {
-                Ok(outcome) => outcome,
-                Err(_) => {
-                    tracing::error!(id, "download task panicked");
-                    Outcome::Failed {
-                        message: "The download stopped because of an internal error. Retry it."
-                            .into(),
-                        bytes: 0,
-                        keep_part: true,
-                        part: None,
+            ));
+            let mut outcome = match gone {
+                Some(outcome) => outcome,
+                None => match run.await {
+                    Ok(outcome) => outcome,
+                    Err(_) => {
+                        tracing::error!(id, "download task panicked");
+                        Outcome::Failed {
+                            message: "The download stopped because of an internal error. Retry it."
+                                .into(),
+                            bytes: 0,
+                            keep_part: true,
+                            part: None,
+                        }
                     }
-                }
+                },
             };
             // A stop request can escalate after the transfer returned.
             if let Outcome::Stopped { reason, .. } = &mut outcome {
                 *reason = ctl.reason();
             }
             let outcome = mgr.settle(id, &ctl.source, outcome);
+            let outcome = drop_origin_bytes(&state, &mgr, id, &ctl, outcome).await;
             back = match &outcome {
                 Outcome::Stopped {
                     reason: StopReason::Yield,
@@ -2405,6 +2428,9 @@ async fn run_task(
                     ..
                 } => Some((*bytes, part.clone(), false)),
                 Outcome::Requeue { bytes, part, .. } => Some((*bytes, part.clone(), true)),
+                // The copy was at fault, not a source: straight back to the
+                // front.
+                Outcome::Respread { bytes, .. } => Some((*bytes, part_of(&state, id).await, false)),
                 _ => None,
             };
             persist_outcome(&state, id, outcome).await;
@@ -2596,9 +2622,233 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
                     store::finish(c, id, DownloadStatus::Failed, bytes, Some(&message))
                 }
                 Outcome::Requeue { bytes, .. } => store::requeue(c, id, bytes).map(|_| ()),
+                Outcome::Respread { message, bytes } => {
+                    tracing::info!(id, bytes, message = %message, "download goes back to the queue");
+                    store::requeue(c, id, bytes).map(|_| ())
+                }
             }
         })
         .await
+}
+
+/// The `.part` row `id` writes, when it has a destination.
+async fn part_of(state: &Arc<AppState>, id: i64) -> Option<std::path::PathBuf> {
+    let path = state
+        .db_call(move |c| Ok(store::get(c, id)?.download.file_path))
+        .await
+        .ok()??;
+    Some(super::naming::part_path(std::path::Path::new(&path)))
+}
+
+/// Resolves the copy a run on another source downloads (a spread copy, or
+/// the row's origin) before its transfer starts, unless it was resolved
+/// ahead. A copy that is gone (its source removed, or the title gone from
+/// that catalog) is final for that copy: the pair's verdict is retired and
+/// the run ends as a `Respread`, so the row goes back at once instead of
+/// waiting for a source that will never have it. Any other failure is left
+/// to the transfer, which resolves again and waits for the source.
+async fn copy_gone(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    id: i64,
+    ctl: &TaskCtl,
+    copy: &CopyRef,
+) -> Option<Outcome> {
+    let ready = matches!(
+        mgr.inner.lock().preresolved.get(&id),
+        Some(spread::Pre::Ready { at, ep, .. }) if ep.copy == *copy && at.elapsed() <= PRERESOLVE_TTL
+    );
+    if ready {
+        return None;
+    }
+    let resolved = tokio::select! {
+        // The transfer sees the stop at once.
+        _ = ctl.token.cancelled() => return None,
+        r = super::shared::resolve(state, copy) => r,
+    };
+    match resolved {
+        Ok(ep) => {
+            mgr.inner.lock().preresolved.insert(
+                id,
+                spread::Pre::Ready {
+                    at: Instant::now(),
+                    ep,
+                    own: false,
+                },
+            );
+            None
+        }
+        Err(CoreError::NotFound(why)) => {
+            let d = state
+                .db_call(move |c| store::get(c, id))
+                .await
+                .ok()?
+                .download;
+            let own = CopyRef::new(d.item_ref, d.episode_id);
+            super::mirrors::record_mismatch(state, &own, copy, false).await;
+            Some(Outcome::Respread {
+                message: format!("The copy on another source is gone: {why}."),
+                bytes: d.bytes_downloaded,
+            })
+        }
+        Err(_) => None,
+    }
+}
+
+/// Discards what row `id` holds: its `.part` and sidecar go, and the row
+/// loses its destination, progress and origin (the path a failed run that
+/// keeps no `.part` takes), so its next run starts over from its own copy.
+fn discard_bytes(c: &rusqlite::Connection, id: i64) -> CoreResult<()> {
+    if let Some(path) = store::get(c, id)?.download.file_path {
+        let part = super::naming::part_path(std::path::Path::new(&path));
+        if let Err(e) = super::segments::remove_part(&part) {
+            tracing::warn!(id, error = %e, "could not delete the partial download");
+        }
+    }
+    store::clear_destination(c, id)
+}
+
+/// Ends a run whose bytes came from a copy the row may no longer trust:
+/// a `Respread` on the row's origin (the file it adopted changed since it
+/// was checked, or is gone), or any run of a row whose origin's source was
+/// removed meanwhile ([`forget_source`]). The row discards those bytes
+/// ([`discard_bytes`]) and forgets its origin, and its next run, at the
+/// front of the queue, starts over from its own copy. A completed run, and
+/// every other one, passes unchanged.
+async fn drop_origin_bytes(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    id: i64,
+    ctl: &TaskCtl,
+    outcome: Outcome,
+) -> Outcome {
+    let (changed, removed) = {
+        let mut inner = mgr.inner.lock();
+        let on_origin = ctl.copy.is_some() && inner.origins.get(&id) == ctl.copy.as_ref();
+        (
+            on_origin && matches!(outcome, Outcome::Respread { .. }),
+            inner.discard.remove(&id),
+        )
+    };
+    if !(changed || removed) || matches!(outcome, Outcome::Completed { .. }) {
+        return outcome;
+    }
+    let source = ctl.copy.as_ref().map_or("", CopyRef::source_id).to_string();
+    tracing::info!(
+        id,
+        source,
+        "the copy this download started from changed or is gone; it starts over from its own copy"
+    );
+    if let Err(err) = state.db_call(move |c| discard_bytes(c, id)).await {
+        tracing::warn!(id, error = %err, "could not reset the download");
+    }
+    {
+        let mut inner = mgr.inner.lock();
+        inner.origins.remove(&id);
+        inner.plans.remove(&id);
+        inner.preresolved.remove(&id);
+        if changed {
+            inner
+                .carried
+                .insert(id, TransferNote::MirrorMismatch { source_id: source });
+        }
+    }
+    match outcome {
+        Outcome::Stopped {
+            reason: reason @ (StopReason::Pause | StopReason::Detach | StopReason::Cancel),
+            ..
+        } => Outcome::Stopped {
+            reason,
+            bytes: 0,
+            part: None,
+            progressed: false,
+        },
+        Outcome::Failed { message, .. } => Outcome::Failed {
+            message,
+            bytes: 0,
+            keep_part: false,
+            part: None,
+        },
+        Outcome::Respread { message, .. } | Outcome::Requeue { message, .. } => {
+            Outcome::Respread { message, bytes: 0 }
+        }
+        _ => Outcome::Respread {
+            message: "The source of the copy this download started from was removed.".into(),
+            bytes: 0,
+        },
+    }
+}
+
+/// Releases the rows whose origin is a copy on source `source`, inside the
+/// source's delete transaction: their bytes belong to a copy that goes
+/// away, so each discards them ([`discard_bytes`]) and starts over from its
+/// own copy. A completed row only forgets its origin (its file is whole); a
+/// running one is left to its run, which [`forget_source`] stops.
+pub fn release_origins(conn: &rusqlite::Connection, source: &str) -> CoreResult<()> {
+    let rows = conn
+        .prepare("SELECT id, status, origin_json FROM downloads WHERE origin_json IS NOT NULL")?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (id, status, json) in rows {
+        let Ok(origin) = serde_json::from_str::<CopyRef>(&json) else {
+            continue;
+        };
+        if origin.source_id() != source {
+            continue;
+        }
+        if status == DownloadStatus::Completed.as_str() {
+            store::set_origin(conn, id, None)?;
+        } else if status != DownloadStatus::Downloading.as_str() {
+            discard_bytes(conn, id)?;
+        }
+    }
+    Ok(())
+}
+
+/// Source `source` was removed (after [`release_origins`] ran in its
+/// delete): queued rows whose origin was there start from their own copy,
+/// running ones stop, discard the bytes they held from it and go back to
+/// the front of the queue, and runs spread to a copy there stop and go
+/// back as rows of their own source.
+pub fn forget_source(state: &AppState, source: &str) {
+    let mgr = manager(state);
+    {
+        let mut inner = mgr.inner.lock();
+        let bound: Vec<i64> = inner
+            .origins
+            .iter()
+            .filter(|(_, o)| o.source_id() == source)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in bound {
+            match inner.active.get(&id).cloned() {
+                Some(ctl) => {
+                    inner.discard.insert(id);
+                    ctl.request_yield();
+                }
+                None => {
+                    inner.origins.remove(&id);
+                }
+            }
+        }
+        for ctl in inner.active.values() {
+            if ctl.copy.as_ref().is_some_and(|c| c.source_id() == source) {
+                ctl.request_yield();
+            }
+        }
+        // Plans and endpoints resolved ahead may name its copies.
+        inner.plans.clear();
+        inner.preresolved.retain(
+            |_, p| !matches!(p, spread::Pre::Ready { ep, .. } if ep.copy.source_id() == source),
+        );
+    }
+    kick(state);
 }
 
 #[cfg(test)]

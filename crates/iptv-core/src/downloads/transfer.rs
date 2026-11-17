@@ -81,6 +81,11 @@ pub enum Outcome {
         progressed: bool,
         part: Option<PathBuf>,
     },
+    /// The copy a spread run, or a run on the row's origin, downloaded
+    /// contradicts what was verified about it: the row goes back to the
+    /// queue at once and no source waits (see `manager::run_task`).
+    /// `message` says why, for the log.
+    Respread { message: String, bytes: i64 },
 }
 
 /// Destination of a run.
@@ -181,15 +186,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                     progressed: reached.unwrap_or(0).max(bytes) > had,
                 }
             }
-            AttemptEnd::Respread { message, bytes } => {
-                return Outcome::Requeue {
-                    reason: WaitReason::Provider,
-                    message,
-                    bytes,
-                    progressed: false,
-                    part: Some(dest.part_path.clone()),
-                }
-            }
+            AttemptEnd::Respread { message, bytes } => return Outcome::Respread { message, bytes },
             AttemptEnd::Error {
                 err,
                 start,

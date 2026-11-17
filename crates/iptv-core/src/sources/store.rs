@@ -433,6 +433,9 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
     )?;
     // downloads: verdicts other copies' records hold on the source's copies.
     crate::downloads::mirrors::forget_source(&tx, id)?;
+    // downloads: rows holding bytes of a copy on the source start over from
+    // their own (running ones in `downloads::manager::forget_source`).
+    crate::downloads::manager::release_origins(&tx, id)?;
     tx.commit()?;
     Ok(())
 }

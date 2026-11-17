@@ -356,15 +356,6 @@ pub(super) async fn record_mismatch(
     let (item, mirror) = (item.clone(), mirror.clone());
     let wrote = state
         .db_write(move |c| {
-            if !against_authority {
-                // Which side is wrong is unknown: the pairing goes, and so
-                // does the mirror's cached fingerprint, so the next use asks
-                // the provider again instead of trusting what it said before.
-                cache::drop_verdict(c, &item, &mirror, Verdict::Identical)?;
-                cache::drop_verdict(c, &mirror, &item, Verdict::Identical)?;
-                cache::forget_fingerprint(c, &mirror)?;
-                return Ok(());
-            }
             let at = stamp(now());
             let entry = |copy: &CopyRef, fp: Option<Fingerprint>| VerdictEntry {
                 copy: copy.clone(),
@@ -380,6 +371,23 @@ pub(super) async fn record_mismatch(
                 cache::source_exists(c, item.source_id())?,
                 cache::source_exists(c, mirror.source_id())?,
             );
+            if !against_authority {
+                // Which side is wrong is unknown: the pairing goes, and so
+                // does the mirror's cached fingerprint, so the next use asks
+                // the provider again instead of trusting what it said before.
+                // An Equivalent verdict becomes Differs, so no row adopts
+                // that copy again while it stands.
+                cache::drop_verdict(c, &item, &mirror, Verdict::Identical)?;
+                cache::drop_verdict(c, &mirror, &item, Verdict::Identical)?;
+                let equivalent = cache::drop_verdict(c, &item, &mirror, Verdict::Equivalent)?
+                    | cache::drop_verdict(c, &mirror, &item, Verdict::Equivalent)?;
+                if equivalent && item_on && mirror_on {
+                    cache::record_verdict(c, &item, entry(&mirror, theirs))?;
+                    cache::record_verdict(c, &mirror, entry(&item, ours))?;
+                }
+                cache::forget_fingerprint(c, &mirror)?;
+                return Ok(());
+            }
             if item_on && mirror_on {
                 cache::record_verdict(c, &item, entry(&mirror, theirs))?;
                 cache::record_verdict(c, &mirror, entry(&item, ours))?;

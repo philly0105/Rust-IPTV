@@ -13,11 +13,12 @@ use dl_panel::{
     variant_content, Logged, Panel, PanelOptions, Redirect, Validators, Variant, SAMPLE_LEN,
 };
 use iptv_core::catalog::{self, CategoryRow, ItemRow};
-use iptv_core::downloads::manager::manager;
+use iptv_core::downloads::manager::{manager, HoldPurpose};
 use iptv_core::downloads::mirrors::{self, Mirror};
 use iptv_core::downloads::shared::{
     self, mirror_key, read_record, Fingerprint, MirrorRecord, Verdict,
 };
+use iptv_core::downloads::StartRequest;
 use iptv_core::error::CoreError;
 use iptv_core::live::matcher::Quality;
 use iptv_core::model::{ContentType, CopyRef, ItemRef, SourceKind};
@@ -715,6 +716,91 @@ async fn busy_or_failing_sources_are_unavailable_for_an_hour() {
         .await
         .unwrap();
     assert_eq!(identical(&app, &item, &fp, &[]).await, vec!["ub", "uc"]);
+}
+
+/// Polls `done` for up to 30 s.
+async fn eventually(what: &str, done: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_real_manager_orders_mirrors_and_refuses_busy_sources() {
+    let app = app().await;
+    iptv_core::downloads::init(app.state.clone()).await.unwrap();
+    // m1 keeps its reported limit of one (no probe raises it).
+    app.state.settings.write().download_probe_disabled = vec!["m1".into()];
+    // (source, reported limit): budgets 1, 1, 3, 2 and 2.
+    let sources = [("mo", 1), ("m1", 1), ("m2", 4), ("m3", 3), ("m4", 3)];
+    let mut panels = Vec::new();
+    for (id, limit) in sources {
+        let p = Panel::spawn(7).await;
+        p.set_reported(limit);
+        p.file(1, SIZE, 0);
+        add_xtream_source(&app.state, id, &p).await;
+        add_movie(&app.state, id, 1, "Heat (1995)", None, "mp4").await;
+        panels.push(p);
+    }
+    let mgr = manager(&app.state);
+    for (id, _) in &sources {
+        eventually("the source's limit", || {
+            mgr.effective_limit(id).1 == iptv_core::model::LimitKind::Reported
+        })
+        .await;
+    }
+    let item = movie("mo", 1);
+    let fp = fingerprint_of(&app, &item).await;
+
+    // m4 is busy playing: the manager's own try_hold refuses it, so it is
+    // never asked and stays unavailable for now.
+    iptv_core::downloads::set_playback(&app.state, "tv", vec!["m4".into()]).await;
+    assert!(mgr.try_hold("m4", HoldPurpose::Verify).is_none());
+    // The rest by spare connections (m2 3, m3 2, m1 1), not catalog order.
+    assert_eq!(
+        identical(&app, &item, &fp, &[]).await,
+        vec!["m2", "m3", "m1"]
+    );
+    assert_eq!(
+        verdict(&app, &item, &movie("m4", 1)).await,
+        Some(Verdict::Unavailable)
+    );
+    assert!(panels[4].log().is_empty(), "{:?}", panels[4].log());
+
+    // A transfer of another film holds m1's one connection; playback takes
+    // m3's. Both have none spare; m3 has no holder, so it comes first.
+    panels[1].file(2, SIZE, 256);
+    add_movie(&app.state, "m1", 2, "Ronin (1998)", None, "mp4").await;
+    let d = iptv_core::downloads::start(
+        &app.state,
+        StartRequest {
+            item_ref: Some(movie_ref("m1", 2)),
+            title: "Ronin".into(),
+            url: panels[1].movie_url(2),
+            ..StartRequest::default()
+        },
+    )
+    .await
+    .unwrap();
+    eventually("the transfer holding m1", || mgr.holders("m1") == 1).await;
+    iptv_core::downloads::set_playback(&app.state, "tv", vec!["m4".into(), "m3".into()]).await;
+    let ranks: Vec<_> = ["m1", "m2", "m3"]
+        .iter()
+        .map(|s| (mgr.spare_on("mo", s), mgr.holders(s)))
+        .collect();
+    assert_eq!(ranks, vec![(0, 1), (3, 0), (0, 0)]);
+    // Standing verdicts need no hold, so busy m1 and m3 are still mirrors.
+    assert_eq!(
+        identical(&app, &item, &fp, &[]).await,
+        vec!["m2", "m3", "m1"]
+    );
+    iptv_core::downloads::cancel(&app.state, d.id)
+        .await
+        .unwrap();
+    iptv_core::downloads::set_playback(&app.state, "tv", Vec::new()).await;
+    eventually("the transfer let go", || mgr.holders("m1") == 0).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

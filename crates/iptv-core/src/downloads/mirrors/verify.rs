@@ -13,7 +13,7 @@ use super::cache::{self, now, stamp};
 use super::discover;
 use super::sample::{sample, SampleError};
 use super::{Candidate, CopyMeta, Mirror};
-use crate::downloads::manager::{ConnHold, HoldPurpose, TaskCtl};
+use crate::downloads::manager::{ConnHold, HoldPurpose};
 use crate::downloads::shared::{
     resolve, Fingerprint, MirrorRecord, Verdict, VerdictEntry, MIN_MIRROR_TOTAL,
 };
@@ -102,13 +102,10 @@ fn order(mgr: &DownloadManager, item: &CopyRef, found: Vec<(String, Mirror)>) ->
 }
 
 /// A transfer of `item_source`'s spare connections on `source`, and how many
-/// holds `source` has now. The one place mirror ordering asks the manager.
-// INT: switch to mgr.spare_on(item_source, source) and mgr.holders(source) after merging dl-speed-b3
+/// active transfers hold connections there now. The one place mirror
+/// ordering asks the manager.
 fn spare_and_holders(mgr: &DownloadManager, item_source: &str, source: &str) -> (usize, usize) {
-    // A control block that holds nothing: what `allowance_on` gives it on a
-    // mirror's source is that source's spare budget. No holder count yet.
-    let probe = TaskCtl::detached(item_source);
-    (mgr.allowance_on(&probe, source), 0)
+    (mgr.spare_on(item_source, source), mgr.holders(source))
 }
 
 /// How a candidate whose bytes differ from the item's compares: Equivalent

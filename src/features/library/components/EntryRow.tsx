@@ -255,8 +255,14 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
                     {resume.episode}
                   </span>
                 )}
+                {/* The first part to give way: on a phone "N min left" and the bar already say where it
+                    stopped, and in Greek or Russian the three parts did not fit beside the time left
+                    (they painted over it). Wider, it ellipsizes before it could touch the time left. */}
                 {resume.at !== undefined && (
-                  <span className="shrink-0 tabular-nums" data-testid="entry-stopped">
+                  <span
+                    className={cn('min-w-0 truncate tabular-nums', resume.minutesLeft !== undefined && 'max-sm:hidden')}
+                    data-testid="entry-stopped"
+                  >
                     <span aria-hidden className="me-1.5 text-fg-subtle">
                       ·
                     </span>

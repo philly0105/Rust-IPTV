@@ -626,6 +626,23 @@ describe('RecentPage', () => {
     expect(within(resume).queryByTestId('entry-left')).toBeNull();
     // The other row is plain history: no clock.
     expect(screen.getAllByTestId('entry-stopped')).toHaveLength(1);
+    // Without a time left it is the only clock on the row, so a phone keeps it too.
+    expect(within(resume).getByTestId('entry-stopped').className).not.toContain('max-sm:hidden');
+  });
+
+  it('"Stopped at" gives way to the time left: it ellipsizes, and a phone drops it (v-themes-locales-02)', async () => {
+    const p1 = makePosition('p1', 1800, 5400);
+    rpc.handlers['recent.list'] = () => [{ ref: p1.ref, viewedAt: new Date().toISOString(), snapshot: p1.snapshot! }];
+    rpc.handlers['positions.continueWatching'] = () => [p1];
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+
+    const resume = await screen.findByTestId('entry-resume');
+    const stopped = within(resume).getByTestId('entry-stopped');
+    expect(stopped.className).toMatch(/(^|\s)min-w-0(\s|$)/);
+    expect(stopped.className).toContain('truncate');
+    expect(stopped.className).toContain('max-sm:hidden');
+    expect(stopped.className).not.toContain('shrink-0');
+    expect(within(resume).getByTestId('entry-left').className).toContain('shrink-0');
   });
 
   it('empty while the quality filter is on, says it may be hiding channels', async () => {

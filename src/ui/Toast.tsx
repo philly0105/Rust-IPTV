@@ -394,7 +394,7 @@ interface Announcement {
  * What goes between two spoken parts of a toast: ". ", or only a space after a part that already
  * ends a sentence ("…on its source." then "Press F8…"), so a reader does not hear "source.. Press".
  */
-export function spokenBreak(part: ReactNode): string {
+function spokenBreak(part: ReactNode): string {
   return typeof part === 'string' && /[.!?…。！？؟]\s*$/u.test(part) ? ' ' : '. ';
 }
 

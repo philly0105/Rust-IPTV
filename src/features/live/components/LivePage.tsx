@@ -1196,6 +1196,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:landscape:w-[clamp(300px,32%,400px)] md:landscape:min-w-60 md:landscape:flex-initial md:landscape:border-e min-[150rem]:landscape:w-[clamp(300px,24%,560px)]"
         onFocus={onListFocus}
       >
+        {/* A phone's header has no room for its subtitle: with several sources the list names the
+            one browsed, and its count, as Movies does on a phone (realdata-13). */}
+        {groupOnToolbar && sourceName ? (
+          <p dir="auto" className="truncate px-(--page-gutter) pt-2 text-caption text-fg-muted" data-testid="live-source-line">
+            {countText ? t('groupWithCount', { group: sourceName, count: countText }) : sourceName}
+          </p>
+        ) : null}
         {toolbar}
         {region && !categoryId && !liveView ? (
           <p className="border-b border-divider bg-surface-2 px-3 py-1.5 text-caption text-fg-muted" data-testid="live-region-note">

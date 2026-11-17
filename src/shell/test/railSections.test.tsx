@@ -285,6 +285,10 @@ describe('the sources accordion', () => {
     const entry = await screen.findByRole('button', { name: /^Backup/ });
     expect(entry.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
+    // aria-controls names only a list that is in the page (w-a11y-11).
+    const controls = entry.getAttribute('aria-controls');
+    expect(controls && document.getElementById(controls)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Night Portal/ }).hasAttribute('aria-controls')).toBe(false);
     // Opened by its page, not a press: nothing is remembered.
     expect(localStorage.getItem('tsrust.railSource')).toBeNull();
   });

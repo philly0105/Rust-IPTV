@@ -175,7 +175,7 @@ function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; co
       <button
         type="button"
         aria-expanded={open}
-        aria-controls={controls}
+        aria-controls={open ? controls : undefined}
         onClick={onToggle}
         data-rail-more=""
         className={cn(itemClass(false, collapsed), 'w-full text-start')}
@@ -544,7 +544,7 @@ function SourceEntry({
       <button
         type="button"
         aria-expanded={expanded}
-        aria-controls={listId}
+        aria-controls={expanded ? listId : undefined}
         onClick={() => {
           revealOnExpand.current = !expanded;
           onToggle();

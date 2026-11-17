@@ -202,6 +202,8 @@ describe('rail at laptop heights (stage 2)', () => {
     expect(within(library).queryByRole('button', { name: 'Library' })).toBeNull();
     const more = within(library).getByRole('button', { name: 'More' });
     expect(more.getAttribute('aria-expanded')).toBe('false');
+    // Folded, it names no list: the list is not in the page (w-a11y-11).
+    expect(more.hasAttribute('aria-controls')).toBe(false);
     expect(within(library).getByRole('link', { name: 'My List' })).toBeTruthy();
     expect(within(library).queryByRole('link', { name: 'Downloads' })).toBeNull();
     fireEvent.click(more);

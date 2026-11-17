@@ -137,7 +137,7 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
   if (sourcesQ.isPending || items.isPending) {
     body = <SkeletonList rows={6} />;
   } else if (sourcesQ.isError) {
-    body = <ErrorState size="inline" error={sourcesQ.error} onRetry={() => sourcesQ.refetch()} />;
+    body = <ErrorState size="inline" error={sourcesQ.error} onRetry={() => void sourcesQ.refetch()} />;
   } else if (sources.length === 0) {
     body = (
       <EmptyState

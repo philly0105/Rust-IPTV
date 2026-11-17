@@ -90,7 +90,7 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
 
   let body;
   if (lists.error) {
-    body = <ErrorState size="inline" error={lists.error} title={t('loadFailed')} onRetry={() => lists.refetch()} />;
+    body = <ErrorState size="inline" error={lists.error} title={t('loadFailed')} onRetry={() => void lists.refetch()} />;
   } else if (!lists.data) {
     body = (
       <div className="flex flex-col gap-2" role="status" aria-busy="true" aria-label={t('loading')}>

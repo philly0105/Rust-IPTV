@@ -63,7 +63,7 @@ export function RecordingsPanel({ search }: { search: string }) {
   const visible = useMemo(() => filterRecordings(files, search), [files, search]);
 
   if (query.isLoading) return <SkeletonList rows={6} className="pt-2" />;
-  if (query.isError) return <ErrorState error={query.error} retrying={query.isFetching} onRetry={() => query.refetch()} />;
+  if (query.isError) return <ErrorState error={query.error} retrying={query.isFetching} onRetry={() => void query.refetch()} />;
   if ((query.data ?? []).length === 0) {
     return (
       <EmptyState

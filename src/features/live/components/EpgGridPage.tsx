@@ -2091,7 +2091,7 @@ export function EpgGridPage() {
     return (
       <>
         {heading}
-        <ErrorState error={sources.error} title={t('guideGridLoadFailed')} onRetry={() => sources.refetch()} />
+        <ErrorState error={sources.error} title={t('guideGridLoadFailed')} onRetry={() => void sources.refetch()} />
       </>
     );
   }

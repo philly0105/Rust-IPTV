@@ -66,7 +66,7 @@ export function ParentalSection(_props: SectionProps): JSX.Element {
         </SettingsSection>
       );
     }
-    return <SectionError error={status.error} onRetry={() => status.refetch()} />;
+    return <SectionError error={status.error} onRetry={() => void status.refetch()} />;
   }
   return <ParentalSettings status={status.data} />;
 }

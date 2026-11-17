@@ -163,7 +163,7 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
 
   let body;
   if (hidden.error) {
-    body = <ErrorState size="inline" error={hidden.error} onRetry={() => hidden.refetch()} retrying={hidden.isFetching} />;
+    body = <ErrorState size="inline" error={hidden.error} onRetry={() => void hidden.refetch()} retrying={hidden.isFetching} />;
   } else if (!hidden.data) {
     body = <SkeletonList rows={4} />;
   } else if (total === 0) {

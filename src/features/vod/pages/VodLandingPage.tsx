@@ -302,7 +302,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     return (
       <div className="h-full overflow-y-auto">
         <h1 className="sr-only">{title}</h1>
-        {isSourceMissing(source.error) ? <SourceMissing /> : <ErrorState error={source.error} onRetry={() => source.refetch()} />}
+        {isSourceMissing(source.error) ? <SourceMissing /> : <ErrorState error={source.error} onRetry={() => void source.refetch()} />}
       </div>
     );
   }
@@ -351,7 +351,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               bleed
               // Placeholder cards from the first frame (L2-vod-5): the rail never pops in and pushes the categories down.
               loading={recent.isPending}
-              empty={recent.isError ? <ErrorState size="inline" error={recent.error} onRetry={() => recent.refetch()} /> : undefined}
+              empty={recent.isError ? <ErrorState size="inline" error={recent.error} onRetry={() => void recent.refetch()} /> : undefined}
               myList={myListTarget}
               menu={railMenu}
               render={(item, i, rail) => card(item, i, rail, watched.has(itemKey(item.ref)))}
@@ -613,7 +613,7 @@ function CategoryIndexSection({
       </div>
       <div id={indexId} hidden={!open} style={open && viewport > 0 ? { minHeight: viewport } : undefined}>
         {!open ? null : cats.isError ? (
-          <ErrorState error={cats.error} onRetry={() => cats.refetch()} />
+          <ErrorState error={cats.error} onRetry={() => void cats.refetch()} />
         ) : cats.isPending ? (
           <div role="status" aria-busy="true" className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
             <span className="sr-only">{t('loading')}</span>

@@ -59,8 +59,7 @@ export interface PagedChannels {
    */
   refreshing: boolean;
   error: unknown;
-  /** Refetches the list; a promise resolves when it has answered (ErrorState spins until then). */
-  retry(): void | Promise<unknown>;
+  retry(): void;
   /** Channels currently held in memory, in index order. */
   loaded: { index: number; channel: Channel }[];
   pageSize: number;
@@ -412,7 +411,10 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
     isLoading: total === undefined && !error,
     refreshing: placeholderFromOtherList && !error,
     error,
-    retry: () => Promise.all([qa.refetch(), b !== a ? qb.refetch() : undefined]),
+    retry: () => {
+      void qa.refetch();
+      if (b !== a) void qb.refetch();
+    },
     loaded,
     pageSize: size,
     guideUnavailable: portalPrograms.unavailable,

@@ -206,7 +206,7 @@ export function MyVideosPage() {
     // All waits for the recordings too, so they do not pop into a grid already on screen.
     body = <SkeletonGrid count={12} minColumnWidth={column} className="pt-2" />;
   } else if (query.isError) {
-    body = <ErrorState error={query.error} onRetry={() => query.refetch()} />;
+    body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   } else if (everything.length === 0) {
     body = (
       <EmptyState

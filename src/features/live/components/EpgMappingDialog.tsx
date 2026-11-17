@@ -125,7 +125,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
           box that shrank with the results would move the search field while typing. */}
       <div className="h-[min(320px,45vh)] overflow-y-auto overscroll-contain" data-testid="epg-mapping-results">
         {results.error ? (
-          <ErrorState error={results.error} onRetry={() => results.refetch()} />
+          <ErrorState error={results.error} onRetry={() => void results.refetch()} />
         ) : debounced && results.isLoading ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 5 }, (_, i) => (

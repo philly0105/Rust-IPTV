@@ -28,7 +28,7 @@ export function RecordingRulesPanel() {
   if (rules.isLoading) {
     body = <SkeletonList rows={2} className="p-2" />;
   } else if (rules.error) {
-    body = <ErrorState size="inline" error={rules.error} retrying={rules.isFetching} onRetry={() => rules.refetch()} />;
+    body = <ErrorState size="inline" error={rules.error} retrying={rules.isFetching} onRetry={() => void rules.refetch()} />;
   } else if (list.length === 0) {
     body = (
       <EmptyState

@@ -296,7 +296,7 @@ export function EpgSection({ settings, update }: SectionProps) {
             <SkeletonList rows={3} />
           </div>
         ) : statuses.isError ? (
-          <ErrorState error={statuses.error} onRetry={() => statuses.refetch()} />
+          <ErrorState error={statuses.error} onRetry={() => void statuses.refetch()} />
         ) : statuses.data.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-fg-muted">{t('epgStatusEmpty')}</p>
         ) : (

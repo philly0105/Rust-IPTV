@@ -148,7 +148,7 @@ export function ManageCategoriesDialog({
         {t('groupsVisibleOf', { visible: visibleIds.size, total })}
       </p>
       {all.error ? (
-        <ErrorState error={all.error} onRetry={() => all.refetch()} />
+        <ErrorState error={all.error} onRetry={() => void all.refetch()} />
       ) : !all.data ? (
         <div className="flex flex-col gap-2">
           {Array.from({ length: 8 }, (_, i) => (

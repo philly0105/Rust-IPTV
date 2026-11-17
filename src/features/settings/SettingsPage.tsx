@@ -367,7 +367,7 @@ export function SettingsPage() {
             {query.isPending ? (
               <SectionSkeleton />
             ) : query.isError ? (
-              <SectionError error={query.error} onRetry={() => query.refetch()} />
+              <SectionError error={query.error} onRetry={() => void query.refetch()} />
             ) : (
               <Section settings={query.data} update={save.update} />
             )}

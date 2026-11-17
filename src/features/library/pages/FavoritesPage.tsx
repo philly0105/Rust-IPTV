@@ -270,7 +270,7 @@ export function FavoritesPage() {
 
   let body;
   if (query.isLoading) body = <EntryRowsSkeleton />;
-  else if (query.isError) body = <ErrorState error={query.error} title={t('favoritesLoadFailed')} onRetry={() => query.refetch()} />;
+  else if (query.isError) body = <ErrorState error={query.error} title={t('favoritesLoadFailed')} onRetry={() => void query.refetch()} />;
   else if (entries.length === 0)
     body = (
       <EmptyState

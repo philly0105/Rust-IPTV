@@ -383,7 +383,7 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes, back }: BrowserPro
               ))}
             </div>
           ) : query.error ? (
-            <ErrorState size="inline" error={query.error} title={t('archiveFailed')} onRetry={() => query.refetch()} />
+            <ErrorState size="inline" error={query.error} title={t('archiveFailed')} onRetry={() => void query.refetch()} />
           ) : programs.length === 0 ? (
             <EmptyState size="inline" icon={<CalendarX2 size={24} />} title={t('archiveEmptyDay')} description={t('archiveEmptyDayHint')} />
           ) : (

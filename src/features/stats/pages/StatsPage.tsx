@@ -103,7 +103,7 @@ export function StatsPage() {
   if (query.isPending || (weekEmpty && monthHasData === null)) {
     body = <StatsSkeleton label={t('loading')} />;
   } else if (!data) {
-    body = <ErrorState error={query.error} hint={t('errorHint')} onRetry={() => query.refetch()} retrying={query.isFetching} />;
+    body = <ErrorState error={query.error} hint={t('errorHint')} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   } else if (data.totalSeconds === 0) {
     // "Show 30 days" only when that range has something; with nothing watched at all, point at something to watch.
     const olderData = range === 7 && monthHasData === true;

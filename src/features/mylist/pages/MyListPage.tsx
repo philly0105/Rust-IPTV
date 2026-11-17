@@ -425,7 +425,7 @@ export function MyListPage() {
   if (query.isPending) {
     body = <MyListSkeleton label={t('loading')} />;
   } else if (query.isError && !all) {
-    body = <ErrorState error={query.error} hint={t('errorHint')} onRetry={() => query.refetch()} retrying={query.isFetching} />;
+    body = <ErrorState error={query.error} hint={t('errorHint')} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   } else if (view.base.length === 0) {
     body = <MyListEmpty sources={sources.data} {...(params.filter !== 'all' ? { kind: params.filter } : {})} />;
   } else if (view.typed.length === 0) {

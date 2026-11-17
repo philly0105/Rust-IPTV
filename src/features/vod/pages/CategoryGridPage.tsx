@@ -773,7 +773,10 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           ) : source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
             <ErrorState
               error={source.error ?? (clientFiltered ? inOrder.error : first.error)}
-              onRetry={() => Promise.all([source.refetch(), clientFiltered ? inOrder.refetch() : first.refetch()])}
+              onRetry={() => {
+                void source.refetch();
+                void (clientFiltered ? inOrder.refetch() : first.refetch());
+              }}
             />
           ) : !input || (clientFiltered ? inOrder.isPending || (filteredItems.length === 0 && !filteredDone) : first.isPending) ? (
             <SkeletonGrid count={18} minColumnWidth={coverWidth} />

@@ -28,7 +28,7 @@ export function ListsIndexPage() {
     <Page width="default" className="flex min-w-0 flex-col" data-testid="lists-index">
       <h1 className="sr-only">{t('title')}</h1>
       {lists.error ? (
-        <ErrorState error={lists.error} title={t('loadFailed')} hint={t('localDataHint')} onRetry={() => lists.refetch()} />
+        <ErrorState error={lists.error} title={t('loadFailed')} hint={t('localDataHint')} onRetry={() => void lists.refetch()} />
       ) : !lists.data ? (
         <div className="flex w-full max-w-md flex-col gap-3" role="status" aria-busy="true" aria-label={t('loading')}>
           <Skeleton className="h-6 w-40" />

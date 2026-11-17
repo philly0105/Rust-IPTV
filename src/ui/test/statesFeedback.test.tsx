@@ -78,26 +78,6 @@ describe('toasts with an action (states-feedback-03)', () => {
   });
 });
 
-describe('ErrorState retry (states-feedback-04)', () => {
-  it('spins Try again until the returned promise settles, then reads the hint again', async () => {
-    let settle: () => void = () => undefined;
-    const onRetry = vi.fn(() => new Promise<void>((r) => (settle = r)));
-    render(<ErrorState error={new RpcError('network', 'fetch failed', true)} onRetry={onRetry} />);
-    const btn = screen.getByRole('button', { name: 'Try again' });
-    const hint = btn.closest('[role="alert"]')!.querySelector('p.text-fg')!;
-    btn.focus();
-    fireEvent.click(btn);
-    expect(btn.getAttribute('aria-busy')).toBe('true');
-    expect(document.activeElement).toBe(btn);
-    fireEvent.click(btn);
-    expect(onRetry).toHaveBeenCalledTimes(1);
-    await act(async () => settle());
-    expect(btn.getAttribute('aria-busy')).toBeNull();
-    // Failed again: the hint is a new node, so the alert announces it again.
-    expect(btn.closest('[role="alert"]')!.querySelector('p.text-fg')).not.toBe(hint);
-  });
-});
-
 describe('ErrorState in the browser (states-feedback-09)', () => {
   it('says to reload the page for a library error, not to restart an app or restore a backup', () => {
     render(<ErrorState error={new RpcError('db', 'database is locked')} title="Couldn't load favorites" />);

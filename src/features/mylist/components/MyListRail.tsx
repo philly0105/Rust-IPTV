@@ -54,7 +54,7 @@ export function MyListRail({ hideError = false }: MyListRailProps = {}) {
       loaded={query.isSuccess}
       error={hideError ? undefined : (query.error ?? undefined)}
       errorHint={t('errorHint')}
-      onRetry={() => query.refetch()}
+      onRetry={() => void query.refetch()}
       seeAll={{ to: MY_LIST_PATH, label: t('seeAll') }}
       meta={
         total > 0 ? (

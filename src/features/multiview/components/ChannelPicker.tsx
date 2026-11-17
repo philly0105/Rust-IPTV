@@ -174,7 +174,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
   if (sourcesQ.isPending) {
     body = <SkeletonList rows={6} />;
   } else if (sourcesQ.isError) {
-    body = <ErrorState size="inline" error={sourcesQ.error} onRetry={() => sourcesQ.refetch()} />;
+    body = <ErrorState size="inline" error={sourcesQ.error} onRetry={() => void sourcesQ.refetch()} />;
   } else if (sources.length === 0) {
     body = (
       <EmptyState
@@ -194,7 +194,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
   } else if (active.isPending) {
     body = <SkeletonList rows={6} />;
   } else if (active.isError && channels.length === 0) {
-    body = <ErrorState size="inline" error={active.error} onRetry={() => active.refetch()} />;
+    body = <ErrorState size="inline" error={active.error} onRetry={() => void active.refetch()} />;
   } else if (channels.length === 0) {
     body = (
       <EmptyState

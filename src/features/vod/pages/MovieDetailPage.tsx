@@ -234,7 +234,10 @@ export function MovieDetailPage() {
         <ErrorState
           error={source.error ?? detail.error}
           title={t('titleLoadFailed')}
-          onRetry={() => Promise.all([source.refetch(), detail.refetch()])}
+          onRetry={() => {
+            void source.refetch();
+            void detail.refetch();
+          }}
         />
       </div>
     );
@@ -465,7 +468,10 @@ export function MovieDetailPage() {
             kind="movie"
             sourceKind={source.data?.kind}
             error={tmdb.isError || similarFallback.isError ? (tmdb.error ?? similarFallback.error) : undefined}
-            onRetry={() => Promise.all([tmdb.refetch(), similarFallback.refetch()])}
+            onRetry={() => {
+              void tmdb.refetch();
+              void similarFallback.refetch();
+            }}
             keyMissing={keyMissing}
             enriched={model.enriched}
             rootRef={detailScrollRef}

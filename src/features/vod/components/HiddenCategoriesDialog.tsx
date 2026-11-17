@@ -96,7 +96,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
       }
     >
       {cats.isError ? (
-        <ErrorState error={cats.error} onRetry={() => cats.refetch()} />
+        <ErrorState error={cats.error} onRetry={() => void cats.refetch()} />
       ) : !cats.data ? (
         <SkeletonGrid count={6} aspect={8} minColumnWidth={400} />
       ) : (

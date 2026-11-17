@@ -577,6 +577,37 @@ describe('Empty groups and group filter', () => {
     expect(screen.getByText('News')).toBeTruthy();
   });
 
+  it('a group row has its options button for a mouse too, shown on hover or keyboard focus (w-walkthrough-12)', () => {
+    const cats: Category[] = [{ id: 'g1', sourceId: 'src1', contentType: 'live', name: 'News', hidden: false, itemCount: 3, position: 0 }];
+    const onGroupMenu = vi.fn();
+    renderAt('/', [
+      {
+        path: '/',
+        element: (
+          <CategorySidebar
+            categories={cats}
+            hiddenCount={0}
+            isLoading={false}
+            error={null}
+            onRetry={() => undefined}
+            hrefFor={(id) => `/s/src1/live${id ? `/${id}` : ''}`}
+            onManage={() => undefined}
+            totalLabel="All channels"
+            onGroupMenu={onGroupMenu}
+          />
+        ),
+      },
+    ]);
+    const button = screen.getByRole('button', { name: 'Group options' });
+    // Not display:none with a fine pointer (it measured 0x0): it fades in over the row's end.
+    expect(button.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(button.className).toContain('group-hover/grp:opacity-100');
+    expect(button.className).toContain('group-has-[:focus-visible]/grp:opacity-100');
+    expect(button.parentElement!.className).toContain('group/grp');
+    fireEvent.click(button);
+    expect(onGroupMenu).toHaveBeenCalledWith(expect.objectContaining({ x: expect.any(Number) }), cats[0]);
+  });
+
   it('from an open group, the filter text searches All channels in the channel search field', async () => {
     rpcMock.handlers['catalog.channels'] = serve(Array.from({ length: 30 }, (_, i) => makeChannel(i)));
     renderAt('/s/src1/live/g1', [

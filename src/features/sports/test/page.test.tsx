@@ -939,10 +939,18 @@ describe('sports page', () => {
     rpc.handlers['sources.list'] = () => h.TWO_SOURCES;
     const g = h.liveGame('1');
     setDay([g]);
-    setStreams(g, [h.match(ESPN), h.match(h.channel('7', 'ESPN', { ref: { sourceId: 'src2', contentType: 'live', itemId: '7' } }), { sourceId: 'src2', sourceKind: 'm3u', sourceName: 'Backup list' })]);
+    setStreams(g, [
+      h.match(ESPN),
+      h.match(h.channel('7', 'ESPN', { ref: { sourceId: 'src2', contentType: 'live', itemId: '7' } }), { sourceId: 'src2', sourceKind: 'm3u', sourceName: 'Backup list', regional: true }),
+    ]);
     open();
     fireEvent.click(await within(card(g)).findByRole('button', { name: 'Show all 2 streams' }));
     await waitFor(() => expect(within(card(g)).getAllByTestId('sports-stream-source').map((s) => s.textContent)).toEqual(['Home portal', 'Backup list']));
+    // Where the line is short, a row with the regional warning (or a slot) leaves its source's name to
+    // screen readers rather than draw it as one letter; a row without either keeps it on screen.
+    const lines = within(card(g)).getAllByTestId('sports-stream').map((r) => r.querySelector('[data-testid=sports-stream-source]')!.closest('span.flex-nowrap')!.className);
+    expect(lines[0]).not.toContain('sports-stream-source])]:sr-only');
+    expect(lines[1]).toContain('@max-[15rem]:[&>span:has([data-testid=sports-stream-source])]:sr-only');
   });
 
   it('watches a live game, then zaps through the channel group', async () => {

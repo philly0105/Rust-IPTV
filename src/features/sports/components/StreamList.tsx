@@ -407,13 +407,16 @@ function StreamRow({
             source's name (or the reason) truncates; the toggle keeps its place at the end, so the row
             never grows a line that starts with a dot. Where the line is short (a phone, a card with an
             action), the slot shows its start only, its range in the tooltip, and "Best" goes after a
-            quality tag: the order and the "+2" beside it already say this one is first. */}
+            quality tag: the order and the "+2" beside it already say this one is first. With a slot
+            or the regional warning beside it, the source's name is then only read: the room left
+            drew it as one letter. */}
         <span className="flex min-w-0 items-center gap-1.5">
           <MetaLine
             as="span"
             className={cn(
               'flex-nowrap [&>span]:shrink-0 [&>span:has([data-meta-shrink])]:shrink',
               quality && '@max-[15rem]:[&>span:has([data-testid=sports-best])]:hidden',
+              (slot || match.regional) && '@max-[15rem]:[&>span:has([data-testid=sports-stream-source])]:sr-only',
             )}
             items={[
               // First, so the rows' qualities line up down the list; the name's own marker is often cut

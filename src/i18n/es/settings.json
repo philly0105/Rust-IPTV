@@ -425,7 +425,7 @@
   "refreshIntervalStartup": "Solo al iniciar",
   "refreshIntervalEvery": "Cada {{interval}}",
   "expiryWarn": "Aviso de caducidad de la suscripción",
-  "expiryWarnHint": "Avisa en el panel y en la tarjeta de la fuente antes de que caduque una suscripción Xtream o Stalker.",
+  "expiryWarnHint": "Avisa en Inicio y en la tarjeta de la fuente antes de que caduque una suscripción Xtream o Stalker.",
   "expiryWarnOff": "Desactivado",
   "expiryWarnBefore": "{{days}} antes",
   "epgShortFallback": "Rellenar huecos con el proveedor",

@@ -376,7 +376,7 @@ describe('rows and windows without guide data (L1-guide-library-14, L1-perf-1)',
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     const notice = await screen.findByTestId('guide-no-data');
     expect(notice.textContent).toContain('Nothing in the guide for this time.');
-    expect(notice.textContent).not.toContain('Add an XMLTV address');
+    expect(notice.textContent).not.toContain('Add a guide');
     fireEvent.click(within(notice).getByRole('button', { name: 'Back to now' }));
     // Back at now with no guide at all: the empty state over the rows, with the way to add one (LG-10).
     await waitFor(() => expect(screen.getByTestId('guide-no-data').textContent).toContain('No guide data for these channels yet.'));

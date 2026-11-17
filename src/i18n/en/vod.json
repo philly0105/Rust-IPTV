@@ -231,7 +231,7 @@
   "browseMovies": "Browse movies",
   "browseSeries": "Browse series",
   "searchForTitle": "Search for it",
-  "goToDashboard": "Go to dashboard",
+  "goToDashboard": "Go to Home",
   "categoryMissingTitle": "Category not found",
   "categoryMissingBody": "This source has no category with that link. The provider may have renamed or dropped it.",
   "namedMarkedWatched": "{{name}} marked watched",

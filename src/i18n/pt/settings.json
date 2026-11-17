@@ -425,7 +425,7 @@
   "refreshIntervalStartup": "Só ao iniciar",
   "refreshIntervalEvery": "A cada {{interval}}",
   "expiryWarn": "Aviso de expiração da assinatura",
-  "expiryWarnHint": "Avisa no painel e no cartão da fonte antes que uma assinatura Xtream ou Stalker expire.",
+  "expiryWarnHint": "Avisa no Início e no cartão da fonte antes que uma assinatura Xtream ou Stalker expire.",
   "expiryWarnOff": "Desativado",
   "expiryWarnBefore": "{{days}} antes",
   "epgShortFallback": "Preencher lacunas com o fornecedor",

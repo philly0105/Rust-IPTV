@@ -231,7 +231,7 @@
   "browseMovies": "瀏覽電影",
   "browseSeries": "瀏覽影集",
   "searchForTitle": "搜尋它",
-  "goToDashboard": "前往儀表板",
+  "goToDashboard": "前往首頁",
   "categoryMissingTitle": "找不到該分類",
   "categoryMissingBody": "此來源中沒有對應該連結的分類。提供者可能已將其重新命名或刪除。",
   "namedMarkedWatched": "已將{{name}}標記為已看",

@@ -231,7 +231,7 @@
   "browseMovies": "Περιήγηση στις ταινίες",
   "browseSeries": "Περιήγηση στις σειρές",
   "searchForTitle": "Αναζήτηση",
-  "goToDashboard": "Μετάβαση στον πίνακα",
+  "goToDashboard": "Μετάβαση στην Αρχική",
   "categoryMissingTitle": "Η κατηγορία δεν βρέθηκε",
   "categoryMissingBody": "Αυτή η πηγή δεν έχει κατηγορία με αυτόν τον σύνδεσμο. Ο πάροχος ίσως τη μετονόμασε ή την αφαίρεσε.",
   "namedMarkedWatched": "Το {{name}} σημειώθηκε ως προβληθέν",

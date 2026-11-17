@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "Nur beim Start",
   "refreshIntervalEvery": "Alle {{interval}}",
   "expiryWarn": "Warnung vor Abo-Ablauf",
-  "expiryWarnHint": "Warnt auf dem Dashboard und in der Quellenkarte, bevor ein Xtream- oder Stalker-Abo abläuft.",
+  "expiryWarnHint": "Warnt auf der Startseite und in der Quellenkarte, bevor ein Xtream- oder Stalker-Abo abläuft.",
   "expiryWarnOff": "Aus",
   "expiryWarnBefore": "{{days}} vorher",
   "epgShortFallback": "Lücken mit Anbieterdaten füllen",

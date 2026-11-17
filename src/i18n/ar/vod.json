@@ -271,7 +271,7 @@
   "browseMovies": "تصفّح الأفلام",
   "browseSeries": "تصفّح المسلسلات",
   "searchForTitle": "ابحث عنه",
-  "goToDashboard": "الانتقال إلى لوحة التحكم",
+  "goToDashboard": "الانتقال إلى الرئيسية",
   "categoryMissingTitle": "لم يتم العثور على الفئة",
   "categoryMissingBody": "لا يحتوي هذا المصدر على فئة بهذا الرابط. ربما أعاد المزوّد تسميتها أو حذفها.",
   "namedMarkedWatched": "تم وضع علامة مشاهَد على {{name}}",

@@ -425,7 +425,7 @@
   "refreshIntervalStartup": "Solo all'avvio",
   "refreshIntervalEvery": "Ogni {{interval}}",
   "expiryWarn": "Avviso di scadenza dell'abbonamento",
-  "expiryWarnHint": "Avvisa nella dashboard e nella scheda della sorgente prima che scada un abbonamento Xtream o Stalker.",
+  "expiryWarnHint": "Avvisa nella Home e nella scheda della sorgente prima che scada un abbonamento Xtream o Stalker.",
   "expiryWarnOff": "Disattivato",
   "expiryWarnBefore": "{{days}} prima",
   "epgShortFallback": "Riempi i vuoti dal fornitore",

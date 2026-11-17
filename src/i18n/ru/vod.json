@@ -251,7 +251,7 @@
   "browseMovies": "Обзор фильмов",
   "browseSeries": "Обзор сериалов",
   "searchForTitle": "Найти его",
-  "goToDashboard": "Перейти на панель",
+  "goToDashboard": "Перейти на главную",
   "categoryMissingTitle": "Категория не найдена",
   "categoryMissingBody": "В этом источнике нет категории с такой ссылкой. Возможно, провайдер переименовал или удалил её.",
   "namedMarkedWatched": "{{name}}: отмечено как просмотренное",

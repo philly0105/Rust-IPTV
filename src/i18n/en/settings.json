@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "Only at startup",
   "refreshIntervalEvery": "Every {{interval}}",
   "expiryWarn": "Subscription expiry warning",
-  "expiryWarnHint": "Warns on the dashboard and the source card before an Xtream or Stalker subscription runs out.",
+  "expiryWarnHint": "Warns on Home and on the source's card before an Xtream or Stalker subscription runs out.",
   "expiryWarnOff": "Off",
   "expiryWarnBefore": "{{days}} before",
   "epgShortFallback": "Fill gaps from the provider",

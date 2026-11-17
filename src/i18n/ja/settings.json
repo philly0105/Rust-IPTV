@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "起動時のみ",
   "refreshIntervalEvery": "{{interval}}ごと",
   "expiryWarn": "サブスクリプション期限の警告",
-  "expiryWarnHint": "Xtream または Stalker のサブスクリプションが切れる前に、ダッシュボードとソースカードで警告します。",
+  "expiryWarnHint": "Xtream または Stalker のサブスクリプションが切れる前に、ホームとソースカードで警告します。",
   "expiryWarnOff": "オフ",
   "expiryWarnBefore": "{{days}}前",
   "epgShortFallback": "空きをプロバイダーの情報で補う",

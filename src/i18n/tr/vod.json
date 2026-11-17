@@ -231,7 +231,7 @@
   "browseMovies": "Filmlere göz at",
   "browseSeries": "Dizilere göz at",
   "searchForTitle": "Ara",
-  "goToDashboard": "Panoya git",
+  "goToDashboard": "Ana sayfaya git",
   "categoryMissingTitle": "Kategori bulunamadı",
   "categoryMissingBody": "Bu kaynakta bu bağlantıya sahip bir kategori yok. Sağlayıcı onu yeniden adlandırmış veya kaldırmış olabilir.",
   "namedMarkedWatched": "{{name}} izlendi olarak işaretlendi",

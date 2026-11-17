@@ -430,7 +430,7 @@
   "refreshIntervalStartup": "Tylko przy uruchomieniu",
   "refreshIntervalEvery": "Co {{interval}}",
   "expiryWarn": "Ostrzeżenie o wygaśnięciu subskrypcji",
-  "expiryWarnHint": "Ostrzega na pulpicie i na karcie źródła, zanim wygaśnie subskrypcja Xtream lub Stalker.",
+  "expiryWarnHint": "Ostrzega na stronie głównej i na karcie źródła, zanim wygaśnie subskrypcja Xtream lub Stalker.",
   "expiryWarnOff": "Wyłączone",
   "expiryWarnBefore": "{{days}} wcześniej",
   "epgShortFallback": "Uzupełniaj luki danymi dostawcy",

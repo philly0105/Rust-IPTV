@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "Μόνο κατά την εκκίνηση",
   "refreshIntervalEvery": "Κάθε {{interval}}",
   "expiryWarn": "Προειδοποίηση λήξης συνδρομής",
-  "expiryWarnHint": "Προειδοποιεί στον πίνακα ελέγχου και στην κάρτα της πηγής πριν λήξει μια συνδρομή Xtream ή Stalker.",
+  "expiryWarnHint": "Προειδοποιεί στην Αρχική και στην κάρτα της πηγής πριν λήξει μια συνδρομή Xtream ή Stalker.",
   "expiryWarnOff": "Ανενεργό",
   "expiryWarnBefore": "{{days}} πριν",
   "epgShortFallback": "Συμπλήρωση κενών από τον πάροχο",

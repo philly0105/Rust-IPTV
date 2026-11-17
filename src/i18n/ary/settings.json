@@ -440,7 +440,7 @@
   "refreshIntervalStartup": "غير ملي يتحل التطبيق",
   "refreshIntervalEvery": "كل {{interval}}",
   "expiryWarn": "تحذير قبل ما يسالي الاشتراك",
-  "expiryWarnHint": "كينبهك فلوحة التحكم وفالبطاقة ديال المصدر قبل ما يسالي اشتراك Xtream ولا Stalker.",
+  "expiryWarnHint": "كينبهك فالرئيسية وفالبطاقة ديال المصدر قبل ما يسالي اشتراك Xtream ولا Stalker.",
   "expiryWarnOff": "مطفي",
   "expiryWarnBefore": "قبل ب{{days}}",
   "epgShortFallback": "عمّر الفراغات من المزوّد",

@@ -231,7 +231,7 @@
   "browseMovies": "映画を探す",
   "browseSeries": "シリーズを探す",
   "searchForTitle": "検索する",
-  "goToDashboard": "ダッシュボードへ",
+  "goToDashboard": "ホームへ",
   "categoryMissingTitle": "カテゴリが見つかりません",
   "categoryMissingBody": "このソースにはそのリンクのカテゴリがありません。プロバイダーが名前を変えたか削除した可能性があります。",
   "namedMarkedWatched": "{{name}}を視聴済みにしました",

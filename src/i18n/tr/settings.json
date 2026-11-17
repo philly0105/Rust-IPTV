@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "Yalnızca başlangıçta",
   "refreshIntervalEvery": "Her {{interval}}",
   "expiryWarn": "Abonelik bitiş uyarısı",
-  "expiryWarnHint": "Bir Xtream veya Stalker aboneliği bitmeden önce panoda ve kaynak kartında uyarır.",
+  "expiryWarnHint": "Bir Xtream veya Stalker aboneliği bitmeden önce ana sayfada ve kaynak kartında uyarır.",
   "expiryWarnOff": "Kapalı",
   "expiryWarnBefore": "{{days}} önce",
   "epgShortFallback": "Boşlukları sağlayıcıdan doldur",

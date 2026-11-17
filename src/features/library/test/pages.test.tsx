@@ -453,7 +453,7 @@ describe('MyVideoDetailPage', () => {
   it('shows not found for an unknown id', async () => {
     rpc.handlers['myvideos.list'] = () => library;
     renderAt('/my-videos/99', [{ path: '/my-videos/:id', element: <MyVideoDetailPage /> }]);
-    expect(await screen.findByText('This video is not in your library')).toBeTruthy();
+    expect(await screen.findByText('This video is not in My videos')).toBeTruthy();
   });
 });
 

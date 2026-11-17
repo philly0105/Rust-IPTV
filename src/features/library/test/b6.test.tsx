@@ -217,7 +217,7 @@ describe('MyVideoDetailPage follows the series when its URL episode is removed (
     // In a browser the file goes too by default: nothing else could delete it from the server later.
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove and delete' }));
     await waitFor(() => expect(screen.getAllByTestId('episode-row')).toHaveLength(1));
-    expect(screen.queryByText('This video is not in your library')).toBeNull();
+    expect(screen.queryByText('This video is not in My videos')).toBeNull();
     expect(screen.getByRole('heading', { level: 1, name: 'Severance' })).toBeTruthy();
   });
 

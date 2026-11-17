@@ -440,7 +440,7 @@
   "refreshIntervalStartup": "عند بدء التشغيل فقط",
   "refreshIntervalEvery": "كل {{interval}}",
   "expiryWarn": "تحذير انتهاء الاشتراك",
-  "expiryWarnHint": "ينبّهك في لوحة التحكم وبطاقة المصدر قبل انتهاء اشتراك Xtream أو Stalker.",
+  "expiryWarnHint": "ينبّهك في الصفحة الرئيسية وبطاقة المصدر قبل انتهاء اشتراك Xtream أو Stalker.",
   "expiryWarnOff": "إيقاف",
   "expiryWarnBefore": "قبل {{days}}",
   "epgShortFallback": "سدّ الفراغات من المزوّد",

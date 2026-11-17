@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "Alleen bij het opstarten",
   "refreshIntervalEvery": "Elke {{interval}}",
   "expiryWarn": "Waarschuwing voor verlopen abonnement",
-  "expiryWarnHint": "Waarschuwt op het dashboard en de bronkaart voordat een Xtream- of Stalker-abonnement afloopt.",
+  "expiryWarnHint": "Waarschuwt op Start en de bronkaart voordat een Xtream- of Stalker-abonnement afloopt.",
   "expiryWarnOff": "Uit",
   "expiryWarnBefore": "{{days}} van tevoren",
   "epgShortFallback": "Gaten aanvullen vanuit de aanbieder",

@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "시작할 때만",
   "refreshIntervalEvery": "{{interval}}마다",
   "expiryWarn": "구독 만료 경고",
-  "expiryWarnHint": "Xtream 또는 Stalker 구독이 끝나기 전에 대시보드와 소스 카드에 경고를 표시합니다.",
+  "expiryWarnHint": "Xtream 또는 Stalker 구독이 끝나기 전에 홈과 소스 카드에 경고를 표시합니다.",
   "expiryWarnOff": "끄기",
   "expiryWarnBefore": "{{days}} 전",
   "epgShortFallback": "빈 곳을 제공업체 정보로 채우기",

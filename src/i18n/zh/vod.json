@@ -231,7 +231,7 @@
   "browseMovies": "浏览电影",
   "browseSeries": "浏览剧集",
   "searchForTitle": "搜索它",
-  "goToDashboard": "前往仪表板",
+  "goToDashboard": "前往首页",
   "categoryMissingTitle": "找不到该分类",
   "categoryMissingBody": "此来源中没有对应该链接的分类。提供商可能已将其重命名或删除。",
   "namedMarkedWatched": "已将{{name}}标记为已看",

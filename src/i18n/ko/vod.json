@@ -231,7 +231,7 @@
   "browseMovies": "영화 둘러보기",
   "browseSeries": "시리즈 둘러보기",
   "searchForTitle": "검색하기",
-  "goToDashboard": "대시보드로 이동",
+  "goToDashboard": "홈으로 이동",
   "categoryMissingTitle": "카테고리를 찾을 수 없습니다",
   "categoryMissingBody": "이 소스에는 해당 링크의 카테고리가 없습니다. 제공자가 이름을 바꾸었거나 삭제했을 수 있습니다.",
   "namedMarkedWatched": "{{name}}을(를) 시청함으로 표시했습니다",

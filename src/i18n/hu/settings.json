@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "Csak indításkor",
   "refreshIntervalEvery": "Időköz: {{interval}}",
   "expiryWarn": "Előfizetés lejáratának jelzése",
-  "expiryWarnHint": "Figyelmeztet az irányítópulton és a forrás kártyáján, mielőtt egy Xtream- vagy Stalker-előfizetés lejár.",
+  "expiryWarnHint": "Figyelmeztet a Kezdőlapon és a forrás kártyáján, mielőtt egy Xtream- vagy Stalker-előfizetés lejár.",
   "expiryWarnOff": "Ki",
   "expiryWarnBefore": "{{days}} előre",
   "epgShortFallback": "Hiányok pótlása a szolgáltatótól",

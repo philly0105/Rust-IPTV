@@ -205,7 +205,7 @@ describe('L1-vod-13 (search): a removed source', () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
     renderAt('/s/gone/search?q=rail', [{ path: '/s/:sourceId/search', element: <SearchPage scoped /> }]);
     expect(await screen.findByText('This source was removed')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Go to dashboard' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Go to Home' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
   });
 });

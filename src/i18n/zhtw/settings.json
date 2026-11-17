@@ -420,7 +420,7 @@
   "refreshIntervalStartup": "僅在啟動時",
   "refreshIntervalEvery": "每 {{interval}}",
   "expiryWarn": "訂閱到期提醒",
-  "expiryWarnHint": "在 Xtream 或 Stalker 訂閱到期前，在儀表板和播放來源卡片上提醒。",
+  "expiryWarnHint": "在 Xtream 或 Stalker 訂閱到期前，在首頁和播放來源卡片上提醒。",
   "expiryWarnOff": "關閉",
   "expiryWarnBefore": "提前 {{days}}",
   "epgShortFallback": "用服務商資訊填補空缺",

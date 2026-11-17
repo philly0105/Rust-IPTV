@@ -425,7 +425,7 @@
   "refreshIntervalStartup": "Au démarrage seulement",
   "refreshIntervalEvery": "Toutes les {{interval}}",
   "expiryWarn": "Alerte d'expiration de l'abonnement",
-  "expiryWarnHint": "Prévient sur le tableau de bord et la fiche de la source avant l'expiration d'un abonnement Xtream ou Stalker.",
+  "expiryWarnHint": "Prévient sur l'accueil et la fiche de la source avant l'expiration d'un abonnement Xtream ou Stalker.",
   "expiryWarnOff": "Désactivé",
   "expiryWarnBefore": "{{days}} avant",
   "epgShortFallback": "Combler les trous avec le fournisseur",

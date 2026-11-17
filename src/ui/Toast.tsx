@@ -332,7 +332,9 @@ function ToastItem({ t, paused, leaving = false, onLeft }: { t: ToastRecord; pau
         className={cn(
           'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
           TOUCH_TARGET,
-          'pointer-coarse:min-w-[calc(44rem/15)]',
+          // The 44 px touch target reaches into the toast's padding instead of growing it: a
+          // one-line toast stays one line tall, with the X level with its title.
+          'pointer-coarse:-my-2.5 pointer-coarse:min-w-[calc(44rem/15)]',
         )}
       >
         <X aria-hidden size={14} />

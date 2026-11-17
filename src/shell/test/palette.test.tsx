@@ -265,7 +265,8 @@ describe('palette library matches', () => {
 
   it("'fox' finds a channel nobody favourited and plays it, with the Search page's own request", async () => {
     const { palette } = await openPaletteWith('fox');
-    const row = await within(palette).findByText('US| FOX HD');
+    // Found by what screen readers hear: the cleaned name, the tag after it (w-a11y-03).
+    const row = await within(palette).findByText('FOX HD (US)');
     expect(within(palette).getByText('Channels')).toBeTruthy();
     expect(within(palette).getByText('Movies and series')).toBeTruthy();
     expect(within(palette).getByText('The Fox Hunt')).toBeTruthy();
@@ -275,7 +276,7 @@ describe('palette library matches', () => {
     const item = row.closest('[cmdk-item]') as HTMLElement;
     expect(within(item).getByText('US| SPORTS')).toBeTruthy();
     // Named as Live TV's rows name it: the name first, the country tag after it in its own quiet
-    // span, and the provider's name for screen readers (which the row's text stays for matching).
+    // span, and the cleaned name for screen readers; data-value keeps the provider's name for matching.
     const tag = within(item).getByTestId('channel-name-tag');
     expect(tag.textContent).toBe('US');
     // Drawn as the station and its quality words ("FOX" + " HD").
@@ -378,7 +379,9 @@ describe('palette library matches', () => {
     expect(within(row).getByTestId('channel-name-tag').textContent).toBe('CA');
     // The name and its quality word ("BLOOMBERG", " HD") drawn as ChannelName draws them.
     expect(within(row).getByText('BLOOMBERG')).toBeTruthy();
-    expect(row.textContent).not.toContain('(CA)');
+    // Drawn unbracketed; screen readers hear the cleaned name with the tag in brackets (w-a11y-03).
+    expect(within(row).getByTestId('channel-name-tag').closest('[aria-hidden]')!.textContent).not.toContain('(CA)');
+    expect(within(row).getByText('BLOOMBERG HD (CA)')).toBeTruthy();
   });
 
   it('a title with no poster and one whose poster fails get the same initials tile (w-realdata-12)', async () => {
@@ -501,8 +504,8 @@ describe('single settings, numbers and pending answers (search lane, 2026-11-16)
         ? { ref: tbs, name: 'US| TBS FHD', categoryId: 'c1', categoryName: 'US| ENTERTAINMENT', isRadio: false, number: 12 }
         : null;
     const { palette } = await openPaletteWith('12');
-    // The provider's name, as screen readers hear it (the drawn name puts "US" after "TBS FHD").
-    const row = (await within(palette).findByText('US| TBS FHD')).closest('[cmdk-item]') as HTMLElement;
+    // The name as screen readers hear it, the tag after it (w-a11y-03).
+    const row = (await within(palette).findByText('TBS FHD (US)')).closest('[cmdk-item]') as HTMLElement;
     expect(within(row).getByText('Channel 12')).toBeTruthy();
     fireEvent.click(row);
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: tbs, isLive: true })));

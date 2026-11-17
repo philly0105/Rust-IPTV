@@ -515,8 +515,10 @@ describe('Search names a channel as Live TV does (round 5)', () => {
     rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : [{ ...programme(1, 0, 23, 0), channelName: 'US| Harbor News HD' }]);
     renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
     const top = await screen.findByTestId('search-top');
-    // Screen readers hear the name as the card shows it, the tag after it (w-a11y-03).
-    const result = await within(top).findByRole('button', { name: /Harbor News HD \(US\)/ });
+    // Screen readers hear the name as the card shows it, the tag after it (w-a11y-03). The card's
+    // name starts with it (after a bidi isolate); the programme row's names the channel after its
+    // time and title.
+    const result = await within(top).findByRole('button', { name: /^\W?Harbor News HD \(US\)/ });
     expect(drawn(result)).toEqual(['Harbor News HD', 'US']);
     expect(within(result).getByTestId('channel-name-tag').className).toContain('text-fg-subtle');
     const line = await screen.findByTestId('search-programme-channel');

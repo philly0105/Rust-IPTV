@@ -651,7 +651,11 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
       {!thumb && (
         <>
           {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
-          <StreamInfoPanel big={overlay && !small} className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
+          <StreamInfoPanel
+            big={overlay && !small}
+            columns={shortPlayer && !smallPlayer && !small}
+            className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')}
+          />
           {/*
             Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
             mini player says it in its header instead; a short player gets the one-line chip.
@@ -958,6 +962,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
         {/* A short player (the Live page's stage) gives it the height above the bar, over the title. */}
         <StreamInfoPanel
           big={isFullscreen && !pip}
+          columns={shortPlayer && !smallPlayer && !compact && !pip}
           className={
             compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : shortPlayer ? 'start-3 top-3 max-h-[calc(100%-4.5rem)]' : 'start-4 top-16 max-h-[calc(100%-9rem)]'
           }

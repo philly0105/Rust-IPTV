@@ -16,15 +16,19 @@ export const STATS_POLL_MS = 1000;
  * open and is not mounted while closed, so a closed panel costs nothing. Over embedded mpv it
  * is cut out of the native video (`data-mpv-overlay` plus `data-mpv-reserved`).
  */
-export function StreamInfoPanel({ className, big = false }: { className?: string; big?: boolean }) {
+export function StreamInfoPanel({ className, big = false, columns = false }: { className?: string; big?: boolean; columns?: boolean }) {
   const open = useStreamInfoStore((s) => s.open);
   const hasSource = usePlayerStore((s) => !!s.source);
   if (!open || !hasSource) return null;
-  return <OpenPanel className={className} big={big} />;
+  return <OpenPanel className={className} big={big} columns={columns} />;
 }
 
-/** `big`: fullscreen and Fill window, read from further away, with the room to show whole values. */
-function OpenPanel({ className, big }: { className?: string | undefined; big: boolean }) {
+/**
+ * `big`: fullscreen and Fill window, read from further away, with the room to show whole values.
+ * `columns`: a wide, short player (the Live page's stage), where one column of rows would scroll:
+ * the rows run on into a second column instead.
+ */
+function OpenPanel({ className, big, columns }: { className?: string | undefined; big: boolean; columns: boolean }) {
   const { t, i18n } = useTranslation('player');
   const url = usePlayerStore((s) => s.source?.url ?? '');
   const [stats, setStats] = useState<StreamStats | null>(null);
@@ -57,7 +61,7 @@ function OpenPanel({ className, big }: { className?: string | undefined; big: bo
       onPointerDown={(e) => e.stopPropagation()}
       className={cn(
         'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-30 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-on-glass motion-safe:animate-pop-in',
-        big ? 'w-96' : 'w-64',
+        big ? 'w-96' : columns ? 'w-[30rem]' : 'w-64',
         className,
       )}
     >
@@ -75,9 +79,15 @@ function OpenPanel({ className, big }: { className?: string | undefined; big: bo
         </Tooltip>
       </header>
       {stats ? (
-        <dl className={cn('grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-3 py-2.5', big ? 'text-body-sm' : 'text-caption')}>
+        <dl
+          className={cn(
+            'px-3 py-2.5',
+            columns ? 'columns-2 gap-x-6 *:mb-1 *:flex *:break-inside-avoid *:justify-between *:gap-3' : 'grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1',
+            big ? 'text-body-sm' : 'text-caption',
+          )}
+        >
           {statsRows(stats, url, t, i18n.language).map(([label, value]) => (
-            <div key={label} className="contents">
+            <div key={label} className={columns ? undefined : 'contents'}>
               <dt className="player-on-glass-muted">{label}</dt>
               {/* A long value (the decoder's state, a server address) wraps rather than losing its end. */}
               <dd className="text-end font-mono tabular-nums [overflow-wrap:anywhere]" dir="auto">

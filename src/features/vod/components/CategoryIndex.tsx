@@ -4,6 +4,7 @@ import { Lock } from 'lucide-react';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 
 import { columnsFor, useElementWidth, useScrollMargin } from '../hooks/useContainerColumns';
 import { handleGridKeyDown } from '../lib/gridNav';
@@ -101,7 +102,8 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
                     entry.emphasis && 'font-semibold text-fg',
                   )}
                 >
-                  <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">{entry.name}</span>
+                  {/* "EN | ACTION" as group names read: the name, its language's tag after it, quiet. */}
+                  <ChannelName name={entry.name} className="min-w-0 flex-1 truncate text-match-parent" />
                   {entry.locked && (
                     <Lock data-testid="category-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} />
                   )}

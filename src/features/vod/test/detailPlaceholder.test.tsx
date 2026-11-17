@@ -198,7 +198,7 @@ describe('VOD-DETAIL-PLACEHOLDER: series', () => {
 
     const ep = { id: 'e11', seriesRef, season: 1, episode: 1, title: 'Good News About Hell' };
     await act(async () => detail.resolve({ item: seriesRow, seasons: [{ number: 1, episodes: [ep] }], cast: [], backdrops: [], providerDetailsUnavailable: false }));
-    const play = await screen.findByRole('button', { name: i18n.t('vod:playEpisode', { code: 'S01E01' }) });
+    const play = await screen.findByRole('button', { name: i18n.t('vod:playEpisodeNumber', { episode: 1 }) });
     expect((play as HTMLButtonElement).disabled).toBe(false);
     expect(within(episodes).queryByRole('status')).toBeNull();
     await waitFor(() => expect(callsOf('tmdb.tv')).toHaveLength(1));
@@ -219,7 +219,7 @@ describe('VOD-DETAIL-PLACEHOLDER: series', () => {
 
     const ep = { id: 'e11', seriesRef, season: 1, episode: 1, title: 'Good News About Hell' };
     await act(async () => detail.resolve({ item: seriesRow, seasons: [{ number: 1, episodes: [ep] }], cast: [], backdrops: [], providerDetailsUnavailable: false }));
-    await screen.findByRole('button', { name: i18n.t('vod:playEpisode', { code: 'S01E01' }) });
+    await screen.findByRole('button', { name: i18n.t('vod:playEpisodeNumber', { episode: 1 }) });
     expect(watched().disabled).toBe(false);
   });
 });

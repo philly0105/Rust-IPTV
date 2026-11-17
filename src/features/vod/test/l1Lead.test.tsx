@@ -162,13 +162,13 @@ describe('SeriesDetailPage season on entry (L1-vod-11)', () => {
     );
     fireEvent.click(screen.getByRole('link', { name: 'open' }));
     // Play points at S01E01, so Season 1 is the one shown.
-    expect(await screen.findByRole('button', { name: 'Play S01E01' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Play season 1, episode 1' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Season 1/ }).getAttribute('aria-selected')).toBe('true');
     cleanup();
 
     // A first render in a MemoryRouter is a POP, like Back.
     renderAt('/s/src1/series/s1', seriesRoute);
-    await screen.findByRole('button', { name: 'Play S01E01' });
+    await screen.findByRole('button', { name: 'Play season 1, episode 1' });
     expect(screen.getByRole('tab', { name: /Season 2/ }).getAttribute('aria-selected')).toBe('true');
   });
 });

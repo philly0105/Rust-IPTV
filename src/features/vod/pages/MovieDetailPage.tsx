@@ -12,6 +12,7 @@ import { resumePoint } from '@/features/library/lib/myvideos';
 import { playDownload } from '@/features/library/lib/playDownload';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 
 import { CatalogRail } from '../components/CatalogRail';
@@ -309,7 +310,7 @@ export function MovieDetailPage() {
           />
         </HeroIcon>
       )}
-      <HeroIcon caption={t('captionMyList')}>
+      <HeroIcon caption={t('captionMyList')} labelled={!watching}>
         <MyListButton itemRef={ref} snapshot={listSnapshot} variant={watching ? 'round' : 'hero'} size="lg" />
       </HeroIcon>
       <HeroIcon caption={t('captionFavorite')}>
@@ -438,7 +439,7 @@ export function MovieDetailPage() {
         )}
         {item.categoryId && source.data && (
           <CatalogRail
-            title={categoryName ? t('moreInCategory', { category: sectionlessCategoryName(categoryName, 'movie') }) : t('moreFromSource', { source: sourceName })}
+            title={categoryName ? t('moreInCategory', { category: plainChannelName(sectionlessCategoryName(categoryName, 'movie'), false) }) : t('moreFromSource', { source: sourceName })}
             seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/movies/c/${encodeURIComponent(item.categoryId || ALL_CATEGORIES)}` }}
             input={{
               sourceKind: source.data.kind,

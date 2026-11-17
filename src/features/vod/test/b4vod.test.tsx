@@ -261,13 +261,13 @@ describe('SeriesDetailPage (B4-vod-D1, D3, D4, D10)', () => {
 
   it('D1: playing an episode hands the player the rest of the season and the next one', async () => {
     renderAt('/s/src1/series/s1', route);
-    fireEvent.click(await screen.findByRole('button', { name: 'Resume S01E02' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume season 1, episode 2' }));
     await waitFor(() => expect(queueIds()).toEqual(['e11', 'e12', 'e13', 'e21']));
   });
 
   it('D3: a resumable episode also offers "Start over", which plays from 0 and keeps the saved row', async () => {
     renderAt('/s/src1/series/s1', route);
-    await screen.findByRole('button', { name: 'Resume S01E02' });
+    await screen.findByRole('button', { name: 'Resume season 1, episode 2' });
     // vod-detail-07: Start over sits beside Resume, one press away, named for the episode.
     fireEvent.click(screen.getByRole('button', { name: 'Start S01E02 over' }));
     await waitFor(() => expect(played).toHaveLength(1));
@@ -278,7 +278,7 @@ describe('SeriesDetailPage (B4-vod-D1, D3, D4, D10)', () => {
 
   it('D4: no second "next episode" countdown when the player queue already has the next episode', async () => {
     renderAt('/s/src1/series/s1', route);
-    fireEvent.click(await screen.findByRole('button', { name: 'Resume S01E02' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume season 1, episode 2' }));
     await waitFor(() => expect(queueIds()).toContain('e13'));
     act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 3000, durationSeconds: 3000 }));
     await screen.findByRole('button', { name: 'Close player' });

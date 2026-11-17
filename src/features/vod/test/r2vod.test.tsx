@@ -53,7 +53,8 @@ const movie = (id: string, categoryName?: string): VodItem => ({
   year: 2020,
 });
 const landing = [{ path: '/s/:sourceId/movies', element: <VodLandingPage kind="movie" /> }];
-const chipNames = () => screen.getAllByTestId('vod-category-chip').map((c) => c.textContent);
+// The provider's names, which the chips keep in their tooltips (they draw the tag after the name).
+const chipNames = () => screen.getAllByTestId('vod-category-chip').map((c) => c.getAttribute('title'));
 
 beforeAll(installDomStubs);
 beforeEach(() => {
@@ -95,10 +96,10 @@ describe('realdata-14: the landing picks a language for its categories', () => {
 
     fireEvent.change(pickers[0]!, { target: { value: 'FR' } });
     await waitFor(() => expect(chipNames()).toEqual(['FR | CINÉMA', 'FR | ACTION', 'NETFLIX MOVIES']));
-    expect(screen.queryByRole('heading', { name: /EN \| ACTION/ })).toBeNull();
-    expect(await screen.findByRole('heading', { name: /FR \| CINÉMA/ })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: /ACTION \(EN\)/ })).toBeNull();
+    expect(await screen.findByRole('heading', { name: /CINÉMA \(FR\)/ })).toBeTruthy();
     const index = await screen.findByRole('list', { name: 'Categories' });
-    expect(within(index).queryByText('EN | COMEDY')).toBeNull();
+    expect(within(index).queryByTitle('EN | COMEDY')).toBeNull();
     expect(within(index).getByText('NETFLIX MOVIES')).toBeTruthy();
     // Both pickers show the pick, which reads as the tag alone.
     for (const p of screen.getAllByRole('combobox', { name: 'Language' })) expect((p as HTMLSelectElement).selectedOptions[0]?.text).toBe('FR');
@@ -113,6 +114,26 @@ describe('realdata-14: the landing picks a language for its categories', () => {
     renderAt('/s/src1/movies', landing);
     await screen.findAllByTestId('vod-category-chip');
     expect(screen.queryByRole('combobox', { name: 'Language' })).toBeNull();
+  }, 20_000);
+});
+
+describe("vod3 follow-up: a category's language tag reads after its name, quiet", () => {
+  it("draws 'EN | ACTION' as ACTION with a quiet EN after it in the chips, rail titles and index, and keeps the provider's name in tooltips", async () => {
+    localStorage.setItem(CATEGORY_INDEX_KEY, '1');
+    renderAt('/s/src1/movies', landing);
+    await waitFor(() => expect(chipNames()).toEqual(NAMES));
+    const chip = screen.getAllByTestId('vod-category-chip')[0]!;
+    expect(chip.textContent).toMatch(/^ACTIONEN/);
+    expect(within(chip).getByTestId('channel-name-tag').textContent).toBe('EN');
+    // Heard as plain text writes it, the name first.
+    expect(within(chip).getByText('ACTION (EN)').className).toContain('sr-only');
+    const rail = await screen.findByRole('heading', { name: /^ACTION \(EN\)/ });
+    expect(within(rail).getByTestId('channel-name-tag').textContent).toBe('EN');
+    const index = await screen.findByRole('list', { name: 'Categories' });
+    const entry = within(index).getByTitle('EN | ACTION');
+    expect(within(entry).getByTestId('channel-name-tag').textContent).toBe('EN');
+    // A name without a place's tag is drawn as it is.
+    expect(within(index).getByTitle('NETFLIX MOVIES').textContent).toMatch(/^NETFLIX MOVIES/);
   }, 20_000);
 });
 
@@ -158,7 +179,7 @@ describe('realdata-22: a category rail leaves out the language its name already 
     rpcMock.handlers['catalog.recentlyAdded'] = () => [{ ...movie('r1', 'FR | CINÉMA'), title: 'Movie r1' }];
     renderAt('/s/src1/movies', landing);
     // The rail's placeholder gives way to the rail as it mounts.
-    const link = await waitFor(() => within(screen.getByRole('heading', { name: /FR \| CINÉMA/ }).closest('section')!).getByRole('link', { name: /^Movie c3-0/ }), { timeout: 8000 });
+    const link = await waitFor(() => within(screen.getByRole('heading', { name: /CINÉMA \(FR\)/ }).closest('section')!).getByRole('link', { name: /^Movie c3-0/ }), { timeout: 8000 });
     expect(link.getAttribute('aria-label')).not.toMatch(/French/);
     expect(within(link).queryByText('FR')).toBeNull();
     const recent = screen.getByRole('heading', { name: 'Recently added' }).closest('section')!;

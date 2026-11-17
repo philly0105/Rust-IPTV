@@ -305,7 +305,6 @@ export function EpisodeList({
                   )}
                   {canDownload && (
                     <DownloadButton
-                      compact
                       label={`${code} ${ep.title}`}
                       download={downloads.get(ep.id)}
                       pending={pendingDownload === ep.id}

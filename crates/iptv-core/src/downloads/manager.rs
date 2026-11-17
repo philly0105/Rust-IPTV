@@ -773,13 +773,22 @@ impl Inner {
     }
 
     /// Asks the newest transfers of every source over its budget to yield
-    /// until the rest fit. Returns their done signals. Only whole transfers
-    /// downloading from a source count here: mirror connections on it give
-    /// way on their own within a tick ([`DownloadManager::allowance_on`]
-    /// drops to 0 while anything plays there), and probes abort.
+    /// until the rest fit. Returns their done signals. A transfer counts on
+    /// a source only while it holds a connection there ([`held_on`]): one
+    /// whose own source has none (only mirrors fetching) leaves it to the
+    /// row that starts there. Mirror connections on a source give way on
+    /// their own within a tick ([`DownloadManager::allowance_on`] drops to 0
+    /// while anything plays there), and probes abort, so only transfers
+    /// holding their own source yield here.
     fn preempt(&self, now: Instant, policy: &Policy) -> Vec<tokio::sync::watch::Receiver<bool>> {
         let mut done = Vec::new();
-        let sources: HashSet<&str> = self.active.values().map(|c| c.source.as_str()).collect();
+        let holding = |c: &&Arc<TaskCtl>| !c.token.is_cancelled() && held_on(c, &c.source) > 0;
+        let sources: HashSet<&str> = self
+            .active
+            .values()
+            .filter(holding)
+            .map(|c| c.source.as_str())
+            .collect();
         for source in sources {
             let Some(budget) = self.budget(source, now, policy) else {
                 continue;
@@ -787,7 +796,7 @@ impl Inner {
             let mut running: Vec<&Arc<TaskCtl>> = self
                 .active
                 .values()
-                .filter(|c| c.source == source && !c.token.is_cancelled())
+                .filter(|c| c.source == source && holding(c))
                 .collect();
             // A transfer in segments gives its extra connections back on
             // its own within a tick (`connection_allowance`), so only whole
@@ -2891,6 +2900,40 @@ mod tests {
         assert!(matches!(mgr.stop(3, StopReason::Pause), Stopped::Dequeued));
         let inner = mgr.inner.lock();
         assert!(inner.plans.is_empty() && inner.batched.is_empty());
+    }
+
+    #[test]
+    fn preempt_counts_what_transfers_hold_on_a_source() {
+        let mgr = DownloadManager::default();
+        known(&mgr, "a", Some(1), None);
+        known(&mgr, "b", Some(3), None);
+        let policy = Policy::of(&Settings::default());
+        // The first row of `a` fetches only from mirror `b`: nothing on `a`.
+        let mirrored = TaskCtl::detached("a");
+        mirrored.set_held("b", 2);
+        mirrored.set_held("a", 0);
+        let next = TaskCtl::placed(2, "a".into(), "a".into(), None);
+        let next = Arc::new(next);
+        {
+            let mut inner = mgr.inner.lock();
+            inner.active.insert(1, mirrored.clone());
+            inner.active.insert(2, next.clone());
+            assert!(inner.preempt(Instant::now(), &policy).is_empty());
+        }
+        assert!(!mirrored.token.is_cancelled() && !next.token.is_cancelled());
+        // Playback on `a` still makes the transfer holding it yield.
+        let now = Instant::now();
+        let mut inner = mgr.inner.lock();
+        inner.leases.insert(
+            "player".into(),
+            Lease {
+                sources: vec!["a".into()],
+                until: now + Duration::from_secs(60),
+            },
+        );
+        assert_eq!(inner.preempt(now, &policy).len(), 1);
+        assert_eq!(next.reason(), StopReason::Yield);
+        assert!(!mirrored.token.is_cancelled());
     }
 
     #[test]

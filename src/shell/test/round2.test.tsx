@@ -315,9 +315,21 @@ describe('the header search slot', () => {
     expect(screen.queryByTestId('open-palette')).toBeNull();
     // The palette button comes before the field, so the slot keeps its place. It stands in for
     // the "Search everything" box (the rail has no Search row), so it carries that name.
+    // From lg it is the worded chip with its Ctrl K hint; below, an icon whose glyph is not the
+    // field's magnifier (v-guide-05, v-vod-09). CSS shows one of the two.
+    const chip = screen.getByTestId('header-palette-chip');
     const palette = screen.getByTestId('header-palette');
-    expect(palette).toBe(screen.getByRole('button', { name: 'Search everything' }));
+    expect(chip.textContent).toContain('Search everything');
+    expect(chip.textContent).toContain('Ctrl');
+    expect(chip.className).toContain('lg:flex');
+    expect(palette.className).toContain('lg:hidden');
+    expect(palette.getAttribute('aria-label')).toBe('Search everything');
+    expect(palette.querySelector('svg')?.getAttribute('class')).not.toMatch(/\blucide-search\b/);
+    expect(chip.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(palette.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(chip);
+    expect(useShellStore.getState().paletteOpen).toBe(true);
+    useShellStore.getState().setPaletteOpen(false);
     fireEvent.click(palette);
     expect(useShellStore.getState().paletteOpen).toBe(true);
   });

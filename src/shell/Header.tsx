@@ -1,4 +1,4 @@
-import { ListTree, Moon, PanelLeftOpen, Search, Sun } from 'lucide-react';
+import { ListTree, Moon, PanelLeftOpen, Search, Sun, TextSearch } from 'lucide-react';
 import { memo, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -165,19 +165,37 @@ export const Header = memo(function Header({
       {!phone && (
         <div className="flex shrink-0 items-center gap-1">
           {searchField && !header?.search?.hidePalette && (
-            // The page's field takes the trigger's place; the palette keeps a small button before
-            // it, so the slot itself stays put (the same box and edges as on every other page).
-            // It stands in for "Search everything", which the rail no longer repeats, so it carries
-            // that name and the trigger's own glyph: the global search, folded. Ctrl+F focuses the
-            // field. The Search page's field is the global search, so it has no button beside it.
-            <IconButton
-              label={t('searchEverything')}
-              shortcut="mod+k"
-              icon={<Search size={18} />}
-              aria-haspopup="dialog"
-              onClick={openPalette}
-              data-testid="header-palette"
-            />
+            // The page's field takes the trigger's place; the palette keeps a smaller control
+            // before it, so the slot itself stays put (the same box and edges as on every other
+            // page). It stands in for "Search everything", which the rail does not repeat. From lg
+            // it is worded, with its Ctrl K hint; below, an icon whose glyph is not the field's
+            // magnifier, so two look-alike controls never sit side by side. Ctrl+F focuses the
+            // field. The Search page's field is the global search, so it has no control beside it.
+            <>
+              <button
+                type="button"
+                onClick={openPalette}
+                aria-haspopup="dialog"
+                data-testid="header-palette-chip"
+                className={cn(
+                  'me-1 hidden h-8 items-center gap-2 rounded-md border border-border bg-surface-2 ps-3 pe-1.5 text-sm whitespace-nowrap text-fg-subtle lg:flex',
+                  TOUCH_TARGET,
+                  'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
+                )}
+              >
+                {t('searchEverything')}
+                <Kbd combo="mod+k" size="sm" className="pointer-coarse:hidden" />
+              </button>
+              <IconButton
+                label={t('searchEverything')}
+                shortcut="mod+k"
+                icon={<TextSearch size={18} />}
+                aria-haspopup="dialog"
+                onClick={openPalette}
+                className="lg:hidden"
+                data-testid="header-palette"
+              />
+            </>
           )}
           {searchField ? (
             <div className="group/search relative me-1 flex">

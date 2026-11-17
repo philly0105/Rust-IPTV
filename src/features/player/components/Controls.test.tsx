@@ -186,6 +186,42 @@ describe('Controls options menu', () => {
     expect(menu()).toBeNull();
   });
 
+  it('ArrowRight opens a submenu row, ArrowLeft goes back to that row (v-player-08)', () => {
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    const speed = screen.getByRole('menuitem', { name: /playback speed/i });
+    expect(speed.getAttribute('aria-haspopup')).toBe('menu');
+    // A row that opens nothing is not marked as a submenu.
+    expect(screen.getByRole('menuitem', { name: /audio track/i }).hasAttribute('aria-haspopup')).toBe(false);
+    act(() => speed.focus());
+    fireEvent.keyDown(speed, { key: 'ArrowRight' });
+    expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('speed');
+    expect(document.activeElement?.textContent).toBe('Normal');
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+    expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('root');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /playback speed/i }));
+    // ArrowLeft at the root leaves the menu as it is.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+    expect(menu()).toBeTruthy();
+  });
+
+  it('in a right-to-left language ArrowLeft opens the submenu', () => {
+    const was = document.documentElement.dir;
+    document.documentElement.dir = 'rtl';
+    try {
+      render(<Controls variant="dock" visible />);
+      openMenu();
+      const speed = screen.getByRole('menuitem', { name: /playback speed/i });
+      act(() => speed.focus());
+      fireEvent.keyDown(speed, { key: 'ArrowRight' });
+      expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('root');
+      fireEvent.keyDown(speed, { key: 'ArrowLeft' });
+      expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('speed');
+    } finally {
+      document.documentElement.dir = was;
+    }
+  });
+
   it('leaves Sync out while nothing in it can be changed, and the browser has no audio row (PL-SYNC-DEAD-ROW)', () => {
     render(<Controls variant="dock" visible />);
     openMenu();

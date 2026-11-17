@@ -466,12 +466,20 @@ export const MENU_ITEM =
   'flex w-full items-center rounded-md px-3 py-2 text-start text-body-sm text-on-glass hover:bg-white/10 active:bg-white/15 pointer-coarse:min-h-[calc(44rem/15)] disabled:opacity-50 disabled:hover:bg-transparent';
 
 /**
- * A row that opens a submenu (shared with the video's context menu). `disabled`: nothing to choose
- * from, so the row only states its value, without the submenu's chevron.
+ * A row that opens a submenu (shared with the video's context menu), also with ArrowRight
+ * (ArrowLeft in right-to-left languages). `disabled`: nothing to choose from, so the row only
+ * states its value, without the submenu's chevron.
  */
 export function MenuRow({ label, value, disabled, onClick }: { label: string; value?: ReactNode; disabled?: boolean; onClick(): void }) {
   return (
-    <button type="button" role="menuitem" disabled={disabled} onClick={onClick} className={cn(MENU_ITEM, 'justify-between gap-6')}>
+    <button
+      type="button"
+      role="menuitem"
+      aria-haspopup={disabled ? undefined : 'menu'}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(MENU_ITEM, 'justify-between gap-6')}
+    >
       <span>{label}</span>
       <span className="flex items-center gap-1 text-on-glass-muted">
         {value}
@@ -882,11 +890,23 @@ function OptionsMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** The root row a submenu was opened from (its place among the root's items), focused again on the way back. */
+  const opener = useRef(-1);
+  const items = (): HTMLElement[] => Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input[type="range"]:not(:disabled)') ?? []);
   useEffect(() => {
     // A new view starts at its top: the frame is the same element, and the scroll the last view
     // was left at would hide the new one's header.
     const menu = ref.current;
     if (menu) menu.scrollTop = 0;
+    let back: HTMLElement | undefined;
+    if (view === 'root') {
+      back = opener.current >= 0 ? items()[opener.current] : undefined;
+      opener.current = -1;
+    }
+    if (back) {
+      back.focus();
+      return;
+    }
     // The current choice of a list (Speed opens on Normal, PV-16), else the first item that can
     // take focus (Sources may still be loading, the style view holds fields), else the header's
     // Back: focus must stay in the menu for its arrow keys and Escape.
@@ -966,6 +986,12 @@ function OptionsMenu({
       aria-label={styleView ? t('subtitleStyle.menuTitle') : t('settingsMenu')}
       data-testid="player-options-menu"
       data-view={view}
+      onClickCapture={(e) => {
+        if (view === 'root' && e.target instanceof Element) {
+          const row = e.target.closest<HTMLElement>('[aria-haspopup]');
+          if (row) opener.current = items().indexOf(row);
+        }
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
@@ -975,10 +1001,20 @@ function OptionsMenu({
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
-          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input[type="range"]:not(:disabled)') ?? []);
-          const i = items.indexOf(document.activeElement as HTMLElement);
-          const next = items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
+          const all = items();
+          const i = all.indexOf(document.activeElement as HTMLElement);
+          const next = all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length];
           next?.focus();
+        }
+        // Into a submenu and back out, as menus do; a slider of the style view keeps its arrows.
+        if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !(e.target instanceof HTMLInputElement)) {
+          const into = (e.key === 'ArrowRight') !== (e.currentTarget.closest('[dir]')?.getAttribute('dir') === 'rtl');
+          const row = e.target instanceof Element ? e.target.closest<HTMLElement>('[aria-haspopup]:not(:disabled)') : null;
+          if (into && row) row.click();
+          else if (!into && view !== 'root') setView(view === 'subStyle' ? 'text' : 'root');
+          else return;
+          e.preventDefault();
+          e.stopPropagation();
         }
       }}
       data-sheet={fit.sheet ? '' : undefined}

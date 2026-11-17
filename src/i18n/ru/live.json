@@ -158,6 +158,8 @@
   "noSearchResultsInGroup": "Поиск только в группе {{group}}.",
   "searchAllChannels": "Искать во всех каналах",
   "searchAllStations": "Искать во всех станциях",
+  "searchChannelsFor": "Искать «{{query}}» среди каналов",
+  "searchStationsFor": "Искать «{{query}}» среди станций",
   "channelNumberHit": "Канал {{number}}",
   "nowShowing": "сейчас: {{title}}",
   "play": "Воспроизвести",

@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "僅在 {{group}} 中搜尋。",
   "searchAllChannels": "在全部頻道中搜尋",
   "searchAllStations": "在全部電台中搜尋",
+  "searchChannelsFor": "在頻道中搜尋「{{query}}」",
+  "searchStationsFor": "在電台中搜尋「{{query}}」",
   "channelNumberHit": "頻道 {{number}}",
   "nowShowing": "正在播出：{{title}}",
   "play": "播放",

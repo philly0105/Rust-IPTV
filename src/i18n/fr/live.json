@@ -152,6 +152,8 @@
   "noSearchResultsInGroup": "Recherche limitée à {{group}}.",
   "searchAllChannels": "Rechercher dans toutes les chaînes",
   "searchAllStations": "Rechercher dans toutes les stations",
+  "searchChannelsFor": "Rechercher « {{query}} » dans les chaînes",
+  "searchStationsFor": "Rechercher « {{query}} » dans les stations",
   "channelNumberHit": "Chaîne {{number}}",
   "nowShowing": "en cours : {{title}}",
   "play": "Lire",

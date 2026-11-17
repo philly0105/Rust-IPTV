@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "Keresés csak ebben a csoportban: {{group}}.",
   "searchAllChannels": "Keresés az összes csatornában",
   "searchAllStations": "Keresés az összes állomásban",
+  "searchChannelsFor": "„{{query}}” keresése a csatornák között",
+  "searchStationsFor": "„{{query}}” keresése az állomások között",
   "channelNumberHit": "{{number}}. csatorna",
   "nowShowing": "most: {{title}}",
   "play": "Lejátszás",

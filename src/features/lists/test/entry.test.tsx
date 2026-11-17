@@ -163,6 +163,18 @@ describe('sidebar section', () => {
     expect(dialog()).toEqual({ kind: 'manage', focusId: undefined });
   });
 
+  it('on the list page, New list is a labelled row under the lists (w-walkthrough-11)', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+    h.renderAt('/lists/L1', [{ path: '/lists/:listId', element: <ListsSidebarSection variant="page" activeListId="L1" /> }]);
+    await screen.findByTestId('lists-sidebar');
+    const section = screen.getByTestId('lists-section');
+    // One New list, in words: no bare icon by the heading as well.
+    const add = within(section).getByRole('button', { name: 'New list' });
+    expect(add.textContent).toBe('New list');
+    fireEvent.click(add);
+    expect(dialog()).toEqual({ kind: 'create', channel: undefined, openAfter: true });
+  });
+
   it('a load failure says so and retries', async () => {
     const core = h.installCore(rpc, [h.coreList('L1', 'Sports', [])]);
     core.fail['lists.list'] = 'db';

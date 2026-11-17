@@ -141,13 +141,15 @@ describe('the toolbar at narrow widths', () => {
     renderGuide({ path: `/epg?source=src1&category=g2&at=${defaultStart(Date.now())}`, routes: GRID });
     await screen.findByText('Channel 0');
     const group = screen.getByTestId('guide-group');
-    await waitFor(() => expect(group.textContent).toBe('US| SPORTS BACKUP'));
+    // The group reads as the groups list draws it: the name, the place's tag after it (live4 follow-up).
+    await waitFor(() => expect(within(group).getByText('SPORTS BACKUP (US)')).toBeTruthy());
+    expect(within(group).getByTestId('channel-name-tag').textContent).toBe('US');
     // fit-content (at most the row) and no flex-basis of 0: the toolbar's flex-wrap moves the time
     // controls under a name that does not fit beside them, instead of shrinking the name.
     expect(group.className.split(' ')).toEqual(expect.arrayContaining(['min-w-fit', 'w-auto', 'grow', 'h-auto']));
     expect(group.className).not.toMatch(/(^| )(flex-1|min-w-0|min-w-24)( |$)/);
     // A name longer than the row wraps onto a second line rather than ending in an ellipsis.
-    const name = within(group).getByText('US| SPORTS BACKUP');
+    const name = group.querySelector<HTMLElement>('[aria-hidden="true"]:has([data-testid="channel-name-tag"])')!;
     expect(name.className).not.toContain('truncate');
     expect(name.className.split(' ')).toEqual(expect.arrayContaining(['line-clamp-2', 'break-words']));
     // Wider layouts keep their one-line, cut-to-fit trigger.
@@ -156,7 +158,7 @@ describe('the toolbar at narrow widths', () => {
     pageWidth(1208);
     renderGuide({ path: `/epg?source=src1&category=g2&at=${defaultStart(Date.now())}`, routes: GRID });
     await screen.findByText('Channel 0');
-    await waitFor(() => expect(within(screen.getByTestId('guide-group')).getByText('US| SPORTS BACKUP').className).toContain('truncate'));
+    await waitFor(() => expect(within(screen.getByTestId('guide-group')).getByTestId('channel-name-tag').closest('.truncate')).toBeTruthy());
   });
 
   it("the guide's search is the header's field at every width, so the toolbar has no search control (round 4)", async () => {

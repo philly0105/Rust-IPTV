@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "Es wird nur in {{group}} gesucht.",
   "searchAllChannels": "Alle Sender durchsuchen",
   "searchAllStations": "Alle Radiosender durchsuchen",
+  "searchChannelsFor": "„{{query}}“ in Sendern suchen",
+  "searchStationsFor": "„{{query}}“ in Radiosendern suchen",
   "channelNumberHit": "Sender {{number}}",
   "nowShowing": "jetzt: {{title}}",
   "play": "Abspielen",

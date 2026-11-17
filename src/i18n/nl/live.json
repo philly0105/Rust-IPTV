@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "Alleen binnen {{group}} gezocht.",
   "searchAllChannels": "Alle kanalen doorzoeken",
   "searchAllStations": "Alle zenders doorzoeken",
+  "searchChannelsFor": "Kanalen doorzoeken op “{{query}}”",
+  "searchStationsFor": "Zenders doorzoeken op “{{query}}”",
   "channelNumberHit": "Kanaal {{number}}",
   "nowShowing": "nu: {{title}}",
   "play": "Afspelen",

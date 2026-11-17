@@ -158,6 +158,8 @@
   "noSearchResultsInGroup": "Wyszukiwanie tylko w grupie {{group}}.",
   "searchAllChannels": "Szukaj we wszystkich kanałach",
   "searchAllStations": "Szukaj we wszystkich stacjach",
+  "searchChannelsFor": "Szukaj „{{query}}” w kanałach",
+  "searchStationsFor": "Szukaj „{{query}}” w stacjach",
   "channelNumberHit": "Kanał {{number}}",
   "nowShowing": "teraz: {{title}}",
   "play": "Odtwórz",

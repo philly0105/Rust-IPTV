@@ -616,6 +616,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
   // The list view already lists every programme, so Up next comes with the timeline only.
   // The compact ribbon leaves it out: the List view lists them.
   const showUpNext = details && !compact && mode === 'timeline' && !!channel && !locked && list.length > 0;
+  // In a gap the Now card already shows what comes next: Up next starts after it, as after the
+  // timeline (a gap past the timeline's end listed its "Off Air" twice).
+  const upNextAfter = upcoming ? Math.max(timelineEnd ?? 0, ms(upcoming.end)) : timelineEnd;
   return (
     <section
       aria-label={t('guide')}
@@ -628,7 +631,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       <div className={cn(compact ? COMPACT_BODY_HEIGHT : BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
         {body}
       </div>
-      {showUpNext ? <UpNext programs={list} now={now} guideTime={playbackAt} after={timelineEnd} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
+      {showUpNext ? <UpNext programs={list} now={now} guideTime={playbackAt} after={upNextAfter} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
     </section>
   );
 }

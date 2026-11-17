@@ -50,6 +50,7 @@ import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuI
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useFitsWidth } from '../hooks/useFitsWidth';
+import { useSearchFit } from '../hooks/useSearchFit';
 import { useLastChannel } from '../hooks/useLastChannel';
 import { useListEngaged } from '../hooks/useListEngaged';
 import { LIVE_VIEW_ID, liveViewOf, useLiveViewChannels } from '../hooks/useLiveViewChannels';
@@ -578,13 +579,17 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const groupName = liveView === 'favorites' ? t('favoritesGroup') : liveView === 'recent' ? recentLabel : category?.name;
   // The phone's groups button names the group being browsed, All channels included.
   const groupLabel = groupName ?? (isRadio ? t('allStations') : t('allChannels'));
+  // The group in plain text (the header, the search field's placeholder, the empty search), as the
+  // groups column draws it: "SPORTS (US)" for "US| SPORTS".
+  const groupText = category ? plainChannelName(category.name, false) : undefined;
   // The count always says what it counts ("106 channels"); All channels is the page with no group,
   // so it shows the count alone rather than "All channels · 106 channels". An empty list says so in
   // its own empty state, so "0 stations" over "No radio stations in this source" is left out.
   const countText = paged.total ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
   // The scope under the section, once: the source (with several), the group and the count. The
   // list no longer repeats them over its rows.
-  const scope = groupName && countText ? t('groupWithCount', { group: groupName, count: countText }) : groupName || countText;
+  const scopeName = category && groupName === category.name ? groupText : groupName;
+  const scope = scopeName && countText ? t('groupWithCount', { group: scopeName, count: countText }) : scopeName || countText;
   const headerSubtitle = sourceName && scope ? t('groupWithCount', { group: sourceName, count: scope }) : sourceName || scope;
   // A source without radio (normal, not broken: the rail leaves Radio out for it) opened at its
   // Radio address: one page-level empty state instead of three columns that contradict each other.
@@ -797,6 +802,20 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     [isRadio, sourceId],
   );
   hrefForCategoryRef.current = hrefForCategory;
+  // A channel's name typed into the groups filter (w-walkthrough-07): the query goes to the channel
+  // search of All channels, and the field takes focus so it can be refined there.
+  const searchChannelsFor = useCallback(
+    (q: string) => {
+      closeDrawer();
+      if (routeCategory !== undefined) navigate(hrefForCategory(undefined), { state: { liveSearch: q } });
+      else {
+        setSearch(q);
+        setDebouncedSearch(q);
+      }
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-page-search]')?.focus());
+    },
+    [closeDrawer, routeCategory, navigate, hrefForCategory],
+  );
   const refetchCategories = allCategories.refetch;
   const retryCategories = useCallback(() => void refetchCategories(), [refetchCategories]);
   const onPlayLive = useCallback((c: Channel) => play(c), [play]);
@@ -889,11 +908,24 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // The list's toolbar, made once per change: a zap re-renders the page, and the groups button,
   // the search field and the quality filter (tooltips and icons included) rendered again with it.
   const sidebarVisible = wide && !collapsed;
+  // On a narrow page the groups button beside the field names the group, so the field says only
+  // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
+  const searchPlaceholder = groupOnToolbar
+    ? t('common:search')
+    : category
+      ? t('searchInGroup', { group: groupText })
+      : t(isRadio ? 'searchStations' : 'searchChannels');
+  // A placeholder cut beside the key caps gets their room instead.
+  const searchFit = useSearchFit(searchRef, searchPlaceholder);
+
   const toolbar = useMemo(
     () => (
       // On a phone the groups button's icon and the quality button sit on the page gutter, under
       // the title's edge, not 8 px from the screen's.
-      <div className="flex items-center gap-1 border-b border-divider px-2 py-2 max-sm:ps-[calc(var(--page-gutter)-0.5rem)] max-sm:pe-(--page-gutter)">
+      <div
+        className="flex items-center gap-1 border-b border-divider px-2 py-2 max-sm:ps-[calc(var(--page-gutter)-0.5rem)] max-sm:pe-(--page-gutter)"
+        style={searchFit.textWidth ? ({ '--search-text': `${searchFit.textWidth}px` } as CSSProperties) : undefined}
+      >
         {groupOnToolbar ? (
           // The group being browsed, as the button that changes it: one press opens the groups.
           <Button
@@ -931,9 +963,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         )}
         <SearchInput
           size="sm"
-          // Beside the group's name the field keeps room for its whole "Search"; a long name is
-          // what gives way on a narrow phone.
-          className={groupOnToolbar ? 'min-w-32 flex-1' : 'min-w-0 flex-1'}
+          // Beside the group's name the field keeps room for its whole "Search" in any language
+          // (its icon, the text, and the clear button's room on touch); a long name is what gives
+          // way on a narrow phone.
+          className={
+            groupOnToolbar
+              ? 'min-w-[calc(var(--search-text,3.5rem)+4.5rem+2px)] flex-1 pointer-coarse:min-w-[calc(var(--search-text,3.5rem)+5.25rem+2px)]'
+              : 'min-w-0 flex-1'
+          }
           value={search}
           // Clearing (the clear button) commits at once, like Escape.
           onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}
@@ -962,16 +999,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           ref={searchRef}
           // Ctrl+F and "/" land here (the shell's page-search rule), and the field shows the key.
           data-page-search=""
-          shortcut="mod+f"
-          // On a narrow page the groups button beside it names the group, so the field says only
-          // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
-          placeholder={
-            groupOnToolbar
-              ? t('common:search')
-              : category
-                ? t('searchInGroup', { group: category.name })
-                : t(isRadio ? 'searchStations' : 'searchChannels')
-          }
+          shortcut={searchFit.caps ? 'mod+f' : undefined}
+          placeholder={searchPlaceholder}
+          // Still too long without the caps (a long group's name), it ends in an ellipsis.
+          style={{ textOverflow: 'ellipsis' }}
           label={t(isRadio ? 'searchStations' : 'searchChannels')}
         />
         {/* Radio has no picture: its stations are never filtered by quality. */}
@@ -992,7 +1023,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       </div>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- searchRef and focusListPending are refs
-    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, isRadio, quality.min, quality.hideUntagged, quality.update, toolbarGuideHref, t],
+    [groupOnToolbar, groupLabel, drawerOpen, sidebarVisible, toggleSidebar, search, debouncedSearch, commitSearch, clearSearch, category, searchPlaceholder, searchFit, isRadio, quality.min, quality.hideUntagged, quality.update, toolbarGuideHref, t],
   );
 
   // ---- render -------------------------------------------------------------
@@ -1050,6 +1081,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
           afterPinned={hiddenChannelsRow}
+          onSearchChannels={searchChannelsFor}
+          stations={isRadio}
         />
       </div>
     </>
@@ -1079,7 +1112,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       <EmptyState
         icon={<Search className="size-6" />}
         title={t(isRadio ? 'noStationSearchResults' : 'noSearchResults', { query: debouncedSearch })}
-        description={category ? t('noSearchResultsInGroup', { group: category.name }) : undefined}
+        description={category ? t('noSearchResultsInGroup', { group: groupText }) : undefined}
         action={
           category ? (
             // The channel is usually in another of the many groups: one press takes the query there.
@@ -1332,7 +1365,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         label={plainChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
         onClose={closeMenu}
       />
-      <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu?.category.name ?? ''} onClose={closeGroupMenu} />
+      <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu ? plainChannelName(groupMenu.category.name, false) : ''} onClose={closeGroupMenu} />
       {manageUsed ? <MemoManageDialog open={manageOpen} onClose={closeManage} sourceId={sourceId} contentType={contentType} /> : null}
       {mappingUsed ? <MemoMappingDialog channel={mapping} onClose={closeMapping} /> : null}
     </div>

@@ -170,6 +170,8 @@
   "noSearchResultsInGroup": "البحث داخل {{group}} فقط.",
   "searchAllChannels": "البحث في كل القنوات",
   "searchAllStations": "البحث في كل المحطات",
+  "searchChannelsFor": "ابحث عن “{{query}}” في القنوات",
+  "searchStationsFor": "ابحث عن “{{query}}” في المحطات",
   "channelNumberHit": "القناة {{number}}",
   "nowShowing": "الآن: {{title}}",
   "play": "تشغيل",

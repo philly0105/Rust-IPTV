@@ -66,6 +66,12 @@ export interface CategorySidebarProps {
    * readers only, and the region select takes the row, so "All regions" reads in full in every locale.
    */
   inDrawer?: boolean;
+  /**
+   * Takes a filter that matched no group over to the channel search (a channel's name typed into
+   * the groups filter, the first search box on the page). `stations` names Radio's items.
+   */
+  onSearchChannels?(query: string): void;
+  stations?: boolean;
 }
 
 export function linkClass(active: boolean): string {
@@ -386,6 +392,22 @@ export function CategorySidebar(props: CategorySidebarProps) {
       ) : visible.length === 0 && filter ? (
         <div className="flex flex-col items-start gap-2 px-4 pt-3 text-sm text-fg-muted">
           <p>{t('noGroupsMatch', { query: filter })}</p>
+          {props.onSearchChannels ? (
+            <Button
+              size="sm"
+              variant="primary"
+              // The whole query on two lines if it must, never cut: it is what the button carries over.
+              className="h-auto min-h-8 max-w-full py-1.5 text-start break-words whitespace-normal"
+              onClick={() => {
+                const q = filter.trim();
+                setFilter('');
+                props.onSearchChannels?.(q);
+              }}
+              data-testid="group-filter-search-channels"
+            >
+              {t(props.stations ? 'searchStationsFor' : 'searchChannelsFor', { query: filter.trim() })}
+            </Button>
+          ) : null}
           <Button size="sm" onClick={() => setFilter('')}>
             {t('clearSearch')}
           </Button>
@@ -402,7 +424,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
               return (
                 <div
                   key={c.id}
-                  className="flex min-w-0 items-center"
+                  className="group/grp flex min-w-0 items-center"
                   style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}
                 >
                   <GroupLink
@@ -500,7 +522,7 @@ const GroupLink = memo(function GroupLink({
   // A rest on the link asks for the group's first page with its now/next and favourite flags, so
   // a click shows complete rows at once. Rows that scroll under a still pointer do not count.
   const intent = useRouteIntent(to);
-  // Inside the row's slot (a flex row): the link, then the touch screen's ⋮.
+  // Inside the row's slot (a flex row): the link, then the ⋮ (over the row's end with a mouse).
   return (
     <>
       <Link
@@ -524,7 +546,13 @@ const GroupLink = memo(function GroupLink({
         }
         {...(onMenu ? longPress : undefined)}
         // No callout or text selection on a long press (iOS would offer to open the link).
-        className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
+        className={cn(
+          linkClass(active),
+          'min-w-0 flex-1',
+          // The row stays lit while the pointer is on its ⋮.
+          onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]',
+          onMenu && !active && 'group-hover/grp:bg-hover group-hover/grp:text-fg',
+        )}
         title={locked ? `${c.name} (${lockedLabel})` : c.name}
       >
         {/* Drawn as a channel row draws its name: "PRIME ᴿᴬᵂ" and a quiet "US" after it (w-realdata-13). */}
@@ -544,9 +572,15 @@ const GroupLink = memo(function GroupLink({
             // Under the button from its inline start, as a channel row's ⋮ opens.
             onMenu({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 }, c, index);
           }}
-          // Touch only, as tall as the row (a mouse has the right click). 44 px wide; the row's own
-          // height, so it never reaches into the next row.
-          className="hidden h-full shrink-0 pointer-coarse:inline-flex pointer-coarse:min-h-0"
+          // With a mouse it floats over the row's end on hover, and while the row has keyboard focus,
+          // as a channel row's ⋮ does (w-walkthrough-12): the right click was the only way in. It
+          // fits the row at any density. On touch it sits in the row's flow, always shown, 44 px
+          // wide and the row's own height, so it never reaches into the next row.
+          className={cn(
+            'absolute inset-y-0.5 end-1 h-auto w-7 rounded-md border border-edge bg-surface-2 opacity-0 shadow-2',
+            'group-hover/grp:opacity-100 group-has-[:focus-visible]/grp:opacity-100',
+            'pointer-coarse:static pointer-coarse:h-full pointer-coarse:min-h-0 pointer-coarse:shrink-0 pointer-coarse:rounded-md pointer-coarse:border-transparent pointer-coarse:bg-transparent pointer-coarse:opacity-100 pointer-coarse:shadow-none',
+          )}
           data-testid="group-menu-button"
         />
       ) : null}

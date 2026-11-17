@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 import { cn, fieldClass, Skeleton, usePresence } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 
+import { ChannelName } from './ChannelLogo';
 import type { ScopePickerListProps } from './ScopePickerList';
 
 export interface PickerOption {
@@ -130,6 +131,8 @@ export function ScopePicker({
 
   const all = useMemo(() => sections.flatMap((s) => s.options), [sections]);
   const current = all.find((o) => o.value === value);
+  // A group reads as the list draws it: the place's tag after the name, quiet ("SPORTS US").
+  const currentIsGroup = !!current && !!sections.find((s) => s.id === 'groups')?.options.includes(current);
 
   // The list's chunk, once the page idles after the picker is up (or sooner: hover, focus, open).
   useEffect(() => {
@@ -254,9 +257,13 @@ export function ScopePicker({
         ) : (
           <>
             {optionIcon && current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
-            <span dir="auto" className={cn('min-w-0 flex-1', wrapLabel ? 'line-clamp-2 break-words leading-tight' : 'truncate', !current && 'text-fg-subtle')}>
-              {current?.label ?? placeholder ?? ''}
-            </span>
+            {currentIsGroup ? (
+              <ChannelName name={current.label} twoLines={wrapLabel} className={cn('min-w-0 flex-1', wrapLabel ? 'leading-tight' : 'truncate')} />
+            ) : (
+              <span dir="auto" className={cn('min-w-0 flex-1', wrapLabel ? 'line-clamp-2 break-words leading-tight' : 'truncate', !current && 'text-fg-subtle')}>
+                {current?.label ?? placeholder ?? ''}
+              </span>
+            )}
             <ChevronDown aria-hidden size={16} className={cn('shrink-0 text-fg-muted motion-safe:transition-transform', open && 'rotate-180')} />
           </>
         )}

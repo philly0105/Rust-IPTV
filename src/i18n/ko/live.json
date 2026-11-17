@@ -146,6 +146,8 @@
   "noSearchResultsInGroup": "{{group}} 안에서만 검색합니다.",
   "searchAllChannels": "전체 채널에서 검색",
   "searchAllStations": "전체 방송국에서 검색",
+  "searchChannelsFor": "채널에서 “{{query}}” 검색",
+  "searchStationsFor": "방송국에서 “{{query}}” 검색",
   "channelNumberHit": "채널 {{number}}",
   "nowShowing": "방송 중: {{title}}",
   "play": "재생",

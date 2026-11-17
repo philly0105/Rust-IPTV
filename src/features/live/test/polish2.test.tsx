@@ -459,8 +459,8 @@ describe('groups drawer below 1024 px', () => {
     // button room for a long name. Its accessible name still says what it searches.
     const field = screen.getByRole('searchbox', { name: 'Search channels' });
     expect(field.getAttribute('placeholder')).toBe('Search');
-    // The field keeps room for that whole word; the name is what gives way.
-    expect(field.parentElement?.className).toContain('min-w-32');
+    // The field keeps room for that whole word, measured in the page's language; the name is what gives way.
+    expect(field.parentElement?.className).toContain('min-w-[calc(var(--search-text,3.5rem)+4.5rem+2px)]');
     fireEvent.click(toggle);
     const drawer = await screen.findByTestId('groups-drawer');
     expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
@@ -476,7 +476,7 @@ describe('groups drawer below 1024 px', () => {
     await screen.findByText('Channel 0');
     expect(screen.getByRole('button', { name: 'Show groups' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Groups:/ })).toBeNull();
-    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in US| SPORTS');
+    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in SPORTS (US)');
     tablet.mockRestore();
   });
 });

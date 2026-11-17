@@ -137,12 +137,12 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
       </div>
     );
   } else {
-    body = (
+    const list = (
       <ul
         ref={listRef}
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className={cn('flex flex-col px-2', isPage ? 'min-h-0 flex-1 overflow-y-auto pb-3' : 'max-h-[min(36vh,300px)] overflow-y-auto overscroll-contain pb-1')}
+        className={cn('flex flex-col px-2', !isPage && 'max-h-[min(36vh,300px)] overflow-y-auto overscroll-contain pb-1')}
         data-testid="lists-sidebar"
       >
         {items.map((l, i) => {
@@ -170,6 +170,21 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
         })}
       </ul>
     );
+    body = isPage ? (
+      <div className="min-h-0 flex-1 overflow-y-auto pb-3">
+        {list}
+        {/* New list in words under the lists, as the rail's Add source (w-walkthrough-11): the
+            page's own + adds channels, and a bare icon by the heading was easy to miss. */}
+        <div className="px-2" style={{ height: rowHeight }}>
+          <button type="button" onClick={() => openCreateList({ openAfter: true })} className={cn(linkClass(false), 'w-full')} data-testid="lists-new">
+            <ListPlus className="size-4 shrink-0 text-fg-subtle" aria-hidden />
+            <span className="flex-1 truncate text-start">{t('newList')}</span>
+          </button>
+        </div>
+      </div>
+    ) : (
+      list
+    );
   }
 
   return (
@@ -194,7 +209,8 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
             </button>
           </h2>
         )}
-        <IconButton size="sm" label={t('newList')} icon={<ListPlus className="size-4" />} onClick={() => openCreateList({ openAfter: isPage })} />
+        {/* The list page says New list in words under its lists (or in its empty state). */}
+        {isPage ? null : <IconButton size="sm" label={t('newList')} icon={<ListPlus className="size-4" />} onClick={() => openCreateList({ openAfter: false })} />}
         <IconButton size="sm" label={t('manageLists')} icon={<Settings2 className="size-4" />} onClick={() => openManageLists(activeListId)} />
       </div>
       {/* Under the heading, what a channel list is (library-01): the page is titled by the list. */}

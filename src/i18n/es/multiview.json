@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Mover el mosaico seleccionado a otra posición",
   "shortcutEnlargeTile": "Agrandar el mosaico seleccionado o devolverlo",
   "wallLabel": "Muro de pantallas",
-  "wallKeysHint": "Las flechas pasan de un mosaico a otro. Intro da el sonido al mosaico seleccionado. Supr lo cierra, R cambia su canal y S lo mueve a otra posición.",
+  "wallKeysHint": "Las flechas pasan de un mosaico a otro. Intro da el sonido al mosaico seleccionado. Supr lo cierra, R cambia su canal y S lo mueve a otra posición. Z lo hace grande o lo devuelve a su sitio.",
   "toolbarLabel": "Controles del muro",
   "layoutLabel": "Diseño",
   "layout1x2": "Lado a lado",

@@ -16,7 +16,7 @@
   "shortcutSwapTile": "선택한 타일을 다른 자리로 옮기기",
   "shortcutEnlargeTile": "선택한 타일을 크게 보기 또는 원래대로",
   "wallLabel": "모니터 월",
-  "wallKeysHint": "화살표 키로 타일 사이를 이동합니다. Enter를 누르면 선택한 타일에서 소리가 납니다. Delete는 타일을 닫고, R은 채널을 바꾸고, S는 다른 자리로 옮깁니다.",
+  "wallKeysHint": "화살표 키로 타일 사이를 이동합니다. Enter를 누르면 선택한 타일에서 소리가 납니다. Delete는 타일을 닫고, R은 채널을 바꾸고, S는 다른 자리로 옮깁니다. Z는 큰 타일로 만들거나 원래대로 되돌립니다.",
   "toolbarLabel": "월 컨트롤",
   "layoutLabel": "레이아웃",
   "layout1x2": "나란히",

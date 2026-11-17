@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Seçili kutucuğu başka bir yere taşı",
   "shortcutEnlargeTile": "Seçili kutucuğu büyüt ya da geri koy",
   "wallLabel": "Monitör duvarı",
-  "wallKeysHint": "Ok tuşları kutucuklar arasında gezinir. Enter, seçili kutucuğa sesi verir. Delete onu kapatır, R kanalını değiştirir, S onu başka bir yere taşır.",
+  "wallKeysHint": "Ok tuşları kutucuklar arasında gezinir. Enter, seçili kutucuğa sesi verir. Delete onu kapatır, R kanalını değiştirir, S onu başka bir yere taşır. Z onu büyük kutucuk yapar veya geri koyar.",
   "toolbarLabel": "Duvar kontrolleri",
   "layoutLabel": "Düzen",
   "layout1x2": "Yan yana",

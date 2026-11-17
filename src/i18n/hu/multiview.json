@@ -16,7 +16,7 @@
   "shortcutSwapTile": "A kijelölt csempe áthelyezése másik helyre",
   "shortcutEnlargeTile": "A kijelölt csempe nagyítása vagy visszaállítása",
   "wallLabel": "Monitorfal",
-  "wallKeysHint": "A nyilakkal lehet a csempék között lépni. Az Enter a kijelölt csempének adja a hangot. A Delete bezárja, az R lecseréli a csatornáját, az S másik helyre teszi.",
+  "wallKeysHint": "A nyilakkal lehet a csempék között lépni. Az Enter a kijelölt csempének adja a hangot. A Delete bezárja, az R lecseréli a csatornáját, az S másik helyre teszi. A Z nagy csempévé teszi, vagy visszateszi.",
   "toolbarLabel": "A fal vezérlői",
   "layoutLabel": "Elrendezés",
   "layout1x2": "Egymás mellett",

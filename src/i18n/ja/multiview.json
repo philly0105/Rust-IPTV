@@ -16,7 +16,7 @@
   "shortcutSwapTile": "選択中のタイルを別の位置に移動",
   "shortcutEnlargeTile": "選択中のタイルを大きくする、または元に戻す",
   "wallLabel": "モニターウォール",
-  "wallKeysHint": "矢印キーでタイルを移動します。Enter で選択中のタイルに音声を切り替えます。Delete で閉じ、R でチャンネルを差し替え、S で別の位置に移動します。",
+  "wallKeysHint": "矢印キーでタイルを移動します。Enter で選択中のタイルに音声を切り替えます。Delete で閉じ、R でチャンネルを差し替え、S で別の位置に移動します。Z で大きなタイルにするか、元に戻します。",
   "toolbarLabel": "ウォールの操作",
   "layoutLabel": "レイアウト",
   "layout1x2": "左右に並べる",

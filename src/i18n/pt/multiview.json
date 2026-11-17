@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Mover o quadro selecionado para outra posição",
   "shortcutEnlargeTile": "Aumentar o quadro selecionado ou devolvê-lo",
   "wallLabel": "Mural de telas",
-  "wallKeysHint": "As setas passam de um quadro para outro. Enter dá o som ao quadro selecionado. Delete o fecha, R troca o canal e S o move para outra posição.",
+  "wallKeysHint": "As setas passam de um quadro para outro. Enter dá o som ao quadro selecionado. Delete o fecha, R troca o canal e S o move para outra posição. Z o deixa grande ou o devolve ao lugar.",
   "toolbarLabel": "Controles do mural",
   "layoutLabel": "Layout",
   "layout1x2": "Lado a lado",

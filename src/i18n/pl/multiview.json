@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Przenieś wybrany kafelek na inne miejsce",
   "shortcutEnlargeTile": "Powiększ wybrany kafelek lub go przywróć",
   "wallLabel": "Ściana ekranów",
-  "wallKeysHint": "Strzałki przechodzą między kafelkami. Enter daje dźwięk wybranemu kafelkowi. Delete go zamyka, R zmienia jego kanał, S przenosi go na inne miejsce.",
+  "wallKeysHint": "Strzałki przechodzą między kafelkami. Enter daje dźwięk wybranemu kafelkowi. Delete go zamyka, R zmienia jego kanał, S przenosi go na inne miejsce. Z powiększa go lub przywraca na miejsce.",
   "toolbarLabel": "Sterowanie ścianą",
   "layoutLabel": "Układ",
   "layout1x2": "Obok siebie",

@@ -332,7 +332,7 @@
   "rowResume": "Συνέχιση",
   "rowDetails": "Άνοιγμα λεπτομερειών",
   "minutesLeftShort": "{{count}} λεπ.",
-  "minutesLeftShortResume": "απομένουν {{count}} λεπ.",
+  "minutesLeftShortResume": "Απομένουν {{count}} λεπ.",
   "browseSeries": "Περιήγηση σειρών",
   "speedUnlimited": "Απεριόριστη",
   "speedDownloadTitle": "Ταχύτητα λήψης: {{title}}",

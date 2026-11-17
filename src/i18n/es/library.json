@@ -349,7 +349,7 @@
   "rowResume": "Reanudar",
   "rowDetails": "Abrir detalles",
   "minutesLeftShort": "{{count}} min",
-  "minutesLeftShortResume": "quedan {{count}} min",
+  "minutesLeftShortResume": "Quedan {{count}} min",
   "browseSeries": "Explorar series",
   "speedUnlimited": "Sin límite",
   "speedDownloadTitle": "Velocidad de descarga: {{title}}",

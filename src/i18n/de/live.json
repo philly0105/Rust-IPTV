@@ -92,7 +92,7 @@
   "onNow": "läuft gerade",
   "minutesLeft_one": "noch {{count}} Min.",
   "minutesLeft_other": "noch {{count}} Min.",
-  "minutesLeftShort": "{{count}} min",
+  "minutesLeftShort": "{{count}} Min.",
   "mapEpg": "EPG-Sender zuordnen",
   "mappingAutomatic": "Automatisch zuordnen",
   "mappingNone": "Kein Programmführer",

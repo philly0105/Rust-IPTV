@@ -963,7 +963,9 @@ const TimelineBlock = memo(function TimelineBlock({
       onFocus={() => onFocusProgram(p)}
       // overflow-clip, not hidden: the block is then no scroll container, so its text can stick.
       // A picked block (the header describes it, LG-06) carries a ring in the text colour.
-      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus ${tone} ${
+      // Focus is the app's own outline, a separate frame outside the block (w-a11y-07): the playing
+      // block already wears an amber inset ring, and a 2 px ring in its place read as the same mark.
+      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start ${tone} ${
         pinned ? 'ring-2 ring-fg-muted ring-inset' : ''
       }`}
       style={{ ...inlineStart(block.left + 1, rtl), width: Math.max(2, block.width - 2) }}

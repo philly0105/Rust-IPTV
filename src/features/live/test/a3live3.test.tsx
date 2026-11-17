@@ -167,3 +167,13 @@ describe('the stage in a short landscape window under 768 px (w-a11y-02)', () =>
     expect(screen.getByTestId('stage').className).toContain('max-md:landscape:shrink');
   });
 });
+
+describe("the stage timeline's focus (w-a11y-07)", () => {
+  it("a block keeps the app's focus outline, a frame apart from the playing block's inset ring", async () => {
+    rpcMock.handlers['epg.programs'] = () => [program('Midday Report', now - 30 * MINUTE, now + 30 * MINUTE)];
+    renderAt('/', [{ path: '/', element: <EpgRibbon channel={makeChannel(1)} sourceKind="xtream" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} details /> }]);
+    const block = await screen.findByRole('button', { name: /^Midday Report,/ }, { timeout: 10_000 });
+    expect(block.className).not.toContain('outline-none');
+    expect(block.className).not.toContain('focus-visible:ring');
+  });
+});

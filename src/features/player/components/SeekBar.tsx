@@ -113,7 +113,12 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
       aria-valuenow={Math.floor(shown)}
       aria-valuetext={valueText}
       data-scrubbing={scrubbing ? '' : undefined}
-      className={cn('group/seek relative flex h-6 cursor-pointer touch-none items-center select-none pointer-coarse:h-9', className)}
+      // A finger gets the 44 px floor: the row is 34 px tall and the hit area reaches 10 px up over
+      // the picture (not down, where the buttons are), so the bar and the row keep their size.
+      className={cn(
+        'group/seek relative flex h-6 cursor-pointer touch-none items-center select-none pointer-coarse:h-9 pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:top-[calc(100%-44rem/15)] pointer-coarse:before:bottom-0',
+        className,
+      )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

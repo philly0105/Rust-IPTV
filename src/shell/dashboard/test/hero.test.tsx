@@ -608,11 +608,15 @@ describe('HeroCarousel', () => {
     expect(screen.queryByTestId('hero-controls')).toBeNull();
     expect(hero.dataset['rotating']).toBeUndefined();
     expect(screen.getByRole('tabpanel').getAttribute('aria-label')).toBe('1 of 1');
+    // v-shell-home-09: a phone keeps no room under the buttons for dots it does not draw.
+    expect(screen.getByRole('tabpanel').className).toContain('max-sm:pb-6');
   });
 
   it('plays a movie slide and links to its details', () => {
     const { onPlay } = renderHero([slide('a'), slide('b')]);
     const panel = screen.getByRole('tabpanel');
+    // Two slides: the room for the dots stays.
+    expect(panel.className).not.toContain('max-sm:pb-6');
     fireEvent.click(within(panel).getByRole('button', { name: 'Play' }));
     expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ key: 's1|movie|a' }));
     expect(within(panel).getByRole('link', { name: 'Details' }).getAttribute('href')).toBe('/s/s1/movie/a');

@@ -11,7 +11,7 @@ import type { EpgSourceStatus, GuideSearchHit } from '@/api/types';
 
 import { DAY, HOUR, MINUTE } from '../../lib/epgTime';
 import { HeaderSlot, lastHeader } from '../../test/fakes';
-import { GuideHeaderSearch, GuideSearchPanel, SEARCH_DEBOUNCE_MS } from '../GuideSearchPanel';
+import { ALSO_SHOWN, GuideHeaderSearch, GuideSearchPanel, SEARCH_DEBOUNCE_MS } from '../GuideSearchPanel';
 import { SEARCH_LIMIT } from '../search';
 import { createRpcMock, hit, i18n, installDomStubs, renderGuide, settings } from './harness';
 
@@ -273,6 +273,26 @@ describe('GuideSearchPanel results', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(within(screen.getByTestId('guide-search-also')).getByRole('button', { name: /^SportsCenter, Chan c, / }));
     expect((onSelect.mock.calls[0]![0] as GuideSearchHit).ref.itemId).toBe('c');
+  });
+
+  it('lists the first eight other channels of a widely carried show, then Show all', async () => {
+    const at = NOW_PLUS(HOUR);
+    rpc.handlers['epg.search'] = () =>
+      Array.from({ length: 61 }, (_, i) => hit('SportsCenter', at, at + HOUR, { channelName: `Chan ${i}`, channelNumber: i + 1, ref: { sourceId: 'src1', contentType: 'live', itemId: `x${i}` } }));
+    panel({ query: 'sports' });
+    await waitFor(() => expect(state()).toBe('results'));
+    const toggle = screen.getByTestId('guide-search-also-toggle');
+    expect(toggle.textContent).toBe('+60 channels');
+    fireEvent.click(toggle);
+    const list = () => screen.getByTestId('guide-search-also');
+    expect(within(list()).getAllByRole('button', { name: /^SportsCenter, Chan / })).toHaveLength(ALSO_SHOWN);
+    const all = within(list()).getByTestId('guide-search-also-all');
+    expect(all.textContent).toBe('Show all (61)');
+    fireEvent.click(all);
+    expect(within(list()).getAllByRole('button', { name: /^SportsCenter, Chan / })).toHaveLength(60);
+    expect(within(list()).queryByTestId('guide-search-also-all')).toBeNull();
+    // Focus moves on to the first channel it brought in.
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^SportsCenter, Chan 9, /);
   });
 
   // Review round 1: "05:00 AM" wrapped in the old w-12 column. The time never wraps now and the

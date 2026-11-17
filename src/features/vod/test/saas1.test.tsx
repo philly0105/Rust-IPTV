@@ -227,7 +227,9 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     rpcMock.handlers['downloads.list'] = () => [d];
     rpcMock.handlers['myvideos.playSource'] = () => ({ url: 'http://local/files/42', title: 'Dune: Part Two', isLive: false });
     renderAt('/s/src1/movie/m7', route);
-    expect(await screen.findByTestId('vod-offline-chip')).toBeTruthy();
+    expect(await screen.findByText('Plays the downloaded copy')).toBeTruthy();
+    // Said once, quietly: no green "Downloaded" pill in the meta line beside Watched's (v-vod-04).
+    expect(screen.queryByTestId('vod-offline-chip')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'Resume from 12:34' }));
     await waitFor(() => expect(callsOf('myvideos.playSource')).toEqual([{ id: 42 }]));
     await waitFor(() => expect(played.sources).toHaveLength(1));

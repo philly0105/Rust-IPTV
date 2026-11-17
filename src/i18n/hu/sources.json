@@ -96,7 +96,6 @@
   "testing": "Tesztelés…",
   "testOk": "Csatlakozva.",
   "testOkNamed": "Csatlakozva: {{name}}.",
-  "testError": "Nem sikerült csatlakozni: {{message}}",
   "testFailedGeneric": "A kiszolgáló nem fogadta el ezeket az adatokat.",
   "checkFailedTitle": "Ezekkel az adatokkal nem sikerült csatlakozni",
   "checkFailedNote": "Még semmi sincs mentve. Javítsd az adatokat, vagy mentsd el őket mégis, ha a kiszolgáló csak átmenetileg nem érhető el.",
@@ -189,7 +188,6 @@
   "removeSource": "{{name}} eltávolítása",
   "removeTitle": "{{name}} eltávolítása?",
   "removeBody": "A csatornái, kedvencei, megtekintési előzményei és a Saját listában lévő címei is törlődnek. A forrást később újra hozzáadhatja.",
-  "removeConfirm": "Forrás eltávolítása",
   "removedTitle": "Eltávolítva: {{name}}",
   "removeFailed": "Nem sikerült eltávolítani: {{name}}",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "rádió",
   "statRadio_other": "rádió",
   "tabAccount": "Fiók",
-  "accountFor": "Fiókadatok – {{name}}",
   "accountLead": "Az előfizetés szolgáltató által közölt adatai.",
   "accountRefresh": "Újbóli ellenőrzés",
   "accountLoadFailed": "Nem sikerült betölteni a fiókadatokat",

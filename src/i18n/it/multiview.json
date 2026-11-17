@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Sposta il riquadro selezionato in un'altra posizione",
   "shortcutEnlargeTile": "Ingrandisci il riquadro selezionato o rimettilo a posto",
   "wallLabel": "Parete di schermi",
-  "wallKeysHint": "Le frecce passano da un riquadro all'altro. Invio dà l'audio al riquadro selezionato. Canc lo chiude, R ne sostituisce il canale, S lo sposta in un'altra posizione.",
+  "wallKeysHint": "Le frecce passano da un riquadro all'altro. Invio dà l'audio al riquadro selezionato. Canc lo chiude, R ne sostituisce il canale, S lo sposta in un'altra posizione. Z lo rende il riquadro grande o lo rimette a posto.",
   "toolbarLabel": "Comandi della parete",
   "layoutLabel": "Disposizione",
   "layout1x2": "Affiancati",

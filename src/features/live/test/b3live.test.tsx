@@ -456,7 +456,7 @@ describe('Guide ribbon and guide page states', () => {
     rpcMock.handlers['sources.list'] = () => [];
     renderAt('/epg', [{ path: '/epg', element: <EpgGridPage /> }]);
     expect(await screen.findByText('No sources yet')).toBeTruthy();
-    expect(screen.getByText('Add a source to see its TV guide.')).toBeTruthy();
+    expect(screen.getByText('Add a source first. Its TV guide shows up here.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Add a source' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
     cleanup();

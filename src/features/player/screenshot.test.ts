@@ -197,7 +197,7 @@ describe('takeScreenshot in server mode', () => {
     playerVideo();
     act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing' }));
     await shot.takeScreenshot();
-    const cors = "The stream's server does not allow its picture to be copied (no CORS permission).";
+    const cors = "The stream's server does not allow its picture to be copied.";
     expect(toastMock).toHaveBeenCalledWith({ title: 'Screenshot not saved', description: cors, variant: 'error' });
     expect(useMediaStore.getState().osd).toBeUndefined();
   });

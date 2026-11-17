@@ -116,7 +116,6 @@
   "testing": "جاري التجريب…",
   "testOk": "تّاصل.",
   "testOkNamed": "تّاصل بـ {{name}}.",
-  "testError": "ما قدرناش نتّاصلو: {{message}}",
   "testFailedGeneric": "الخادم ما قبلش هاد المعلومات.",
   "checkFailedTitle": "هاد المعلومات ما تكونيكطاوش",
   "checkFailedNote": "باقي ما تسجّل والو. صلّح المعلومات، ولا سجّلهم كيفما كان إلا كان الخادم طايح غير دابا.",
@@ -237,7 +236,6 @@
   "removeSource": "حيد {{name}}",
   "removeTitle": "تحيد {{name}}؟",
   "removeBody": "القنوات ديالو، المفضلة، سجل المشاهدة والعناوين ديالو فالليستة ديالي غادي يتحيدو معاه. تقدر تزيد المصدر مرة أخرى من بعد.",
-  "removeConfirm": "حيد المصدر",
   "removedTitle": "تحيّد {{name}}",
   "removeFailed": "ما قدرناش نحيدو {{name}}",
 
@@ -309,7 +307,6 @@
   "statRadio_many": "راديو",
   "statRadio_other": "راديوهات",
   "tabAccount": "الحساب",
-  "accountFor": "تفاصيل الحساب ديال {{name}}",
   "accountLead": "تفاصيل الاشتراك كيف عطاها المزود.",
   "accountRefresh": "شوف مرة أخرى",
   "accountLoadFailed": "ما قدرناش نشارجيو تفاصيل الحساب",

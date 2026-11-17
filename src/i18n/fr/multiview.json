@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Déplacer la vignette sélectionnée vers un autre emplacement",
   "shortcutEnlargeTile": "Agrandir la vignette sélectionnée ou la remettre en place",
   "wallLabel": "Mur d’écrans",
-  "wallKeysHint": "Les flèches passent d’une vignette à l’autre. Entrée donne le son à la vignette sélectionnée. Suppr la ferme, R remplace sa chaîne, S la déplace vers un autre emplacement.",
+  "wallKeysHint": "Les flèches passent d’une vignette à l’autre. Entrée donne le son à la vignette sélectionnée. Suppr la ferme, R remplace sa chaîne, S la déplace vers un autre emplacement. Z l’agrandit ou la remet à sa place.",
   "toolbarLabel": "Commandes du mur",
   "layoutLabel": "Disposition",
   "layout1x2": "Côte à côte",

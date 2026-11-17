@@ -96,7 +96,6 @@
   "testing": "Testing…",
   "testOk": "Connected.",
   "testOkNamed": "Connected to {{name}}.",
-  "testError": "Couldn't connect: {{message}}",
   "testFailedGeneric": "The server didn't accept these details.",
   "checkFailedTitle": "These details didn't connect",
   "checkFailedNote": "Nothing is saved yet. Fix the details, or save them anyway if the server is only down for now.",
@@ -189,7 +188,6 @@
   "removeSource": "Remove {{name}}",
   "removeTitle": "Remove {{name}}?",
   "removeBody": "Its channels, favorites, watch history and My List titles go with it. You can add the source again later.",
-  "removeConfirm": "Remove source",
   "removedTitle": "Removed {{name}}",
   "removeFailed": "Couldn't remove {{name}}",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "radio",
   "statRadio_other": "radio",
   "tabAccount": "Account",
-  "accountFor": "Account details for {{name}}",
   "accountLead": "Subscription details reported by the provider.",
   "accountRefresh": "Check again",
   "accountLoadFailed": "Couldn't load the account details",

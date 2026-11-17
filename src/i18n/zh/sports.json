@@ -56,7 +56,7 @@
   "emptyLeagueDayHint": "请选择其他日期，或查看所有联赛。",
   "showAllLeagues": "显示所有联赛",
   "noSourcesTitle": "还没有播放源",
-  "noSourcesHint": "添加播放源即可观看这些比赛。",
+  "noSourcesHint": "请先添加播放源。然后在它的频道上观看这些比赛。",
   "searchTeams": "搜索球队",
   "upcoming": "即将开始",
   "finalGames": "已结束",

@@ -110,7 +110,7 @@ export function StatsPage() {
     body =
       !olderData && (sources.data?.length === 0 || adding) ? (
         // Nothing to watch yet either: the state every page shows until a source exists.
-        <NoSourcesState icon={<ChartColumn />} title={t('emptyTitle')} description={t('emptyMonth')} testId="stats-add-source" />
+        <NoSourcesState icon={<ChartColumn />} title={t('emptyTitle')} description={t('emptyNoSources')} testId="stats-add-source" />
       ) : (
         <EmptyState
           icon={<ChartColumn size={28} aria-hidden />}

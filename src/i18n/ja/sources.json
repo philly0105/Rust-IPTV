@@ -96,7 +96,6 @@
   "testing": "テスト中…",
   "testOk": "接続しました。",
   "testOkNamed": "{{name}}に接続しました。",
-  "testError": "接続できませんでした：{{message}}",
   "testFailedGeneric": "サーバーがこの情報を受け付けませんでした。",
   "checkFailedTitle": "この情報では接続できませんでした",
   "checkFailedNote": "まだ何も保存されていません。情報を修正するか、サーバーが一時的に停止しているだけなら、このまま保存してください。",
@@ -189,7 +188,6 @@
   "removeSource": "{{name}}を削除",
   "removeTitle": "{{name}}を削除しますか？",
   "removeBody": "チャンネル、お気に入り、視聴履歴、マイリストの作品もあわせて削除されます。ソースは後で再度追加できます。",
-  "removeConfirm": "ソースを削除",
   "removedTitle": "{{name}}を削除しました",
   "removeFailed": "{{name}}を削除できませんでした",
 
@@ -257,7 +255,6 @@
   "statRadio_one": "ラジオ",
   "statRadio_other": "ラジオ",
   "tabAccount": "アカウント",
-  "accountFor": "{{name}}のアカウント情報",
   "accountLead": "プロバイダーから提供された契約情報です。",
   "accountRefresh": "再確認",
   "accountLoadFailed": "アカウント情報を読み込めませんでした",

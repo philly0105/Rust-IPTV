@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Geselecteerde tegel naar een andere plek verplaatsen",
   "shortcutEnlargeTile": "Geselecteerde tegel groot maken of terugzetten",
   "wallLabel": "Monitorwand",
-  "wallKeysHint": "Met de pijltoetsen ga je van tegel naar tegel. Enter geeft de geselecteerde tegel het geluid. Delete sluit hem, R vervangt de zender, S verplaatst hem naar een andere plek.",
+  "wallKeysHint": "Met de pijltoetsen ga je van tegel naar tegel. Enter geeft de geselecteerde tegel het geluid. Delete sluit hem, R vervangt de zender, S verplaatst hem naar een andere plek. Z maakt hem de grote tegel of zet hem terug.",
   "toolbarLabel": "Bediening van de wand",
   "layoutLabel": "Indeling",
   "layout1x2": "Naast elkaar",

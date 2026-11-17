@@ -301,10 +301,10 @@ describe('ShellLayout', () => {
     expect(overlay.querySelector('[data-combo="mod+k"]')).toBeTruthy();
     fireEvent.change(within(overlay).getByRole('searchbox', { name: 'Filter shortcuts' }), { target: { value: 'volume' } });
     expect(within(overlay).getByText('Volume up')).toBeTruthy();
-    expect(within(overlay).queryByText('Open the command palette')).toBeNull();
+    expect(within(overlay).queryByText('Search everything, or run a command')).toBeNull();
     // First Escape clears the filter, the second closes the overlay.
     fireEvent.keyDown(document.activeElement ?? window, { key: 'Escape' });
-    expect(within(overlay).getByText('Open the command palette')).toBeTruthy();
+    expect(within(overlay).getByText('Search everything, or run a command')).toBeTruthy();
     fireEvent.keyDown(document.activeElement ?? window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByTestId('shortcut-overlay')).toBeNull());
   });

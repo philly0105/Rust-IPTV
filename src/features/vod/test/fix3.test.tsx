@@ -161,7 +161,7 @@ describe('U4-fix3: TMDB key status on the similar rail', () => {
     rpcMock.handlers['settings.get'] = () => settings({ tmdb: { enabled: true } });
     rpcMock.handlers['tmdb.testKey'] = () => ({ ok: false, message: 'No API key found. Paste one here, or put TMDB_API_KEY=<key> in a .env file.' });
     renderAt('/s/src1/movie/m7', movieRoute);
-    await screen.findByText('Add a TMDB key in Settings > Metadata.');
+    await screen.findByText('Add a TMDB key in Settings > Posters and details.');
     expect(screen.getByRole('link', { name: 'Add a TMDB key' }).getAttribute('href')).toBe('/settings/metadata');
     expect(screen.queryByText('TMDB has no similar titles for this one.')).toBeNull();
     expect(screen.queryByTestId('tmdb-attribution')).toBeNull();

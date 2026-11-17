@@ -117,11 +117,11 @@ describe('the no-data notice (F-GUIDE-NOMATCH)', () => {
     expect(await screen.findByRole('dialog', { name: 'Guide data for Channel 0' })).toBeTruthy();
   });
 
-  it('without any guide programmes, still asks for an XMLTV address', async () => {
+  it('without any guide programmes, still asks for a guide', async () => {
     rpc.handlers['epg.sources'] = () => [{ url: 'http://x/epg.xml', status: 'ok', programCount: 0, channelCount: 0, enabled: true, origin: 'settings' }];
     await openGuide();
     const notice = await screen.findByTestId('guide-no-data');
-    await waitFor(() => expect(notice.textContent).toContain('Add an XMLTV address'));
+    await waitFor(() => expect(notice.textContent).toContain('Add a guide'));
     // LG-10: no guide at all is an empty state with the way to add one, not a pill at the foot.
     expect(within(notice).getByRole('link', { name: 'Add guide' }).getAttribute('href')).toBe('/settings/epg');
   });

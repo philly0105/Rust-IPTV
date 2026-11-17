@@ -56,7 +56,7 @@
   "emptyLeagueDayHint": "Válassz másik napot, vagy nézd meg az összes bajnokságot.",
   "showAllLeagues": "Összes bajnokság",
   "noSourcesTitle": "Még nincs forrás",
-  "noSourcesHint": "Adj hozzá egy forrást, hogy megnézhesd ezeket a mérkőzéseket.",
+  "noSourcesHint": "Először adj hozzá egy forrást. Utána a csatornáin nézheted ezeket a mérkőzéseket.",
   "searchTeams": "Csapat keresése",
   "upcoming": "Hamarosan",
   "finalGames": "Befejezett",

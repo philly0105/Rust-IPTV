@@ -101,7 +101,6 @@
   "testing": "Verifica in corso…",
   "testOk": "Connesso.",
   "testOkNamed": "Connesso a {{name}}.",
-  "testError": "Impossibile connettersi: {{message}}",
   "testFailedGeneric": "Il server non ha accettato questi dati.",
   "checkFailedTitle": "Con questi dati la connessione non è riuscita",
   "checkFailedNote": "Non è ancora stato salvato nulla. Correggi i dati, oppure salvali comunque se il server è solo temporaneamente irraggiungibile.",
@@ -201,7 +200,6 @@
   "removeSource": "Rimuovi {{name}}",
   "removeTitle": "Rimuovere {{name}}?",
   "removeBody": "Verranno eliminati anche i relativi canali, preferiti, cronologia di visione e titoli nella mia lista. Potrai aggiungere di nuovo la sorgente in seguito.",
-  "removeConfirm": "Rimuovi sorgente",
   "removedTitle": "{{name}} rimossa",
   "removeFailed": "Impossibile rimuovere {{name}}",
 
@@ -270,7 +268,6 @@
   "statRadio_many": "radio",
   "statRadio_other": "radio",
   "tabAccount": "Account",
-  "accountFor": "Dettagli dell'account di {{name}}",
   "accountLead": "Dettagli dell'abbonamento comunicati dal fornitore.",
   "accountRefresh": "Controlla di nuovo",
   "accountLoadFailed": "Impossibile caricare i dettagli dell'account",

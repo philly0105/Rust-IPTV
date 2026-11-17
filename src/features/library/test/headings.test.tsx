@@ -182,7 +182,7 @@ describe('my video detail page has one h1', () => {
   it('not found', async () => {
     rpc.handlers['myvideos.list'] = () => library;
     at(99);
-    await screen.findByText('This video is not in your library');
+    await screen.findByText('This video is not in My videos');
     await expectSingleH1('My videos');
   });
 });

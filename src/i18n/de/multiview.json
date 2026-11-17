@@ -16,7 +16,7 @@
   "shortcutSwapTile": "Ausgewählte Kachel auf einen anderen Platz verschieben",
   "shortcutEnlargeTile": "Ausgewählte Kachel groß machen oder zurücksetzen",
   "wallLabel": "Videowand",
-  "wallKeysHint": "Mit den Pfeiltasten wechseln Sie zwischen den Kacheln. Enter gibt der ausgewählten Kachel den Ton. Entf schließt sie, R ersetzt ihren Sender, S verschiebt sie auf einen anderen Platz.",
+  "wallKeysHint": "Mit den Pfeiltasten wechseln Sie zwischen den Kacheln. Enter gibt der ausgewählten Kachel den Ton. Entf schließt sie, R ersetzt ihren Sender, S verschiebt sie auf einen anderen Platz. Z macht sie zur großen Kachel oder setzt sie zurück.",
   "toolbarLabel": "Steuerung der Videowand",
   "layoutLabel": "Layout",
   "layout1x2": "Nebeneinander",

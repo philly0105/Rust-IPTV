@@ -56,7 +56,7 @@
   "emptyLeagueDayHint": "別の日付を選ぶか、すべてのリーグを表示してください。",
   "showAllLeagues": "すべてのリーグを表示",
   "noSourcesTitle": "ソースがまだありません",
-  "noSourcesHint": "これらの試合を見るには、ソースを追加してください。",
+  "noSourcesHint": "まずソースを追加してください。そのチャンネルでこれらの試合を見られます。",
   "searchTeams": "チームを検索",
   "upcoming": "これから",
   "finalGames": "試合終了",

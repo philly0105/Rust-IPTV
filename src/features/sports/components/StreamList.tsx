@@ -10,7 +10,7 @@
  */
 
 import { Bell, BellOff, ChevronDown, ChevronUp, Circle, Clock, History, Play, TriangleAlert, Volume2 } from 'lucide-react';
-import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -23,6 +23,7 @@ import {
   Badge,
   Button,
   ChannelLogo,
+  cn,
   MetaLine,
   Tooltip,
   canCatchUp,
@@ -385,22 +386,32 @@ function StreamRow({
   const slotRepeatsStart =
     program !== null && game.phase === 'scheduled' && game.timeValid && !game.timeNote && Math.abs(ms(program.start) - game.startMs) < MINUTE;
   const slot = program && !slotRepeatsStart ? formatTimeRange(ms(program.start), ms(program.end), i18n.language) : null;
+  const slotStart = program && !slotRepeatsStart ? formatClock(ms(program.start), i18n.language) : null;
   const reason = t(REASON_KEYS[match.reason]);
   // A guide slot already says the match came from the guide, so it stands in for "In guide": the
-  // reason stays its tooltip and is read before it.
+  // reason stays its tooltip and is read before it. So does the regional warning, whose tooltip says
+  // why the channel matched: on the line, the reason is what pushed the slot or the warning to "N.".
   const slotIsReason = slot !== null && match.reason === 'guide';
+  const reasonHidden = slotIsReason || match.regional;
   return (
     <li className="flex min-w-0 items-center gap-3 py-2" aria-current={playing ? 'true' : undefined} data-testid="sports-stream" data-reason={match.reason}>
       <ChannelLogo src={match.channel.logoUrl} name={name} size={32} sourceId={match.sourceId} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      {/* A container, so the line below fits what it says to the room the row's action leaves. */}
+      <div className="@container flex min-w-0 flex-1 flex-col gap-1">
         {/* Named as Live TV's list names it: the country tag after the name, quiet. */}
         <ChannelName name={match.channel.name} strip={ctx.strip} className="truncate text-body-sm font-medium text-fg" testId="sports-stream-name" />
-        {/* One line: where the details don't fit beside an action, the last one truncates and the
-            toggle keeps its place at the end, so the row never grows a line that starts with a dot. */}
+        {/* One line: the quality, the warning and the slot's time keep their width, and only the
+            source's name (or the reason) truncates; the toggle keeps its place at the end, so the row
+            never grows a line that starts with a dot. Where the line is short (a phone, a card with an
+            action), the slot shows its start only, its range in the tooltip, and "Best" goes after a
+            quality tag: the order and the "+2" beside it already say this one is first. */}
         <span className="flex min-w-0 items-center gap-1.5">
           <MetaLine
             as="span"
-            className="flex-nowrap [&>span]:shrink-0 [&>span:last-child]:shrink"
+            className={cn(
+              'flex-nowrap [&>span]:shrink-0 [&>span:has([data-meta-shrink])]:shrink',
+              quality && '@max-[15rem]:[&>span:has([data-testid=sports-best])]:hidden',
+            )}
             items={[
               // First, so the rows' qualities line up down the list; the name's own marker is often cut
               // off or a superscript ("ᴴᴰ").
@@ -416,31 +427,40 @@ function StreamRow({
               // badge, as on an NFL Sunday nearly every card carries it. Before the reason, so where the
               // line runs short the warning is never what truncates.
               match.regional ? (
-                <span
-                  key="regional"
-                  className="flex min-w-0 items-center gap-1 text-warning"
-                  title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')}
-                  data-testid="sports-regional"
-                >
-                  <TriangleAlert aria-hidden size={12} className="shrink-0" />
-                  <span className="truncate">{t('regional')}</span>
-                </span>
+                <Fragment key="regional">
+                  <span
+                    className="flex min-w-0 items-center gap-1 text-warning"
+                    title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')}
+                    data-testid="sports-regional"
+                  >
+                    <TriangleAlert aria-hidden size={12} className="shrink-0" />
+                    <span className="truncate">{t('regional')}</span>
+                  </span>
+                  {slotIsReason ? null : <span className="sr-only">{`, ${reason}`}</span>}
+                </Fragment>
               ) : null,
               // Why it matched is quiet text: a badge on every card made status green the page's loudest colour.
-              slotIsReason ? null : (
-                <span key="reason" className="block truncate" data-testid="sports-reason">
+              reasonHidden ? null : (
+                <span key="reason" className="block truncate" data-meta-shrink="" data-testid="sports-reason">
                   {reason}
                 </span>
               ),
               ctx.multiSource ? (
-                <span key="source" dir="auto" className="block truncate" data-testid="sports-stream-source">
+                <span key="source" dir="auto" className="block truncate" data-meta-shrink="" data-testid="sports-stream-source">
                   {match.sourceName}
                 </span>
               ) : null,
               slot ? (
-                <span key="time" className="block truncate tabular-nums" title={slotIsReason ? reason : undefined} data-testid="sports-stream-slot">
+                <span
+                  key="time"
+                  className="block truncate tabular-nums"
+                  title={slotIsReason ? `${reason}: ${slot}` : slot}
+                  data-meta-shrink=""
+                  data-testid="sports-stream-slot"
+                >
                   {slotIsReason ? <span className="sr-only">{`${reason}, `}</span> : null}
-                  {slot}
+                  <span className="@max-[15rem]:hidden">{slot}</span>
+                  <span className="@min-[15rem]:hidden">{slotStart}</span>
                 </span>
               ) : null,
             ]}

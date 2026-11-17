@@ -854,13 +854,19 @@ describe('sports page', () => {
     // A guide match's slot stands in for "In guide", which stays its tooltip and is read before it.
     expect(within(rows[0]!).queryByTestId('sports-reason')).toBeNull();
     const slot = within(rows[0]!).getByTestId('sports-stream-slot');
-    expect(slot.getAttribute('title')).toBe('In guide');
+    expect(slot.getAttribute('title')).toMatch(/^In guide: \d.*–.*\d/);
     expect(slot.textContent).toMatch(/^In guide, \d/);
+    // Where the line is short the slot shows its start only; the range is kept for a wide line.
+    expect([...slot.children].map((e) => e.className)).toEqual(['sr-only', '@max-[15rem]:hidden', '@min-[15rem]:hidden']);
+    expect(slot.children[2]!.textContent).not.toContain('–');
     // The reason is quiet text, and the regional warning warning-toned text: neither is a badge.
     expect(within(rows[1]!).getByTestId('sports-reason').className).toBe('block truncate');
     expect(within(rows[2]!).getByTestId('sports-regional').className).toContain('text-warning');
     expect(within(rows[1]!).getByText('Event channel')).toBeTruthy();
-    expect(within(rows[2]!).getByText('Network')).toBeTruthy();
+    // A regional row's reason is read, not drawn: the warning's tooltip explains it, and on the line
+    // the reason cut the warning or the slot to "N.".
+    expect(within(rows[2]!).queryByTestId('sports-reason')).toBeNull();
+    expect(within(rows[2]!).getByText(', Network').className).toBe('sr-only');
     expect(within(rows[2]!).getByTestId('sports-regional').textContent).toBe('Regional');
     expect(within(rows[2]!).getByTestId('sports-regional').getAttribute('title')).toBe('This channel may show a different regional game.');
     expect(within(rows[0]!).queryByTestId('sports-regional')).toBeNull();

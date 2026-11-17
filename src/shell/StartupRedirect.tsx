@@ -1,12 +1,20 @@
-import { useEffect } from 'react';
-import { Navigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Navigate, useNavigation } from 'react-router';
 
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { CustomList, Settings, Source } from '@/api/types';
 import { Skeleton } from '@/ui';
 
-import { consumeStartupDeepLink, isRestorableRoute, pendingStartupDeepLink, pullStartupDeepLink, useStartupDeepLink } from './effects';
+import {
+  consumeStartupDeepLink,
+  isRestorableRoute,
+  localLastRoute,
+  pendingStartupDeepLink,
+  pullStartupDeepLink,
+  rememberLastRoute,
+  useStartupDeepLink,
+} from './effects';
 import { routeSourceId } from './railLinks';
 import { useSettings } from './useSettings';
 
@@ -31,9 +39,12 @@ export interface StartupChecks {
   isKnownPath?: (pathname: string) => boolean;
 }
 
-/** The screen `/` restores, before any check: lastRoute in restore-last-view mode. */
+/**
+ * The screen `/` restores, before any check, in restore-last-view mode: this browser's own last
+ * screen, else the server's lastRoute (a device that has none yet).
+ */
 function savedRoute(settings: Settings | undefined): string | undefined {
-  const last = settings?.lastRoute;
+  const last = localLastRoute() ?? settings?.lastRoute;
   return settings?.startupBehavior === 'restore-last-view' && last && isRestorableRoute(last) ? last : undefined;
 }
 
@@ -63,6 +74,7 @@ export function startupTarget(settings: Settings | undefined, checks: StartupChe
  * into the cache: a lastRoute-only update sends no settings.changed event.
  */
 function forgetDeadScreen(target: string): void {
+  rememberLastRoute(target);
   void rpc('settings.update', { patch: { lastRoute: target } })
     .then((s) => queryClient.setQueryData(rpcKey('settings.get'), s))
     .catch(() => undefined);
@@ -120,6 +132,19 @@ export async function resolveStartup(isKnownPath?: (pathname: string) => boolean
 export const loadDashboard = () => import('./dashboard/DashboardPage');
 
 /**
+ * A neutral frame, not the hero's (SH-hero-skeleton-flash): restoring the last screen, the
+ * default, often lands somewhere else, and a new user's Home has no hero at all, so a 22rem
+ * placeholder showed and then collapsed. One faint line where every page starts.
+ */
+function StartupPending() {
+  return (
+    <div className="px-(--page-gutter) py-6" aria-busy="true" data-testid="startup-pending">
+      <Skeleton className="h-5 w-48 opacity-60" />
+    </div>
+  );
+}
+
+/**
  * The index route. On desktop it first waits for the cold-start deep link
  * pull; a pending link wins over the startup target, so the app lands where
  * the link points even when its route is lazy or settings answer late.
@@ -128,6 +153,11 @@ export const loadDashboard = () => import('./dashboard/DashboardPage');
 export function StartupRedirect({ isKnownPath }: { isKnownPath?: (pathname: string) => boolean } = {}) {
   const settings = useSettings();
   const link = useStartupDeepLink();
+  // A link the user pressed while startup still waited (late settings, a slow list): that page is
+  // on its way (its code loading), and a redirect now would cancel it for the saved screen.
+  const navigation = useNavigation();
+  const [userMoved, setUserMoved] = useState(false);
+  if (!userMoved && navigation.location && navigation.location.pathname !== '/') setUserMoved(true);
   // The saved screen points at a source or a list, so startup needs that list to check it.
   const saved = savedRoute(settings.data);
   const checkSource = saved !== undefined && routeSourceId(saved) !== undefined;
@@ -154,16 +184,10 @@ export function StartupRedirect({ isKnownPath }: { isKnownPath?: (pathname: stri
   useEffect(() => {
     if (stale) forgetDeadScreen(target);
   }, [stale, target]);
+  if (userMoved) return <StartupPending />;
   if (link.path) return <Navigate to={link.path} replace />;
   if (settings.isPending || !link.settled || checksPending) {
-    return (
-      // A neutral frame, not the hero's (SH-hero-skeleton-flash): restoring the last screen, the
-      // default, often lands somewhere else, and a new user's Home has no hero at all, so a
-      // 22rem placeholder showed and then collapsed. One faint line where every page starts.
-      <div className="px-(--page-gutter) py-6" aria-busy="true" data-testid="startup-pending">
-        <Skeleton className="h-5 w-48 opacity-60" />
-      </div>
-    );
+    return <StartupPending />;
   }
   // On error fall back to the dashboard; it shows its own error states.
   return <Navigate to={target} replace />;

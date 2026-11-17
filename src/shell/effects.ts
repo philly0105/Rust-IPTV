@@ -518,7 +518,31 @@ function routePathname(route: string | undefined): string | undefined {
 }
 
 /**
- * Persists the current route, query included, as settings.lastRoute.
+ * This browser's own last screen. settings.lastRoute is one value per server, written by whichever
+ * browser moved last, so a phone opened where the desktop had been; startup reads this first and
+ * the server's value only on a device that has none yet.
+ */
+const LAST_ROUTE_KEY = 'tsrust.lastRoute';
+
+export function localLastRoute(): string | undefined {
+  try {
+    return localStorage.getItem(LAST_ROUTE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function rememberLastRoute(path: string): void {
+  try {
+    localStorage.setItem(LAST_ROUTE_KEY, path);
+  } catch {
+    // storage blocked: the server's value stands in
+  }
+}
+
+/**
+ * Persists the current route, query included, in this browser (localLastRoute) and as
+ * settings.lastRoute, the fallback for a device with no memory of its own.
  *
  * A new screen (pathname) is saved after a debounce. A query-only change on
  * the same screen (typing a search's ?q=, a filter) is not timed at all: each
@@ -527,9 +551,9 @@ function routePathname(route: string | undefined): string | undefined {
  */
 export function useLastRoutePersistence(enabled: boolean, initial: string | undefined): void {
   const location = useLocation();
-  const saved = useRef<string | undefined>(initial);
+  const saved = useRef<string | undefined>(localLastRoute() ?? initial);
   useEffect(() => {
-    saved.current = initial;
+    saved.current = localLastRoute() ?? initial;
   }, [initial]);
   useEffect(() => {
     if (!enabled) return;
@@ -541,6 +565,7 @@ export function useLastRoutePersistence(enabled: boolean, initial: string | unde
       if (!pending) return;
       pending = false;
       saved.current = path;
+      rememberLastRoute(path);
       rpc('settings.update', { patch: { lastRoute: path } })
         .then((s) => queryClient.setQueryData(rpcKey('settings.get'), s))
         .catch(() => {

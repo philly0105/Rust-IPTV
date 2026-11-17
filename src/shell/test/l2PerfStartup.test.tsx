@@ -46,6 +46,7 @@ const flush = () =>
 
 beforeEach(() => {
   rpcMock.reset();
+  localStorage.removeItem('tsrust.lastRoute');
   rpcMock.handlers['sources.list'] = () => [makeSource('s1')];
   rpcMock.handlers['settings.update'] = () => settings();
 });

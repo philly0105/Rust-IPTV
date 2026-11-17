@@ -845,7 +845,7 @@ describe('sports page', () => {
     expect(more.getAttribute('aria-expanded')).toBe('false');
     // Its hit area reaches 44 px on touch, and 24 px for a mouse, just short of the name above it.
     const hit = more.className.split(' ');
-    expect(hit).toEqual(expect.arrayContaining(['after:absolute', 'after:-inset-y-0.5', 'pointer-coarse:after:-inset-y-3']));
+    expect(hit).toEqual(expect.arrayContaining(['after:absolute', 'after:-inset-y-0.5', 'pointer-coarse:after:-inset-y-[calc(12.625rem/15)]']));
     fireEvent.click(more);
     rows = within(list).getAllByTestId('sports-stream');
     // The toggle stays put in the first row, so the same press closes the list again.

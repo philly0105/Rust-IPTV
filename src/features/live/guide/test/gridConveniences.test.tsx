@@ -96,6 +96,24 @@ describe('the row menu (F-GUIDE-MENU)', () => {
     await waitFor(() => expect(useToastStore.getState().toasts.at(-1)?.title).toBe('Added Channel 2 to favorites'));
   });
 
+  it('shows the new favorite state at once and sends one toggle while it is in flight (states-feedback-14)', async () => {
+    rpc.handlers['favorites.contains'] = () => [];
+    let answer: (v: { isFavorite: boolean }) => void = () => undefined;
+    rpc.handlers['favorites.toggle'] = () => new Promise((resolve) => (answer = resolve));
+    await openGuide();
+    fireEvent.contextMenu(await screen.findByText('Channel 2'));
+    await waitFor(() => expect(item('Add to favorites').hasAttribute('disabled')).toBe(false));
+    fireEvent.click(item('Add to favorites'));
+    // Reopened before the core answers: the menu already says it is a favorite, and a second
+    // press does not send a toggle that could cross the first.
+    fireEvent.contextMenu(await screen.findByText('Channel 2'));
+    fireEvent.click(await within(menu()).findByRole('menuitem', { name: 'Remove from favorites' }));
+    expect(rpc.of('favorites.toggle')).toHaveLength(1);
+    act(() => answer({ isFavorite: true }));
+    await waitFor(() => expect(useToastStore.getState().toasts.at(-1)?.title).toBe('Added Channel 2 to favorites'));
+    expect(rpc.of('favorites.toggle')).toHaveLength(1);
+  });
+
   it('offers removal for a favorite, and opens guide matching for the row’s channel', async () => {
     rpc.handlers['favorites.contains'] = (a) => (a as { refs: ItemRef[] }).refs;
     await openGuide();
@@ -180,7 +198,7 @@ describe('favorites and list views (F-GUIDE-CONVENIENCES)', () => {
     await openGuide();
     // All channels, then the views (favorites, each list) under their heading, then the groups.
     fireEvent.click(group());
-    expect(screen.getAllByRole('option').map((o) => o.textContent).slice(0, 3)).toEqual(['All channels', 'Favorites', 'List: Picks']);
+    expect(screen.getAllByRole('option').map((o) => o.textContent).slice(0, 4)).toEqual(['All channels', 'With guide data', 'Favorites', 'List: Picks']);
     fireEvent.click(screen.getByRole('option', { name: 'Favorites' }));
     await waitFor(() => expect(router.location?.search).toContain('view=favorites'));
     expect(rpc.of('favorites.list')).toContainEqual({ sourceId: 'src1' });

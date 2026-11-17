@@ -1590,17 +1590,41 @@ export function EpgGridPage() {
   // "Match guide channel" from the row menu and the no-match notice, as on the Live page.
   const [mapping, setMapping] = useState<Channel | null>(null);
   const closeMapping = useCallback(() => setMapping(null), []);
+  // As on Live: the menu shows the new state at once (reopened before the core answers, it says
+  // "Remove from favorites" already), and one toggle per channel is in flight at a time, so two
+  // quick presses cannot add and remove in a race.
+  const [favOverrides, setFavOverrides] = useState<ReadonlyMap<ItemKey, boolean>>(() => new Map());
+  const favInFlight = useRef(new Set<ItemKey>());
+  const setFavOverride = (key: ItemKey, value: boolean | undefined) =>
+    setFavOverrides((prev) => {
+      const next = new Map(prev);
+      if (value === undefined) next.delete(key);
+      else next.set(key, value);
+      return next;
+    });
   const toggleFavorite = useStable(async (channel: Channel, wasFavorite: boolean) => {
+    const key = itemKey(channel.ref);
+    if (favInFlight.current.has(key)) return;
+    favInFlight.current.add(key);
+    setFavOverride(key, !wasFavorite);
     const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
     try {
       const res = await rpc('favorites.toggle', {
         ref: channel.ref,
         snapshot: { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
       });
+      setFavOverride(key, res.isFavorite);
+      // The menu's own question, answered: closed, it is not refetched, and a reopen would show
+      // the old state until the refetch landed.
+      queryClient.setQueryData(rpcKey('favorites.contains', { refs: [channel.ref] }), res.isFavorite ? [channel.ref] : []);
       await invalidate('favorites.');
       toast({ title: res.isFavorite ? t('favoriteAdded', { name }) : t('favoriteRemoved', { name }), variant: 'success' });
     } catch (err) {
       toast({ title: wasFavorite ? t('favoriteRemoveFailed') : t('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
+    } finally {
+      favInFlight.current.delete(key);
+      // The refetched `favorites.contains` is the truth from here on.
+      setFavOverride(key, undefined);
     }
   });
   /** The keyboard's way in: the menu of the cursor row's channel, anchored at its channel cell. */
@@ -2424,6 +2448,7 @@ export function EpgGridPage() {
               : programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title
           }
           programme={rowMenu.programme}
+          favoriteOverride={favOverrides.get(itemKey(rowMenu.channel.ref))}
           now={now}
           onProgrammeLink={offerProgrammeLink}
           onPlay={playLive}
@@ -2992,6 +3017,7 @@ function GuideRowMenu({
   source,
   nowTitle,
   programme,
+  favoriteOverride,
   now,
   onProgrammeLink,
   onPlay,
@@ -3003,6 +3029,8 @@ function GuideRowMenu({
   source: Source | undefined;
   nowTitle: string | undefined;
   programme?: EpgProgram;
+  /** The state a toggle still in flight set, before `favorites.contains` has the core's answer. */
+  favoriteOverride?: boolean;
   now: number;
   onProgrammeLink(url: string, programme: EpgProgram): void;
   onPlay(channel: Channel): void;
@@ -3014,7 +3042,7 @@ function GuideRowMenu({
   const ch = menu.channel;
   const name = displayChannelName(ch.name, stripCountryPrefix);
   const favorites = useRpcQuery('favorites.contains', { refs: [ch.ref] });
-  const favorite = favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined;
+  const favorite = favoriteOverride ?? (favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined);
   const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide, programme, now, onProgrammeLink });
   return <ContextMenu pos={menu.pos} items={items} header={channelMenuHeader(ch, name, nowTitle)} label={name} onClose={onClose} />;
 }

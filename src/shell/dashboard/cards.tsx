@@ -11,7 +11,9 @@ import { displayChannelName, splitPlaceTag, stripCountryPrefix } from '@/lib/cha
 import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
 import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from '@/features/mylist/components/MyListButton';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
+import { useLongPress, type LongPressHandlers } from '@/features/live/hooks/useLongPress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
+import type { PosterMenuItem } from '@/features/vod/hooks/usePosterMenu';
 import { intlLocale, listSeparator } from '@/lib/intl';
 import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, WatchedChip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
 
@@ -219,6 +221,9 @@ interface PosterCardViewProps extends PosterCardProps {
   artCorner?: ReactNode;
   /** Extra classes for the artwork frame. */
   artClassName?: string;
+  /** The poster's menu: right click, the context-menu key, Shift+F10 and a long press (`longPress`) open it. */
+  openMenu?: ((pos: { x: number; y: number }) => void) | undefined;
+  longPress?: LongPressHandlers | undefined;
 }
 
 function PosterCardView({
@@ -237,6 +242,8 @@ function PosterCardView({
   artCorner,
   artClassName,
   search,
+  openMenu,
+  longPress,
 }: PosterCardViewProps) {
   // Only a link to a movie or series page prefetches; play cards and search links do not.
   const opens = onPlay ? undefined : linkTarget(to, title, posterUrl)?.itemRef;
@@ -281,7 +288,10 @@ function PosterCardView({
       to={to ?? '#'}
       {...rail}
       aria-label={ariaLabel}
-      className={cardRoot}
+      // A long press opens the menu: no link preview or text selection on touch.
+      className={cn(cardRoot, longPress && 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]')}
+      {...menuHandlers<HTMLAnchorElement>(openMenu)}
+      {...longPress}
       onPointerEnter={opens ? intent.onPointerEnter : undefined}
       onPointerLeave={opens ? intent.onPointerLeave : undefined}
       onFocus={opens ? intent.onFocus : undefined}
@@ -358,9 +368,16 @@ function CornerMyListButton(props: MyListButtonProps) {
  */
 function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
   const { rail, myList, progress, myListMark = 'saved' } = props;
+  const openPosterMenu = useContext(PosterMenuContext);
+  const kinds = useContext(SourceKindContext);
+  const openMenu = openPosterMenu
+    ? (pos: { x: number; y: number }) => openPosterMenu({ pos, item: posterMenuItem(props), sourceKind: kinds?.get(myList.itemRef.sourceId) })
+    : undefined;
+  // iOS fires no contextmenu on a long press of a link (it shows its own preview): a timer does.
+  const longPress = useLongPress((x, y) => openMenu?.({ x, y }));
   return (
     <div className="group/poster relative min-w-0">
-      <PosterCardView {...props} artClassName={WRAPPER_HOVER_ART} />
+      <PosterCardView {...props} artClassName={WRAPPER_HOVER_ART} openMenu={openMenu} longPress={openMenu ? longPress : undefined} />
       {/* The artwork's box (2:3 at the card's width), so the toggle sits on the poster's corner. */}
       <div className={cn('pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]', WRAPPER_HOVER_LAYER)}>
         {/* The rail is one Tab stop (roving tabindex): only the card holding it also offers its toggle. */}
@@ -371,8 +388,14 @@ function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef;
           snapshot={myList.snapshot}
           className={cn(
             'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 group-has-[a:focus-visible]/poster:opacity-100 focus-visible:opacity-100',
-            // No hover on a touch screen: there an invisible toggle would only take stray taps.
-            myListMark === 'saved' ? 'data-in-list:opacity-100 [@media(hover:none)]:opacity-100' : '[@media(hover:none)]:hidden',
+            // No hover on a touch screen: there an invisible toggle would only take stray taps. With
+            // the poster's menu (a long press) holding Add to My List, a touch screen shows the
+            // toggle only as the saved marker, not as an add disc on every poster (home-07).
+            myListMark === 'hover'
+              ? '[@media(hover:none)]:hidden'
+              : openMenu
+                ? 'data-in-list:opacity-100 [@media(hover:none)]:not-data-in-list:hidden'
+                : 'data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
             'motion-safe:transition-[opacity,background-color,color,transform]',
             cornerOffset(progress),
           )}
@@ -380,6 +403,15 @@ function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef;
       </div>
     </div>
   );
+}
+
+/** What a poster's menu acts on: its title, with a caption that is only a year as the menu's subtitle. */
+function posterMenuItem({ title, posterUrl, myList }: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }): PosterMenuItem {
+  const item: PosterMenuItem = { ref: myList.itemRef, name: title };
+  const year = myList.snapshot.subtitle;
+  if (year && /^\d{4}$/.test(year)) item.year = Number(year);
+  if (posterUrl) item.posterUrl = posterUrl;
+  return item;
 }
 
 /** A channel card asking for its menu (Run 2 C2): where to draw it, the channel, and the card's Play. */
@@ -672,6 +704,17 @@ export interface CardMenuItem {
 
 /** Opens a card's action menu. `ChannelMenuHost` provides it; without it a card has no menu. */
 export const CardMenuContext = createContext<((request: CardMenuRequest) => void) | null>(null);
+
+/** A movie or series poster asking for the Movies grids' poster menu (usePosterMenu): where to draw it, and the title. */
+export interface PosterMenuRequest {
+  pos: { x: number; y: number };
+  item: PosterMenuItem;
+  /** The title's source kind, for Play; unknown, Play opens the details instead. */
+  sourceKind: SourceKind | undefined;
+}
+
+/** Opens a poster's menu. `ChannelMenuHost` provides it; without it a poster has no menu. */
+export const PosterMenuContext = createContext<((request: PosterMenuRequest) => void) | null>(null);
 
 /**
  * 16:9 artwork for a title that may only have a poster: the backdrop when there is one; else

@@ -19,6 +19,7 @@ const MENU_ONLY = [
   '@/features/multiview/addChannel',
   '@/features/multiview/useMultiviewMenuItem',
   '@/features/parental/lockMenu',
+  '@/features/vod/hooks/usePosterMenu',
   './ChannelMenuBody',
 ];
 

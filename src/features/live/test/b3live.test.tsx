@@ -274,6 +274,29 @@ describe('Live list: states', () => {
   });
 });
 
+describe('Live list: a number typed (v-live-10)', () => {
+  it('names the number over the first match when that is the channel, instead of a card repeating it', async () => {
+    rpcMock.handlers['catalog.channelByNumber'] = () => makeChannel(5);
+    renderAt('/s/src1/live', ROUTE);
+    fireEvent.change(searchBox(), { target: { value: '5' } });
+    const caption = await screen.findByTestId('group-caption');
+    expect(caption.textContent).toBe('Channel 5 · News');
+    expect(caption.closest('[role="listitem"]')?.getAttribute('data-index')).toBe('0');
+    expect(screen.queryByTestId('live-number-hit')).toBeNull();
+  });
+
+  it('a channel not leading the matches keeps its card, in the number and logo columns of the rows', async () => {
+    rpcMock.handlers['catalog.channelByNumber'] = () => makeChannel(4);
+    renderAt('/s/src1/live', ROUTE);
+    fireEvent.change(searchBox(), { target: { value: '5' } });
+    const hit = await screen.findByTestId('live-number-hit');
+    expect(hit.firstElementChild?.textContent).toBe('5');
+    expect(hit.firstElementChild?.className).toContain('w-[var(--num-w');
+    await within(list()).findByText('Channel 5');
+    expect(within(list()).queryByText('Channel 5 · News')).toBeNull();
+  });
+});
+
 describe('Live list: keyboard', () => {
   it('the search field is the page search ("/" and Ctrl+F); Escape clears it, a second Escape returns to the list cursor', async () => {
     renderAt('/s/src1/live', ROUTE);

@@ -9,6 +9,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -30,7 +31,7 @@ import {
   type PlayerSource,
 } from '@/api/types';
 
-import { Button, buttonClass, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canZap, isPendingZap } from '@/features/player/store';
 import { catchupResumeFor } from '@/features/player/catchupResume';
@@ -70,7 +71,7 @@ import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 import { ChannelList } from './ChannelList';
-import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, NUMBER_WIDTH, RowSkeleton } from './ChannelRow';
 import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
@@ -263,6 +264,18 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // empty or error state, the old cursor channel no longer drives the ribbon.
   const listKey = `${contentType}|${sourceId}|${routeCategory ?? ''}|${debouncedSearch}`;
   const listShown = !paged.error && !paged.isLoading && paged.total !== 0;
+  // The number's channel already leads the matches: a caption over that row says so, in place of
+  // a card that repeated it (v-live-10).
+  const firstRow = numberHit ? paged.getChannel(0) : undefined;
+  const hitLeads = !!numberHit && !!firstRow && sameRef(firstRow.ref, numberHit.ref);
+  // The card's number column is as wide as the list's: ChannelList widens it past 3 digits by the
+  // count and the numbers it has shown.
+  const hitDigits = useMemo(() => {
+    if (!numberHit) return 0;
+    let digits = (paged.total ?? 0) >= 1000 ? String(paged.total).length : 0;
+    for (const { channel } of paged.loaded) digits = Math.max(digits, String(channel.number ?? '').length);
+    return digits;
+  }, [numberHit, paged.total, paged.loaded]);
   const [reported, setReported] = useState<{ key: string; channel: Channel | undefined }>({ key: '', channel: undefined });
   const listKeyRef = useRef(listKey);
   listKeyRef.current = listKey;
@@ -1191,6 +1204,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         onActiveChange={onActiveChange}
         locks={locks}
         showGroup={!!debouncedSearch && !categoryId && !liveView}
+        leadCaption={hitLeads ? t('channelNumberHit', { number: searchNumber }) : undefined}
         groupId={categoryId}
         hideFavoriteMark={liveView === 'favorites'}
       />
@@ -1254,7 +1268,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           </p>
         ) : null}
         {qualityFiltering && !qualityEmpty ? <QualityFilterBar quality={quality} /> : null}
-        {numberHit && searchNumber && !paged.error ? (
+        {numberHit && searchNumber && !paged.error && !hitLeads ? (
           <button
             type="button"
             onClick={() => play(numberHit)}
@@ -1264,9 +1278,12 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
             }}
             data-testid="live-number-hit"
-            className="flex w-full min-w-0 shrink-0 items-center gap-3 border-b border-divider px-3 py-2 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+            // The list's own columns (number, 40 px logo, name), so it reads as a channel row (v-live-10).
+            style={hitDigits > 3 ? ({ '--num-w': `${hitDigits}ch` } as CSSProperties) : undefined}
+            className="flex w-full min-w-0 shrink-0 items-center gap-3 border-b border-divider py-2 ps-2.5 pe-3 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
           >
-            <ChannelLogo src={numberHit.logoUrl} name={displayChannelName(numberHit.name, prefs.stripCountryPrefix)} size={32} sourceId={numberHit.ref.sourceId} />
+            <span className={cn('shrink-0 text-end font-numeric text-sm text-fg-subtle tabular-nums', NUMBER_WIDTH)}>{numberHit.number ?? searchNumber}</span>
+            <ChannelLogo src={numberHit.logoUrl} name={displayChannelName(numberHit.name, prefs.stripCountryPrefix)} size={40} sourceId={numberHit.ref.sourceId} />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-caption text-fg-subtle">{t('channelNumberHit', { number: searchNumber })}</span>
               <ChannelName name={numberHit.name} strip={prefs.stripCountryPrefix} title={numberHit.name} className="truncate text-body-sm font-medium text-fg" />

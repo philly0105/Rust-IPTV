@@ -81,7 +81,7 @@ export interface ChannelRowProps {
  * sets `--num-w` (a source numbered to 57,000 spilled "57012" past the row's padding). In `ch` of
  * the number's own tabular figures, so every row's logo stays on one line.
  */
-const NUMBER_WIDTH = 'w-[var(--num-w,1.75rem)] min-w-7';
+export const NUMBER_WIDTH = 'w-[var(--num-w,1.75rem)] min-w-7';
 
 /** Same columns and height as a loaded row, so nothing moves when the data lands. */
 export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {

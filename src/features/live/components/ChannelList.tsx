@@ -45,6 +45,8 @@ export interface ChannelListProps {
   zapKeys?: boolean;
   /** See `ChannelRow.showGroup`: a search across every group. */
   showGroup?: boolean;
+  /** A caption over the first row: a number typed found the channel that leads the matches (v-live-10). */
+  leadCaption?: string;
   /** See `ChannelRow.groupId`: the group the list is open on. */
   groupId?: string;
   /** See `ChannelRow.hideFavoriteMark`: the Favorites view. */
@@ -153,14 +155,15 @@ export function ChannelList(props: ChannelListProps) {
   // above the run's first row (v-live-02): on every row it left a few letters of group and title.
   const captionHeight = useRowHeight(GROUP_CAPTION_HEIGHT, GROUP_CAPTION_SPACING);
   const groupCaption = (i: number): string | undefined => {
-    const { paged: p, showGroup } = propsRef.current;
-    if (!showGroup) return undefined;
+    const { paged: p, showGroup, leadCaption } = propsRef.current;
     const ch = p.getChannel(i);
-    if (!ch?.categoryName || isSeparatorName(ch.name)) return undefined;
-    if (i === 0) return ch.categoryName;
+    const group = showGroup && ch?.categoryName && !isSeparatorName(ch.name) ? ch.categoryName : undefined;
+    if (i === 0 && leadCaption) return group ? `${leadCaption} · ${group}` : leadCaption;
+    if (!group) return undefined;
+    if (i === 0) return group;
     const prev = p.getChannel(i - 1);
     // Not loaded yet: no band until it is known, then the sizes are measured again.
-    return prev && prev.categoryName !== ch.categoryName ? ch.categoryName : undefined;
+    return prev && prev.categoryName !== group ? group : undefined;
   };
   const virtualizer = useListVirtualizer({
     count,
@@ -182,12 +185,13 @@ export function ChannelList(props: ChannelListProps) {
   }, [rowHeight, virtualizer]);
   // New results in a search across groups: their caption bands change the sizes.
   const captionsFor = props.showGroup ? paged.loaded : null;
-  const captionsMeasured = useRef(captionsFor);
+  const captionsMeasured = useRef({ captionsFor, lead: props.leadCaption });
   useLayoutEffect(() => {
-    if (captionsMeasured.current === captionsFor) return;
-    captionsMeasured.current = captionsFor;
+    const m = captionsMeasured.current;
+    if (m.captionsFor === captionsFor && m.lead === props.leadCaption) return;
+    captionsMeasured.current = { captionsFor, lead: props.leadCaption };
     virtualizer.measure();
-  }, [captionsFor, virtualizer]);
+  }, [captionsFor, props.leadCaption, virtualizer]);
   const items = virtualizer.getVirtualItems();
   const first = items[0]?.index ?? 0;
   const last = items[items.length - 1]?.index ?? 0;
@@ -322,7 +326,8 @@ export function ChannelList(props: ChannelListProps) {
   // 30,132 takes 5ch from the first frame instead of moving every name past 9,999 (v-live-09).
   const widest = useRef({ key: resetKey, digits: 0 });
   if (widest.current.key !== resetKey) widest.current = { key: resetKey, digits: 0 };
-  if (count >= 1000) widest.current.digits = Math.max(widest.current.digits, String(count).length);
+  // Not the count the previous list leaves while this one loads (a search of "12" took 5ch from All channels).
+  if (count >= 1000 && !paged.refreshing) widest.current.digits = Math.max(widest.current.digits, String(count).length);
   for (const l of paged.loaded) {
     const n = l.channel.number;
     if (n !== undefined && n >= 1000) widest.current.digits = Math.max(widest.current.digits, String(n).length);

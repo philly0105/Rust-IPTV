@@ -13,6 +13,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, TEXT_LINK, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
@@ -32,7 +33,7 @@ import {
   type FavoriteRow,
 } from '../lib/favorites';
 import { addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../lib/entryMenu';
-import { SourceGoneError, openEntry, relativeTime } from '../lib/open';
+import { SourceGoneError, openEntry, relativeTime, spokenEntryTitle } from '../lib/open';
 
 const EntryChannelMenu = lazy(() => import('../components/EntryChannelMenu').then((m) => ({ default: m.EntryChannelMenu })));
 
@@ -60,6 +61,7 @@ export function FavoritesPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  const { stripCountryPrefix } = useDisplayPrefs();
   // Add a source's dialog is open: the no-source line stays with it (see BrowseAction).
   const adding = useNoSourcesAdding();
   const args = useMemo(() => (sourceId ? { sourceId } : {}), [sourceId]);
@@ -124,7 +126,7 @@ export function FavoritesPage() {
         try {
           await rpc('favorites.remove', { ref: entry.ref });
           toast({
-            title: t('favoriteRemoved', { title: entry.snapshot.title }),
+            title: t('favoriteRemoved', { title: spokenEntryTitle(entry.ref, entry.snapshot.title, stripCountryPrefix) }),
             variant: 'info',
             action: {
               label: t('undo'),
@@ -144,7 +146,7 @@ export function FavoritesPage() {
         }
       });
     },
-    [args, entries, run, sourceId, t, toast],
+    [args, entries, run, sourceId, stripCountryPrefix, t, toast],
   );
 
   const open = useCallback(
@@ -152,13 +154,13 @@ export function FavoritesPage() {
       // Channel up/down then walks this page's favorites in their order.
       openEntry(entry.ref, entry.snapshot, sources.get(entry.ref.sourceId), navigate, args).catch((err: unknown) => {
         toast({
-          title: t('openFailed', { title: entry.snapshot.title }),
+          title: t('openFailed', { title: spokenEntryTitle(entry.ref, entry.snapshot.title, stripCountryPrefix) }),
           description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
           variant: 'error',
         });
       });
     },
-    [args, navigate, sources, t, toast],
+    [args, navigate, sources, stripCountryPrefix, t, toast],
   );
 
   /** A channel's menu is Live TV's (library-04), with this page's moves among Organize. */
@@ -232,6 +234,8 @@ export function FavoritesPage() {
   const renderRow = (row: FavoriteRow) => {
     if (row.kind === 'header') return <SectionHeading title={t(k('group', row.group))} count={row.count} />;
     const e = row.entry;
+    // Read aloud: a channel's cleaned name ("BBC Two (UK)"), not the provider's "UK| BBC Two".
+    const spoken = spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix);
     const isDragTarget = drag?.over?.key === row.key && drag.key !== row.key;
     return (
       <div className="h-full" data-entry-key={row.key}>
@@ -242,7 +246,8 @@ export function FavoritesPage() {
           showSource={!sourceId && namesSources}
           now={nowOn.get(itemKey(e.ref))}
           time={t('addedAgo', { time: relativeTime(e.addedAt, i18n.language) })}
-          removeLabel={t('removeFavorite', { title: e.snapshot.title })}
+          removeLabel={t('removeFavorite', { title: spoken })}
+          spokenTitle={spoken}
           menuRemoveLabel={t('removeFromFavorites')}
           busy={pending.has(refKey(e.ref))}
           onOpen={() => open(e)}

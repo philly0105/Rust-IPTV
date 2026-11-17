@@ -13,6 +13,7 @@ import { useNavigate, useParams } from 'react-router';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, usePlayerStore, useToast, errorDescription } from '../deps';
@@ -25,7 +26,7 @@ import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
 import { formatClock } from '../lib/format';
 import { addEntryToList, isAddToListKey, isMenuKey, type EntryMenuRequest } from '../lib/entryMenu';
-import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
+import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition, spokenEntryTitle } from '../lib/open';
 import {
   buildRecentRows,
   collectHistory,
@@ -65,6 +66,7 @@ export function RecentPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  const { stripCountryPrefix } = useDisplayPrefs();
   // Add a source's dialog is open: the no-source line stays with it (see BrowseAction).
   const adding = useNoSourcesAdding();
   const args = useMemo(() => (sourceId ? { sourceId, limit: RECENT_LIMIT } : { limit: RECENT_LIMIT }), [sourceId]);
@@ -112,7 +114,7 @@ export function RecentPage() {
         try {
           await rpc('recent.remove', { ref: e.ref });
           toast({
-            title: t('recentRemoved', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
+            title: t('recentRemoved', { title: spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix) }),
             variant: 'info',
             action: {
               label: t('undo'),
@@ -131,20 +133,20 @@ export function RecentPage() {
         }
       });
     },
-    [run, t, toast],
+    [run, stripCountryPrefix, t, toast],
   );
 
   const open = useCallback(
     (e: { ref: RecentEntry['ref']; snapshot: RecentEntry['snapshot'] }) => {
       openEntry(e.ref, e.snapshot, sources.get(e.ref.sourceId), navigate).catch((err: unknown) => {
         toast({
-          title: t('openFailed', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
+          title: t('openFailed', { title: spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix) }),
           description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
           variant: 'error',
         });
       });
     },
-    [navigate, sources, t, toast],
+    [navigate, sources, stripCountryPrefix, t, toast],
   );
 
   // Continue means resume: play from the saved spot (the dashboard rail does
@@ -287,7 +289,7 @@ export function RecentPage() {
     if (row.kind === 'header') return <SectionHeading title={t(k('bucket', row.bucket))} count={row.count} />;
     const e = row.entry;
     const key = `${e.ref.sourceId}|${e.ref.contentType}|${e.ref.itemId}`;
-    const title = snapshotTitle(e.ref, e.snapshot.title).title;
+    const title = spokenEntryTitle(e.ref, e.snapshot.title, stripCountryPrefix);
     return (
       <EntryRow
         entryRef={e.ref}
@@ -297,6 +299,7 @@ export function RecentPage() {
         now={nowOn.get(itemKey(e.ref))}
         time={relativeTime(e.viewedAt, i18n.language)}
         removeLabel={t('removeRecent', { title })}
+        spokenTitle={title}
         menuRemoveLabel={t('removeFromHistory')}
         busy={pending.has(key)}
         resume={resumeOf(e, title)}

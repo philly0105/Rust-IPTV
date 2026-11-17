@@ -44,6 +44,8 @@ export interface EntryRowProps {
   time: string;
   /** The hover strip's remove button's name, with the title ("Remove Heat from favorites"). */
   removeLabel: string;
+  /** The name in the row's button labels (`spokenEntryTitle`: a channel's cleaned name); the shown title by default. */
+  spokenTitle?: string;
   /**
    * The touch menu's remove item, without the title ("Remove from favorites"): the menu is already
    * named for the row, and a long channel name cut the titled label to "Remove US| ESPN Alt…",
@@ -124,17 +126,18 @@ const HOVER_ACTIONS =
 const HIDE_UNDER_ACTIONS =
   'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible not-pointer-coarse:group-has-[[aria-expanded=true]]:invisible';
 
-function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, menuRemoveLabel, busy, now, resume, onOpen, onRemove, onChannelMenu, reorder }: EntryRowProps) {
+function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, spokenTitle, menuRemoveLabel, busy, now, resume, onOpen, onRemove, onChannelMenu, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
   const playable = type === 'live' || type === 'radio';
   // Older movie and series snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
   const title = snapshotTitle(entryRef, snapshot.title).title;
+  const spoken = spokenTitle ?? title;
   const busyButton = useBusyButtons(!!busy);
   const minutesLeft = now ? Math.max(1, Math.round(now.leftSeconds / 60)) : 0;
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
-  const openLabel = resume ? resume.label : playable ? t('playTitle', { title }) : t('openTitle', { title });
+  const openLabel = resume ? resume.label : playable ? t('playTitle', { title: spoken }) : t('openTitle', { title: spoken });
   const rowRef = useRef<HTMLDivElement>(null);
   // What a resumable row adds to its menu: on a fine pointer these are the strip's own menu, beside
   // its Resume and remove buttons; on touch they join the one menu at the row's end.
@@ -334,7 +337,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
             <IconButton
               size="sm"
               tabIndex={-1}
-              label={t('moveUp', { title })}
+              label={t('moveUp', { title: spoken })}
               icon={<ArrowUp size={14} aria-hidden />}
               disabled={!reorder.canUp}
               {...busyButton('up', () => reorder.onMove(-1))}
@@ -343,7 +346,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
             <IconButton
               size="sm"
               tabIndex={-1}
-              label={t('moveDown', { title })}
+              label={t('moveDown', { title: spoken })}
               icon={<ArrowDown size={14} aria-hidden />}
               disabled={!reorder.canDown}
               {...busyButton('down', () => reorder.onMove(1))}
@@ -362,13 +365,13 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           data-action="open"
         />
         {resume && (
-          <Menu items={resumeItems} label={t('entryMenu', { title })} align="end" triggerIcon={<EllipsisVertical size={14} aria-hidden />} triggerClassName="h-8 w-8" />
+          <Menu items={resumeItems} label={t('entryMenu', { title: spoken })} align="end" triggerIcon={<EllipsisVertical size={14} aria-hidden />} triggerClassName="h-8 w-8" />
         )}
         {onChannelMenu && (
           <IconButton
             size="sm"
             tabIndex={-1}
-            label={t('entryMenu', { title })}
+            label={t('entryMenu', { title: spoken })}
             aria-haspopup="menu"
             icon={<EllipsisVertical size={14} aria-hidden />}
             onClick={(e) => onChannelMenu(menuAnchor(e.currentTarget))}
@@ -404,7 +407,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           covers: the logo or poster, the title and what is on (or what it is). */}
       {onChannelMenu ? (
         <IconButton
-          label={t('entryMenu', { title })}
+          label={t('entryMenu', { title: spoken })}
           aria-haspopup="menu"
           icon={<EllipsisVertical aria-hidden size={18} />}
           onClick={(e) => onChannelMenu(menuAnchor(e.currentTarget))}
@@ -413,7 +416,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       ) : (
         <Menu
           items={menuItems}
-          label={t('entryMenu', { title })}
+          label={t('entryMenu', { title: spoken })}
           align="end"
           triggerIcon={<EllipsisVertical aria-hidden size={18} />}
           triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"

@@ -176,6 +176,22 @@ describe('favorite undo puts it back in place (D3)', () => {
     expect(rpc.callsOf('favorites.toggle')).toEqual([]);
   });
 
+  it("names a provider-prefixed channel the cleaned way in the row's labels and the toast (w-a11y-03)", async () => {
+    const fav = makeFavorite('live', 'c1', 0);
+    fav.snapshot = { title: 'UK| BBC Two', contentType: 'live' };
+    rpc.handlers['favorites.list'] = () => [fav];
+    rpc.handlers['favorites.remove'] = () => undefined;
+    renderAt('/favorites', favoritesRoute);
+
+    const remove = await screen.findByRole('button', { name: 'Remove BBC Two (UK) from favorites' });
+    const row = remove.closest<HTMLElement>('[role="listitem"]')!;
+    expect(within(row).getByRole('button', { name: 'Play BBC Two (UK)' })).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Move BBC Two (UK) down' })).toBeTruthy();
+    expect(within(row).getAllByRole('button', { name: 'Actions for BBC Two (UK)' }).length).toBeGreaterThan(0);
+    fireEvent.click(remove);
+    await waitFor(() => expect(lastToast()?.title).toBe('Removed BBC Two (UK) from favorites'));
+  });
+
   it('reinsertFavorite keeps the current order of the others', () => {
     const [a, b, c] = [makeFavorite('live', 'a', 0), makeFavorite('live', 'b', 1), makeFavorite('live', 'c', 2)];
     expect(reinsertFavorite([{ ...c!, position: 0 }, { ...a!, position: 1 }], b!, 1).map((e) => e.ref.itemId)).toEqual(['c', 'b', 'a']);

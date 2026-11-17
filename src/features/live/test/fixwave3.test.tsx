@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within, configure } from '@testing
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, ItemRef, Page, PageQuery, Settings, SourceKind } from '@/api/types';
+import { useToastStore } from '@/ui/Toast';
 
 import { EpgGridPage, GRID_DATA_LENGTH, guideDataStart } from '../components/EpgGridPage';
 import { LivePage } from '../components/LivePage';
@@ -221,11 +222,12 @@ describe('display names outside the rows (R1 F3, live part)', () => {
   it('favourite toasts use the name without the country prefix', async () => {
     handlers('xtream', { stripCountryPrefix: true } as Partial<Settings>, (i) => `UK | Alpha ${i}`);
     rpcMock.handlers['favorites.toggle'] = () => ({ isFavorite: true });
-    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    useToastStore.getState().clear();
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     await screen.findByText('Alpha 0', undefined, WAIT);
     fireEvent.click(screen.getAllByRole('button', { name: 'Favorite', pressed: false })[0]!);
-    await waitFor(() => expect(info).toHaveBeenCalledWith('[toast]', 'Added Alpha 0 to favorites', ''), WAIT);
+    // The shared favourite toggle raises the toast (`toggleFavoriteWithUndo`, on `@/ui/Toast`).
+    await waitFor(() => expect(useToastStore.getState().toasts.map((t) => [t.title, t.variant])).toEqual([['Added Alpha 0 to favorites', 'success']]), WAIT);
   });
 });
 

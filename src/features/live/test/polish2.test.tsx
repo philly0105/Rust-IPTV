@@ -14,6 +14,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { queryClient } from '@/api/query';
 import common from '@/i18n/en/common.json';
 import { joinList } from '@/shell/dashboard/cards';
+import { useToastStore } from '@/ui/Toast';
 import type { Category, Channel, EpgNowNext, Page, PageQuery } from '@/api/types';
 
 import { CategorySidebar } from '../components/CategorySidebar';
@@ -133,7 +134,12 @@ const list = () => screen.getByTestId('channel-list');
 const rowButton = (i: number) => document.querySelector<HTMLButtonElement>(`[data-testid="channel-list"] [data-row-index="${i}"]`);
 const rowStar = (i: number) => rowButton(i)!.parentElement!.querySelector<HTMLButtonElement>('button[aria-pressed]')!;
 const calls = (cmd: string) => rpcMock.calls.filter((c) => c.cmd === cmd);
-const toasts = () => (console.info as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[1]));
+// The page's own toasts (the fake `useToast` logs them) and the shared ones: favourite toggles go
+// through `toggleFavoriteWithUndo`, which raises its toasts on `@/ui/Toast` directly.
+const toasts = () => [
+  ...(console.info as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[1])),
+  ...useToastStore.getState().toasts.map((t) => String(t.title)),
+];
 
 beforeAll(() => {
   installDomStubs();
@@ -148,6 +154,7 @@ beforeEach(() => {
   fakes.usePlayerStore.setState({ source: undefined, zapContext: undefined });
   fakes.recorded.playItem.length = 0;
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  useToastStore.getState().clear();
 });
 afterEach(() => {
   cleanup();

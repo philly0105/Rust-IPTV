@@ -247,7 +247,10 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const locks = useParentalLocks(channel?.ref.sourceId, channel?.ref.contentType === 'radio' ? 'radio' : 'live');
   const locked = locks.channelLocked(channel);
   const chosen = pinned && !(current && samePrograms(pinned, current)) ? pinned : undefined;
-  const restingProgram = catchupProgram ?? current;
+  // In a gap in the guide the card rests on what comes next, marked as such, rather than on the
+  // channel's name over an empty card that read as a guide that failed to load (v-live-06).
+  const upcoming = useMemo(() => (current || catchupProgram ? undefined : list.find((p) => programWhen(p, now) === 'future')), [current, catchupProgram, list, now]);
+  const restingProgram = catchupProgram ?? current ?? upcoming;
   const shown = locked ? undefined : (hovered ?? chosen ?? restingProgram);
   const awayFromRest = !!shown && !!restingProgram && !samePrograms(shown, restingProgram);
   // LG-17: below md the ribbon is one line until it is opened, so a phone keeps room for the list.
@@ -298,7 +301,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const compact = details && !!props.compact;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
   const titleLine = shown ? (
-    <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:text-title-sm')}>
+    <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold', shown === upcoming ? 'text-fg-muted' : 'text-fg', details && 'md:text-title-sm')}>
       {shown.title}
     </p>
   ) : null;
@@ -354,6 +357,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
               <p className={cn('flex min-w-0 items-center gap-2 overflow-hidden text-fg-muted', details ? 'text-caption md:mt-0.5' : 'text-xs')}>
                 {shownIsLive ? <LivePill size="sm" dot="none" /> : null}
                 {showingCatchup ? <span className="shrink-0 text-accent" data-testid="ribbon-playing">{t('playingNow')}</span> : null}
+                {shown === upcoming ? <span className="shrink-0" data-testid="ribbon-up-next">{t('upNext')}</span> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                   {shownWhen !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ? `${formatDay(ms(shown.start), i18n.language)} ` : ''}
                   {formatRange(shown, i18n.language)}

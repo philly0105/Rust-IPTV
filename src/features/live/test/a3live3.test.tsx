@@ -87,6 +87,17 @@ describe('the stacked stage of a portrait tablet (v-live-01)', () => {
   });
 });
 
+describe('a gap in the guide (v-live-06)', () => {
+  it('the Now card shows what comes next, marked Up next, with no LIVE badge', async () => {
+    rpcMock.handlers['epg.programs'] = () => [program('NFL Football Pregame', now + 45 * MINUTE, now + 2 * HOUR)];
+    renderAt('/', [{ path: '/', element: <EpgRibbon channel={makeChannel(1)} sourceKind="xtream" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} details /> }]);
+    expect((await screen.findByTestId('ribbon-up-next', {}, { timeout: 10_000 })).textContent).toBe('Up next');
+    expect(screen.getByTestId('ribbon-header').textContent).toContain('NFL Football Pregame');
+    expect(screen.queryByTestId('ribbon-remaining')).toBeNull();
+    expect(screen.queryByTestId('ribbon-channel-name')).toBeNull();
+  });
+});
+
 describe("the ribbon's TV guide link (v-vod-02)", () => {
   it('stays at every width on a channel list, whose header has no guide button', async () => {
     ribbon({ guideHref: '/epg?view=list:l1' });

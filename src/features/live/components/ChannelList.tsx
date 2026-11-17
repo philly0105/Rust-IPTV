@@ -548,6 +548,7 @@ export function ChannelList(props: ChannelListProps) {
                 <ListChannelRow
                   t={t}
                   separator={separator}
+                  language={i18n.language}
                   index={v.index}
                   channel={ch}
                   nowNext={paged.getNowNext(v.index)}

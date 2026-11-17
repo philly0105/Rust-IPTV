@@ -110,6 +110,17 @@ describe('the second line of a row', () => {
     expect(row(0)!.getAttribute('aria-label')).toBe('1, ESPN HD (US), PRIME ᴿᴬᵂ (US), now: SportsCenter');
   });
 
+  it('in a gap in the guide says what comes next instead of the group (v-live-06)', () => {
+    const later = new Date(Date.now() + 45 * 60_000);
+    const next: EpgNowNext = { next: { channelId: 'c', title: 'NFL Football Pregame', start: later.toISOString(), end: new Date(later.getTime() + 3_600_000).toISOString() } };
+    const channels = [makeChannel(0)];
+    list(channels, { paged: pagedOf(channels, () => next) });
+    const line = screen.getByTestId('row-next');
+    expect(line.textContent).toContain('Up next');
+    expect(line.textContent).toContain('NFL Football Pregame');
+    expect(within(row(0)!).queryByText('News')).toBeNull();
+  });
+
   it('leaves the group out when the list is not a search across groups', () => {
     const channels = [makeChannel(0)];
     list(channels, { paged: pagedOf(channels, () => airing('SportsCenter')) });

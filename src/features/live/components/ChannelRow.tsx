@@ -11,7 +11,7 @@ import { cn } from '@/ui/cn';
 import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName, isSeparatorName, plainChannelName, separatorLabel } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
-import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNowNext } from '../lib/epgTime';
+import { formatClock, hasUsableArchive, isValidProgram, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo, ChannelName } from './ChannelLogo';
 
 /**
@@ -112,6 +112,8 @@ interface RowLanguage {
   t: TFunction<'live'>;
   /** `listSeparator` of the UI language: between the parts of the row button's name. */
   separator: string;
+  /** The UI language, for the clock of a programme still to come. */
+  language: string;
 }
 
 /**
@@ -128,6 +130,7 @@ interface RowText {
   channelMenu: string;
   guideNotAnswering: string;
   noGuide: string;
+  upNext: string;
   archive: string;
   archiveIcon: ReactElement;
   /** Plural texts by key and count, filled as rows ask for them. */
@@ -147,6 +150,7 @@ function rowText(t: TFunction<'live'>): RowText {
       channelMenu: t('channelMenu'),
       guideNotAnswering: t('guideNotAnswering'),
       noGuide: t('noGuideShort'),
+      upNext: t('upNext'),
       archive: t('archive'),
       archiveIcon: <History size={12} aria-label={t('archive')} data-testid="row-archive" />,
       counted: new Map(),
@@ -187,7 +191,7 @@ const MENU_ICON = <EllipsisVertical size={16} />;
 /** A channel row that reads the UI language itself; ChannelList's rows take the list's (ListChannelRow). */
 export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const { t, i18n } = useTranslation('live');
-  return <ListChannelRow {...props} t={t} separator={listSeparator(i18n.language)} />;
+  return <ListChannelRow {...props} t={t} separator={listSeparator(i18n.language)} language={i18n.language} />;
 });
 
 /**
@@ -250,6 +254,8 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
   const archive = hasUsableArchive(channel, props.sourceKind);
   const name = displayChannelName(channel.name, props.stripPrefix);
   const left = cur ? minutesLeft(cur, now) : 0;
+  // A gap in the guide: what comes next, instead of the group or "No guide data" (v-live-06).
+  const next = !cur && shifted?.next && isValidProgram(shifted.next) && ms(shifted.next.start) > now ? shifted.next : undefined;
   const text = rowText(t);
   // A search across groups names each run's group once, over its first row (ChannelList): the row
   // keeps it for screen readers only, and without a programme says there is no guide.
@@ -373,6 +379,16 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
                 </span>
               )}
             </>
+          ) : next ? (
+            <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-subtle pointer-coarse:text-body-sm" data-testid="row-next">
+              <span className="shrink-0 whitespace-nowrap">{`${text.upNext} ${formatClock(ms(next.start), props.language)}`}</span>
+              <span aria-hidden className="shrink-0">
+                ·
+              </span>
+              <span dir="auto" className="min-w-0 truncate text-match-parent" title={next.title}>
+                {next.title}
+              </span>
+            </span>
           ) : props.guideUnavailable ? (
             <span className="truncate text-caption text-fg-subtle" data-testid="row-guide-unavailable">
               {text.guideNotAnswering}

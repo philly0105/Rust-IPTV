@@ -165,9 +165,14 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
       onDoubleClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={(e) => {
-        if (e.key === 'ArrowLeft' && view !== 'root') {
+        // Into a submenu and back out (mirrored in right-to-left languages); a slider keeps its arrows.
+        if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !(e.target instanceof HTMLInputElement)) {
+          const into = (e.key === 'ArrowRight') !== (e.currentTarget.closest('[dir]')?.getAttribute('dir') === 'rtl');
+          const row = e.target instanceof Element ? e.target.closest<HTMLElement>('[aria-haspopup]:not(:disabled)') : null;
+          if (into && row) row.click();
+          else if (!into && view !== 'root') setView(view === 'style' ? 'text' : 'root');
+          else return;
           e.preventDefault();
-          setView(view === 'style' ? 'text' : 'root');
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
@@ -177,7 +182,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[min(70vh,420px)] w-64 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[calc(100dvh-1rem)] w-64 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>

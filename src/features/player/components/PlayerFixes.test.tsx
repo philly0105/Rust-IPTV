@@ -569,6 +569,18 @@ describe('the end of a movie in a stage with a way out (PV-09)', () => {
     fireEvent.click(back!);
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+
+  it('hands focus to the way out when nothing else holds it (v-player-06)', () => {
+    render(
+      <>
+        <PlayerStage endedAction={{ label: 'Back to details', onClick: () => {} }} />
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </>,
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 600, durationSeconds: 600 }));
+    expect(document.activeElement?.textContent).toBe('Back to details');
+  });
 });
 
 describe('a short player gives its end of item the whole height', () => {

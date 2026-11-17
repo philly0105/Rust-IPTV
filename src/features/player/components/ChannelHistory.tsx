@@ -1,5 +1,5 @@
 import { Radio, Tv, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
@@ -11,6 +11,7 @@ import { safeImageUrl } from '../format';
 import { currentLiveKey, playHistoryEntry, setHistoryOpen, useHistoryStore, type HistoryEntry } from '../history';
 import { getSettings, usePlayerStore } from '../store';
 import { MENU_HEADER, menuFrameClass, menuFrameStyle, UNMEASURED, type MenuFit } from './menuFrame';
+import { PlayerChannelName } from './ZapBanner';
 
 /** What airs now on each history channel, fetched once per opening. */
 function useNowPlaying(entries: readonly HistoryEntry[]): Record<string, string> {
@@ -73,7 +74,15 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
   usePlayerStore((s) => s.source);
   const current = currentLiveKey();
   const now = useNowPlaying(entries);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const { menuRef } = fit;
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      ref.current = el;
+      menuRef?.(el);
+    },
+    [menuRef],
+  );
 
   useEffect(() => {
     const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
@@ -89,7 +98,7 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
 
   return (
     <div
-      ref={ref}
+      ref={setRef}
       role="menu"
       aria-label={t('channelHistory')}
       data-testid="channel-history"
@@ -111,8 +120,8 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
         }
       }}
       data-sheet={fit.sheet ? '' : undefined}
-      style={menuFrameStyle(fit, '60vh, 420px')}
-      className={menuFrameClass(fit, 'max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)]')}
+      style={menuFrameStyle(fit)}
+      className={menuFrameClass(fit, 'max-h-[calc(100dvh-1rem)] w-72 max-w-[calc(100vw-1rem)]')}
     >
       {/* The options menu's header: the title, then Close. */}
       <div className={MENU_HEADER}>
@@ -149,9 +158,7 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
             >
               <Logo entry={entry} />
               <span className="min-w-0 flex-1">
-                <span dir="auto" className={cn('block truncate text-body-sm', playing && 'font-medium')}>
-                  {entry.title}
-                </span>
+                <PlayerChannelName title={entry.title} glass className={cn('text-body-sm', playing && 'font-medium')} />
                 <span dir="auto" className="block truncate text-caption text-on-glass-muted">
                   {playing ? t('channelHistoryWatching') : (airing ?? ' ')}
                 </span>

@@ -522,7 +522,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
         aria-hidden={!open}
         inert={!open}
         className={cn(
-          'player-glass-strong absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-on-glass shadow-2',
+          'player-glass-strong player-sheet absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-on-glass shadow-2',
           'motion-safe:transition-transform motion-safe:duration-200',
           open ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full',
         )}

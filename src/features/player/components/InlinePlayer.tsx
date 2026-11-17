@@ -49,6 +49,7 @@ import { usePlayerSettings } from '../useSettings';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { ErrorActions, rawTsHintKey } from './ErrorActions';
 import { glassButton } from './glassButton';
+import { PlayerChannelName } from './lazyParts';
 
 /** Stable identity for "the same media": a source swap with the same url keeps the engine. */
 function mediaKey(s: PlayerSource | undefined): string {
@@ -720,9 +721,13 @@ function ErrorOverlay({
             {/* A short player hides its title bar over an error: name what failed here, which
                 matters most after an automatic switch to another copy. */}
             {source?.title && (
-              <p dir="auto" data-testid="error-item" className="-mb-1 max-w-full truncate text-caption text-on-glass-muted" title={source.title}>
-                {source.title}
-              </p>
+              source.isLive || source.catchupProgramStart ? (
+                <PlayerChannelName testId="error-item" title={source.title} glass className="-mb-1 max-w-full text-caption text-on-glass-muted" />
+              ) : (
+                <p dir="auto" data-testid="error-item" className="-mb-1 max-w-full truncate text-caption text-on-glass-muted" title={source.title}>
+                  {source.title}
+                </p>
+              )
             )}
             <h2 className="flex max-w-full items-center gap-2 text-body-sm font-medium" title={message ? `${view.title}: ${message}` : undefined}>
               <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />

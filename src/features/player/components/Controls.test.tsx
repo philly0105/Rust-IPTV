@@ -186,6 +186,42 @@ describe('Controls options menu', () => {
     expect(menu()).toBeNull();
   });
 
+  it('ArrowRight opens a submenu row, ArrowLeft goes back to that row (v-player-08)', () => {
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    const speed = screen.getByRole('menuitem', { name: /playback speed/i });
+    expect(speed.getAttribute('aria-haspopup')).toBe('menu');
+    // A row that opens nothing is not marked as a submenu.
+    expect(screen.getByRole('menuitem', { name: /audio track/i }).hasAttribute('aria-haspopup')).toBe(false);
+    act(() => speed.focus());
+    fireEvent.keyDown(speed, { key: 'ArrowRight' });
+    expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('speed');
+    expect(document.activeElement?.textContent).toBe('Normal');
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+    expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('root');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /playback speed/i }));
+    // ArrowLeft at the root leaves the menu as it is.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+    expect(menu()).toBeTruthy();
+  });
+
+  it('in a right-to-left language ArrowLeft opens the submenu', () => {
+    const was = document.documentElement.dir;
+    document.documentElement.dir = 'rtl';
+    try {
+      render(<Controls variant="dock" visible />);
+      openMenu();
+      const speed = screen.getByRole('menuitem', { name: /playback speed/i });
+      act(() => speed.focus());
+      fireEvent.keyDown(speed, { key: 'ArrowRight' });
+      expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('root');
+      fireEvent.keyDown(speed, { key: 'ArrowLeft' });
+      expect(screen.getByTestId('player-options-menu').getAttribute('data-view')).toBe('speed');
+    } finally {
+      document.documentElement.dir = was;
+    }
+  });
+
   it('leaves Sync out while nothing in it can be changed, and the browser has no audio row (PL-SYNC-DEAD-ROW)', () => {
     render(<Controls variant="dock" visible />);
     openMenu();
@@ -632,6 +668,9 @@ describe('Controls for fullscreen live TV', () => {
   });
 });
 
+/** A named menu row's label, without its key caps. */
+const rowName = (b: Element): string | null | undefined => b.querySelector('.flex-1')?.textContent;
+
 describe('Controls in a narrow player', () => {
   let restore: () => void = () => undefined;
   beforeEach(() => {
@@ -652,8 +691,12 @@ describe('Controls in a narrow player', () => {
 
     openMenu();
     const moved = screen.getByTestId('moved-controls');
-    const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map(rowName);
     expect(names).toEqual(['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture', 'Fill window']);
+    // Named rows under the settings, with their keys: focus opens on the first setting (v-player-04).
+    expect(screen.getByRole('menuitemcheckbox', { name: /stream info/i }).compareDocumentPosition(moved) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /^subtitles/i }));
+    expect(screen.getByRole('menuitem', { name: /fill window/i }).getAttribute('aria-keyshortcuts')).toBe('Shift+F');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Picture in picture' }));
     expect(commands.togglePip).toHaveBeenCalledTimes(1);
     expect(menu()).toBeNull();
@@ -666,7 +709,7 @@ describe('Controls in a narrow player', () => {
     expect(screen.getByRole('button', { name: 'Open channel list' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
     openMenu();
-    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
     expect(names.slice(0, 2)).toEqual(['Previous channel', 'Next channel']);
   });
 
@@ -676,7 +719,7 @@ describe('Controls in a narrow player', () => {
     render(<Controls variant="overlay" visible />);
     expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
     openMenu();
-    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
     expect(names).not.toContain('Next channel');
   });
 
@@ -751,7 +794,7 @@ describe('Controls in a narrow player', () => {
       expect(screen.getByRole('button', { name: 'Forward 10 seconds' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
       openMenu();
-      const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+      const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map(rowName);
       expect(names).toEqual(['Picture in picture', 'Fill window']);
     })();
   });
@@ -1041,6 +1084,20 @@ describe('Controls on a short player (review: the scrim darkened most of a phone
 });
 
 describe('Controls seek row in a right-to-left language (review: times swapped against the fill)', () => {
+  it('keeps the transport buttons left to right beside it, and mirrors the rest of the bar (v-themes-locales-10)', () => {
+    act(() => usePlayerStore.setState({ queue: [{ url: 'http://v/a.mp4', kind: 'direct', title: 'A', isLive: false, isRadio: false }, usePlayerStore.getState().source!, { url: 'http://v/b.mp4', kind: 'direct', title: 'B', isLive: false, isRadio: false }] }));
+    render(
+      <div dir="rtl">
+        <Controls variant="overlay" visible />
+      </div>,
+    );
+    const transport = document.querySelector('[data-transport]')!;
+    expect(transport.getAttribute('dir')).toBe('ltr');
+    expect(Array.from(transport.querySelectorAll('[data-ctl]'), (b) => b.getAttribute('data-ctl'))).toEqual(['prev', 'play', 'next', 'back10', 'fwd10']);
+    // Volume, options and fullscreen follow the page's direction.
+    expect(screen.getByRole('button', { name: 'Mute' }).closest('[dir]')!.getAttribute('dir')).toBe('rtl');
+  });
+
   it('lays the times and the bar out left to right, as the fill grows', () => {
     render(
       <div dir="rtl">

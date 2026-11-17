@@ -10,6 +10,7 @@ import '../player.css';
 import { PHONE_QUERY } from '@/shell/navigation';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { IconButton } from '@/ui/Button';
+import { focusableIn } from '@/ui/focus';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
@@ -28,7 +29,7 @@ import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
 import { bindSettingsEvents, usePlayerSettings } from '../useSettings';
 import { retryPlayback } from './Controls';
 import { PlayerSurface } from './PlayerSurface';
-import { SleepTimerHost, ZapHeaderLine } from './lazyParts';
+import { PlayerChannelName, SleepTimerHost, ZapAnnouncer, ZapHeaderLine } from './lazyParts';
 import { useZapBannerShown, useZapHover } from './zapHooks';
 
 /** The surface follows the stores itself: a dock render (a move, the mini frame) passes it by. */
@@ -194,6 +195,8 @@ function selectDockItem(s: PlayerState): { present: boolean; isLive: boolean; ha
 }
 
 const selectTitle = (s: PlayerState): string | undefined => s.source?.title;
+/** The title names a channel: live, or a catch-up programme. */
+const selectIsLive = (s: PlayerState): boolean => !!s.source?.isLive || !!s.source?.catchupProgramStart;
 
 /**
  * The mini frame's header: the title, or during a zap its number and what airs (ZapHeaderLine).
@@ -202,6 +205,7 @@ const selectTitle = (s: PlayerState): string | undefined => s.source?.title;
  */
 function MiniTitle({ miniZap, onPointerEnter, onPointerLeave }: { miniZap: boolean; onPointerEnter(): void; onPointerLeave(): void }) {
   const title = usePlayerStore(selectTitle);
+  const isLive = usePlayerStore(selectIsLive);
   const subtitle = usePlayerStore((s) => s.source?.subtitle);
   const second = !miniZap && subtitle ? subtitle : undefined;
   return (
@@ -213,6 +217,8 @@ function MiniTitle({ miniZap, onPointerEnter, onPointerLeave }: { miniZap: boole
     >
       {miniZap && title !== undefined ? (
         <ZapHeaderLine title={title} />
+      ) : isLive && title !== undefined ? (
+        <PlayerChannelName title={title} className={cn('min-w-0', second && 'leading-tight')} />
       ) : (
         <span dir="auto" className={cn('min-w-0 truncate', second && 'leading-tight')}>
           {title}
@@ -230,8 +236,11 @@ function MiniTitle({ miniZap, onPointerEnter, onPointerLeave }: { miniZap: boole
 /** The phone bar's first line, after the live dot. */
 function BarTitle({ miniZap }: { miniZap: boolean }) {
   const title = usePlayerStore(selectTitle);
+  const isLive = usePlayerStore(selectIsLive);
   return miniZap && title !== undefined ? (
     <ZapHeaderLine title={title} />
+  ) : isLive && title !== undefined ? (
+    <PlayerChannelName title={title} className="min-w-0" />
   ) : (
     <span dir="auto" className="min-w-0 truncate">
       {title}
@@ -380,7 +389,23 @@ export const PlayerDock = memo(function PlayerDock() {
       made.push(el);
     }
     if (!(before instanceof Node) || !host.contains(before)) host.querySelector<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
+    // Tab wraps inside the player: past its last control it went to the browser (the address bar)
+    // before it came round, one press with no focus ring anywhere.
+    const wrapTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      const stops = focusableIn(host);
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      if (!first || !last) return;
+      const at = document.activeElement;
+      if (e.shiftKey ? at === first || at === host.querySelector('[data-player-focus]') : at === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    host.addEventListener('keydown', wrapTab);
     return () => {
+      host.removeEventListener('keydown', wrapTab);
       for (const el of made) el.inert = false;
       const now = document.activeElement;
       const lost = !now || now === document.body || host.contains(now);
@@ -588,7 +613,11 @@ export const PlayerDock = memo(function PlayerDock() {
     <>
       {/* Fullscreen from the mini frame fills the screen: full controls, not the mini bar. */}
       {createPortal(
-        <MemoSurface compact={inMini && !isFullscreen && !inWindowFill && !inPip} thumb={barShown && !isFullscreen && !inWindowFill && !inPip} channelPanelAvailable={channelPanelAvailable} />,
+        <>
+          <MemoSurface compact={inMini && !isFullscreen && !inWindowFill && !inPip} thumb={barShown && !isFullscreen && !inWindowFill && !inPip} channelPanelAvailable={channelPanelAvailable} />
+          {/* In the host, which moves with the player: outside it, Fill window's inert page would silence it. */}
+          <ZapAnnouncer />
+        </>,
         host,
       )}
       {/* Sleep timer (C5): the one-minute warning toast. */}

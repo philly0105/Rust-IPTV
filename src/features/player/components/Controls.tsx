@@ -4,6 +4,7 @@ import {
   Captions,
   CaptionsOff,
   CircleDot,
+  CircleStop,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -24,7 +25,6 @@ import {
   Settings2,
   SkipBack,
   SkipForward,
-  Square,
   Volume1,
   Volume2,
   VolumeX,
@@ -68,7 +68,7 @@ import { canZap, replay, reportStatus, retryResolve, sameSource, selectEnded, us
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { canEnterFullscreen } from '../fullscreen';
 import { InlineSpinner } from './InlineSpinner';
-import { DROP_BELOW_PX, MENU_HEADER, menuFrameClass, menuFrameStyle, playerMenuLayer, SHEET_BELOW_PX, type MenuFit } from './menuFrame';
+import { MENU_HEADER, menuFrameClass, menuFrameStyle, playerMenuLayer, SHEET_BELOW_PX, type MenuFit } from './menuFrame';
 import { useNarrow } from './useNarrow';
 // failover: AlternatesMenu, AlternatesRow
 import {
@@ -466,12 +466,20 @@ export const MENU_ITEM =
   'flex w-full items-center rounded-md px-3 py-2 text-start text-body-sm text-on-glass hover:bg-white/10 active:bg-white/15 pointer-coarse:min-h-[calc(44rem/15)] disabled:opacity-50 disabled:hover:bg-transparent';
 
 /**
- * A row that opens a submenu (shared with the video's context menu). `disabled`: nothing to choose
- * from, so the row only states its value, without the submenu's chevron.
+ * A row that opens a submenu (shared with the video's context menu), also with ArrowRight
+ * (ArrowLeft in right-to-left languages). `disabled`: nothing to choose from, so the row only
+ * states its value, without the submenu's chevron.
  */
 export function MenuRow({ label, value, disabled, onClick }: { label: string; value?: ReactNode; disabled?: boolean; onClick(): void }) {
   return (
-    <button type="button" role="menuitem" disabled={disabled} onClick={onClick} className={cn(MENU_ITEM, 'justify-between gap-6')}>
+    <button
+      type="button"
+      role="menuitem"
+      aria-haspopup={disabled ? undefined : 'menu'}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(MENU_ITEM, 'justify-between gap-6')}
+    >
       <span>{label}</span>
       <span className="flex items-center gap-1 text-on-glass-muted">
         {value}
@@ -638,48 +646,73 @@ const MENU_EDGE = 8;
 
 /**
  * The height a menu that grows up from its bottom edge may take: up to the app header (or the top
- * of the screen in fullscreen) and the top of the player it floats in, which clips it (a docked
- * stage, the mini frame). Null when it cannot be measured.
+ * of the screen in fullscreen and Fill window, which cover the header) and the top of the player
+ * it floats in, which clips it (a docked stage, the mini frame). Null when it cannot be measured.
  */
 export function roomAbove(menu: HTMLElement): number | null {
   const bottom = menu.getBoundingClientRect().bottom;
-  const header = document.fullscreenElement ? null : document.querySelector<HTMLElement>('[data-testid="shell-header"]');
   const host = menu.closest<HTMLElement>('[data-player-host]');
+  const header = fillsWindow(host) ? null : document.querySelector<HTMLElement>('[data-testid="shell-header"]');
   const top = Math.max(0, header?.getBoundingClientRect().bottom ?? 0, host?.getBoundingClientRect().top ?? 0) + MENU_EDGE;
   const room = Math.floor(bottom - top);
   return Number.isFinite(room) && bottom > 0 ? Math.max(room, 0) : null;
 }
 
+/** The player is all there is: fullscreen, Fill window, picture-in-picture. */
+function fillsWindow(host: Element | null): boolean {
+  return !!document.fullscreenElement || !!host?.closest('[data-player-window-layer], [data-pip-layer]');
+}
+
+/** A menu's full height, rows it scrolls included (its border too). */
+function naturalHeight(menu: HTMLElement): number {
+  return menu.scrollHeight + menu.offsetHeight - menu.clientHeight;
+}
+
 /**
- * Where a player menu opens from the bar (the options menu, the channel history). `className`
- * places this frame, and with it the menu's bottom edge, just above the bar. The room from there
- * up to the top of the player is measured here and handed to the menu (`fit`), again whenever the
- * bar or the player changes size: the live seek row arriving under an open menu, fullscreen,
- * a resized window. With less room than a header and a few rows (`SHEET_BELOW_PX`: a phone's
- * inline player, the mini player), and when `sheet` allows it, the menu opens as a sheet from the
- * bottom of the screen instead, over a scrim that closes it (`onScrim`). The frame stays in place
- * empty then, so the room is still measured from the same edge and the sheet goes back to a popover
- * when the player grows.
+ * Where a player menu taller than the room above the bar goes (`natural`: its full height), or
+ * null to keep it above the bar. A player that is the whole window has nothing beside it: a side
+ * panel (`side`). A docked stage (the Live page's, a movie's) has the page around it: the menu
+ * hangs from the player's bottom edge over the page, slid up as far as it must to show whole
+ * (`at`: fixed, below the app header, `room` down to the bottom of the window). The mini player
+ * keeps it inside (a sheet when that is too short). `out`: the menu already left the bar, and stays
+ * out when a shorter view now fits there, so it does not jump while open. `align`: the side of the
+ * frame the menu keeps to (`end` grows toward the start).
  */
-/**
- * Where a menu on a short docked player hangs below it instead (see `DROP_BELOW_PX`), or null to
- * keep it above the bar: in fullscreen, Fill window and picture-in-picture the player is all there
- * is, and a player at the bottom of the window (the mini player) has less room under it.
- * `align`: the side of the frame the menu keeps to (`end` grows toward the start).
- */
-export function dropBelow(frame: HTMLElement, room: number | null, align: 'start' | 'end'): { room: number; at: CSSProperties } | null {
-  if (room === null || room >= DROP_BELOW_PX || document.fullscreenElement) return null;
+export function placeMenu(
+  frame: HTMLElement,
+  above: number | null,
+  natural: number | null,
+  align: 'start' | 'end',
+  out = false,
+): { side: true } | { room: number; at: CSSProperties } | null {
+  if (above === null || natural === null || (natural <= above && !out)) return null;
   const host = frame.closest<HTMLElement>('[data-player-host]');
-  if (!host || host.closest('[data-player-window-layer], [data-pip-layer], [data-player-mini]')) return null;
-  const top = host.getBoundingClientRect().bottom + MENU_EDGE / 2;
-  const below = Math.floor(window.innerHeight - top - MENU_EDGE);
-  if (below <= room) return null;
+  if (!host || host.closest('[data-player-mini]')) return null;
+  if (fillsWindow(host)) return { side: true };
+  const header = document.querySelector<HTMLElement>('[data-testid="shell-header"]')?.getBoundingClientRect().bottom ?? 0;
+  const bottom = window.innerHeight - MENU_EDGE;
+  const top = Math.max(header + MENU_EDGE, Math.min(host.getBoundingClientRect().bottom + MENU_EDGE / 2, bottom - natural));
+  const room = Math.floor(bottom - top);
+  if (room <= above && !out) return null;
   const r = frame.getBoundingClientRect();
   const rtl = getComputedStyle(frame).direction === 'rtl';
   const towardLeft = (align === 'end') !== rtl;
-  return { room: below, at: towardLeft ? { top, right: Math.max(MENU_EDGE, window.innerWidth - r.right) } : { top, left: Math.max(MENU_EDGE, r.left) } };
+  return { room, at: towardLeft ? { top, right: Math.max(MENU_EDGE, window.innerWidth - r.right) } : { top, left: Math.max(MENU_EDGE, r.left) } };
 }
 
+/**
+ * Where a player menu opens from the bar (the options menu, the channel history). `className`
+ * places this frame, and with it the menu's bottom edge, just above the bar. The room from there
+ * up to the top of the player and the menu's own full height are measured here and handed to the
+ * menu (`fit`), again whenever the bar, the player or the menu changes size: the live seek row
+ * arriving under an open menu, fullscreen, a resized window, another view of the menu. A menu
+ * taller than that room leaves the bar (`placeMenu`): it shows every row whenever the window has
+ * the room, and takes what there is when it has not. With less room than a header and a few rows
+ * (`SHEET_BELOW_PX`: a phone's inline player, the mini player), and when `sheet` allows it, the
+ * menu opens as a sheet from the bottom of the screen instead, over a scrim that closes it
+ * (`onScrim`). The frame stays in place empty then, so the room is still measured from the same
+ * edge and the sheet goes back to a popover when the player grows.
+ */
 function PlayerPopup({
   className,
   align,
@@ -688,41 +721,53 @@ function PlayerPopup({
   children,
 }: {
   className: string;
-  /** The side of the bar the menu opens at, for a menu that drops below the player (`dropBelow`). */
+  /** The side of the bar the menu opens at, for a menu that leaves the player (`placeMenu`). */
   align: 'start' | 'end';
   sheet: boolean;
   onScrim(): void;
   children(fit: MenuFit): ReactNode;
 }) {
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
+  const [menuEl, setMenuEl] = useState<HTMLElement | null>(null);
   const [room, setRoom] = useState<number | null>(null);
-  const [drop, setDrop] = useState<{ room: number; at: CSSProperties } | null>(null);
+  const [place, setPlace] = useState<ReturnType<typeof placeMenu>>(null);
+  // Out of the bar already: a shorter view keeps the menu where it is.
+  const out = useRef(false);
+  out.current = place !== null;
   useLayoutEffect(() => {
     if (!frame) return;
     const measure = (): void => {
       const above = roomAbove(frame);
       setRoom(above);
-      const next = dropBelow(frame, above, align);
-      setDrop((d) => (JSON.stringify(d) === JSON.stringify(next) ? d : next));
+      const natural = menuEl ? naturalHeight(menuEl) : null;
+      // The dock bar (embedded mpv) keeps its menus in place, as it never turns them into sheets.
+      const next = sheetAllowed ? placeMenu(frame, above, natural, align, out.current) : null;
+      setPlace((p) => (JSON.stringify(p) === JSON.stringify(next) ? p : next));
     };
     measure();
     window.addEventListener('resize', measure);
-    // The page under a dropped menu may scroll: it follows the player.
+    // The page under a floating menu may scroll: it follows the player.
     window.addEventListener('scroll', measure, true);
     document.addEventListener('fullscreenchange', measure);
     const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
     for (const el of [frame.closest('[data-player-controls]'), frame.closest('[data-player-host]')]) if (el) ro?.observe(el);
+    // Another view (Sleep, Subtitles) changes the menu's height.
+    const rows = !menuEl || typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(measure);
+    if (menuEl) rows?.observe(menuEl, { childList: true, subtree: true });
     return () => {
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
       document.removeEventListener('fullscreenchange', measure);
       ro?.disconnect();
+      rows?.disconnect();
     };
-  }, [frame, align]);
-  const sheet = sheetAllowed && room !== null && room < SHEET_BELOW_PX;
-  // The dock bar (embedded mpv) keeps its menus in place, as it never turns them into sheets.
-  const dropped = sheetAllowed && !sheet && drop !== null;
-  const menu = children(dropped ? { room: drop.room, sheet: false, drop: drop.at } : { room, sheet });
+  }, [frame, menuEl, align, sheetAllowed]);
+  const side = place !== null && 'side' in place;
+  const sheet = sheetAllowed && (side || (room !== null && room < SHEET_BELOW_PX));
+  const dropped = !sheet && place !== null && 'at' in place;
+  const menu = children(
+    dropped ? { room: place.room, sheet: false, drop: place.at, menuRef: setMenuEl } : { room, sheet, side: side || undefined, menuRef: setMenuEl },
+  );
   return (
     <div ref={setFrame} data-menu-frame="" className={cn('absolute z-10', className)}>
       {dropped
@@ -797,7 +842,7 @@ function OptionsMenu({
   view: MenuView;
   setView(v: MenuView | null): void;
   isVod: boolean;
-  /** Controls the bar has no room for (a narrow player), at the top of the root view. */
+  /** Controls the bar has no room for (a narrow player), at the top of the commands under the settings. */
   moved?: readonly MovedControl[] | undefined;
   commandsShown: MenuCommands;
   fit: MenuFit;
@@ -811,7 +856,15 @@ function OptionsMenu({
   const syncSummary = useSyncSummary();
   const syncAvailable = useSyncAvailable();
   const pictureValue = usePictureSummary();
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const { menuRef } = fit;
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      ref.current = el;
+      menuRef?.(el);
+    },
+    [menuRef],
+  );
   // The style view holds form fields (radio groups, a slider), which a menu may not contain: it
   // is a small dialog in the same frame instead.
   const styleView = view === 'subStyle';
@@ -837,11 +890,23 @@ function OptionsMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** The root row a submenu was opened from (its place among the root's items), focused again on the way back. */
+  const opener = useRef(-1);
+  const items = (): HTMLElement[] => Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input[type="range"]:not(:disabled)') ?? []);
   useEffect(() => {
     // A new view starts at its top: the frame is the same element, and the scroll the last view
     // was left at would hide the new one's header.
     const menu = ref.current;
     if (menu) menu.scrollTop = 0;
+    let back: HTMLElement | undefined;
+    if (view === 'root') {
+      back = opener.current >= 0 ? items()[opener.current] : undefined;
+      opener.current = -1;
+    }
+    if (back) {
+      back.focus();
+      return;
+    }
     // The current choice of a list (Speed opens on Normal, PV-16), else the first item that can
     // take focus (Sources may still be loading, the style view holds fields), else the header's
     // Back: focus must stay in the menu for its arrow keys and Escape.
@@ -910,16 +975,23 @@ function OptionsMenu({
     </div>
   );
 
+  const hasMoved = !!moved && moved.length > 0;
   const hasCommands = commandsShown.screenshot || commandsShown.history || commandsShown.record || commandsShown.stop;
 
   return (
     <div
-      ref={ref}
+      ref={setRef}
       id={id}
       role={styleView ? 'dialog' : 'menu'}
       aria-label={styleView ? t('subtitleStyle.menuTitle') : t('settingsMenu')}
       data-testid="player-options-menu"
       data-view={view}
+      onClickCapture={(e) => {
+        if (view === 'root' && e.target instanceof Element) {
+          const row = e.target.closest<HTMLElement>('[aria-haspopup]');
+          if (row) opener.current = items().indexOf(row);
+        }
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
@@ -929,36 +1001,30 @@ function OptionsMenu({
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
-          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input[type="range"]:not(:disabled)') ?? []);
-          const i = items.indexOf(document.activeElement as HTMLElement);
-          const next = items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
+          const all = items();
+          const i = all.indexOf(document.activeElement as HTMLElement);
+          const next = all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length];
           next?.focus();
+        }
+        // Into a submenu and back out, as menus do; a slider of the style view keeps its arrows.
+        if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !(e.target instanceof HTMLInputElement)) {
+          const into = (e.key === 'ArrowRight') !== (e.currentTarget.closest('[dir]')?.getAttribute('dir') === 'rtl');
+          const row = e.target instanceof Element ? e.target.closest<HTMLElement>('[aria-haspopup]:not(:disabled)') : null;
+          if (into && row) row.click();
+          else if (!into && view !== 'root') setView(view === 'subStyle' ? 'text' : 'root');
+          else return;
+          e.preventDefault();
+          e.stopPropagation();
         }
       }}
       data-sheet={fit.sheet ? '' : undefined}
-      // 460 px: a live channel's whole root view (Audio track included) shows without scrolling.
-      style={menuFrameStyle(fit, '70vh, 460px')}
+      style={menuFrameStyle(fit)}
       onScroll={updateMore}
-      className={menuFrameClass(fit, 'max-h-[min(70vh,460px)] w-64 max-w-[calc(100vw-1.5rem)]')}
+      className={menuFrameClass(fit, 'max-h-[calc(100dvh-1rem)] w-64 max-w-[calc(100vw-1.5rem)]')}
     >
       {view === 'root' && (
         <>
           {header}
-          {moved && moved.length > 0 && (
-            // A popover keeps them as a row of icons (it is narrow); a sheet has the width for named rows.
-            <div data-testid="moved-controls" className={fit.sheet ? undefined : 'mb-1 flex flex-wrap items-center gap-0.5 border-b border-white/10 pb-1'}>
-              {moved.map((m) =>
-                fit.sheet ? (
-                  <MenuAction key={m.id} icon={m.rowIcon ?? m.icon} label={m.label} shortcut={m.shortcut} onClick={m.onClick} />
-                ) : (
-                  <CtlButton key={m.id} role="menuitem" label={m.label} shortcut={m.shortcut} onClick={m.onClick}>
-                    {m.icon}
-                  </CtlButton>
-                ),
-              )}
-              {fit.sheet && <MenuSeparator />}
-            </div>
-          )}
           {tracks.qualities.length > 0 && <MenuRow label={t('quality')} value={qualityValue} onClick={() => setView('quality')} />}
           {/* Always there, like Subtitles: a stream with one track says so instead of leaving no row. */}
           <MenuRow label={t('audioTrack')} value={audioValue} disabled={!audioChoice} onClick={() => setView('audio')} />
@@ -978,7 +1044,16 @@ function OptionsMenu({
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
           {/* failover: other copies of the live channel. */}
           <AlternatesRow onOpen={() => setView('sources')} />
-          {(hasCommands || !isVod) && <MenuSeparator />}
+          {(hasCommands || !isVod || hasMoved) && <MenuSeparator />}
+          {hasMoved && (
+            // Named rows with their keys, as the sheet always had: a lone unlabelled icon above
+            // Subtitles was the first stop of the keyboard (v-player-04).
+            <div role="none" data-testid="moved-controls">
+              {moved.map((m) => (
+                <MenuAction key={m.id} icon={m.rowIcon ?? m.icon} label={m.label} shortcut={m.shortcut} onClick={m.onClick} />
+              ))}
+            </div>
+          )}
           {/* Live: favourite the channel, put it on the multi-view wall. */}
           {!isVod && <ChannelActions onDone={() => setView(null)} />}
           {/* Screenshot (C6): the menu closes first, so it is never in the picture. */}
@@ -988,7 +1063,7 @@ function OptionsMenu({
           )}
           {commandsShown.record && <RecordMenuAction onDone={() => setView(null)} />}
           {commandsShown.stop && (
-            <MenuAction icon={<Square className="fill-current" aria-hidden />} label={t('stop')} onClick={() => pick(() => usePlayerStore.getState().stop())} />
+            <MenuAction icon={<CircleStop aria-hidden />} label={t('stop')} onClick={() => pick(() => usePlayerStore.getState().stop())} />
           )}
         </>
       )}
@@ -1502,6 +1577,19 @@ function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: numbe
   return { slots: active ? slots : 0, showing };
 }
 
+/**
+ * The transport buttons (previous, play, next, 10 s back and ahead), left to right in every
+ * language, as media players keep them: they move along the seek bar, which runs left to right
+ * (`PositionSeekBar`). The rest of the bar mirrors in a right-to-left language (v-themes-locales-10).
+ */
+function Transport({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <div dir="ltr" data-transport="" className={cn('flex shrink-0 items-center', className)}>
+      {children}
+    </div>
+  );
+}
+
 /** 10 s back or ahead, as J and L do. */
 function jump(seconds: number): void {
   usePlayerStore.getState().seekBy(seconds);
@@ -1811,6 +1899,9 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
     </CtlButton>
   );
 
+  const rowGap = compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1';
+  // The row's start: previous, play, next and the 10 s skips (a narrow row keeps the spares at its end).
+  const transport = (!compact && !narrow && (prev || next)) || !panelOwnsError || (!narrow && canJump);
   const overlay = variant === 'overlay';
   /** The player itself, which takes focus after a pointer closes a menu (PL-SPACE-CLICKED-CONTROL). */
   const focusPlayer = (): void => root?.closest<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
@@ -1890,11 +1981,15 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                 onSeek={(s, step) => store.seekTo(s, { step })}
               />
             )}
-            <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1')}>
-              {!compact && !narrow && prevButton}
-              {!panelOwnsError && playButton}
-              {!compact && !narrow && nextButton}
-              {!narrow && jumpButtons}
+            <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', rowGap)}>
+              {transport && (
+                <Transport className={rowGap}>
+                  {!compact && !narrow && prevButton}
+                  {!panelOwnsError && playButton}
+                  {!compact && !narrow && nextButton}
+                  {!narrow && jumpButtons}
+                </Transport>
+              )}
               {/* Over an error a narrow row has no volume, so nothing makes the channel buttons step aside:
                   they stay together at the start, as on a wide bar. */}
               {(!narrow || panelOwnsError) && channelsButton}
@@ -1939,9 +2034,13 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
               {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
               {/* A narrow row keeps its spares right of the volume, so they can step aside when it opens. */}
               {narrow && !panelOwnsError && inRow('zap') && zapButtons}
-              {narrow && inRow('jump') && jumpButtons}
-              {narrow && inRow('skip') && prevButton}
-              {narrow && inRow('skip') && nextButton}
+              {narrow && ((inRow('jump') && jumpButtons) || (inRow('skip') && (prevButton || nextButton))) && (
+                <Transport className={rowGap}>
+                  {inRow('jump') && jumpButtons}
+                  {inRow('skip') && prevButton}
+                  {inRow('skip') && nextButton}
+                </Transport>
+              )}
 
               <div className={cn('flex items-center', big ? 'gap-2' : 'gap-1')}>
                 {tracks.text.length > 0 && !compact && inRow('captions') && (

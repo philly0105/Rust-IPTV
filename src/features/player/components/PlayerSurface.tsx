@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
+import { plainChannelName } from '@/lib/channelName';
 import { intlLocale } from '@/lib/intl';
 
 import { cn } from '../cn';
@@ -30,7 +31,7 @@ import { BarReadout, Controls, CtlButton, InlineSpinner, retryPlayback } from '.
 import { ErrorActions } from './ErrorActions';
 import { glassButton } from './glassButton';
 import { InlinePlayer } from './InlinePlayer';
-import { FullscreenChannelPanel, LiveProgrammeLine, RadioPlayer, SleepPrompt, StreamInfoPanel, TitleLogo, VideoContextMenu, ZapBanner } from './lazyParts';
+import { FullscreenChannelPanel, LiveProgrammeLine, PlayerChannelName, RadioPlayer, SleepPrompt, StreamInfoPanel, TitleLogo, VideoContextMenu, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
 import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
 import { SHORT_PLAYER_PX, useNarrow, useSmallPlayer } from './useNarrow';
@@ -128,11 +129,23 @@ function useTopClearOfZapBanner(ref: RefObject<HTMLElement | null>): number | un
 function Osd({ short = false }: { short?: boolean }) {
   const osd = useMediaStore((s) => s.osd);
   if (!osd) return null;
-  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} short={short} />;
+  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} zap={!!osd.zap} short={short} />;
 }
 
 /** `locked`: a zap passing a channel parental controls lock; a lock stands before its number. */
-function OsdReadout({ primary, secondary, locked = false, short }: { primary: string; secondary?: string | undefined; locked?: boolean; short: boolean }) {
+function OsdReadout({
+  primary,
+  secondary,
+  locked = false,
+  zap = false,
+  short,
+}: {
+  primary: string;
+  secondary?: string | undefined;
+  locked?: boolean;
+  zap?: boolean;
+  short: boolean;
+}) {
   const { t } = useTranslation('player');
   const ref = useRef<HTMLDivElement>(null);
   const digits = /^\d+$/.test(primary);
@@ -140,7 +153,9 @@ function OsdReadout({ primary, secondary, locked = false, short }: { primary: st
   return (
     <div
       ref={ref}
-      aria-live="polite"
+      // A tune's readout is said once by ZapAnnouncer.
+      aria-live={zap ? undefined : 'polite'}
+      aria-hidden={zap || undefined}
       data-testid="player-osd"
       // Within the player, whatever its size: long lines (file names, reasons) wrap, never clip.
       // PV-06: words sit on a glass plate, so "Forward 10 seconds" reads over a bright picture; a
@@ -303,7 +318,14 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
   const upNext = useMediaStore((s) => s.upNext);
   const fullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const action = useStageEndedAction();
-  if (!ended || upNext) return null;
+  // The way on takes focus when the player had it (or the page did): it stayed on the page's
+  // body, so Enter did nothing, as UpNextCard's Play now already does.
+  const primary = useRef<HTMLButtonElement>(null);
+  const shown = ended && !upNext;
+  useEffect(() => {
+    if (shown) focusIfPlayerOwnsFocus(primary.current);
+  }, [shown]);
+  if (!shown) return null;
   const small = compact || short;
   if (action && !compact) {
     return (
@@ -323,7 +345,7 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
             <RotateCcw aria-hidden />
             {t('replay')}
           </button>
-          <button type="button" onClick={action.onClick} className={glassButton('primary', short ? 'sm' : 'md')}>
+          <button ref={primary} type="button" onClick={action.onClick} className={glassButton('primary', short ? 'sm' : 'md')}>
             {action.label}
           </button>
         </div>
@@ -341,6 +363,7 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <button
+        ref={primary}
         type="button"
         onClick={replay}
         aria-label={t('replay')}
@@ -527,7 +550,8 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const status = usePlayerStore((s) => s.status);
-  const title = usePlayerStore((s) => s.source?.title);
+  // The PiP bar's title: a live (or catch-up) channel's in the toasts' plain form, "ESPN2 FHD (US)" (a drag region holds text only).
+  const title = usePlayerStore((s) => (s.source?.isLive || s.source?.catchupProgramStart ? plainChannelName(s.source.title, false) : s.source?.title));
   const pip = usePipStore((s) => s.active);
   const [idle, setIdle] = useState(false);
   const [volumeDragging, setVolumeDragging] = useState(false);
@@ -1178,7 +1202,8 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
                       titleHover.onPointerLeave();
                     }}
                   >
-                    {source.title}
+                    {/* A catch-up programme's title is its channel's name too. */}
+                    {liveRef || source.catchupProgramStart ? <PlayerChannelName title={source.title} glass /> : source.title}
                   </h2>
                   {/* What airs now, kept current while the channel plays (PL-STALE-PROGRAMME); an episode's line for VOD. */}
                   {liveRef ? (

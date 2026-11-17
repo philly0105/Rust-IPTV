@@ -502,6 +502,8 @@ describe('ArchivePage', () => {
     const list = await rows();
     expect(list[0]!.getAttribute('aria-current')).toBe('true');
     expect(list[1]!.hasAttribute('data-playing')).toBe(false);
+    // The player's bar offers Watch live while the catch-up plays: the page leaves its own out (v-player-11).
+    expect(screen.queryByRole('button', { name: 'Watch live' })).toBeNull();
   });
 
   it('opens on the playing catch-up day and programme instead of the live day', async () => {
@@ -659,6 +661,8 @@ describe('ArchivePage, review round 2', () => {
     renderAt('/live/archive/src1/c0', ROUTE);
     await screen.findByTestId('archive-programs');
     expect(lastHeader()).toMatchObject({ title: 'Channel 0', subtitle: 'Catch-up: 2 days · Panel' });
+    // Nothing plays: the page's own Watch live.
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeTruthy();
     // The content keeps the logo, what airs now and Watch live, not the name again.
     expect(screen.getByTestId('archive-airing').textContent).toBe('Now: Matinee · 30 min left');
     expect(screen.queryByText('Channel 0', { selector: 'p' })).toBeNull();

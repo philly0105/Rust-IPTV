@@ -310,7 +310,8 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes, back }: BrowserPro
         </div>
         {/* The header names the channel and the archive's reach; here, its logo, what airs now and
             Watch live. A narrow column (a phone, the sticky column of a 1024 px window) puts Watch
-            live on a line of its own. */}
+            live on a line of its own. While a catch-up of the channel plays, the player's bar has
+            Watch live (in Fill window and fullscreen too): one button, not two (v-player-11). */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
           <ChannelLogo src={channel.logoUrl} name={name} size={56} sourceId={channel.ref.sourceId} />
           {/* From lg the details under the player describe the cursor's programme: while that is the
@@ -322,9 +323,11 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes, back }: BrowserPro
           >
             {watchingTitle ? t('archiveWatching', { title: watchingTitle }) : airing ? t('idleNowOn', { title: airing.title, left: t('minutesLeft', { count: minutesLeft(airing, now) }) }) : null}
           </p>
-          <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">
-            {t('watchLive')}
-          </Button>
+          {!playingStart && (
+            <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">
+              {t('watchLive')}
+            </Button>
+          )}
         </div>
         {/* LG-09: catch-up plays here, in a full player, not in the corner mini player. */}
         {/* Below lg the stage stacks above the list: until something plays it would only say

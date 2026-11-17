@@ -79,7 +79,7 @@ Removing a source hides it and shows an Undo toast. The source is deleted 8 seco
 
 ### Renaming and hiding channels
 
-Right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels" under the group list shows them and brings them back, and its "Reset all edits" gives every channel of the source its provider's name back and unhides everything. The provider's catalog is never changed, so edits survive refreshes.
+Right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels", with Favorites and Recently watched at the top of the group list, shows them and brings them back, and its "Reset all edits" gives every channel of the source its provider's name back and unhides everything. The provider's catalog is never changed, so edits survive refreshes.
 
 ### Filtering by quality
 

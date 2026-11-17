@@ -152,7 +152,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const source = useRpcQuery('sources.get', { id: sourceId }, { enabled: !!sourceId });
   const settings = useRpcQuery('settings.get', undefined);
   const allCategories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, contentType), { enabled: !!sourceId });
-  // The query behind "Hidden channels (n)" below the groups: no request of its own.
+  // The query behind "Hidden channels  n" with the pinned views: no request of its own.
   const channelsHidden = (useHiddenChannelCount(sourceId) ?? 0) > 0;
   const groups = useMemo(
     () => (allCategories.data ? shownGroups(allCategories.data, channelsHidden) : undefined),
@@ -767,6 +767,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     [t, recentLabel],
   );
 
+  // walkthrough-09: Hidden channels sits with the pinned views, not under the last of 900 groups.
+  const hiddenChannelsRow = useCallback((height: number) => <MemoHiddenChannels sourceId={sourceId} height={height} />, [sourceId]);
+
   const hrefForCategory = useCallback(
     (cid?: string) =>
       isRadio
@@ -982,7 +985,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     );
   }
 
-  // Run 2: the Lists group above the groups (C3), and the source's hidden channels below them (C2).
+  // Run 2: the Lists group above the groups (C3); the source's hidden channels are with the pinned views (C2).
   // Lists hold TV channels: Radio leaves them out.
   const sidebar = (
     <>
@@ -1005,9 +1008,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onRegionChange={onRegionChange}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
+          afterPinned={hiddenChannelsRow}
         />
       </div>
-      <MemoHiddenChannels sourceId={sourceId} />
     </>
   );
 

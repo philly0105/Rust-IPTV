@@ -37,6 +37,8 @@
   "urlCopied": "已複製串流位址",
   "copyFailed": "無法複製串流位址",
   "emptyGroup": "此群組沒有頻道",
+  "groupGone": "該群組已不存在",
+  "groupGoneHint": "它可能已被隱藏，或已被供應商移除。",
   "epgMappingTitle": "{{name}} 的節目表資料",
   "epgSettings": "節目表設定",
   "externalFailed": "無法啟動 {{player}}。請在「設定 > 外部播放器」中檢查其路徑。",

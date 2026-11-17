@@ -37,6 +37,8 @@
   "urlCopied": "ストリームのアドレスをコピーしました",
   "copyFailed": "ストリームのアドレスをコピーできませんでした",
   "emptyGroup": "このグループにはチャンネルがありません",
+  "groupGone": "そのグループは存在しません",
+  "groupGoneHint": "非表示にされたか、プロバイダーによって削除された可能性があります。",
   "epgMappingTitle": "{{name}}の番組表データ",
   "epgSettings": "番組表の設定",
   "externalFailed": "{{player}}を起動できませんでした。設定 > 外部プレーヤーでパスを確認してください。",

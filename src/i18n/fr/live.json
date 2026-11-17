@@ -40,6 +40,8 @@
   "urlCopied": "Adresse du flux copiée",
   "copyFailed": "Impossible de copier l'adresse du flux",
   "emptyGroup": "Ce groupe ne contient aucune chaîne",
+  "groupGone": "Ce groupe n'existe plus",
+  "groupGoneHint": "Il a peut-être été masqué ou supprimé par le fournisseur.",
   "epgMappingTitle": "Données du guide pour {{name}}",
   "epgSettings": "Paramètres du guide",
   "externalFailed": "Impossible de lancer {{player}}. Vérifiez son chemin dans Paramètres > Lecteurs externes.",

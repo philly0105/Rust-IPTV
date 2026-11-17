@@ -37,6 +37,8 @@
   "urlCopied": "Stream address copied",
   "copyFailed": "Couldn't copy the stream address",
   "emptyGroup": "This group has no channels",
+  "groupGone": "That group is gone",
+  "groupGoneHint": "It may have been hidden or removed by the provider.",
   "epgMappingTitle": "Guide data for {{name}}",
   "epgSettings": "Guide settings",
   "externalFailed": "Couldn't start {{player}}. Check its path in Settings > External players.",

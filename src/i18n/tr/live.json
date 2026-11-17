@@ -37,6 +37,8 @@
   "urlCopied": "Yayın adresi kopyalandı",
   "copyFailed": "Yayın adresi kopyalanamadı",
   "emptyGroup": "Bu grupta kanal yok",
+  "groupGone": "Bu grup artık yok",
+  "groupGoneHint": "Gizlenmiş ya da sağlayıcı tarafından kaldırılmış olabilir.",
   "epgMappingTitle": "{{name}} için rehber verisi",
   "epgSettings": "Rehber ayarları",
   "externalFailed": "{{player}} başlatılamadı. Yolunu Ayarlar > Harici oynatıcılar bölümünde kontrol edin.",

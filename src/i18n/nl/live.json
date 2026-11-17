@@ -37,6 +37,8 @@
   "urlCopied": "Streamadres gekopieerd",
   "copyFailed": "Kan het streamadres niet kopiëren",
   "emptyGroup": "Deze groep heeft geen kanalen",
+  "groupGone": "Die groep bestaat niet meer",
+  "groupGoneHint": "Hij is misschien verborgen of door de aanbieder verwijderd.",
   "epgMappingTitle": "Gidsgegevens voor {{name}}",
   "epgSettings": "Gidsinstellingen",
   "externalFailed": "Kan {{player}} niet starten. Controleer het pad in Instellingen > Externe spelers.",

@@ -483,6 +483,17 @@ describe('Empty groups and group filter', () => {
     expect(link.getAttribute('href')).toBe('/s/src1/live');
   });
 
+  it('a link to a group that no longer exists says the group is gone (v-live-13)', async () => {
+    rpcMock.handlers['catalog.channels'] = serve([]);
+    renderAt('/s/src1/live/doesnotexist', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
+    const title = await screen.findByText('That group is gone');
+    expect(screen.getByText('It may have been hidden or removed by the provider.')).toBeTruthy();
+    expect(screen.queryByText('This group has no channels')).toBeNull();
+    const state = title.parentElement!;
+    expect(within(state).getByRole('link', { name: 'All channels' }).getAttribute('href')).toBe('/s/src1/live');
+    expect(within(state).getByRole('button', { name: 'Manage visible groups…' })).toBeTruthy();
+  });
+
   it('a group filter with no match offers Clear search; Escape clears too', () => {
     const cats: Category[] = [{ id: 'g1', sourceId: 'src1', contentType: 'live', name: 'News', hidden: false, itemCount: 3, position: 0 }];
     renderAt('/', [

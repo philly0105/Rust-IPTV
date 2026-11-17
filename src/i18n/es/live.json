@@ -40,6 +40,8 @@
   "urlCopied": "Dirección del stream copiada",
   "copyFailed": "No se pudo copiar la dirección del stream",
   "emptyGroup": "Este grupo no tiene canales",
+  "groupGone": "Ese grupo ya no existe",
+  "groupGoneHint": "Puede que se haya ocultado o que el proveedor lo haya eliminado.",
   "epgMappingTitle": "Datos de guía de {{name}}",
   "epgSettings": "Ajustes de la guía",
   "externalFailed": "No se pudo iniciar {{player}}. Revisa su ruta en Ajustes > Reproductores externos.",

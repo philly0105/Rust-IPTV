@@ -37,6 +37,8 @@
   "urlCopied": "Stream-Adresse kopiert",
   "copyFailed": "Die Stream-Adresse konnte nicht kopiert werden",
   "emptyGroup": "Diese Gruppe enthält keine Sender",
+  "groupGone": "Diese Gruppe gibt es nicht mehr",
+  "groupGoneHint": "Sie wurde ausgeblendet oder vom Anbieter entfernt.",
   "epgMappingTitle": "Programmdaten für {{name}}",
   "epgSettings": "Programmführer-Einstellungen",
   "externalFailed": "{{player}} konnte nicht gestartet werden. Prüfen Sie den Pfad unter Einstellungen > Externe Player.",

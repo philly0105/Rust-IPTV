@@ -37,6 +37,8 @@
   "urlCopied": "流地址已复制",
   "copyFailed": "无法复制流地址",
   "emptyGroup": "此分组中没有频道",
+  "groupGone": "该分组已不存在",
+  "groupGoneHint": "它可能已被隐藏，或已被提供商移除。",
   "epgMappingTitle": "{{name}} 的节目指南数据",
   "epgSettings": "节目指南设置",
   "externalFailed": "无法启动 {{player}}。请在“设置 > 外部播放器”中检查其路径。",

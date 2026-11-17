@@ -37,6 +37,8 @@
   "urlCopied": "Adatfolyam címe másolva",
   "copyFailed": "Nem sikerült másolni az adatfolyam címét",
   "emptyGroup": "Ebben a csoportban nincs csatorna",
+  "groupGone": "Ez a csoport már nem létezik",
+  "groupGoneHint": "Lehet, hogy elrejtették, vagy a szolgáltató eltávolította.",
   "epgMappingTitle": "Műsoradatok – {{name}}",
   "epgSettings": "Műsorújság-beállítások",
   "externalFailed": "Nem sikerült elindítani: {{player}}. Ellenőrizze az elérési útját a Beállítások > Külső lejátszók részben.",

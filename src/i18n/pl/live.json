@@ -43,6 +43,8 @@
   "urlCopied": "Skopiowano adres strumienia",
   "copyFailed": "Nie udało się skopiować adresu strumienia",
   "emptyGroup": "Ta grupa nie ma kanałów",
+  "groupGone": "Ta grupa już nie istnieje",
+  "groupGoneHint": "Mogła zostać ukryta lub usunięta przez dostawcę.",
   "epgMappingTitle": "Dane przewodnika dla {{name}}",
   "epgSettings": "Ustawienia przewodnika",
   "externalFailed": "Nie udało się uruchomić {{player}}. Sprawdź ścieżkę w Ustawienia > Zewnętrzne odtwarzacze.",

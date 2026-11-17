@@ -1099,6 +1099,25 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         }
       />
     );
+  } else if (listEmpty && categoryId && groups && !category) {
+    // A stale link (the group was hidden or the provider dropped it): say so, not "no channels".
+    listBody = (
+      <EmptyState
+        icon={<ListTree className="size-6" />}
+        title={t('groupGone')}
+        description={t('groupGoneHint')}
+        action={
+          <>
+            <Link to={hrefFor(undefined)} className={buttonClass('primary', 'sm')}>
+              {isRadio ? t('allStations') : t('allChannels')}
+            </Link>
+            <Button size="sm" onClick={openManage}>
+              {t('manageCategoriesEllipsis')}
+            </Button>
+          </>
+        }
+      />
+    );
   } else if (listEmpty && categoryId) {
     listBody = (
       <EmptyState

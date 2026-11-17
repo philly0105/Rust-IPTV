@@ -18,7 +18,7 @@
  * the league and search leave on screen.
  */
 
-import { CalendarX2, Hd, SearchX, Star, Tv } from 'lucide-react';
+import { CalendarX2, Hd, SearchX, Star, TriangleAlert, Tv } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
@@ -33,7 +33,23 @@ import { LEAGUE_KEYS, LeagueFilter } from '../components/LeagueFilter';
 import { GRID_COLUMNS, SportsSkeleton } from '../components/SportsSkeleton';
 import { QUALITY_LABEL, useStreamContext, type StreamContext } from '../components/StreamList';
 import { WeekSearch } from '../components/WeekSearch';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SearchEverythingLink, SectionHeader, cn, intlLocale, useNow, useSettingsValue, useShell, useToast, useVisibleSources } from '../deps';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  FilterChip,
+  Page,
+  SearchEverythingLink,
+  SectionHeader,
+  TEXT_LINK,
+  cn,
+  intlLocale,
+  useNow,
+  useSettingsValue,
+  useShell,
+  useToast,
+  useVisibleSources,
+} from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -236,6 +252,12 @@ export function SportsPage() {
   );
   // Part of the channel index failed: a game with no stream may have one the page couldn't look through.
   const streamsError = hasSources ? (dayStreams.error ?? liveStreams.error ?? null) : null;
+  // Part of the guide failed: games still match by channel name, and the page says so once, quietly.
+  const guideError = hasSources && streamsError === null ? (dayStreams.guideError ?? liveStreams.guideError ?? null) : null;
+  const retryStreams = () => {
+    dayStreams.retry();
+    liveStreams.retry();
+  };
   const ctx = useStreamContext(now, sourceCount, hdOnly, streamsError !== null);
   // Live TV's filter has already left the lower qualities out of the index.
   const floorStreams = hdOnly && !liveFloor;
@@ -533,11 +555,19 @@ export function SportsPage() {
           size="inline"
           error={streamsError}
           title={t('streamsErrorTitle')}
-          onRetry={() => {
-            dayStreams.retry();
-            liveStreams.retry();
-          }}
+          onRetry={retryStreams}
         />
+      ) : null}
+      {guideError !== null && allDay.games.length > 0 ? (
+        <p role="status" className="-mt-2 flex items-start gap-2 text-caption text-fg-muted" data-testid="sports-guide-failed">
+          <TriangleAlert aria-hidden size={14} className="mt-px shrink-0 text-warning" />
+          <span>
+            {t('guideErrorNote')}{' '}
+            <button type="button" className={TEXT_LINK} onClick={retryStreams} data-testid="sports-guide-retry">
+              {t('common:retry')}
+            </button>
+          </span>
+        </p>
       ) : null}
       {live.length > 0 ? (
         <Section id="live" title={t('liveNow')} count={live.length}>

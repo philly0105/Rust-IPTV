@@ -39,6 +39,7 @@
   "qualityNote": "Der Qualitätsfilter blendet möglicherweise Streams aus.",
   "streamsFailed": "Streams konnten nicht geprüft werden",
   "streamsErrorTitle": "Ihre Sender konnten nicht nach diesen Spielen durchsucht werden",
+  "guideErrorNote": "Der Programmführer für diese Spiele konnte nicht gelesen werden, daher werden Streams nur über Sendernamen zugeordnet.",
   "showAllStreams_one": "{{count}} Stream anzeigen",
   "showAllStreams_other": "Alle {{count}} Streams anzeigen",
   "showFewer": "Weniger anzeigen",

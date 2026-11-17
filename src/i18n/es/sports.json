@@ -39,6 +39,7 @@
   "qualityNote": "Puede que el filtro de calidad esté ocultando transmisiones.",
   "streamsFailed": "No se pudieron buscar transmisiones",
   "streamsErrorTitle": "No se pudieron revisar tus canales para estos partidos",
+  "guideErrorNote": "No se pudo leer la guía de TV para estos partidos, así que las emisiones se buscan solo por el nombre del canal.",
   "showAllStreams_one": "Mostrar {{count}} transmisión",
   "showAllStreams_many": "Mostrar las {{count}} transmisiones",
   "showAllStreams_other": "Mostrar las {{count}} transmisiones",

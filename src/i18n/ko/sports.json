@@ -39,6 +39,7 @@
   "qualityNote": "화질 필터 때문에 일부 스트림이 숨겨져 있을 수 있습니다.",
   "streamsFailed": "스트림을 확인하지 못했습니다",
   "streamsErrorTitle": "이 경기들에 대해 채널을 확인하지 못했습니다",
+  "guideErrorNote": "이 경기들의 TV 가이드를 읽지 못해 채널 이름으로만 스트림을 찾고 있습니다.",
   "showAllStreams_one": "{{count}}개 모두 보기",
   "showAllStreams_other": "{{count}}개 모두 보기",
   "showFewer": "간단히 보기",

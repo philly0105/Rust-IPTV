@@ -39,6 +39,7 @@
   "qualityNote": "The quality filter may be hiding streams.",
   "streamsFailed": "Couldn't check for streams",
   "streamsErrorTitle": "Couldn't check your channels for these games",
+  "guideErrorNote": "Couldn't read the TV guide for these games, so streams are matched by channel names only.",
   "showAllStreams_one": "Show all {{count}} streams",
   "showAllStreams_other": "Show all {{count}} streams",
   "showFewer": "Show fewer",

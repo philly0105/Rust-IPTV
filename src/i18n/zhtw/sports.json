@@ -39,6 +39,7 @@
   "qualityNote": "畫質篩選可能隱藏了部分直播來源。",
   "streamsFailed": "無法查找直播來源",
   "streamsErrorTitle": "無法為這些比賽檢查你的頻道",
+  "guideErrorNote": "無法讀取這些比賽的節目表，因此僅依頻道名稱比對直播來源。",
   "showAllStreams_one": "顯示全部 {{count}} 個",
   "showAllStreams_other": "顯示全部 {{count}} 個",
   "showFewer": "收合",

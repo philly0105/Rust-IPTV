@@ -39,6 +39,7 @@
   "qualityNote": "Kalite filtresi bazı yayınları gizliyor olabilir.",
   "streamsFailed": "Yayınlar kontrol edilemedi",
   "streamsErrorTitle": "Kanallarınız bu maçlar için kontrol edilemedi",
+  "guideErrorNote": "Bu maçlar için TV rehberi okunamadı, bu yüzden yayınlar yalnızca kanal adlarına göre eşleştiriliyor.",
   "showAllStreams_one": "{{count}} yayını göster",
   "showAllStreams_other": "{{count}} yayının tümünü göster",
   "showFewer": "Daha az göster",

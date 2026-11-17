@@ -22,6 +22,7 @@ export {
   Page,
   SectionHeader,
   Skeleton,
+  TEXT_LINK,
   Tabs,
   Tooltip,
   buttonClass,

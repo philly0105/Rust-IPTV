@@ -39,6 +39,7 @@
   "qualityNote": "Filtr jakości może ukrywać część transmisji.",
   "streamsFailed": "Nie udało się sprawdzić transmisji",
   "streamsErrorTitle": "Nie udało się sprawdzić Twoich kanałów pod kątem tych meczów",
+  "guideErrorNote": "Nie udało się odczytać przewodnika TV dla tych meczów, więc transmisje są dopasowywane tylko po nazwach kanałów.",
   "showAllStreams_one": "Pokaż {{count}} transmisję",
   "showAllStreams_few": "Pokaż wszystkie {{count}} transmisje",
   "showAllStreams_many": "Pokaż wszystkie {{count}} transmisji",

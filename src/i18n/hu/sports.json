@@ -39,6 +39,7 @@
   "qualityNote": "Lehet, hogy a minőségszűrő közvetítéseket rejt el.",
   "streamsFailed": "Nem sikerült közvetítést keresni",
   "streamsErrorTitle": "Nem sikerült átnézni a csatornáit ezekhez a meccsekhez",
+  "guideErrorNote": "Nem sikerült beolvasni a műsorújságot ezekhez a meccsekhez, ezért a közvetítéseket csak a csatornanevek alapján keressük.",
   "showAllStreams_one": "{{count}} közvetítés megjelenítése",
   "showAllStreams_other": "Mind a(z) {{count}} közvetítés megjelenítése",
   "showFewer": "Kevesebb",

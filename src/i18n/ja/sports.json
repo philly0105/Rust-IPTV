@@ -39,6 +39,7 @@
   "qualityNote": "画質フィルターで配信が非表示になっている可能性があります。",
   "streamsFailed": "配信を確認できませんでした",
   "streamsErrorTitle": "これらの試合についてチャンネルを確認できませんでした",
+  "guideErrorNote": "これらの試合の番組表を読み込めなかったため、チャンネル名だけで配信を探しています。",
   "showAllStreams_one": "{{count}} 件すべて表示",
   "showAllStreams_other": "{{count}} 件すべて表示",
   "showFewer": "表示を減らす",

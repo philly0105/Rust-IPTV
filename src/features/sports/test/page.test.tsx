@@ -33,6 +33,7 @@ const data = vi.hoisted(() => ({
   streams: new Map<string, unknown[]>(),
   streamsLoading: false,
   streamsError: null as unknown,
+  guideError: null as unknown,
   streamRetries: 0,
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
@@ -67,8 +68,8 @@ vi.mock('../hooks/useGameStreams', () => ({
     data.streamCalls.push({ keys: games.map((g) => g.key), enabled });
     const retry = () => void data.streamRetries++;
     return enabled
-      ? { streams: data.streams, loading: data.streamsLoading, error: data.streamsError, retry }
-      : { streams: new Map(), loading: false, error: null, retry };
+      ? { streams: data.streams, loading: data.streamsLoading, error: data.streamsError, guideError: data.guideError, retry }
+      : { streams: new Map(), loading: false, error: null, guideError: null, retry };
   },
 }));
 
@@ -179,6 +180,7 @@ beforeEach(() => {
   data.streams = new Map();
   data.streamsLoading = false;
   data.streamsError = null;
+  data.guideError = null;
   data.streamRetries = 0;
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
@@ -1225,6 +1227,28 @@ describe('sports page', () => {
     expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
     fireEvent.click(within(alert!).getByRole('button', { name: 'Try again' }));
     expect(data.streamRetries).toBeGreaterThan(0);
+  });
+
+  it('says once, quietly, when the guide could not be read, and reads it again from there', async () => {
+    const g = h.liveGame('1');
+    setDay([g]);
+    setStreams(g, [h.match(ESPN)]);
+    data.guideError = Object.assign(new Error('database is locked'), { code: 'db' });
+    await openReady();
+    const note = screen.getByTestId('sports-guide-failed');
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.textContent).toBe("Couldn't read the TV guide for these games, so streams are matched by channel names only. Try again");
+    // Not an alert box, and the cards still offer what was found by name.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(within(card(g)).getByTestId('sports-watch')).toBeTruthy();
+    fireEvent.click(within(note).getByRole('button', { name: 'Try again' }));
+    expect(data.streamRetries).toBeGreaterThan(0);
+    cleanup();
+
+    // The channel index failing as well says that, the louder message, alone.
+    data.streamsError = Object.assign(new Error('database is locked'), { code: 'db' });
+    await openReady();
+    expect(screen.queryByTestId('sports-guide-failed')).toBeNull();
   });
 
   it('says streams are being looked for while matching runs', async () => {

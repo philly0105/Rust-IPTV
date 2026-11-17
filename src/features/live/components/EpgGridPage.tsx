@@ -614,7 +614,7 @@ export function EpgGridPage() {
 
   // A view pages nothing from the source: the source's own list stays idle meanwhile.
   const sourcePaged = usePagedChannels({ sourceId: view ? '' : sourceId, categoryId, withExtras: false });
-  const viewPaged = useGuideViewChannels(view, sourceId);
+  const viewPaged = useGuideViewChannels(view, sourceId, prefs.epgOffsetMinutes);
   const paged = viewPaged ?? sourcePaged;
   const count = paged.total ?? 0;
   // The Live TV quality filter applies here too; a guide it empties says so (Live sets it).
@@ -2131,6 +2131,7 @@ export function EpgGridPage() {
         categoryId={categoryId}
         view={view}
         lists={lists.data}
+        withGuideView={guidesLoaded}
         bar={bar}
         nowInWindow={nowInViewport}
         now={now}
@@ -2198,8 +2199,8 @@ export function EpgGridPage() {
       ) : count === 0 && view ? (
         <EmptyState
           icon={<Tv className="size-8" />}
-          title={tg(view.kind === 'favorites' ? 'viewFavoritesEmpty' : 'viewListEmpty')}
-          description={tg('viewEmptyHint')}
+          title={tg(view.kind === 'favorites' ? 'viewFavoritesEmpty' : view.kind === 'list' ? 'viewListEmpty' : 'viewWithGuideEmpty')}
+          description={tg(view.kind === 'withGuide' ? 'viewWithGuideHint' : 'viewEmptyHint')}
           action={
             <Button variant="secondary" size="sm" onClick={() => setQuery('view', undefined)}>
               {t('allChannels')}
@@ -2600,6 +2601,7 @@ const GuideToolbar = memo(function GuideToolbar({
   categoryId,
   view,
   lists,
+  withGuideView,
   bar,
   nowInWindow,
   now,
@@ -2623,6 +2625,8 @@ const GuideToolbar = memo(function GuideToolbar({
   categoryId: string | undefined;
   view: GuideView | undefined;
   lists: readonly { id: string; name: string }[] | undefined;
+  /** The guides hold programmes: offer the view of the channels that have some. */
+  withGuideView: boolean;
   bar: 'full' | 'stacked' | 'phone';
   nowInWindow: boolean;
   /** For the phone's day label ("Today"). */
@@ -2655,10 +2659,17 @@ const GuideToolbar = memo(function GuideToolbar({
     () => [{ id: 'sources', options: (sources ?? []).map((s) => ({ value: s.id, label: s.name, count: s.channelCount })) }],
     [sources],
   );
-  // All channels, then the views (favorites, each custom list), then the source's groups.
+  // All channels (and those of them with guide data: a patchy guide leaves most rows empty), then
+  // the views (favorites, each custom list), then the source's groups.
   const groupSections: PickerSection[] = useMemo(
     () => [
-      { id: 'all', options: [{ value: '', label: t('allChannels'), icon: <LayoutList size={14} /> }] },
+      {
+        id: 'all',
+        options: [
+          { value: '', label: t('allChannels'), icon: <LayoutList size={14} /> },
+          ...(withGuideView ? [{ value: `${VIEW_OPTION}${guideViewParam({ kind: 'withGuide' })}`, label: tg('viewWithGuide'), icon: <CalendarClock size={14} /> }] : []),
+        ],
+      },
       {
         id: 'views',
         heading: t('pickerViews'),
@@ -2677,7 +2688,7 @@ const GuideToolbar = memo(function GuideToolbar({
         options: (categories ?? []).filter((c) => !c.hidden).map((c) => ({ value: c.id, label: c.name, count: c.itemCount })),
       },
     ],
-    [categories, lists, t, tg],
+    [categories, lists, withGuideView, t, tg],
   );
   const stacked = bar !== 'full';
   const phone = bar === 'phone';

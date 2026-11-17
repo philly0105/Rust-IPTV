@@ -10,7 +10,7 @@ import { Button, cn, ErrorState, IconButton, SearchInput, Select, Skeleton, useL
 import { intlLocale } from '@/lib/intl';
 import { useLongPress } from '../hooks/useLongPress';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
+import { groupRegion, groupRegions, readRegion, regionLabel, writeRegion } from '../lib/groupRegion';
 import { documentIsRtl } from '../lib/rtl';
 
 /** A group row's slot at 100 %. */
@@ -274,9 +274,12 @@ export function CategorySidebar(props: CategorySidebarProps) {
             }}
             options={[
               { value: '', label: t('allRegions') },
-              // "UK · 3 groups" in the list (a bare 3 read as a count of channels); the picked one
-              // reads "UK" alone, which is what the closed select shows in its narrow header.
-              ...regions.map((r) => ({ value: r.tag, label: r.tag === region ? r.tag : t('regionOption', { region: r.tag, count: r.groups }) })),
+              // "UK · United Kingdom · 3 groups" in the list (a bare 3 read as a count of channels);
+              // the picked one reads "UK" alone, which is what the closed select shows in its narrow header.
+              ...regions.map((r) => ({
+                value: r.tag,
+                label: r.tag === region ? r.tag : t('regionOption', { region: regionLabel(r.tag, intlLocale(i18n.language)), count: r.groups }),
+              })),
             ]}
             data-testid="group-region"
           />

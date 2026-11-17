@@ -8,7 +8,11 @@
 //!   one without a validator stands for [`FINGERPRINT_TTL`].
 //! - Identical and Equivalent verdicts stand for [`MATCH_TTL`], and only
 //!   while both copies' fingerprints still agree with what was compared.
-//! - Differs stands for [`DIFFERS_TTL`]; Unavailable for [`UNAVAILABLE_TTL`].
+//! - Differs stands for [`DIFFERS_TTL`]; Unavailable for [`UNAVAILABLE_TTL`],
+//!   or [`BUSY_TTL`] when the source only had no spare connection (the
+//!   entry's validator is [`BUSY`]).
+//! - Nothing names a removed source: [`forget_source`] strips it, and the
+//!   reads here skip any copy whose source is gone.
 //!
 //! Every write is a read-modify-write of one record; callers on the
 //! serialized write connection (`db_write`) never lose each other's updates.
@@ -35,6 +39,12 @@ pub(super) const MATCH_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
 pub(super) const DIFFERS_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
 /// How long an Unavailable verdict stands (the source was busy or failed).
 pub(super) const UNAVAILABLE_TTL: Duration = Duration::from_secs(3600);
+/// How long an Unavailable verdict stands when the source was only busy
+/// (the manager refused a verification hold).
+pub(super) const BUSY_TTL: Duration = Duration::from_secs(120);
+/// The validator of a busy Unavailable entry. Unavailable entries carry no
+/// validator otherwise.
+pub(super) const BUSY: &str = "busy";
 /// Most verdicts one record keeps; the oldest go first.
 pub(super) const MAX_VERDICTS: usize = 50;
 
@@ -224,13 +234,23 @@ pub(super) fn fresh_verdict(
                         })))
         }
         Verdict::Differs => within(&e.checked_at, DIFFERS_TTL, now),
+        Verdict::Unavailable if e.validator.as_deref() == Some(BUSY) => {
+            within(&e.checked_at, BUSY_TTL, now)
+        }
         Verdict::Unavailable => within(&e.checked_at, UNAVAILABLE_TTL, now),
     };
     fresh.then_some(e.verdict)
 }
 
+/// Whether source `id` still exists.
+pub(super) fn source_exists(conn: &Connection, id: &str) -> CoreResult<bool> {
+    Ok(conn
+        .prepare_cached("SELECT 1 FROM sources WHERE id = ?1")?
+        .exists([id])?)
+}
+
 /// Copies with a standing Identical verdict in `item`'s record, on sources
-/// other than `item`'s, ordered by source.
+/// other than `item`'s that still exist, ordered by source.
 pub(super) fn cached_identical(
     conn: &Connection,
     item: &CopyRef,
@@ -244,6 +264,7 @@ pub(super) fn cached_identical(
         if e.verdict != Verdict::Identical
             || e.copy.source_id() == item.source_id()
             || out.contains(&e.copy)
+            || !source_exists(conn, e.copy.source_id())?
         {
             continue;
         }
@@ -263,6 +284,41 @@ pub(super) fn cached_identical(
     Ok(out)
 }
 
+/// Every mirror record's key. A prefix compare, not LIKE: ids may hold `_`.
+fn keys(conn: &Connection) -> CoreResult<Vec<String>> {
+    let mut st = conn
+        .prepare("SELECT key FROM app_state WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key")?;
+    let keys = st
+        .query_map(params![MIRROR_KEY_PREFIX], |r| r.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok(keys)
+}
+
+/// Forgets source `source_id` in every mirror record: its copies' records
+/// (their fingerprints) go, and every other record loses the verdicts that
+/// name one of its copies. Records that do not parse are left alone.
+/// Returns how many records changed or went.
+pub(super) fn forget_source(conn: &Connection, source_id: &str) -> CoreResult<usize> {
+    let mut changed = 0;
+    for key in keys(conn)? {
+        let Some(mut rec) = read_record::<MirrorRecord>(conn, &key)? else {
+            continue;
+        };
+        if rec.copy.source_id() == source_id {
+            conn.execute("DELETE FROM app_state WHERE key = ?1", [&key])?;
+            changed += 1;
+            continue;
+        }
+        let before = rec.verdicts.len();
+        rec.verdicts.retain(|e| e.copy.source_id() != source_id);
+        if rec.verdicts.len() != before {
+            write_record(conn, &key, &rec)?;
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
 /// Test hook: moves every mirror record's stamps `by` into the past, as if
 /// that much time had gone by.
 pub(super) fn age(conn: &Connection, by: Duration) -> CoreResult<usize> {
@@ -272,17 +328,8 @@ pub(super) fn age(conn: &Connection, by: Duration) -> CoreResult<usize> {
             *at = stamp(t);
         }
     };
-    let keys: Vec<String> = {
-        let mut st = conn.prepare(
-            "SELECT key FROM app_state WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
-        )?;
-        let keys = st
-            .query_map(params![MIRROR_KEY_PREFIX], |r| r.get(0))?
-            .collect::<Result<Vec<String>, _>>()?;
-        keys
-    };
     let mut aged = 0;
-    for key in keys {
+    for key in keys(conn)? {
         let Some(mut rec) = read_record::<MirrorRecord>(conn, &key)? else {
             continue;
         };

@@ -11,7 +11,9 @@ use chrono::{Duration as Span, Utc};
 fn db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
-        "CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT)",
+        "CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT);
+         CREATE TABLE sources (id TEXT PRIMARY KEY);
+         INSERT INTO sources (id) VALUES ('a'), ('b'), ('c'), ('d');",
     )
     .unwrap();
     conn
@@ -247,6 +249,14 @@ fn verdict_windows_follow_the_spec() {
     assert_eq!(at(Differs, Span::days(31)), None);
     assert_eq!(at(Unavailable, Span::minutes(59)), Some(Unavailable));
     assert_eq!(at(Unavailable, Span::minutes(61)), None);
+    // A source that was only busy is asked again after two minutes.
+    let busy = |ago: Span| {
+        let mut e = entry(&b, Unavailable, None, ago);
+        e.validator = Some(cache::BUSY.into());
+        cache::fresh_verdict(&rec(vec![e]), &b, None, now)
+    };
+    assert_eq!(busy(Span::seconds(110)), Some(Unavailable));
+    assert_eq!(busy(Span::seconds(130)), None);
     // A stamp from the future (a clock set back) or one that does not parse
     // never stands.
     assert_eq!(at(Differs, Span::hours(-2)), None);
@@ -373,6 +383,51 @@ fn cached_identical_lists_standing_copies_on_other_sources() {
     assert!(cached_identical(&conn, &movie("nobody"))
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn removed_sources_are_skipped_then_forgotten() {
+    let conn = db();
+    let (a, b, c) = (movie("a"), movie("b"), movie("c"));
+    let total = Some(MIN_MIRROR_TOTAL);
+    for copy in [&a, &b, &c] {
+        store_fingerprint(&conn, copy, &fp(MIN_MIRROR_TOTAL, None, "x")).unwrap();
+    }
+    for (owner, of) in [(&a, &b), (&a, &c), (&b, &a), (&c, &b)] {
+        cache::record_verdict(
+            &conn,
+            owner,
+            entry(of, Verdict::Identical, total, Span::zero()),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        cached_identical(&conn, &a).unwrap(),
+        vec![b.clone(), c.clone()]
+    );
+    conn.execute("DELETE FROM sources WHERE id = 'b'", [])
+        .unwrap();
+    // Before the cleanup, reads already skip the removed source.
+    assert_eq!(cached_identical(&conn, &a).unwrap(), vec![c.clone()]);
+    // a and c lose their verdicts on b; b's record goes.
+    assert_eq!(cache::forget_source(&conn, "b").unwrap(), 3);
+    let copies = |owner: &CopyRef| -> Vec<CopyRef> {
+        cache::load(&conn, owner)
+            .unwrap()
+            .unwrap()
+            .verdicts
+            .into_iter()
+            .map(|e| e.copy)
+            .collect()
+    };
+    assert_eq!(copies(&a), vec![c.clone()]);
+    assert!(copies(&c).is_empty());
+    assert!(cache::load(&conn, &b).unwrap().is_none());
+    assert!(cache::cached_fingerprint(&conn, &c, Utc::now())
+        .unwrap()
+        .is_some());
+    // Nothing left to do the second time.
+    assert_eq!(cache::forget_source(&conn, "b").unwrap(), 0);
 }
 
 #[test]

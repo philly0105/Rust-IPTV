@@ -431,6 +431,8 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
          WHERE substr(key, 1, length('dl_mirror:' || ?1 || ':')) = 'dl_mirror:' || ?1 || ':'",
         [id],
     )?;
+    // downloads: verdicts other copies' records hold on the source's copies.
+    crate::downloads::mirrors::forget_source(&tx, id)?;
     tx.commit()?;
     Ok(())
 }

@@ -88,6 +88,7 @@
   "openMyVideosCount_other": "我的视频（{{count, number}}）",
   "queueEmptyTitle": "没有正在进行的下载",
   "queueEmptyBody": "在电影或剧集上使用下载按钮，即可保存以供离线观看。",
+  "queueEmptyNoSources": "请先添加播放源。然后用电影或剧集上的下载按钮保存，即可离线观看。",
   "queueEmptyWithLibrary_one": "你已完成的 {{count, number}} 个下载在“我的视频”中。",
   "queueEmptyWithLibrary_other": "你已完成的 {{count, number}} 个下载在“我的视频”中。",
   "shortcutPause": "暂停或继续当前下载",

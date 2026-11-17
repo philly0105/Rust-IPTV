@@ -120,6 +120,7 @@
   "openMyVideosCount_other": "فيديوهاتي ({{count, number}})",
   "queueEmptyTitle": "لا يوجد شيء قيد التنزيل",
   "queueEmptyBody": "استخدم زر التنزيل في أي فيلم أو حلقة لحفظه ومشاهدته دون اتصال.",
+  "queueEmptyNoSources": "أضف مصدرًا أولًا. ثم استخدم زر التنزيل في فيلم أو حلقة لحفظه للمشاهدة دون اتصال.",
   "queueEmptyWithLibrary_zero": "التنزيلات المكتملة في فيديوهاتي: {{count, number}}.",
   "queueEmptyWithLibrary_one": "التنزيلات المكتملة في فيديوهاتي: {{count, number}}.",
   "queueEmptyWithLibrary_two": "التنزيلات المكتملة في فيديوهاتي: {{count, number}}.",

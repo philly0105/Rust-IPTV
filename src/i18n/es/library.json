@@ -96,6 +96,7 @@
   "openMyVideosCount_other": "Mis videos ({{count, number}})",
   "queueEmptyTitle": "No se está descargando nada",
   "queueEmptyBody": "Usa el botón de descarga de una película o un episodio para guardarlo y verlo sin conexión.",
+  "queueEmptyNoSources": "Añade primero una fuente. Luego usa el botón de descarga de una película o un episodio para verlo sin conexión.",
   "queueEmptyWithLibrary_one": "Tu descarga finalizada está en Mis videos ({{count, number}}).",
   "queueEmptyWithLibrary_many": "Tus {{count, number}} descargas finalizadas están en Mis videos.",
   "queueEmptyWithLibrary_other": "Tus {{count, number}} descargas finalizadas están en Mis videos.",

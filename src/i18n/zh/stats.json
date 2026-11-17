@@ -28,6 +28,7 @@
   "emptyTitle": "还没有观看记录",
   "emptyWeek": "过去 7 天没有播放任何内容。",
   "emptyMonth": "你在直播、电影和剧集上花的时间会显示在这里。",
+  "emptyNoSources": "请先添加播放源。你的观看时长会显示在这里。",
   "localNote": "仅在此设备上统计。",
   "clear": "清除统计",
   "clearTitle": "要清除观看统计吗？",

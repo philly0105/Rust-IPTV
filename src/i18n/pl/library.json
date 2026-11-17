@@ -104,6 +104,7 @@
   "openMyVideosCount_other": "Moje wideo ({{count, number}})",
   "queueEmptyTitle": "Nic nie jest pobierane",
   "queueEmptyBody": "Użyj przycisku pobierania przy filmie lub odcinku, aby zapisać go do oglądania offline.",
+  "queueEmptyNoSources": "Najpierw dodaj źródło. Potem użyj przycisku pobierania przy filmie lub odcinku, aby zapisać go do oglądania offline.",
   "queueEmptyWithLibrary_one": "{{count, number}} zakończone pobranie znajdziesz w Moich wideo.",
   "queueEmptyWithLibrary_few": "{{count, number}} zakończone pobrania znajdziesz w Moich wideo.",
   "queueEmptyWithLibrary_many": "{{count, number}} zakończonych pobrań znajdziesz w Moich wideo.",

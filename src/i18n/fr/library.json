@@ -96,6 +96,7 @@
   "openMyVideosCount_other": "Mes vidéos ({{count, number}})",
   "queueEmptyTitle": "Aucun téléchargement en cours",
   "queueEmptyBody": "Utilisez le bouton de téléchargement d'un film ou d'un épisode pour le regarder hors ligne.",
+  "queueEmptyNoSources": "Ajoutez d’abord une source. Utilisez ensuite le bouton de téléchargement d'un film ou d'un épisode pour le regarder hors ligne.",
   "queueEmptyWithLibrary_one": "Votre {{count, number}} téléchargement terminé est dans Mes vidéos.",
   "queueEmptyWithLibrary_many": "Vos {{count, number}} téléchargements terminés sont dans Mes vidéos.",
   "queueEmptyWithLibrary_other": "Vos {{count, number}} téléchargements terminés sont dans Mes vidéos.",

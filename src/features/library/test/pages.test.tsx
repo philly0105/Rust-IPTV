@@ -370,6 +370,14 @@ describe('DownloadsPage', () => {
     expect((await screen.findByRole('link', { name: 'Browse movies' })).getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
   });
 
+  it('with no sources, says to add one first, like every other empty page (sources-onboarding-15)', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    rpc.handlers['sources.list'] = () => [];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect(await screen.findByText(/^Add a source first\. Then use the download button/)).toBeTruthy();
+    expect(await screen.findByTestId('library-empty-add-source')).toBeTruthy();
+  });
+
   it('shows the empty state when only completed items remain', async () => {
     rpc.handlers['downloads.list'] = () => [list[3]];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);

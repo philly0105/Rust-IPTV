@@ -234,7 +234,13 @@ export function DownloadsPage() {
       <EmptyState
         icon={<DownloadIcon size={28} aria-hidden />}
         title={t('queueEmptyTitle')}
-        description={completedCount > 0 ? t('queueEmptyWithLibrary', { count: completedCount }) : t('queueEmptyBody')}
+        description={
+          completedCount > 0
+            ? t('queueEmptyWithLibrary', { count: completedCount })
+            : !sourcesLoading && sources.size === 0
+              ? t('queueEmptyNoSources')
+              : t('queueEmptyBody')
+        }
         action={
           completedCount > 0 ? (
             <Link to="/my-videos" className={buttonClass('primary', 'md')}>

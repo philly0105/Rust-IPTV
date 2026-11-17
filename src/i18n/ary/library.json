@@ -120,6 +120,7 @@
   "openMyVideosCount_other": "الفيديوهات ديالي ({{count, number}})",
   "queueEmptyTitle": "حتى حاجة ما كتتحمّل",
   "queueEmptyBody": "استعمل زر التحميل فشي فيلم ولا حلقة باش تحفظها وتتفرج بلا أنترنت.",
+  "queueEmptyNoSources": "زيد مصدر لول. من بعد ستعمل بوطونة التحميل ف فيلم ولا حلقة باش تحفظو وتتفرج فيه بلا كونيكسيون.",
   "queueEmptyWithLibrary_zero": "حتى تحميل كامل ما كاين فالفيديوهات ديالي.",
   "queueEmptyWithLibrary_one": "التحميل اللي كمل ({{count, number}}) كاين فالفيديوهات ديالي.",
   "queueEmptyWithLibrary_two": "جوج تحميلات اللي كملو كاينين فالفيديوهات ديالي.",

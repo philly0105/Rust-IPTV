@@ -104,6 +104,7 @@
   "openMyVideosCount_other": "Мае відэа ({{count, number}})",
   "queueEmptyTitle": "Нічога не спампоўваецца",
   "queueEmptyBody": "Націсніце кнопку спампоўвання на фільме або эпізодзе, каб захаваць яго для прагляду без сеткі.",
+  "queueEmptyNoSources": "Спачатку дадайце крыніцу. Потым націсніце кнопку спампоўкі ў фільма або серыі, каб глядзець яго без сеткі.",
   "queueEmptyWithLibrary_one": "{{count, number}} завершанае спампоўванне ёсць у «Мае відэа».",
   "queueEmptyWithLibrary_few": "{{count, number}} завершаныя спампоўванні ёсць у «Мае відэа».",
   "queueEmptyWithLibrary_many": "{{count, number}} завершаных спампоўванняў ёсць у «Мае відэа».",

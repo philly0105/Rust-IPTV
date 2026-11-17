@@ -88,6 +88,7 @@
   "openMyVideosCount_other": "Meine Videos ({{count, number}})",
   "queueEmptyTitle": "Keine laufenden Downloads",
   "queueEmptyBody": "Speichern Sie Filme oder Folgen über die Download-Schaltfläche, um sie offline anzusehen.",
+  "queueEmptyNoSources": "Fügen Sie zuerst eine Quelle hinzu. Speichern Sie dann Filme oder Folgen über die Download-Schaltfläche, um sie offline anzusehen.",
   "queueEmptyWithLibrary_one": "{{count, number}} abgeschlossener Download befindet sich unter „Meine Videos“.",
   "queueEmptyWithLibrary_other": "{{count, number}} abgeschlossene Downloads befinden sich unter „Meine Videos“.",
   "shortcutPause": "Ausgewählten Download pausieren oder fortsetzen",

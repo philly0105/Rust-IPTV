@@ -88,6 +88,7 @@
   "openMyVideosCount_other": "Saját videók ({{count, number}})",
   "queueEmptyTitle": "Nincs folyamatban lévő letöltés",
   "queueEmptyBody": "Egy film vagy epizód letöltés gombjával mentheti el azt offline megtekintéshez.",
+  "queueEmptyNoSources": "Először adjon hozzá egy forrást. Utána egy film vagy epizód letöltés gombjával mentheti el offline megtekintéshez.",
   "queueEmptyWithLibrary_one": "{{count, number}} befejezett letöltése a Saját videók között található.",
   "queueEmptyWithLibrary_other": "{{count, number}} befejezett letöltése a Saját videók között található.",
   "shortcutPause": "A kijelölt letöltés szüneteltetése vagy folytatása",

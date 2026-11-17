@@ -88,6 +88,7 @@
   "openMyVideosCount_other": "マイビデオ（{{count, number}}）",
   "queueEmptyTitle": "ダウンロード中のものはありません",
   "queueEmptyBody": "映画やエピソードのダウンロードボタンを使うと、オフラインで視聴できるよう保存できます。",
+  "queueEmptyNoSources": "まずソースを追加してください。その後、映画やエピソードのダウンロードボタンで保存すると、オフラインで視聴できます。",
   "queueEmptyWithLibrary_one": "完了した{{count, number}}件のダウンロードはマイビデオにあります。",
   "queueEmptyWithLibrary_other": "完了した{{count, number}}件のダウンロードはマイビデオにあります。",
   "shortcutPause": "選択中のダウンロードを一時停止／再開",

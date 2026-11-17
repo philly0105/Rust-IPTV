@@ -88,6 +88,7 @@
   "openMyVideosCount_other": "Mijn video's ({{count, number}})",
   "queueEmptyTitle": "Er wordt niets gedownload",
   "queueEmptyBody": "Gebruik de downloadknop bij een film of aflevering om die op te slaan voor offline kijken.",
+  "queueEmptyNoSources": "Voeg eerst een bron toe. Gebruik daarna de downloadknop bij een film of aflevering om die op te slaan voor offline kijken.",
   "queueEmptyWithLibrary_one": "Je {{count, number}} afgeronde download staat in Mijn video's.",
   "queueEmptyWithLibrary_other": "Je {{count, number}} afgeronde downloads staan in Mijn video's.",
   "shortcutPause": "Geselecteerde download pauzeren of hervatten",

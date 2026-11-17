@@ -80,7 +80,7 @@
   "guideNoMatch": "これらのチャンネルは、読み込まれた番組表のどれとも一致しません。チャンネルのメニューから番組表のチャンネルを対応付けてください。",
   "guideBackToNow": "現在に戻る",
   "guideNoSources": "ソースがまだありません",
-  "guideNoSourcesHint": "番組表を見るには、ソースを追加してください。",
+  "guideNoSourcesHint": "まずソースを追加してください。その番組表がここに表示されます。",
   "previousDay": "前日",
   "nextDay": "翌日",
   "earlier": "3時間前へ",

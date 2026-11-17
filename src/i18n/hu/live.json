@@ -80,7 +80,7 @@
   "guideNoMatch": "Egyik csatorna sem egyezik egy betöltött műsorújsággal sem. Párosítson egy csatornát a műsorújság-csatornájával a menüjéből.",
   "guideBackToNow": "Vissza a mostanihoz",
   "guideNoSources": "Még nincs forrás",
-  "guideNoSourcesHint": "A műsorújság megtekintéséhez adjon hozzá egy forrást.",
+  "guideNoSourcesHint": "Először adjon hozzá egy forrást. A műsorújsága itt jelenik meg.",
   "previousDay": "Előző nap",
   "nextDay": "Következő nap",
   "earlier": "3 órával korábban",

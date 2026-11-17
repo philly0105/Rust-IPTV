@@ -96,6 +96,7 @@
   "openMyVideosCount_other": "Meus vídeos ({{count, number}})",
   "queueEmptyTitle": "Nada está sendo baixado",
   "queueEmptyBody": "Use o botão de download em um filme ou episódio para salvá-lo e assistir offline.",
+  "queueEmptyNoSources": "Adicione primeiro uma fonte. Depois use o botão de download de um filme ou episódio para assistir offline.",
   "queueEmptyWithLibrary_one": "Seu {{count, number}} download concluído está em Meus vídeos.",
   "queueEmptyWithLibrary_many": "Seus {{count, number}} downloads concluídos estão em Meus vídeos.",
   "queueEmptyWithLibrary_other": "Seus {{count, number}} downloads concluídos estão em Meus vídeos.",

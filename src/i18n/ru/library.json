@@ -104,6 +104,7 @@
   "openMyVideosCount_other": "Мои видео ({{count, number}})",
   "queueEmptyTitle": "Ничего не скачивается",
   "queueEmptyBody": "Нажмите кнопку загрузки на странице фильма или серии, чтобы сохранить их для просмотра офлайн.",
+  "queueEmptyNoSources": "Сначала добавьте источник. Потом нажмите кнопку загрузки у фильма или серии, чтобы смотреть без интернета.",
   "queueEmptyWithLibrary_one": "Завершённых загрузок в «Моих видео»: {{count, number}}.",
   "queueEmptyWithLibrary_few": "Завершённых загрузок в «Моих видео»: {{count, number}}.",
   "queueEmptyWithLibrary_many": "Завершённых загрузок в «Моих видео»: {{count, number}}.",

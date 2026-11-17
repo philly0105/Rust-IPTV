@@ -142,7 +142,7 @@ describe('stats page', () => {
     rpc.handlers['sources.list'] = () => [];
     rpc.handlers['stats.summary'] = (raw) => h.summary((raw as { days: 7 | 30 }).days);
     open('/stats?range=30');
-    expect(await screen.findByText('Time spent on live TV, movies and series shows up here.')).toBeTruthy();
+    expect(await screen.findByText('Add a source first. Time you spend watching shows up here.')).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId('stats-add-source').textContent).toBe('Add a source'));
     expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
     expect(screen.queryByTestId('stats-watch-live')).toBeNull();

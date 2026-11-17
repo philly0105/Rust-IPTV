@@ -630,6 +630,28 @@ describe('Home rails', () => {
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });
   });
 
+  it('names a provider-prefixed channel the cleaned way to screen readers and in its removal toast', async () => {
+    const TWO = h.channel('4', 'UK| BBC Two');
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [TWO], { onDashboard: true })]);
+    rpc.handlers['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    rpc.handlers['channels.edits'] = () => [];
+    h.renderAt('/dashboard', [
+      {
+        path: '/dashboard',
+        element: (
+          <ChannelMenuHost>
+            <CustomListRails />
+          </ChannelMenuHost>
+        ),
+      },
+    ]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    const card = await within(sports).findByRole('button', { name: /^Play BBC Two \(UK\)/ });
+    fireEvent.contextMenu(card, { clientX: 40, clientY: 40 });
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Remove from this list' }));
+    await waitFor(() => expect(h.lastToast()?.title).toBe('Removed BBC Two (UK) from Sports'));
+  });
+
   it('leaves out the channels of a source in its delete-undo window, and brings them back on Undo', async () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN, ARTE], { onDashboard: true })]);
     usePendingRemovals.setState({ ids: new Set(['src2']) });

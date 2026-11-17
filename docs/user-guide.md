@@ -310,7 +310,7 @@ Space, the arrows and Page Up / Page Down control the player while it is expande
 
 ## Movie and series details from TMDB
 
-Movie and series pages can show plots, cast, trailers, ratings, artwork, similar titles, and actor pages from TMDB. This is off by default. Turn it on in Settings > Metadata and enter your own API key there, or put `TMDB_API_KEY=...` in a `.env` file in the app data folder or the working directory (see `.env.example`). A key saved in Settings wins over the `.env` file. Results are cached in SQLite.
+Movie and series pages can show plots, cast, trailers, ratings, artwork, similar titles, and actor pages from TMDB. This is off by default. Turn it on in Settings > Posters and details and enter your own API key there, or put `TMDB_API_KEY=...` in a `.env` file in the app data folder or the working directory (see `.env.example`). A key saved in Settings wins over the `.env` file. Results are cached in SQLite.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 

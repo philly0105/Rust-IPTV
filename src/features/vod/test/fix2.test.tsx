@@ -249,7 +249,7 @@ describe('U4-fix2: exactly one h1 in every other state of every routed page', ()
     const route = [{ path: '/s/:sourceId/actor/:personId', element: <ActorPage /> }];
     rpcMock.handlers['settings.get'] = () => settings();
     renderAt('/s/src1/actor/9', route);
-    await screen.findByText('TMDB metadata is off');
+    await screen.findByText('TMDB is off');
     // Until a person is known the page is named after the row it came from (critique: actor).
     expect(h1Texts()).toEqual(['Cast']);
     expect(headerTitle()).toBe('Cast');

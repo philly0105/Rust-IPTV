@@ -117,7 +117,7 @@ describe('settings words (L3-app-8)', () => {
     ['theme', 'Settings: Appearance'],
     ['dark', 'Settings: Appearance'],
     ['pin', 'Settings: Parental controls'],
-    ['xmltv', 'Settings: Guide'],
+    ['xmltv', 'Settings: TV guide'],
     ['hotkeys', 'Settings: Keyboard shortcuts'],
     // Words people use for what a section holds, not only its own terms.
     ['subtitles', 'Settings: Playback'],
@@ -127,7 +127,7 @@ describe('settings words (L3-app-8)', () => {
     ['font size', 'Settings: Appearance'],
     ['qr code', 'Settings: Remote control'],
     ['reset settings', 'Settings: Backup'],
-    ['time zone', 'Settings: Guide'],
+    ['time zone', 'Settings: TV guide'],
     ['report a problem', 'Settings: About'],
   ])("'%s' finds %s", async (query, title) => {
     const { palette } = await openPaletteWith(query);
@@ -166,8 +166,8 @@ describe('settings words (L3-app-8)', () => {
     rpcMock.handlers['settings.get'] = () => settings({ language: 'ar' });
     await applyLanguage('ar');
     try {
-      const general = i18n.t('shell:settingsSection', { section: i18n.t('shell:settingsGeneral') });
-      const appearance = i18n.t('shell:settingsSection', { section: i18n.t('shell:settingsAppearance') });
+      const general = i18n.t('shell:settingsSection', { section: i18n.t('settings:sectionGeneral') });
+      const appearance = i18n.t('shell:settingsSection', { section: i18n.t('settings:sectionAppearance') });
       expect(general).not.toBe('Settings: General');
       renderRoutes(routes, '/favorites');
       await screen.findByText('favorites page');

@@ -494,7 +494,7 @@ describe('ActorPage', () => {
   it('explains that TMDB is off', async () => {
     rpcMock.handlers['settings.get'] = () => settings();
     renderAt('/s/src1/actor/5', [{ path: '/s/:sourceId/actor/:personId', element: <ActorPage /> }]);
-    await screen.findByText('TMDB metadata is off');
+    await screen.findByText('TMDB is off');
     expect(callsOf('tmdb.person')).toHaveLength(0);
   });
 });

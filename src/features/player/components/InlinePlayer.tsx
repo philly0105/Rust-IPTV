@@ -630,9 +630,15 @@ function ErrorOverlay({
   // Live failover moved here from the channel the user picked: that one failed first. Read as the
   // error shows; the switch was made before this copy failed.
   const [switchedFrom] = useState(() => failoverOriginTitle(source));
-  const switchedLine = switchedFrom && (
-    <p dir="auto" data-testid="error-failover" className={cn('max-w-full text-on-glass-muted', tight ? 'truncate text-caption' : 'text-body-sm text-pretty')} title={tight ? t('liveFailoverSwitchedDetail', { channel: switchedFrom }) : undefined}>
-      {t('liveFailoverSwitchedDetail', { channel: switchedFrom })}
+  const switchedText = switchedFrom && t('liveFailoverSwitchedDetail', { channel: switchedFrom });
+  const switchedLine = switchedText && (
+    <p
+      dir="auto"
+      data-testid="error-failover"
+      className={cn('max-w-full text-on-glass-muted', tight ? 'truncate text-caption' : 'text-body-sm text-pretty')}
+      title={tight ? switchedText : undefined}
+    >
+      {switchedText}
     </p>
   );
 

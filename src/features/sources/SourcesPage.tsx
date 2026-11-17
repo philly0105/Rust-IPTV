@@ -188,6 +188,19 @@ export function SourcesPage() {
   const returnTo = safeReturnPath(params.get('from'));
   const forSection = params.get('for');
   const addedRef = useRef<{ source: Source; first: boolean } | null>(null);
+  const addOpen = addInitial !== undefined;
+  const addWasOpen = useRef(addOpen);
+  useEffect(() => {
+    const was = addWasOpen.current;
+    addWasOpen.current = addOpen;
+    if (!was || addOpen) return;
+    // Opened by a link from another page or the palette, the dialog has no opener here to give
+    // focus back to, so focus stays in the closing panel and then drops to <body>: the page's Add
+    // (or the first kind tile) takes it instead. This runs after the Dialog's own restore.
+    const active = document.activeElement;
+    if (active && active !== document.body && active.id !== 'main' && !active.closest('[role="dialog"]')) return;
+    document.querySelector<HTMLElement>('[data-testid="sources-add"], [data-testid="sources-onboarding"] button')?.focus({ preventScroll: true });
+  }, [addOpen]);
   const closeAdd = () => {
     const added = addedRef.current;
     if (added && added.first) {
@@ -783,7 +796,7 @@ export function SourcesPage() {
       {body}
 
       <AddSourceDialog
-        open={addInitial !== undefined}
+        open={addOpen}
         initial={addInitial}
         onClose={closeAdd}
         onAdded={(source, first) => {

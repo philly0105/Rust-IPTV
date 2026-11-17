@@ -163,6 +163,20 @@ describe('inline validation in the add dialog', () => {
   });
 });
 
+describe('add dialog opened by a link (v-setup-07)', () => {
+  it('Escape hands focus to the first kind tile when there are no sources, and to Add a source when there are', async () => {
+    await openAdd();
+    fireEvent.keyDown(dialog(), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement?.closest('[data-testid="sources-onboarding"]')).not.toBeNull());
+    cleanup();
+    rpcMock.handlers['sources.list'] = () => [xtream('x')];
+    renderAt(routes(), '/sources?add=1');
+    fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-testid')).toBe('sources-add'));
+  });
+});
+
 describe('connection test', () => {
   async function fillXtream() {
     await openAdd('Xtream Codes');

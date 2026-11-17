@@ -27,9 +27,11 @@ import { useLists } from '@/features/lists/hooks/useLists';
 import { CustomListRails } from '@/features/lists/rails';
 import { MyListRail, type MyListRailProps } from '@/features/mylist/components/MyListRail';
 import { useInMyList, useMyList } from '@/features/mylist/hooks/useMyList';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { formatRating } from '@/features/vod/lib/rating';
 import { isDesktop, RpcError, type RpcResult } from '@/api/transport';
+import { plainChannelName } from '@/lib/channelName';
 import { snapshotTitle } from '@/lib/title';
 import { Badge, EmptyState, ErrorState, scalePx, useDensity, useToast, useUiScale, errorDescription, whenIdle } from '@/ui';
 
@@ -43,7 +45,7 @@ import { useSettings } from '../useSettings';
 import { useMediaQuery } from '../useMediaQuery';
 // account:
 import { AccountAlerts } from './AccountAlerts';
-import { ChannelCard, ContinueCard, OnNowCard, PosterCard, RailMyListProvider, SourceCard, SourceKindContext, itemPath, joinList, type CardMenuItem } from './cards';
+import { ChannelCard, ContinueCard, OnNowCard, PosterCard, REMOVE_FAVORITE_ID, RailMyListProvider, SourceCard, SourceKindContext, itemPath, joinList, type CardMenuItem } from './cards';
 import { ChannelMenuHost, snapshotChannel } from './ChannelCardMenu';
 import { DashboardRail, type RailCardProps } from './DashboardRail';
 import { RailDeferContext, railLeastHeight, sectionsBelowFold, useFirstScreenSettled, type FoldSection } from './firstScreen';
@@ -1031,6 +1033,8 @@ const OnNowRail = memo(function OnNowRail({
   play: PlayFn;
 }) {
   const { t, i18n } = useTranslation('shell');
+  // Screen readers hear the name the card shows ("ESPN2 FHD (US)"), not the provider's "US| ESPN2 FHD".
+  const { stripCountryPrefix: strip } = useDisplayPrefs();
   return (
     <DashboardRail<OnNowItem>
       id="on-now"
@@ -1056,10 +1060,11 @@ const OnNowRail = memo(function OnNowRail({
             channelName={c.name}
             sourceName={manySources ? sourceById.get(c.ref.sourceId)?.name : undefined}
             logoUrl={c.logoUrl}
-            left={left}
+            // Beside the source the line has no room for "50 minutes left": Live TV's rows' "50m".
+            left={manySources && c.left !== undefined ? t('live:minutesLeftShort', { count: c.left }) : left}
             progress={c.progress}
             sourceId={c.ref.sourceId}
-            ariaLabel={joinList([t('playTitle', { title: c.name }), c.programme.title, left], i18n.language)}
+            ariaLabel={joinList([t('playTitle', { title: plainChannelName(c.name, strip) }), c.programme.title, left], i18n.language)}
             onPlay={() => play({ ref: c.ref, title: c.name, posterUrl: c.logoUrl })}
             channel={c.channel}
           />
@@ -1089,6 +1094,7 @@ const LiveFavoritesRail = memo(function LiveFavoritesRail({
   play: PlayFn;
 }) {
   const { t } = useTranslation('shell');
+  const { stripCountryPrefix: strip } = useDisplayPrefs();
   return (
     <DashboardRail<FavoriteEntry>
       id="live-favorites"
@@ -1116,12 +1122,12 @@ const LiveFavoritesRail = memo(function LiveFavoritesRail({
             sourceName={manySources ? sourceById.get(f.ref.sourceId)?.name : undefined}
             showSourceWithNow={manySources}
             isRadio={f.ref.contentType === 'radio'}
-            ariaLabel={t('playTitle', { title: f.snapshot.title })}
+            ariaLabel={t('playTitle', { title: plainChannelName(f.snapshot.title, strip) })}
             onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
             channel={snapshotChannel(f.ref, f.snapshot)}
             menuExtra={[
               {
-                id: 'remove-favorite',
+                id: REMOVE_FAVORITE_ID,
                 label: t('library:removeFromFavorites'),
                 icon: <X className="size-4" />,
                 onSelect: () => void railActions().then((m) => m.removeFavorite(f, f.snapshot.title, t)),
@@ -1140,6 +1146,7 @@ const LiveFavoritesRail = memo(function LiveFavoritesRail({
  */
 const SourceChannelsRail = memo(function SourceChannelsRail({ source, items, play }: { source: Source; items: readonly Channel[]; play: PlayFn }) {
   const { t } = useTranslation('shell');
+  const { stripCountryPrefix: strip } = useDisplayPrefs();
   return (
     <DashboardRail<Channel>
       id="source-channels"
@@ -1156,7 +1163,7 @@ const SourceChannelsRail = memo(function SourceChannelsRail({ source, items, pla
           name={c.name}
           logoUrl={c.logoUrl}
           sourceName={c.categoryName || undefined}
-          ariaLabel={t('playTitle', { title: c.name })}
+          ariaLabel={t('playTitle', { title: plainChannelName(c.name, strip) })}
           onPlay={() => play({ ref: c.ref, title: c.name, posterUrl: c.logoUrl })}
           channel={c}
         />
@@ -1186,6 +1193,7 @@ const RecentLiveRail = memo(function RecentLiveRail({
   play: PlayFn;
 }) {
   const { t } = useTranslation('shell');
+  const { stripCountryPrefix: strip } = useDisplayPrefs();
   return (
     <DashboardRail<RecentEntry>
       id="recent-live"
@@ -1212,7 +1220,7 @@ const RecentLiveRail = memo(function RecentLiveRail({
             sourceName={manySources ? sourceById.get(r.ref.sourceId)?.name : undefined}
             showSourceWithNow={manySources}
             isRadio={r.ref.contentType === 'radio'}
-            ariaLabel={t('playTitle', { title: r.snapshot.title })}
+            ariaLabel={t('playTitle', { title: plainChannelName(r.snapshot.title, strip) })}
             onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
             channel={snapshotChannel(r.ref, r.snapshot)}
             menuExtra={[

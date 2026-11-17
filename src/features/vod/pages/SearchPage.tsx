@@ -11,9 +11,9 @@ import { isDesktop, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type GuideSearchHit, type Page as PageOf, type RecentEntry, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
-import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { ChannelLogo, ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName } from '@/features/live/lib/channelName';
+import { displayChannelName, plainChannelName } from '@/features/live/lib/channelName';
 import { ms } from '@/features/live/lib/epgTime';
 // The Scheduled list's clock and day words, from the module itself (pure helpers, no hooks).
 import { clockTime, dayHeading } from '@/features/recording/lib/schedule';
@@ -67,7 +67,7 @@ import {
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, LivePill, Page, Poster, PosterCellWidthContext, SectionHeader, Skeleton, TOUCH_TARGET, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, LivePill, Page, PosterCellWidthContext, SectionHeader, Skeleton, TOUCH_TARGET, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -556,12 +556,15 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       />
     );
     // The search of everything also finds settings, as the palette does: when only settings
-    // match, they lead and the no-results note under them is a quiet line, not the page's state.
+    // match, they lead and the no-results note under them is one quiet line, not the page's state.
     if (settingRows.length > 0) {
       body = (
         <>
           <SettingsMatches rows={settingRows} />
-          <EmptyState size="inline" icon={<SearchX />} title={t('noResultsTitle', { query })} description={t('noResultsHint')} />
+          {/* One quiet line: the page did find "subtitle", so no empty state and no spelling hint. */}
+          <p className="px-3 text-body-sm text-fg-muted" data-testid="search-no-catalog">
+            {t('noCatalogResults', { query })}
+          </p>
         </>
       );
     }
@@ -1382,7 +1385,8 @@ const NOW_LIMIT = SEARCH_LIMIT;
 
 /**
  * What is on now on the first channel hits, by `itemKey`: how a user tells "ESPN HD" from
- * "ESPN (Backup)", as Live TV's rows and the multi-view picker show it.
+ * "ESPN (Backup)", as Live TV's rows and the multi-view picker show it. Once the guide has
+ * answered, a channel it has nothing on now for maps to '' (the card says "No guide data").
  */
 function useNowTitles(hits: readonly SearchHit[]): Map<string, string> {
   const { epgOffsetMinutes } = useDisplayPrefs();
@@ -1390,9 +1394,13 @@ function useNowTitles(hits: readonly SearchHit[]): Map<string, string> {
   const q = useRpcQuery('epg.nowNext', { refs, offsetMinutes: epgOffsetMinutes }, { enabled: refs.length > 0, staleTime: 60_000 });
   return useMemo(() => {
     const titles = new Map<string, string>();
-    for (const [key, nn] of Object.entries(q.data ?? {})) if (nn.now?.title) titles.set(key, nn.now.title);
+    if (!q.data) return titles;
+    for (const ref of refs) {
+      const key = itemKey(ref);
+      titles.set(key, q.data[key]?.now?.title ?? '');
+    }
     return titles;
-  }, [q.data]);
+  }, [q.data, refs]);
 }
 
 /** Channel hits; choosing one plays it. Memoized like PosterGrid. */
@@ -1450,15 +1458,18 @@ function ChannelHitButton({
   now?: string | undefined;
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
+  const { t, i18n } = useTranslation('vod');
   const c = h.item as Channel;
   // The logo's width is known, so it does not read its frame as it mounts (P2-GRID-2).
   const logoWidth = useScaledPx(CHANNEL_LOGO_PX, true);
   const openMenu = useContext(ChannelMenuContext);
-  const menu = (pos: { x: number; y: number }) => openMenu?.({ pos, channel: c, onPlay: () => onPlayChannel(c, h) });
+  const menu = (pos: { x: number; y: number }) => openMenu?.({ pos, channel: c, onPlay: () => onPlayChannel(c, h), nowTitle: now });
   return (
     <button
       type="button"
       data-grid-index={index}
+      // Screen readers hear the name the card shows ("ESPN HD (US)"), not the provider's "US| ESPN HD".
+      aria-label={joinList([plainChannelName(h.title, strip), now, c.number, c.categoryName, showBadges && h.sourceName], i18n.language)}
       onClick={() => onPlayChannel(c, h)}
       onContextMenu={(e) => {
         if (!openMenu) return;
@@ -1474,15 +1485,22 @@ function ChannelHitButton({
       className="flex w-full items-center gap-3 rounded-lg border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors"
     >
       <div className="w-12 shrink-0">
-        {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
-        <Poster src={h.imageUrl} sourceId={c.ref.sourceId} width={logoWidth} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
+        {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2).
+            Live TV's tile, so a channel without a logo has the same letters here as in its list. */}
+        <ChannelLogo src={h.imageUrl} name={h.title} size={logoWidth} sourceId={c.ref.sourceId} />
       </div>
       <div className="min-w-0 flex-1">
         {/* As Live TV's list names it: the country tag after the name, quiet, or none with the setting. */}
         <ChannelName name={h.title} strip={strip} title={h.title} className="block truncate text-body-sm font-medium text-fg text-match-parent" />
-        {now && (
+        {/* Always a line, so every card in the grid is one height: the programme, "No guide data"
+            once the guide has nothing for it (as Live TV's rows say), or a blank line meanwhile. */}
+        {now ? (
           <p dir="auto" title={now} className="truncate text-caption text-fg-muted" data-testid="search-channel-now">
             {now}
+          </p>
+        ) : (
+          <p className="min-h-[1lh] truncate text-caption text-fg-subtle" data-testid="search-channel-no-guide">
+            {now === '' ? t('live:noGuideShort') : null}
           </p>
         )}
         {/* Number, group and source as quiet text (no outlined chip). A provider's group name runs to

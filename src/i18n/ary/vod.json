@@ -175,6 +175,7 @@
   "searching": "جاري البحث",
   "noResultsTitle": "ما كاينة حتى نتيجة لـ «{{query}}»",
   "noResultsHint": "شوف الإملاء، ولا كتب الحروف اللولين ديال الكلمة: البحث كيقلب على بدايات الكلمات.",
+  "noCatalogResults": "حتى قناة ولا فيلم ولا سلسلة ولا برنامج ما كيطابق «{{query}}».",
   "noResultsInSourceTitle": "ما كاينة حتى نتيجة لـ «{{query}}» ف {{source}}",
   "noResultsInSourceHint": "البحث محدود فهاد المصدر. يمكن تلقاه فمصادر أخرى.",
   "searchAllSources": "قلّب فجميع المصادر",

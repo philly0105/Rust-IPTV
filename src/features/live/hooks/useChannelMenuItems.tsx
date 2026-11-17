@@ -4,7 +4,7 @@
  * menus, and a list row lacked catch-up, the external players, multi-view and guide matching.
  *
  * Sections, separated by rules (empty ones fold away):
- * - Watch: Play, Browse catch-up, Play in MPV / VLC (desktop app only).
+ * - Watch: Play, Browse catch-up, Play in MPV / VLC (desktop app only), Open in TV guide (the caller's).
  * - Organize: Favorite, Add to multi-view, Add to list…, and the caller's own (Remove from list).
  * - Channel: Copy link, Rename / Reset name / Hide, Match guide channel, Lock.
  */
@@ -46,6 +46,8 @@ export interface ChannelMenuOptions {
   onMapGuide?(channel: Channel): void;
   /** Entries the caller adds at the end of Organize (a list's "Remove from list"). */
   organize?: readonly MenuItem[];
+  /** "Open in TV guide" after the Watch entries, where the menu is not on the guide (Home, Search). */
+  guide?: Omit<MenuItem, 'id'>;
   /**
    * Show F2 and Shift+Delete beside Rename and Hide. Only where the page binds them (the Live and
    * list rows); the guide does not.
@@ -87,7 +89,7 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
     channel ? { sourceId: channel.ref.sourceId, contentType: channel.ref.contentType, kind: 'item', targetId: channel.ref.itemId, name } : null,
     { categoryId: channel?.categoryId },
   );
-  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, editHints = false, programme, now = Date.now(), onProgrammeLink } = opts;
+  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, guide, editHints = false, programme, now = Date.now(), onProgrammeLink } = opts;
   const programmeActions = useProgrammeActions(channel, source, programme, now, onProgrammeLink);
 
   return useMemo((): MenuEntry[] => {
@@ -148,6 +150,7 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
             { id: 'vlc', label: t('playIn', { player: 'VLC' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('vlc') },
           ]
         : []),
+      ...(guide ? [{ id: 'guide', ...guide }] : []),
       sep('sep-organize'),
       {
         id: 'fav',
@@ -173,7 +176,7 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
       ...lockItems.map((a) => plain(a, false)),
     ];
     return out;
-  }, [channel, source, favorite, name, live, t, navigate, onPlay, onToggleFavorite, onMapGuide, organize, editHints, multiviewItem, addToListItem, editItems, lockItems, programme, now, programmeActions]);
+  }, [channel, source, favorite, name, live, t, navigate, onPlay, onToggleFavorite, onMapGuide, organize, guide, editHints, multiviewItem, addToListItem, editItems, lockItems, programme, now, programmeActions]);
 }
 
 /**

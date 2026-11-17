@@ -12,7 +12,7 @@ import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type CustomList } from '@/api/types';
 import { intlLocale } from '@/lib/intl';
 
-import { ChannelCard, DashboardRail, displayChannelName, errorDescription, toast, useDisplayPrefs, usePendingRemovals, useVisibleSources } from '../deps';
+import { ChannelCard, DashboardRail, displayChannelName, errorDescription, plainChannelName, toast, useDisplayPrefs, usePendingRemovals, useVisibleSources } from '../deps';
 import { useListActions } from '../hooks/useListActions';
 import { useListItems } from '../hooks/useLists';
 import { playFromList } from '../lib/play';
@@ -86,7 +86,7 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
             nowProgress={progress(nn?.now?.start, nn?.now?.end, offset)}
             sourceName={sourceName.get(c.ref.sourceId)}
             isRadio={c.ref.contentType === 'radio'}
-            ariaLabel={ts('playTitle', { title: name })}
+            ariaLabel={ts('playTitle', { title: plainChannelName(c.name, prefs.stripCountryPrefix) })}
             // Right click, the context-menu key and Shift+F10: Home's channel menu (its Play plays from the list too).
             channel={c}
             // Taken out of the list from Home, with the list page's Undo.
@@ -116,7 +116,12 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
 /** The rails of `lists` (those with Show on Home), loaded lazily by `CustomListRails`. */
 export function ListRails({ lists }: { lists: readonly CustomList[] }) {
   const sources = useVisibleSources();
-  const sourceName = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
+  // With one source its name under every card says nothing (and read like a programme): the card
+  // says Live TV or Radio, as Home's other channel rails do.
+  const sourceName = useMemo(() => {
+    const all = sources.data ?? [];
+    return new Map(all.length > 1 ? all.map((s) => [s.id, s.name]) : []);
+  }, [sources.data]);
   return (
     <>
       {lists.map((l) => (

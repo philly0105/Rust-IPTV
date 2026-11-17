@@ -877,7 +877,7 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       renderAt('/search?q=news', [{ path: '/search', element: <SearchPage /> }]);
       fireEvent.click(await screen.findByRole('tab', { name: /Channels/ }));
       await screen.findByText('News 1');
-      const img = within(screen.getByTestId('vod-search-channels')).getByRole('img', { name: 'News 1' });
+      const img = within(screen.getByTestId('vod-search-channels')).getByRole('button', { name: /News 1/ }).querySelector('img')!;
       // At the logo's 45 px width (P2-GRID-2), which the cache serves from its 64 px copy.
       expect(img.getAttribute('src')).toBe(`/api/img?url=${encodeURIComponent('http://192.168.1.5/logo.png')}&sourceId=src1&w=64`);
     });

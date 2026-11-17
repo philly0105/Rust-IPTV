@@ -515,7 +515,8 @@ describe('Search names a channel as Live TV does (round 5)', () => {
     rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : [{ ...programme(1, 0, 23, 0), channelName: 'US| Harbor News HD' }]);
     renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
     const top = await screen.findByTestId('search-top');
-    const result = await within(top).findByRole('button', { name: /^US\| Harbor News HD/ });
+    // Screen readers hear the name as the card shows it, the tag after it (w-a11y-03).
+    const result = await within(top).findByRole('button', { name: /Harbor News HD \(US\)/ });
     expect(drawn(result)).toEqual(['Harbor News HD', 'US']);
     expect(within(result).getByTestId('channel-name-tag').className).toContain('text-fg-subtle');
     const line = await screen.findByTestId('search-programme-channel');
@@ -529,7 +530,8 @@ describe('Search names a channel as Live TV does (round 5)', () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 1, 'US| Harbor News HD')], movies: [], series: [] });
     renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
     // Only channels match: the channel grid shows on its own.
-    const result = await screen.findByRole('button', { name: /^Harbor News HD/ });
+    const result = await screen.findByRole('button', { name: /Harbor News HD/ });
+    expect(result.getAttribute('aria-label')).not.toContain('US');
     expect(result.textContent).not.toContain('US');
     expect(within(result).queryByTestId('channel-name-tag')).toBeNull();
   });

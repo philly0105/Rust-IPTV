@@ -147,6 +147,7 @@
   "searching": "Zoeken",
   "noResultsTitle": "Geen resultaten voor \"{{query}}\"",
   "noResultsHint": "Controleer de spelling, of typ de eerste letters van een woord: zoeken vindt het begin van woorden.",
+  "noCatalogResults": "Geen kanalen, films, series of programma's komen overeen met \"{{query}}\".",
   "noResultsInSourceTitle": "Geen resultaten voor \"{{query}}\" in {{source}}",
   "noResultsInSourceHint": "De zoekopdracht is beperkt tot deze bron. Andere bronnen hebben het misschien wel.",
   "searchAllSources": "Zoeken in alle bronnen",

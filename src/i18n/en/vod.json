@@ -147,6 +147,7 @@
   "searching": "Searching",
   "noResultsTitle": "No results for \"{{query}}\"",
   "noResultsHint": "Check the spelling, or type the first letters of a word: search matches the start of words.",
+  "noCatalogResults": "No channels, movies, series or programmes match \"{{query}}\".",
   "noResultsInSourceTitle": "No results for \"{{query}}\" in {{source}}",
   "noResultsInSourceHint": "The search is limited to this source. Other sources may have it.",
   "searchAllSources": "Search all sources",

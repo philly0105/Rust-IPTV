@@ -80,7 +80,8 @@ describe("Home's channel cards name a channel as Live TV does", () => {
     // realdata-12: a tag that did not fit still widened the name's box, so a gap came before ", Northwind".
     expect(two.querySelector('[data-testid=channel-name-tag]')).toBeNull();
     const line = two.querySelector<HTMLElement>(`[title="${joined}"]`)!;
-    expect([...line.children].map((c) => c.textContent)).toEqual(['CBS HD', '·', 'Northwind Premium']);
+    // w-realdata-03: the channel first, then the source with its dot, which gives way first.
+    expect([...line.children].map((c) => c.textContent)).toEqual(['CBS HD', '·Northwind Premium']);
   });
 
   it('with "Hide country tags" on, the cards leave the tag out', async () => {

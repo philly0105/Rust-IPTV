@@ -7,7 +7,7 @@ import { Link } from 'react-router';
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
-import { displayChannelName, splitPlaceTag, stripCountryPrefix } from '@/lib/channelName';
+import { displayChannelName, plainChannelName, splitPlaceTag, stripCountryPrefix } from '@/lib/channelName';
 import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
 import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from '@/features/mylist/components/MyListButton';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
@@ -419,9 +419,17 @@ export interface ChannelMenuRequest {
   pos: { x: number; y: number };
   channel: Channel;
   onPlay(): void;
-  /** The rail's own actions (Remove from favorites, Remove from history), after the channel's. */
+  /** What is on now, under the channel's name in the menu's header. */
+  nowTitle?: string;
+  /**
+   * The rail's own actions (Remove from history, Remove from this list), with the channel's
+   * Organize entries. One with the id {@link REMOVE_FAVORITE_ID} is the favourite heart's removal.
+   */
   extra?: CardMenuItem[];
 }
+
+/** A rail's Remove from favorites (the Favorite channels rail), which the menu's heart uses for the removal. */
+export const REMOVE_FAVORITE_ID = 'remove-favorite';
 
 /**
  * Opens the dashboard's channel menu. `ChannelMenuHost` (ChannelCardMenu.tsx) provides it; with no
@@ -644,7 +652,10 @@ export function ChannelCard({
   const { stripCountryPrefix: strip } = useDisplayPrefs();
   const openMenu = useContext(ChannelMenuContext);
   const watch = useWatchChannel(onPlay, channel, watchPath);
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch, extra: menuExtra }) : undefined;
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch, nowTitle: now, extra: menuExtra }) : undefined;
+  // The menu button's name says the name the card shows ("ESPN2 FHD (US)"), not the provider's
+  // "US| ESPN2 FHD"; the name's own tooltip keeps the provider's full string.
+  const label = plainChannelName(name, strip);
   return (
     // The visible "more" button sits beside the card's button, as on a Continue watching card, so
     // the menu is there for a mouse and a finger too, not only for right click and the menu key.
@@ -676,7 +687,7 @@ export function ChannelCard({
           </span>
         )}
       </button>
-      {menu && <CardMenuButton label={t('moreActionsFor', { title: name })} tabIndex={rail.tabIndex} onOpen={(el) => menu(buttonMenuAnchor(el))} />}
+      {menu && <CardMenuButton label={t('moreActionsFor', { title: label })} tabIndex={rail.tabIndex} onOpen={(el) => menu(buttonMenuAnchor(el))} />}
     </div>
   );
 }
@@ -775,6 +786,10 @@ function CardMenuButton({ label, tabIndex, onOpen }: { label: string; tabIndex: 
           // On touch it is on every card at once: a lighter disc with no rim or shadow, so a rail of
           // them does not read as a row of dark dots (the strongest on the light theme's pale tiles).
           '[@media(hover:none)]:border-transparent [@media(hover:none)]:bg-glass/50 [@media(hover:none)]:shadow-none',
+          // A finger gets the 44 px target every phone control has: an invisible band round the 30 px
+          // disc (8 px out from inside its 1 px border), above the card's own button, so a near miss
+          // opens the menu instead of playing.
+          "pointer-coarse:after:absolute pointer-coarse:after:-inset-[calc(8rem/15)] pointer-coarse:after:rounded-full pointer-coarse:after:content-['']",
           'hover:bg-glass active:scale-95 motion-safe:transition-[opacity,transform] motion-safe:duration-(--duration-fast)',
         )}
       >
@@ -907,7 +922,8 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, sourceNa
   // player over Home, the pressed card left On now (its channel joins Recently watched) and the
   // rail shifted under the pointer.
   const watch = useWatchChannel(onPlay, channel, channel && itemPath(channel.ref));
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch, nowTitle: programme }) : undefined;
+  const label = plainChannelName(channelName, strip);
   return (
     // Its visible "more" button beside the card's button, as on the channel and Continue cards.
     <div className="group/wide relative min-w-0">
@@ -936,14 +952,19 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, sourceNa
           {sourceName ? (
             // With the source after it the line has no room to spare, and a place tag that did not
             // fit still widened the name's box, leaving a gap before the source: the name goes bare.
-            <span title={joinList([channelName, sourceName], i18n.language)} className="flex min-w-0 items-baseline gap-1.5">
-              {/* The channel comes first: whole while the source can still show a few letters. */}
-              <span dir="auto" className="max-w-[calc(100%-3rem)] shrink-0 truncate text-match-parent">
+            <span title={joinList([channelName, sourceName], i18n.language)} className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
+              {/* The channel gets the room. The source gives way: shortened down to a few letters,
+                  then onto the hidden second line, never "Me…" beside a cut channel name. Its least
+                  width is also what the line measures, so a short source ("sports") is not sent to
+                  the hidden line beside a short name. */}
+              <span dir="auto" className="max-w-full shrink-0 truncate text-match-parent">
                 {strip ? stripCountryPrefix(channelName) : splitPlaceTag(channelName).name}
               </span>
-              <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
-              <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="on-now-source">
-                {sourceName}
+              <span className="flex min-w-[7ch] grow basis-[7ch] items-baseline gap-1.5 ps-1.5">
+                <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+                <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="on-now-source">
+                  {sourceName}
+                </span>
               </span>
             </span>
           ) : (
@@ -957,7 +978,7 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, sourceNa
           )}
         </span>
       </button>
-      {menu && <CardMenuButton label={t('moreActionsFor', { title: channelName })} tabIndex={rail.tabIndex} onOpen={(el) => menu(buttonMenuAnchor(el))} />}
+      {menu && <CardMenuButton label={t('moreActionsFor', { title: label })} tabIndex={rail.tabIndex} onOpen={(el) => menu(buttonMenuAnchor(el))} />}
     </div>
   );
 }

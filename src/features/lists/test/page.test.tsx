@@ -623,6 +623,23 @@ describe('Home rails', () => {
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });
   });
 
+  // v-shell-home-08: with one source, its name under a card with nothing on air read like a programme.
+  it('names the source under a card with nothing on only when there are two or more sources', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [CNN], { onDashboard: true })]);
+    h.renderAt('/dashboard', [{ path: '/dashboard', element: <CustomListRails /> }]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    expect(await within(sports).findByText('Backup list')).toBeTruthy();
+  });
+
+  it('with one source, a card with nothing on says Live TV, as the other Home rails do', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [CNN], { onDashboard: true })]);
+    rpc.handlers['sources.list'] = () => [h.SOURCES[1]!];
+    h.renderAt('/dashboard', [{ path: '/dashboard', element: <CustomListRails /> }]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    expect(await within(sports).findByText('Live TV')).toBeTruthy();
+    expect(within(sports).queryByText('Backup list')).toBeNull();
+  });
+
   it('leaves out the channels of a source in its delete-undo window, and brings them back on Undo', async () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN, ARTE], { onDashboard: true })]);
     usePendingRemovals.setState({ ids: new Set(['src2']) });

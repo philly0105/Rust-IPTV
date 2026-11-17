@@ -147,6 +147,7 @@
   "searching": "Aranıyor",
   "noResultsTitle": "\"{{query}}\" için sonuç yok",
   "noResultsHint": "Yazımı kontrol edin veya bir kelimenin ilk harflerini yazın: arama kelimelerin başını eşleştirir.",
+  "noCatalogResults": "\"{{query}}\" ile eşleşen kanal, film, dizi veya program yok.",
   "noResultsInSourceTitle": "\"{{query}}\" için {{source}} kaynağında sonuç yok",
   "noResultsInSourceHint": "Arama bu kaynakla sınırlı. Diğer kaynaklarda bulunabilir.",
   "searchAllSources": "Tüm kaynaklarda ara",

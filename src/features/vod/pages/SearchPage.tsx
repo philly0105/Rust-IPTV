@@ -1382,7 +1382,8 @@ const NOW_LIMIT = SEARCH_LIMIT;
 
 /**
  * What is on now on the first channel hits, by `itemKey`: how a user tells "ESPN HD" from
- * "ESPN (Backup)", as Live TV's rows and the multi-view picker show it.
+ * "ESPN (Backup)", as Live TV's rows and the multi-view picker show it. Once the guide has
+ * answered, a channel it has nothing on now for maps to '' (the card says "No guide data").
  */
 function useNowTitles(hits: readonly SearchHit[]): Map<string, string> {
   const { epgOffsetMinutes } = useDisplayPrefs();
@@ -1390,9 +1391,13 @@ function useNowTitles(hits: readonly SearchHit[]): Map<string, string> {
   const q = useRpcQuery('epg.nowNext', { refs, offsetMinutes: epgOffsetMinutes }, { enabled: refs.length > 0, staleTime: 60_000 });
   return useMemo(() => {
     const titles = new Map<string, string>();
-    for (const [key, nn] of Object.entries(q.data ?? {})) if (nn.now?.title) titles.set(key, nn.now.title);
+    if (!q.data) return titles;
+    for (const ref of refs) {
+      const key = itemKey(ref);
+      titles.set(key, q.data[key]?.now?.title ?? '');
+    }
     return titles;
-  }, [q.data]);
+  }, [q.data, refs]);
 }
 
 /** Channel hits; choosing one plays it. Memoized like PosterGrid. */
@@ -1450,6 +1455,7 @@ function ChannelHitButton({
   now?: string | undefined;
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
+  const { t } = useTranslation('vod');
   const c = h.item as Channel;
   // The logo's width is known, so it does not read its frame as it mounts (P2-GRID-2).
   const logoWidth = useScaledPx(CHANNEL_LOGO_PX, true);
@@ -1480,9 +1486,15 @@ function ChannelHitButton({
       <div className="min-w-0 flex-1">
         {/* As Live TV's list names it: the country tag after the name, quiet, or none with the setting. */}
         <ChannelName name={h.title} strip={strip} title={h.title} className="block truncate text-body-sm font-medium text-fg text-match-parent" />
-        {now && (
+        {/* Always a line, so every card in the grid is one height: the programme, "No guide data"
+            once the guide has nothing for it (as Live TV's rows say), or a blank line meanwhile. */}
+        {now ? (
           <p dir="auto" title={now} className="truncate text-caption text-fg-muted" data-testid="search-channel-now">
             {now}
+          </p>
+        ) : (
+          <p className="min-h-[1lh] truncate text-caption text-fg-subtle" data-testid="search-channel-no-guide">
+            {now === '' ? t('live:noGuideShort') : null}
           </p>
         )}
         {/* Number, group and source as quiet text (no outlined chip). A provider's group name runs to

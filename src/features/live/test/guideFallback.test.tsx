@@ -220,7 +220,14 @@ describe('EpgGridPage short-EPG fallback', () => {
     expect(within(pop).getByTestId('program-from-provider').textContent).toBe("From the provider's guide");
     // K6: one archive action in the dialog.
     expect(within(pop).getAllByTestId('program-browse-archive')).toHaveLength(1);
-    fireEvent.click(within(pop).getByTestId('program-browse-archive'));
+    // Not on a programme that has not aired yet: there is nothing of it to catch up on (walkthrough-10).
+    fireEvent.click(screen.getByRole('button', { name: /^Provider next c0,/ }));
+    const next = await screen.findByTestId('program-popover');
+    await waitFor(() => expect(within(next).getByRole('heading', { name: 'Provider next c0' })).toBeTruthy());
+    expect(within(next).queryByTestId('program-browse-archive')).toBeNull();
+    fireEvent.click(within(next).getByRole('button', { name: 'Close' }));
+    fireEvent.click(cell);
+    fireEvent.click(within(await screen.findByTestId('program-popover')).getByTestId('program-browse-archive'));
     expect(await screen.findByText('archive route')).toBeTruthy();
   });
 

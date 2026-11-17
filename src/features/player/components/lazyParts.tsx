@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 
+import { cn } from '../cn';
+
 /**
  * Player parts that only show on demand (popovers, sub-menus, the stream info panel, the
  * fullscreen channel panel), split out of the main chunk. The first player part that
@@ -65,6 +67,7 @@ export const ChannelActions = lazyPart(() => import('./ChannelActions').then((m)
 export const FullscreenChannelPanel = lazyPart(() => import('./FullscreenChannelPanel').then((m) => m.FullscreenChannelPanel));
 /** The tuner's info banner (C5); mounted with every surface, so it loads right after the player. */
 export const ZapBanner = lazyPart(() => import('./ZapBanner').then((m) => m.ZapBanner));
+export const ZapAnnouncer = lazyPart(() => import('./ZapBanner').then((m) => m.ZapAnnouncer));
 /** The sleep timer's chip, menu, warning toast and in-player prompt (C5). */
 export const SleepChip = lazyPart(() => import('./SleepTimer').then((m) => m.SleepChip));
 export const SleepMenu = lazyPart(() => import('./SleepTimer').then((m) => m.SleepMenu));
@@ -95,6 +98,15 @@ export const LiveProgrammeLine = lazyPart(
         {p.fallback}
       </p>
     ) : null,
+);
+/** A live channel's name in the player's titles (ChannelName's form); the plain name until it loads. */
+export const PlayerChannelName = lazyPart(
+  () => import('./ZapBanner').then((m) => m.PlayerChannelName),
+  (p) => (
+    <span data-testid={p.testId} className={cn('block truncate', p.className)} title={p.title}>
+      {p.title}
+    </span>
+  ),
 );
 /** The mini player's header line while the zap banner is up; the plain name until it loads. */
 export const ZapHeaderLine = lazyPart(

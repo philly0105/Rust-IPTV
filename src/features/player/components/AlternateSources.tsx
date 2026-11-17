@@ -2,6 +2,7 @@ import { Pin } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { ChannelQuality, LiveAlternate } from '@/api/types';
+import { plainChannelName } from '@/lib/channelName';
 
 import { cn } from '../cn';
 import { playAlternate, rankAlternates, useAlternatesStore } from '../failover';
@@ -109,7 +110,7 @@ export function AlternatesMenu({ onDone }: { onDone(): void }) {
           >
             {/* On: a filled pin in the accent's indicator tone, like the menus' check marks. */}
             <Pin className={cn('size-4 shrink-0', pinnedHere ? 'fill-current text-accent' : 'text-on-glass-muted')} aria-hidden />
-            <span className="min-w-0 flex-1">{t('preferSource', { channel: source.title })}</span>
+            <span className="min-w-0 flex-1">{t('preferSource', { channel: plainChannelName(source.title, false) })}</span>
           </button>
         </>
       )}

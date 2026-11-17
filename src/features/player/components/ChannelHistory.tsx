@@ -11,6 +11,7 @@ import { safeImageUrl } from '../format';
 import { currentLiveKey, playHistoryEntry, setHistoryOpen, useHistoryStore, type HistoryEntry } from '../history';
 import { getSettings, usePlayerStore } from '../store';
 import { MENU_HEADER, menuFrameClass, menuFrameStyle, UNMEASURED, type MenuFit } from './menuFrame';
+import { PlayerChannelName } from './ZapBanner';
 
 /** What airs now on each history channel, fetched once per opening. */
 function useNowPlaying(entries: readonly HistoryEntry[]): Record<string, string> {
@@ -157,9 +158,7 @@ export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
             >
               <Logo entry={entry} />
               <span className="min-w-0 flex-1">
-                <span dir="auto" className={cn('block truncate text-body-sm', playing && 'font-medium')}>
-                  {entry.title}
-                </span>
+                <PlayerChannelName title={entry.title} glass className={cn('text-body-sm', playing && 'font-medium')} />
                 <span dir="auto" className="block truncate text-caption text-on-glass-muted">
                   {playing ? t('channelHistoryWatching') : (airing ?? ' ')}
                 </span>

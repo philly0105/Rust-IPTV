@@ -53,7 +53,7 @@ export interface MediaState {
    * `at`: when it was raised (ms epoch), so chrome that mounts a moment later still shows it.
    * `locked`: a zap passing a locked channel (parental Ask mode); drawn with a lock glyph.
    */
-  osd?: { primary: string; secondary?: string; key: number; at?: number; locked?: boolean };
+  osd?: { primary: string; secondary?: string; key: number; at?: number; locked?: boolean; zap?: boolean };
   channelPanelOpen: boolean;
   externalRuns: ExternalRun[];
   commands: MediaCommands | null;
@@ -109,10 +109,12 @@ export function resetMedia(): void {
 }
 
 let osdKey = 0;
-export function showOsd(primary: string, secondary?: string, opts?: { locked?: boolean }): void {
+/** `zap`: a tune's number and name, which ZapAnnouncer says, so the readout is seen only. */
+export function showOsd(primary: string, secondary?: string, opts?: { locked?: boolean; zap?: boolean }): void {
   const at = Date.now();
   const osd: NonNullable<MediaState['osd']> = secondary ? { primary, secondary, key: ++osdKey, at } : { primary, key: ++osdKey, at };
   if (opts?.locked) osd.locked = true;
+  if (opts?.zap) osd.zap = true;
   useMediaStore.setState({ osd });
 }
 

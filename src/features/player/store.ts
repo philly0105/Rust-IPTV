@@ -27,6 +27,7 @@ import type {
 } from '@/api/types';
 import { itemKey, sameRef } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
+import { plainChannelName } from '@/lib/channelName';
 import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
 import { parseClearKey } from './clearKey';
@@ -1871,11 +1872,13 @@ function lookupArgs(channel: Channel, kind: SourceKind): PlayItemArgs {
 }
 
 /** Tuner readout: number big, name below. `locked`: a locked channel the zap is passing. */
-function showZapReadout(channel: Channel, name: string, locked = false): void {
+function showZapReadout(channel: Channel, title: string, locked = false): void {
+  // The toasts' plain form, "ESPN HD (US)", as the rows beside it read, not "US| ESPN HD".
+  const name = plainChannelName(title, false);
   showOsd(
     channel.number !== undefined ? String(channel.number) : name,
     channel.number !== undefined ? name : undefined,
-    locked ? { locked: true } : undefined,
+    locked ? { locked: true, zap: true } : { zap: true },
   );
 }
 

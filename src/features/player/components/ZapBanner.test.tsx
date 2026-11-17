@@ -30,7 +30,7 @@ const store = await import('../store');
 const media = await import('../media');
 const nowNext = await import('../nowNext');
 const zap = await import('../zapBanner');
-const { ZapBanner, ZapHeaderLine, airingPair } = await import('./ZapBanner');
+const { ZapAnnouncer, ZapBanner, ZapHeaderLine, airingPair } = await import('./ZapBanner');
 const { useZapHover } = await import('./zapHooks');
 const { PlayerSurface } = await import('./PlayerSurface');
 const { usePlayerStore } = store;
@@ -177,7 +177,9 @@ describe('what the banner shows', () => {
     expect(screen.getByTestId('zap-guide-loading')).toBeTruthy();
     await advance(0);
     const banner = screen.getByTestId('zap-banner');
-    expect(banner.getAttribute('role')).toBe('status');
+    // Seen only: ZapAnnouncer says the tune (w-a11y-04).
+    expect(banner.getAttribute('aria-hidden')).toBe('true');
+    expect(banner.getAttribute('role')).toBeNull();
     expect(screen.getByTestId('zap-number').textContent).toBe('1');
     expect(screen.getByTestId('zap-title').textContent).toBe('News 24');
     // Through the image cache (C3) first.
@@ -217,7 +219,7 @@ describe('what the banner shows', () => {
     expect(screen.getByTestId('zap-logo-fallback')).toBeTruthy();
   });
 
-  it("names the channel as the player's titles do, as the provider writes it, so the name holds when the banner hides (round 5)", async () => {
+  it("names the channel as the channel lists do, the place's tag after the name, and screen readers hear the plain form (round 3)", async () => {
     tune(channel('101', 'US| CBS HD'));
     render(
       <>
@@ -226,9 +228,30 @@ describe('what the banner shows', () => {
       </>,
     );
     await advance(0);
-    expect(screen.getByTestId('zap-title').textContent).toBe('US| CBS HD');
-    expect(screen.getByTestId('mini-zap-line').textContent).toContain('US| CBS HD');
-    expect(screen.queryByTestId('channel-name-tag')).toBeNull();
+    const title = screen.getByTestId('zap-title');
+    // The tooltip keeps the provider's name; the eye reads "CBS HD  US"; a screen reader "CBS HD (US)".
+    expect(title.getAttribute('title')).toBe('US| CBS HD');
+    expect(within(title).getByTestId('channel-name-tag').textContent).toBe('US');
+    expect(title.querySelector(':scope > .sr-only')?.textContent).toBe('CBS HD (US)');
+    expect(title.querySelector(':scope > [aria-hidden]')).toBeTruthy();
+    expect(within(screen.getByTestId('mini-zap-line')).getByTestId('channel-name-tag').textContent).toBe('US');
+  });
+
+  it('lets the chip name take the line when no programme follows it (w-realdata-08)', async () => {
+    handlers['catalog.item'] = () => ({ ref: ref('102'), name: 'PRIME: PBS HD (BACKUP 2)', number: 2508, isRadio: false });
+    tune(channel('102', 'PRIME: PBS HD (BACKUP 2)'));
+    render(<ZapBanner chip />);
+    await advance(0);
+    const title = screen.getByTestId('zap-title');
+    expect(title.className).not.toContain('max-w-[60%]');
+    expect(title.className).toContain('max-w-full');
+  });
+
+  it('caps the chip name at 60% while a programme shares the line', async () => {
+    tune(news);
+    render(<ZapBanner chip />);
+    await advance(0);
+    expect(screen.getByTestId('zap-title').className).toContain('max-w-[60%]');
   });
 
   it('shows the compact one-line version with time left', async () => {
@@ -245,6 +268,46 @@ describe('what the banner shows', () => {
     expect(airingPair(g, T0)).toEqual({ current: g.next });
     expect(airingPair(g, T0 - 2 * MIN)).toEqual({ current: g.now, upcoming: g.next });
     expect(airingPair(null, T0)).toEqual({});
+  });
+});
+
+describe('what screen readers hear (w-a11y-04)', () => {
+  it('says each tune once, with its number and programme, and again when the channel comes back', async () => {
+    render(<ZapAnnouncer />);
+    const region = screen.getByTestId('zap-announcer');
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    const heard: string[] = [];
+    const listen = new MutationObserver(() => {
+      if (region.textContent) heard.push(region.textContent);
+    });
+    listen.observe(region, { childList: true, characterData: true, subtree: true });
+
+    tune(channel('101', 'US| News 24'));
+    await advance(0);
+    expect(region.textContent).toBe('');
+    await advance(400);
+    expect(region.textContent).toBe('1 News 24 (US), Evening News');
+
+    tune(sport);
+    await advance(0);
+    // Cleared at once, so the next line is new text.
+    expect(region.textContent).toBe('');
+    await advance(400);
+    expect(region.textContent).toBe('2 Sport 1');
+
+    tune(channel('101', 'US| News 24'));
+    await advance(1000);
+    expect(region.textContent).toBe('1 News 24 (US), Evening News');
+    await advance(5000);
+    listen.disconnect();
+    expect(heard).toEqual(['1 News 24 (US), Evening News', '2 Sport 1', '1 News 24 (US), Evening News']);
+  });
+
+  it('says nothing for a film', async () => {
+    render(<ZapAnnouncer />);
+    tune(movie);
+    await advance(2000);
+    expect(screen.getByTestId('zap-announcer').textContent).toBe('');
   });
 });
 

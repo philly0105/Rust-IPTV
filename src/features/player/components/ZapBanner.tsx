@@ -1,10 +1,12 @@
 import { Lock, Tv } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type EpgNowNext, type ItemRef } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { formatClock, formatTimeRange, ms } from '@/features/live/lib/epgTime';
 import { monogramFill, monogramText } from '@/features/live/lib/monogram';
+import { plainChannelName } from '@/lib/channelName';
 import { useImageChain } from '@/ui/image';
 
 import { cn } from '../cn';
@@ -253,7 +255,8 @@ function useDropZapReadout(shown: boolean, title: string | undefined): void {
   useEffect(() => {
     if (!shown) return;
     const osd = useMediaStore.getState().osd;
-    if (osd && title && (osd.primary === title || osd.secondary === title)) useMediaStore.setState({ osd: undefined });
+    const name = title && plainChannelName(title, false);
+    if (osd && name && (osd.primary === name || osd.secondary === name)) useMediaStore.setState({ osd: undefined });
   }, [shown, showing, title]);
 }
 
@@ -287,12 +290,18 @@ function ZapChip({
             {number}
           </span>
         )}
-        {/* The provider's name as written, as the stage's title bar and the mini player's header show
-            it once the banner hides. With ChannelName here alone the name reordered a few seconds
-            after every zap, so the player's titles move to ChannelName together. */}
-        <span data-testid="zap-title" className="max-w-[60%] shrink-0 truncate text-body-sm leading-tight font-medium" title={title}>
-          {title}
-        </span>
+        {/* Named as the stage's title bar and the mini player's header name it once the banner hides.
+            The name takes the line when nothing follows it (no guide data, the common case on a
+            real library): a 60% cap there cut "PBS HD (BACKUP 2)" with empty glass beside it. */}
+        <PlayerChannelName
+          testId="zap-title"
+          title={title}
+          glass
+          className={cn(
+            'text-body-sm leading-tight font-medium',
+            locked || guide === undefined || current ? 'max-w-[60%] shrink-0' : 'min-w-0 max-w-full',
+          )}
+        />
         {locked ? (
           <span data-testid="zap-locked" className="player-on-glass-muted min-w-0 flex-1 truncate text-caption">
             {t('zapLocked')}
@@ -325,7 +334,6 @@ function ZapChip({
  * shows `ZapHeaderLine` in its header instead.
  */
 export function ZapBanner({ compact = false, chip = false, className }: { compact?: boolean; chip?: boolean; className?: string }) {
-  const { t } = useTranslation('player');
   const shown = useZapBannerShown();
   const showing = useZapBanner((s) => s.showing);
   const source = usePlayerStore((s) => s.source);
@@ -345,10 +353,8 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
     return (
       <div
         key={showing}
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        aria-label={t('zapBannerLabel')}
+        // Seen only: ZapAnnouncer says each tune once.
+        aria-hidden
         data-testid="zap-banner"
         data-variant="chip"
         data-zap-banner=""
@@ -379,10 +385,8 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
   return (
     <div
       key={showing}
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      aria-label={t('zapBannerLabel')}
+      // Seen only: ZapAnnouncer says each tune once.
+      aria-hidden
       data-testid="zap-banner"
       // The surfaces' readout (OSD) moves below this while it shares the readout's column.
       data-zap-banner=""
@@ -414,13 +418,12 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
                 {number}
               </span>
             )}
-            <span
-              data-testid="zap-title"
-              className={cn('min-w-0 truncate leading-tight', compact ? 'text-body-sm font-medium' : 'text-title-sm')}
+            <PlayerChannelName
+              testId="zap-title"
               title={source.title}
-            >
-              {source.title}
-            </span>
+              glass
+              className={cn('min-w-0 leading-tight', compact ? 'text-body-sm font-medium' : 'text-title-sm')}
+            />
           </div>
           <GuideRows guide={guide} now={now} compact={compact} locked={locked} />
         </div>
@@ -454,9 +457,7 @@ export function ZapHeaderLine({ title }: { title: string }) {
             {number}
           </span>
         )}
-        <span className={cn('min-w-0 truncate', shown && current && 'max-w-[60%] shrink-0 @max-[14rem]:max-w-none @max-[14rem]:shrink')} title={title}>
-          {title}
-        </span>
+        <PlayerChannelName title={title} className={cn('min-w-0', shown && current && 'max-w-[60%] shrink-0 @max-[14rem]:max-w-none @max-[14rem]:shrink')} />
         {locked && (
           <span data-testid="zap-locked" className="flex shrink-0 self-center text-fg-muted motion-safe:animate-fade-in">
             <Lock aria-hidden className="size-3.5" />
@@ -474,6 +475,85 @@ export function ZapHeaderLine({ title }: { title: string }) {
         )}
       </span>
     </span>
+  );
+}
+
+/**
+ * A live channel's name in the player, as the channel lists draw it: "ESPN2 FHD US" for "US| ESPN2
+ * FHD", the place's tag after the name and quiet (ChannelName). Screen readers hear the toasts'
+ * plain form, "ESPN2 FHD (US)", not the provider's "US| ESPN2 FHD"; the tooltip keeps the latter.
+ * `title` is the player's title, already under the strip setting. `glass`: on the dark stage.
+ * `className` places and sizes the name's box, which truncates.
+ */
+export function PlayerChannelName({ title, className, glass = false, testId }: { title: string; className?: string; glass?: boolean; testId?: string }) {
+  const spoken = plainChannelName(title, false);
+  const name = <ChannelName name={title} className="block truncate" tagClassName={glass ? 'text-on-glass-muted' : undefined} />;
+  return (
+    <span data-testid={testId} className={cn('block truncate', className)} title={title}>
+      {/* Without a place's tag the drawn name already reads as the plain one. */}
+      {spoken === title ? (
+        name
+      ) : (
+        <>
+          <span aria-hidden>{name}</span>
+          <span className="sr-only">{spoken}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/** How long a tune waits for its number and programme before it is announced without them. */
+const ANNOUNCE_WAIT_MS = 1500;
+/** The pause before a tune is announced, so a run of zaps is read once, at the end. */
+const ANNOUNCE_SETTLE_MS = 400;
+
+/**
+ * Says each live tune once to screen readers: "1 ESPN HD (US), NFL Football". One polite region,
+ * mounted once with the player (PlayerSurface), whose text changes per channel. The banners are
+ * hidden from screen readers: each zap mounted a new, already filled region (often not read at
+ * all), and the number arriving a beat later read the first tune twice. It waits for the number
+ * and the guide (at most `ANNOUNCE_WAIT_MS`), and clears first, so a channel tuned again is read.
+ */
+export function ZapAnnouncer() {
+  const { t } = useTranslation('player');
+  const source = usePlayerStore((s) => s.source);
+  const ref = source?.ref && source.isLive && !source.isRadio ? source.ref : undefined;
+  const key = ref ? itemKey(ref) : null;
+  const locked = isLockedZap(source);
+  const { info, guide } = useZapData(ref, 0, locked);
+  const [text, setText] = useState('');
+  const said = useRef<string | null>(null);
+  const ready = info !== undefined && guide !== undefined;
+  const line = (() => {
+    if (!source?.title) return '';
+    const name = plainChannelName(source.title, false);
+    const head = info?.number !== undefined ? `${info.number} ${name}` : name;
+    const tail = locked ? t('zapLocked') : airingPair(guide, Date.now()).current?.title;
+    return tail ? `${head}, ${tail}` : head;
+  })();
+  const latest = useRef(line);
+  latest.current = line;
+  useEffect(() => {
+    if (key === said.current) return;
+    setText('');
+    if (!key) {
+      said.current = null;
+      return;
+    }
+    const timer = setTimeout(
+      () => {
+        said.current = key;
+        setText(latest.current);
+      },
+      ready ? ANNOUNCE_SETTLE_MS : ANNOUNCE_WAIT_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [key, ready]);
+  return (
+    <p data-testid="zap-announcer" className="sr-only" aria-live="polite" aria-atomic="true">
+      {text}
+    </p>
   );
 }
 

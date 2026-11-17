@@ -131,6 +131,26 @@ describe('inline validation in the add dialog', () => {
     expect(input(/^Server URL/).getAttribute('aria-invalid')).toBe('true');
   });
 
+  it('splits a full Xtream link when it is pasted or the field is left, never while it is typed (v-setup-12)', async () => {
+    const link = 'http://line.example.tv:8080/get.php?username=bob&password=secret&type=m3u_plus';
+    await openAdd('Xtream Codes');
+    // Typed key by key: the link is complete at "password=s" and must stay whole.
+    type(/^Server URL/, 'http://line.example.tv:8080/get.php?username=bob&password=s');
+    type(/^Server URL/, link);
+    expect(input(/^Server URL/).value).toBe(link);
+    expect(input(/^Password/).value).toBe('');
+    fireEvent.blur(input(/^Server URL/));
+    expect(input(/^Server URL/).value).toBe('http://line.example.tv:8080');
+    expect(input(/^Username/).value).toBe('bob');
+    expect(input(/^Password/).value).toBe('secret');
+    // A paste splits at once.
+    type(/^Server URL/, '');
+    fireEvent.paste(input(/^Server URL/));
+    type(/^Server URL/, 'http://other.example.tv/get.php?username=amy&password=pw2');
+    expect(input(/^Server URL/).value).toBe('http://other.example.tv');
+    expect(input(/^Username/).value).toBe('amy');
+  });
+
   it('flags an incomplete MAC on blur and clears it once completed', async () => {
     await openAdd('Stalker portal');
     type(/^MAC address/, '001a79');

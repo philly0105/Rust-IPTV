@@ -381,7 +381,7 @@ describe('DownloadsPage', () => {
 
   it('keeps a finished download on the page with Play and its page in My videos', async () => {
     rpc.handlers['downloads.list'] = () => [
-      makeDownload({ id: 21, status: 'completed', title: 'Heat', totalBytes: 2048, fileAvailable: true, completedAt: '2026-10-02T00:00:00Z' }),
+      makeDownload({ id: 21, status: 'completed', title: 'Heat', totalBytes: 2048, fileAvailable: true, completedAt: '2026-10-02T00:00:00Z', fileName: 'Heat (1995).mkv', filePath: 'D:\\Videos\\Heat (1995).mkv' }),
       makeDownload({ id: 22, status: 'completed', title: 'Ronin', fileAvailable: false, completedAt: '2026-10-03T00:00:00Z' }),
     ];
     rpc.handlers['myvideos.playSource'] = () => ({ url: 'file:///heat.mkv', kind: 'file' });
@@ -394,6 +394,11 @@ describe('DownloadsPage', () => {
     expect(within(rows[0]!).getByText('File missing')).toBeTruthy();
     fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Download Ronin again' }));
     await waitFor(() => expect(rpc.callsOf('downloads.retry')).toEqual([{ id: 22 }]));
+    // The file to look for, with its full path in the tooltip (walkthrough-13).
+    const file = within(rows[1]!).getByTestId('finished-file');
+    expect(file.textContent).toBe('Heat (1995).mkv');
+    expect(file.getAttribute('title')).toBe('D:\\Videos\\Heat (1995).mkv');
+    expect(within(rows[0]!).queryByTestId('finished-file')).toBeNull();
     expect(within(rows[1]!).getByRole('link', { name: 'Show Heat in My videos' }).getAttribute('href')).toBe('/my-videos/21');
     fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Play Heat' }));
     await waitFor(() => expect(rpc.callsOf('myvideos.playSource')).toEqual([{ id: 21 }]));

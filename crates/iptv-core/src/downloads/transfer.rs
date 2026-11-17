@@ -2,12 +2,18 @@
 //! `.part`, in-task retry with backoff, and the no-overwrite finalize.
 
 use super::manager::{DownloadManager, StopReason, TaskCtl};
+use super::mirrors;
 use super::naming::{self, Reservation};
-use super::segments::{self, Ranges, SegEnd};
+use super::segments::stats as xstats;
+use super::segments::{self, MirrorPlan, Ranges, SegEnd, SegSource};
+use super::shared::{self, Endpoint, Fingerprint};
 use super::store::{self, DownloadRow};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{apply_source_headers, backoff_delay};
-use crate::model::{ContentType, SourceKind, WaitReason};
+use crate::model::{
+    ContentType, CopyRef, Limiting, OneConnectionReason, SourceKind, SourceRole, TransferNote,
+    TransferStats, WaitReason,
+};
 use crate::state::AppState;
 use futures::StreamExt;
 use reqwest::header::{
@@ -127,7 +133,21 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                 progressed: false,
             }
         }
-        kind = refresh_url(state, &mut row) => kind,
+        kind = authority(state, mgr, ctl, &mut row) => match kind {
+            Ok(kind) => kind,
+            // The copy the queue spread the row to cannot be resolved now:
+            // the row waits for its source like any outage.
+            Err(err) => {
+                tracing::info!(id, error = %err, "could not resolve the copy to download from");
+                return Outcome::Requeue {
+                    reason: WaitReason::Provider,
+                    message: user_message(&err),
+                    bytes: row.download.bytes_downloaded,
+                    progressed: false,
+                    part: Some(dest.part_path.clone()),
+                };
+            }
+        },
     };
     let mut rep = Representation {
         total: row.download.total_bytes,
@@ -144,7 +164,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
     // (a file without resume) gets the row no further.
     let had = row.download.bytes_downloaded;
     loop {
-        match attempt(state, &row, &dest, ctl, mgr, &mut rep).await {
+        match attempt(state, &row, &dest, ctl, mgr, &mut rep, kind).await {
             AttemptEnd::Done(bytes) => return finalize(&dest, bytes).await,
             AttemptEnd::Stopped(bytes) => {
                 return Outcome::Stopped {
@@ -179,7 +199,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                 let wait = if discard {
                     None
                 } else {
-                    wait_reason(state, mgr, &err, kind, &row.download.item_ref.source_id).await
+                    wait_reason(state, mgr, &err, kind, &ctl.source).await
                 };
                 if let Some(reason) = wait {
                     tracing::info!(id, ?reason, error = %err, "download waits for its source");
@@ -203,12 +223,56 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
     }
 }
 
+/// The row's own copy: its ref and episode.
+fn own_copy(row: &DownloadRow) -> CopyRef {
+    CopyRef::new(
+        row.download.item_ref.clone(),
+        row.download.episode_id.clone(),
+    )
+}
+
+/// The copy the queue spread the row to, when the run downloads from
+/// another copy than the row's own.
+fn spread_copy(row: &DownloadRow, ctl: &TaskCtl) -> Option<CopyRef> {
+    ctl.copy.clone().filter(|c| *c != own_copy(row))
+}
+
+/// Points the row at the URL this run downloads from (the authority): the
+/// copy the queue spread it to (resolved ahead by the manager, or now), or
+/// the row's own (see [`refresh_url`]). A spread copy's URL is never
+/// persisted: the row keeps its own. Returns the authority source's kind.
+async fn authority(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    ctl: &TaskCtl,
+    row: &mut DownloadRow,
+) -> CoreResult<Option<SourceKind>> {
+    let Some(copy) = spread_copy(row, ctl) else {
+        return Ok(refresh_url(state, mgr, row).await);
+    };
+    let ep = match mgr
+        .take_preresolved(row.download.id)
+        .filter(|e| e.copy == copy)
+    {
+        Some(ep) => ep,
+        None => shared::resolve(state, &copy).await?,
+    };
+    row.download.url = ep.url;
+    row.headers = ep.headers;
+    Ok(Some(ep.kind))
+}
+
 /// Replaces the row's URL (and headers) with a freshly resolved one for
 /// Xtream and Stalker sources and persists it. M3U/file sources, catch-up
 /// programmes (live and radio refs), removed sources, and resolution failures
 /// keep the stored URL; the transfer then reports whatever the server says
-/// about it. Returns the source's kind (`None` when it was removed).
-async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) -> Option<SourceKind> {
+/// about it. An endpoint the manager resolved ahead for the row is used
+/// first. Returns the source's kind (`None` when it was removed).
+async fn refresh_url(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    row: &mut DownloadRow,
+) -> Option<SourceKind> {
     let item_ref = row.download.item_ref.clone();
     let episode_id = row.download.episode_id.clone();
     let sid = item_ref.source_id.clone();
@@ -233,27 +297,38 @@ async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) -> Option<Sou
     ) {
         return kind;
     }
+    let ahead = mgr
+        .take_preresolved(row.download.id)
+        .filter(|e| e.copy == own_copy(row) && Some(e.kind) == kind);
     let resolved = match kind {
+        _ if ahead.is_some() => {
+            let ep = ahead.expect("an endpoint resolved ahead");
+            Ok((ep.url, Some(ep.headers)))
+        }
         Some(SourceKind::Xtream) => {
-            crate::xtream::service::stream_url(state, &item_ref, episode_id.as_deref()).await
+            crate::xtream::service::stream_url(state, &item_ref, episode_id.as_deref())
+                .await
+                .map(|s| (s.url, s.headers))
         }
         Some(SourceKind::Stalker) => {
-            crate::stalker::playback::stream_url(state, &item_ref, episode_id.as_deref()).await
+            crate::stalker::playback::stream_url(state, &item_ref, episode_id.as_deref())
+                .await
+                .map(|s| (s.url, s.headers))
         }
         _ => return kind,
     };
-    let src = match resolved {
+    let (url, headers) = match resolved {
         Ok(src) => src,
         Err(err) => {
             tracing::warn!(id = row.download.id, error = %err, "could not re-resolve download URL; using the stored one");
             return kind;
         }
     };
-    if src.url == row.download.url && src.headers.as_ref().is_none_or(|h| *h == row.headers) {
+    if url == row.download.url && headers.as_ref().is_none_or(|h| *h == row.headers) {
         return kind;
     }
-    row.download.url = src.url;
-    if let Some(h) = src.headers {
+    row.download.url = url;
+    if let Some(h) = headers {
         row.headers = h;
     }
     let (id, url, headers) = (
@@ -541,6 +616,18 @@ fn validator_of(resp: &reqwest::Response) -> Option<String> {
         .or_else(|| header_str(resp, LAST_MODIFIED))
 }
 
+/// The authority of an attempt: the copy the run downloads from.
+struct Authority {
+    /// Its copy (the row's own, or the one the queue spread the row to).
+    copy: CopyRef,
+    /// The spread copy, as the sidecar names it (`None`: the row's own).
+    spread: Option<CopyRef>,
+    /// Resolved, for probes and fingerprints. None for catch-up and a
+    /// removed source.
+    endpoint: Option<Endpoint>,
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn attempt(
     state: &Arc<AppState>,
     row: &DownloadRow,
@@ -548,6 +635,7 @@ async fn attempt(
     ctl: &TaskCtl,
     mgr: &DownloadManager,
     rep: &mut Representation,
+    kind: Option<SourceKind>,
 ) -> AttemptEnd {
     let id = row.download.id;
     let error = |err: CoreError, start: i64, bytes: i64| AttemptEnd::Error {
@@ -556,6 +644,28 @@ async fn attempt(
         bytes,
         discard: false,
     };
+    let spread = spread_copy(row, ctl);
+    let copy = spread.clone().unwrap_or_else(|| own_copy(row));
+    let endpoint = kind
+        .filter(|_| {
+            !matches!(
+                copy.item_ref.content_type,
+                ContentType::Live | ContentType::Radio
+            )
+        })
+        .map(|kind| Endpoint {
+            copy: copy.clone(),
+            kind,
+            url: row.download.url.clone(),
+            headers: row.headers.clone(),
+        });
+    let auth = Authority {
+        copy,
+        spread,
+        endpoint,
+    };
+    let source = ctl.source.as_str();
+    let splittable = !is_catchup(row) && may_split(state, source, ctl, rep.one_connection);
 
     // A sidecar means the `.part` was written in segments: its length says
     // nothing, and each segment resumes where it got to.
@@ -563,16 +673,31 @@ async fn attempt(
     let sidecar = tokio::task::spawn_blocking(move || segments::load(&part))
         .await
         .unwrap_or(segments::Sidecar::Invalid);
-    match sidecar {
-        segments::Sidecar::None => {}
-        segments::Sidecar::Valid(ranges)
-            if Some(ranges.total) == rep.total
-                && rep.validator.as_deref() == Some(&ranges.validator) =>
-        {
-            return segmented(state, row, dest, ctl, mgr, rep, ranges, None).await;
+    let adopted = match sidecar {
+        segments::Sidecar::None => None,
+        // This file's layout, set out for this run's authority.
+        segments::Sidecar::Valid(ranges) if Some(ranges.total) == rep.total => Some(
+            ranges
+                .adopt(auth.spread.as_ref(), rep.validator.as_deref())
+                .ok_or(()),
+        ),
+        _ => Some(Err(())),
+    };
+    match adopted {
+        None => {}
+        Some(Ok(ranges)) => {
+            let plan = if splittable {
+                mirror_plan(state, ctl, rep, &auth).await
+            } else {
+                None
+            };
+            return segmented(
+                state, row, dest, ctl, mgr, rep, ranges, None, &auth, None, plan,
+            )
+            .await;
         }
         // Not this file's layout, or not one the `.part` holds: start over.
-        _ => {
+        Some(Err(())) => {
             let part = dest.part_path.clone();
             let cleared = tokio::task::spawn_blocking(move || {
                 std::fs::OpenOptions::new()
@@ -607,16 +732,24 @@ async fn attempt(
     }
     ctl.bytes.store(resume_from, Ordering::Relaxed);
 
+    // Mirrors need the authority's fingerprint before its file is split.
+    let mut plan = if splittable {
+        mirror_plan(state, ctl, rep, &auth).await
+    } else {
+        None
+    };
+    if ctl.token.is_cancelled() {
+        return AttemptEnd::Stopped(resume_from);
+    }
+
     // `identity`: byte ranges and Content-Length must describe the file itself,
     // and a manual Accept-Encoding also turns off reqwest's transparent decoding.
     let url = &row.download.url;
-    let client = crate::http::source_client(state, &row.download.item_ref.source_id, url).await;
+    let client = crate::http::source_client(state, source, url).await;
     let mut req =
         apply_source_headers(client.get(url), &row.headers).header(ACCEPT_ENCODING, "identity");
     // A file may go over several connections: a fresh start asks for a range
-    // too, since only a `206` with a total and a validator shows it can.
-    let source = row.download.item_ref.source_id.as_str();
-    let splittable = !is_catchup(row) && may_split(state, source, ctl, rep.one_connection);
+    // too, since only a `206` with a total shows it can.
     let ranged = resume_from > 0 || splittable;
     if resume_from > 0 {
         req = req.header(RANGE, format!("bytes={resume_from}-"));
@@ -734,28 +867,46 @@ async fn attempt(
     };
 
     // Over several connections when the answer allows it and the source has
-    // spare ones now; otherwise a check every second hands this stream over
-    // when they free up (the rest of a season finished, playback stopped).
+    // spare ones now (or identical copies may serve part of it); otherwise a
+    // check every second hands this stream over when they free up (the rest
+    // of a season finished, playback stopped). A `206` with a total is
+    // enough: without a validator, overlapping bytes show a changed file.
     let split_total = rep
         .total
-        .filter(|_| splittable && status == StatusCode::PARTIAL_CONTENT && rep.validator.is_some());
+        .filter(|_| splittable && status == StatusCode::PARTIAL_CONTENT);
     let worth_splitting =
         |offset: i64| split_total.is_some_and(|t| t - offset >= 2 * segments::MIN_SEGMENT);
-    if worth_splitting(offset) && mgr.connection_allowance(ctl) >= 2 {
+    // The mirrors apply to this answer's file only while the cached
+    // fingerprint still describes it: otherwise it is read again once the
+    // transfer runs.
+    match (&mut plan, split_total) {
+        (Some(p), Some(t)) if t >= shared::MIN_MIRROR_TOTAL => {
+            if p.fingerprint
+                .as_ref()
+                .is_some_and(|fp| !still_matches(fp, t, rep.validator.as_deref()))
+            {
+                p.fingerprint = None;
+            }
+        }
+        _ => plan = None,
+    }
+    // Where the answer came from after redirects: segment requests go there.
+    let landed = resp.url().as_str();
+    let pinned = (landed != url.as_str()).then(|| landed.to_string());
+    if worth_splitting(offset) && (mgr.allowance_on(ctl, source) >= 2 || plan.is_some()) {
         if sparse(mgr, dest).await {
-            let ranges = Ranges::new(
-                rep.total.unwrap_or(0),
-                rep.validator.clone().unwrap_or_default(),
-                offset,
-            );
+            let ranges = Ranges::new(rep.total.unwrap_or(0), authority_source(&auth, rep), offset);
             let first = Some((resp.bytes_stream().boxed(), offset));
-            let end = segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+            let end = segmented(
+                state, row, dest, ctl, mgr, rep, ranges, first, &auth, pinned, plan,
+            )
+            .await;
             settle_recorded(id, recorded).await;
             return end;
         }
         // The file system cannot leave holes: the rest of the run keeps
         // one connection and stops asking.
-        rep.one_connection = true;
+        no_holes(ctl, rep);
     }
 
     let file = tokio::fs::OpenOptions::new()
@@ -780,6 +931,8 @@ async fn attempt(
     let mut pace = Pace::new(rate_limit(state, ctl), offset);
     let mut split_checked = Instant::now();
     let mut hand_over = false;
+    // The single stream's breakdown, once a second.
+    let mut stats = Single::new(offset, status == StatusCode::PARTIAL_CONTENT);
 
     let end = loop {
         // The idle timer starts after throttle(), so a rate cap never trips it.
@@ -801,7 +954,8 @@ async fn attempt(
                 }
                 offset += chunk.len() as i64;
                 ctl.bytes.store(offset, Ordering::Relaxed);
-                progress.tick(state, id, offset, rep.total);
+                progress.tick(state, ctl, id, offset, rep.total);
+                stats.tick(state, mgr, ctl, id, offset, rep.total);
                 if throttle(&mut pace, state, ctl, offset).await {
                     break None;
                 }
@@ -809,7 +963,7 @@ async fn attempt(
                     split_checked = Instant::now();
                     if !catchup
                         && may_split(state, source, ctl, rep.one_connection)
-                        && mgr.connection_allowance(ctl) >= 2
+                        && (mgr.allowance_on(ctl, source) >= 2 || plan.is_some())
                     {
                         // Asked before the stream is let go: a file system
                         // that cannot leave holes keeps it.
@@ -817,7 +971,7 @@ async fn attempt(
                             hand_over = true;
                             break None;
                         }
-                        rep.one_connection = true;
+                        no_holes(ctl, rep);
                     }
                 }
             }
@@ -874,11 +1028,7 @@ async fn attempt(
         return error(CoreError::Io(e), started_at, offset);
     }
     if let Some(stream) = stream {
-        let ranges = Ranges::new(
-            rep.total.unwrap_or(0),
-            rep.validator.clone().unwrap_or_default(),
-            offset,
-        );
+        let ranges = Ranges::new(rep.total.unwrap_or(0), authority_source(&auth, rep), offset);
         return segmented(
             state,
             row,
@@ -888,6 +1038,9 @@ async fn attempt(
             rep,
             ranges,
             Some((stream, offset)),
+            &auth,
+            pinned,
+            plan,
         )
         .await;
     }
@@ -949,8 +1102,110 @@ async fn sparse(mgr: &DownloadManager, dest: &Dest) -> bool {
         .unwrap_or(false)
 }
 
+/// The authority as the sidecar names it, with the validator of its answer.
+fn authority_source(auth: &Authority, rep: &Representation) -> SegSource {
+    SegSource {
+        copy: auth.spread.clone(),
+        validator: rep.validator.clone(),
+    }
+}
+
+/// The file system cannot leave holes: the rest of the run keeps one
+/// connection and stops asking.
+fn no_holes(ctl: &TaskCtl, rep: &mut Representation) {
+    if !rep.one_connection {
+        ctl.push_note(TransferNote::OneConnection {
+            reason: OneConnectionReason::NoHoles,
+        });
+    }
+    rep.one_connection = true;
+}
+
+/// Whether fingerprint `fp` still describes a file of `total` bytes with
+/// `validator`.
+///
+/// Replace with `mirrors::still_matches` (B2) after the merge: this is a
+/// local shim of the same shape.
+fn still_matches(fp: &Fingerprint, total: i64, validator: Option<&str>) -> bool {
+    fp.total == total
+        && match (&fp.validator, validator) {
+            (Some(a), Some(b)) => a == b,
+            (Some(_), None) => false,
+            (None, _) => true,
+        }
+}
+
+/// The mirrors a transfer may draw on: with "Use identical copies" on, a
+/// file of at least [`shared::MIN_MIRROR_TOTAL`] and candidates on other
+/// sources. The authority's fingerprint is read here (over the transfer's
+/// own connection, before its main request) when none is cached or the
+/// cached one no longer matches what the row knows about the file. None
+/// when any of it fails: the transfer goes on without mirrors. The caller
+/// checks `may_split` and catch-up.
+async fn mirror_plan(
+    state: &Arc<AppState>,
+    ctl: &TaskCtl,
+    rep: &Representation,
+    auth: &Authority,
+) -> Option<MirrorPlan> {
+    if !state.settings.read().download_use_mirrors {
+        return None;
+    }
+    if rep.total.is_some_and(|t| t < shared::MIN_MIRROR_TOTAL) {
+        return None;
+    }
+    let ep = auth.endpoint.as_ref()?;
+    let item = auth.copy.clone();
+    let key = item.clone();
+    let (has, cached) = state
+        .db_call(move |c| {
+            Ok((
+                mirrors::has_candidates(c, &key)?,
+                mirrors::cached_fingerprint(c, &key)?,
+            ))
+        })
+        .await
+        .ok()?;
+    if !has {
+        return None;
+    }
+    let cached = cached.filter(|fp| {
+        rep.total
+            .is_none_or(|t| still_matches(fp, t, rep.validator.as_deref()))
+    });
+    let fp = match cached {
+        Some(fp) => fp,
+        None => {
+            let fp = tokio::select! {
+                _ = ctl.token.cancelled() => return None,
+                fp = mirrors::fingerprint(state, ep) => fp,
+            };
+            let fp = match fp {
+                Ok(fp) => fp,
+                Err(e) => {
+                    tracing::info!(error = %e, "could not fingerprint the file; going on without mirrors");
+                    return None;
+                }
+            };
+            let (copy, stored) = (item.clone(), fp.clone());
+            if let Err(e) = state
+                .db_call(move |c| mirrors::store_fingerprint(c, &copy, &stored))
+                .await
+            {
+                tracing::warn!(error = %e, "could not cache a fingerprint");
+            }
+            fp
+        }
+    };
+    (fp.total >= shared::MIN_MIRROR_TOTAL).then_some(MirrorPlan {
+        item,
+        fingerprint: Some(fp),
+    })
+}
+
 /// Runs `ranges` over several connections and maps the end to the
-/// attempt's. `first` is the open answer of the attempt, if any.
+/// attempt's. `first` is the open answer of the attempt, if any, and
+/// `pinned` where it came from after redirects.
 #[allow(clippy::too_many_arguments)]
 async fn segmented(
     state: &Arc<AppState>,
@@ -964,6 +1219,9 @@ async fn segmented(
         futures::stream::BoxStream<'static, reqwest::Result<bytes::Bytes>>,
         i64,
     )>,
+    auth: &Authority,
+    pinned: Option<String>,
+    mirrors: Option<MirrorPlan>,
 ) -> AttemptEnd {
     let id = row.download.id;
     let start = ranges.done();
@@ -976,8 +1234,9 @@ async fn segmented(
     let one_connection = AtomicBool::new(rep.one_connection);
     let job = segments::Job {
         id,
-        client: crate::http::source_client(state, &row.download.item_ref.source_id, &url).await,
+        client: crate::http::source_client(state, &ctl.source, &url).await,
         url,
+        pinned,
         headers: row.headers.clone(),
         part: dest.part_path.clone(),
         ctl,
@@ -987,10 +1246,13 @@ async fn segmented(
         host,
         state,
         one_connection: &one_connection,
+        authority: auth.endpoint.clone(),
+        copy: auth.copy.clone(),
+        mirrors,
     };
     let mut progress = Progress::new(start);
     let end = segments::run(job, ranges, first, |done, total| {
-        progress.tick(state, id, done, Some(total))
+        progress.tick(state, ctl, id, done, Some(total))
     })
     .await;
     rep.one_connection = one_connection.load(Ordering::Relaxed);
@@ -1138,6 +1400,12 @@ struct ProgressEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     total_bytes: Option<i64>,
     bytes_per_second: i64,
+    /// Connections the transfer holds, when more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connections: Option<usize>,
+    /// Sources it draws on, when more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sources: Option<usize>,
 }
 
 /// Throttled `downloads.progress` emitter plus periodic DB persistence.
@@ -1164,7 +1432,14 @@ impl Progress {
         }
     }
 
-    fn tick(&mut self, state: &Arc<AppState>, id: i64, bytes: i64, total: Option<i64>) {
+    fn tick(
+        &mut self,
+        state: &Arc<AppState>,
+        ctl: &TaskCtl,
+        id: i64,
+        bytes: i64,
+        total: Option<i64>,
+    ) {
         let now = Instant::now();
         if self
             .last_emit
@@ -1175,6 +1450,8 @@ impl Progress {
                 .as_secs_f64()
                 .max(0.001);
             let bps = ((bytes - self.last_bytes) as f64 / secs).round() as i64;
+            let connections = ctl.connections.load(Ordering::Relaxed);
+            let sources = ctl.holdings().iter().filter(|(_, n)| *n > 0).count();
             state.emit(
                 "downloads.progress",
                 ProgressEvent {
@@ -1182,6 +1459,8 @@ impl Progress {
                     bytes_downloaded: bytes,
                     total_bytes: total,
                     bytes_per_second: bps.max(0),
+                    connections: (connections > 1).then_some(connections),
+                    sources: (sources > 1).then_some(sources),
                 },
             );
             self.last_emit = Some(now);
@@ -1202,6 +1481,73 @@ impl Progress {
                 }
             }));
         }
+    }
+}
+
+/// The breakdown (`downloads.stats`) of a transfer over one connection,
+/// published once a second.
+struct Single {
+    last: Instant,
+    bytes: i64,
+    began: i64,
+    /// The answer was a `206`: the provider serves ranges.
+    ranged: bool,
+}
+
+impl Single {
+    fn new(offset: i64, ranged: bool) -> Self {
+        Self {
+            last: Instant::now(),
+            bytes: offset,
+            began: offset,
+            ranged,
+        }
+    }
+
+    fn tick(
+        &mut self,
+        state: &Arc<AppState>,
+        mgr: &DownloadManager,
+        ctl: &TaskCtl,
+        id: i64,
+        bytes: i64,
+        total: Option<i64>,
+    ) {
+        let now = Instant::now();
+        let secs = now.duration_since(self.last).as_secs_f64();
+        if now.duration_since(self.last) < xstats::STATS_EVERY {
+            return;
+        }
+        let bps = ((bytes - self.bytes) as f64 / secs.max(0.001))
+            .round()
+            .max(0.0) as i64;
+        self.last = now;
+        self.bytes = bytes;
+        let source = &ctl.source;
+        let mut found = xstats::settings_reasons(state, ctl, source);
+        if !self.ranged {
+            found.push(Limiting::NoRanges);
+        }
+        if total.is_some_and(|t| t - bytes < 2 * segments::MIN_SEGMENT) {
+            found.push(Limiting::SmallFile);
+        }
+        found.extend(mgr.limit_reason(ctl, source));
+        let s = TransferStats {
+            id,
+            bytes_per_second: bps,
+            connections: Vec::new(),
+            sources: vec![xstats::source_stat(
+                mgr,
+                source,
+                SourceRole::Primary,
+                1,
+                bps,
+                bytes - self.began,
+            )],
+            limiting: xstats::first(found),
+            notes: ctl.recent_notes(),
+        };
+        xstats::publish(state, ctl, s);
     }
 }
 
@@ -1309,7 +1655,7 @@ mod tests {
         let held = state.background_gate().acquire_owned().await.unwrap();
         let mut p = Progress::new(0);
         p.last_persist = Instant::now().checked_sub(PERSIST_INTERVAL).unwrap();
-        p.tick(&state, id, 5_000, None);
+        p.tick(&state, &TaskCtl::detached("s1"), id, 5_000, None);
         let write = p.persisting.take().expect("the write is due");
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(!write.is_finished(), "the write waits at the gate");

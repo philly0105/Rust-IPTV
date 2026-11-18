@@ -446,9 +446,11 @@ pub async fn run(
         job.mirrors.as_ref().map(|m| find_mirrors(cx, m).boxed());
     // When the last mirror search ended.
     let mut searched = Instant::now();
-    // Ends a probe round when the transfer ends: the round keeps what it
-    // proved, or backs off (a dropped round would do neither).
-    let probe_end = CancellationToken::new();
+    // Ends a probe round when the transfer ends, or when one of the
+    // authority's connections ends, is refused or fails to open (the count
+    // the round started from no longer holds): the round keeps the steps
+    // it held in full, or backs off (a dropped round would do neither).
+    let mut probe_end = CancellationToken::new();
     let mut probing: Option<BoxFuture<'_, ()>> = None;
     let mut probe_ended: Option<Instant> = None;
     let mut last_stats = Instant::now();
@@ -663,6 +665,10 @@ pub async fn run(
                         .map(|k| running.remove(k));
                     srcs[src].bytes += meter.bytes();
                     closed_at = Some(Instant::now());
+                    // A drop while a probe runs is the kick it watches for.
+                    if src == 0 && !matches!(result, Err(WorkerError::Dropped(_))) {
+                        probe_end.cancel();
+                    }
                     if open_ended == Some(seg) {
                         open_ended = None;
                     }
@@ -902,13 +908,16 @@ pub async fn run(
             if !stopping
                 && may
                 && probing.is_none()
+                && pending.is_empty()
+                && settled(&running)
                 && ramp.gained != Some(false)
                 && total - done >= PROBE_MIN_LEFT
             {
                 if let Some(ep) = &job.authority {
                     if probe::probe_due(state, mgr, ctl, &ctl.source) {
+                        probe_end = CancellationToken::new();
                         probing = Some(
-                            probe::probe_until(state, mgr, ctl, ep, total, &probe_end)
+                            probe::probe_until(state, mgr, ctl, ep, total, probe_end.clone())
                                 .map(|_| ())
                                 .boxed(),
                         );
@@ -1033,6 +1042,17 @@ pub async fn run(
 /// Workers of source `src` that run.
 fn count(running: &[Running], src: usize) -> usize {
     running.iter().filter(|r| r.src == src).count()
+}
+
+/// True when every connection of the authority has its answer (bytes
+/// came) and none is being replaced: the panel counts each of them, so a
+/// probe round may start from that count. A request still waiting (the
+/// close grace, the panel's answer) is not open yet.
+fn settled(running: &[Running]) -> bool {
+    running
+        .iter()
+        .filter(|r| r.src == 0)
+        .all(|r| !r.recycle && r.meter.bytes() > 0)
 }
 
 /// How long a new request waits after a connection closed.

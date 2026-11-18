@@ -1734,3 +1734,128 @@ async fn an_origin_row_spread_to_another_file_keeps_the_origin_bytes() {
     dl_panel::is_exact(1, 24 * MIB, Path::new(&end.file_path.unwrap()))
         .expect("the file is the origin's copy throughout");
 }
+
+/// Waits until the round on `source` that follows `before` ended: the
+/// record was written again. Returns the limits entry then.
+async fn round_after(
+    c: &Ctx,
+    source: &str,
+    before: &iptv_core::model::SourceConnectionLimit,
+    within: Duration,
+) -> iptv_core::model::SourceConnectionLimit {
+    let deadline = Instant::now() + within;
+    loop {
+        let l = limit_of(c, source).await;
+        if (!l.probing && l.probed_at != before.probed_at) || Instant::now() >= deadline {
+            return l;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The retest of a learned limit of 3 on a panel that takes exactly 3,
+/// while the transfer's third request waits at the panel (not counted
+/// there yet): no round starts until it has its answer, and the round then
+/// records the 3 the panel holds, not 4.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_probe_waits_until_every_connection_has_its_answer() {
+    let c = xctx().await;
+    // The waiting connection carries nothing: the ramp must not take it
+    // back, nor replace it as slow, while it waits.
+    iptv_core::downloads::set_ramp_timing(
+        &c.state,
+        Duration::from_secs(10),
+        Duration::from_secs(30),
+    );
+    let panel = Panel::spawn(92).await;
+    panel.set_reported(1);
+    panel.set_enforced(3);
+    let size = 160 * MIB;
+    panel.file(1, size, 1024);
+    let s = add_xtream_source(&c.state, "inflight", &panel).await;
+    add_movie(&c.state, &s, 1, "Movie 1", None, "mp4").await;
+    learned_limit(&c, &s, 3, 1).await;
+    iptv_core::downloads::age_connection_limit(&c.state, &s, WEEK + Duration::from_secs(60))
+        .await
+        .unwrap();
+    let before = limit_of(&c, &s).await;
+    let d = c.start_movie(&s, 1, &panel.movie_url(1)).await;
+    until("two connections", || panel.open() == 2).await;
+    let gate = panel.hold_next_head();
+    gate.held().await;
+    // The engine looks for a due retest once a second.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        probe_requests(&panel, size),
+        0,
+        "a round started while a connection waited for its answer"
+    );
+    gate.release();
+    let after = round_after(&c, &s, &before, WAIT).await;
+    assert!(!after.probing, "the round never ended");
+    assert_eq!(
+        after.learned,
+        Some(3),
+        "the round recorded more than the panel holds"
+    );
+    assert_eq!(panel.peak(), 3);
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+}
+
+/// One trial: a learned limit of 3 on a panel that takes exactly 3, its
+/// retest falling due about a second before the transfer's third segment
+/// ends; `k` moves that end against the engine's once-a-second tick.
+/// Returns what the source's record says after the round.
+async fn retest_near_a_segment_end(k: u64) -> Option<i64> {
+    let c = xctx().await;
+    let kbps = 2048 + 10 * k;
+    let panel = Panel::spawn(93 + k).await;
+    panel.set_reported(1);
+    panel.set_enforced(3);
+    let size = 160 * MIB;
+    panel.file(1, size, kbps);
+    let s = add_xtream_source(&c.state, &format!("sweep{k}"), &panel).await;
+    add_movie(&c.state, &s, 1, "Movie 1", None, "mp4").await;
+    learned_limit(&c, &s, 3, 1).await;
+    let t0 = Instant::now();
+    let d = c.start_movie(&s, 1, &panel.movie_url(1)).await;
+    until("three requests", || panel.log().len() >= 3).await;
+    let t3 = t0.elapsed().as_secs_f64();
+    let third = panel.log()[2].range.expect("a range");
+    let len = third.1.expect("an end") - third.0 + 1;
+    let ends = t3 + len as f64 / (kbps * 1024) as f64;
+    // Due at the engine's tick about a second before that end.
+    loop {
+        let got = c
+            .collect("downloads.stats", d.id, Duration::from_millis(20))
+            .await;
+        if !got.is_empty() && t0.elapsed().as_secs_f64() >= ends - 1.2 {
+            break;
+        }
+        assert!(t0.elapsed().as_secs_f64() < ends + 5.0, "no tick seen");
+    }
+    iptv_core::downloads::age_connection_limit(&c.state, &s, WEEK + Duration::from_secs(60))
+        .await
+        .unwrap();
+    let aged = limit_of(&c, &s).await;
+    let after = round_after(&c, &s, &aged, Duration::from_secs(40)).await;
+    assert!(panel.peak() <= 3);
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    after.learned
+}
+
+/// Retests that start around a segment's end, where the transfer closes a
+/// connection and opens the next: no round records more than the 3
+/// connections the panel takes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_retest_near_a_segment_end_never_records_more_than_the_panel_holds() {
+    let trials = (0..8u64).map(|k| tokio::spawn(retest_near_a_segment_end(k)));
+    let mut all = Vec::new();
+    for t in trials {
+        all.push(t.await.unwrap());
+    }
+    assert!(
+        all.iter().all(|l| l.is_some_and(|l| l <= 3)),
+        "a round recorded more than the panel's 3: {all:?}"
+    );
+}

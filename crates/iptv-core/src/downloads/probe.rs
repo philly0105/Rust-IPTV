@@ -2,7 +2,8 @@
 //! allows, beyond what the account reports.
 //!
 //! A round runs beside a transfer that holds everything its source gives
-//! it. It opens extra Range requests near the file's end one at a time,
+//! it, once every one of those connections has its answer and none is
+//! being replaced: the round counts from them. It opens extra Range requests near the file's end one at a time,
 //! holds each for [`ProbeTiming::step`](super::manager::ProbeTiming) with
 //! its body unread, and stops at the first refusal (any answer but a 2xx),
 //! at a kick (the panel ended the oldest connection, the transfer's own, to
@@ -17,10 +18,13 @@
 //! the source or the transfer stops, and it closes every connection it
 //! opened before it returns. After an aborted round the source is not
 //! probed for [`super::manager::PROBE_ABORT_BACKOFF`]. A round whose
-//! transfer ends (done or failed) keeps what it proved: connections held
-//! for a full step above the known limit are recorded as a learned limit,
+//! transfer ends (done or failed), or one of whose transfer's connections
+//! to the source ends, is refused or fails to open (the count it started
+//! from no longer holds), keeps what it proved: connections held for a
+//! full step above the known limit are recorded as a learned limit,
 //! retested after [`super::manager::PROBE_ABORT_BACKOFF`]; with none, the
-//! round counts as aborted.
+//! round counts as aborted. So a recorded count never exceeds the
+//! connections that were answered and open at the same moment.
 
 use super::manager::{self, Policy, TaskCtl};
 use super::segments::MAX_CONNECTIONS;
@@ -70,7 +74,9 @@ enum End {
     Cap,
     /// The transfer stopped, or playback or a recording started.
     Abort,
-    /// The transfer ended (done or failed) before the climb did.
+    /// The transfer ended (done or failed), or one of its connections to
+    /// the source ended, was refused or failed to open, before the climb
+    /// did.
     Ended,
 }
 
@@ -83,18 +89,20 @@ pub async fn probe(
     ep: &Endpoint,
     total: i64,
 ) -> Option<ProbeOutcome> {
-    probe_until(state, mgr, ctl, ep, total, &CancellationToken::new()).await
+    probe_until(state, mgr, ctl, ep, total, CancellationToken::new()).await
 }
 
-/// [`probe`], ended early once `end` is cancelled (the transfer ended):
-/// the round then keeps what it proved.
+/// [`probe`], ended early once `end` is cancelled: the transfer ended, or
+/// one of its connections to the source ended, was refused or failed to
+/// open, so the count the round started from no longer holds. The round
+/// then keeps the steps it held in full before that.
 pub async fn probe_until(
     state: &Arc<AppState>,
     mgr: &DownloadManager,
     ctl: &TaskCtl,
     ep: &Endpoint,
     total: i64,
-    end: &CancellationToken,
+    end: CancellationToken,
 ) -> Option<ProbeOutcome> {
     let source = ep.copy.source_id().to_string();
     mgr.load_now(state, &source).await;
@@ -151,6 +159,11 @@ pub async fn probe_until(
                 }
             }
         };
+        // The transfer's side changed while the request was out: the
+        // answer says nothing about the count the round started from.
+        if let Some(e) = stop() {
+            break e;
+        }
         match answer {
             Ok(Ok(resp)) if resp.status().is_success() => {
                 open.push(resp);

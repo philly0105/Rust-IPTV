@@ -1385,9 +1385,14 @@ async fn scr_redirected_edge_is_pinned_and_split() {
 // Mirrors and playback
 // ---------------------------------------------------------------------------
 
-/// Playback starting on a mirror's account takes its connection back: the
-/// mirror closes within about a second with a mirrorDropped{playback} note,
-/// and the file still completes byte-exact.
+/// The coordinator's tick (`segments::TICK`, private): how often a transfer
+/// re-reads its allowance on each source.
+const ENGINE_TICK: Duration = Duration::from_millis(250);
+
+/// Spec check 14: playback starting on a mirror's account takes its
+/// connection back. The mirror's connection closes within one coordinator
+/// tick (plus scheduling slack) of the playback hold landing, with a
+/// mirrorDropped{playback} note, and the file still completes byte-exact.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn mirror_yields_to_playback() {
     const SIZE: u64 = 48 * MIB;
@@ -1424,21 +1429,35 @@ async fn mirror_yields_to_playback() {
         assert!(Instant::now() < deadline, "the mirror never joined");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    // Playback starts on the mirror's account.
+    // Playback starts on the mirror's account. `downloads.playback` stores
+    // the playback hold (the lease that drops `allowance_on` for the
+    // mirror's source) synchronously, before its first await; it then waits
+    // for the yield plus the manager's 300 ms YIELD_GRACE before returning.
+    // So the call is polled together with the panel watch, and t0 (just
+    // before the first poll) is the hold landing to within the dispatch's
+    // synchronous prologue; timing from the call's return would add the
+    // grace and could not tell a one-tick yield from a slower one.
     let t0 = Instant::now();
-    lab.ok(
-        "downloads.playback",
-        json!({"clientId": "tv", "sourceIds": [sb]}),
-    )
-    .await;
-    while b.open() > 0 {
-        assert!(
-            t0.elapsed() < Duration::from_secs(10),
-            "the mirror never let go"
-        );
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    let yielded = t0.elapsed();
+    let watch = async {
+        while b.open() > 0 {
+            assert!(
+                t0.elapsed() < Duration::from_secs(10),
+                "the mirror never let go"
+            );
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        t0.elapsed()
+    };
+    let call = async {
+        lab.ok(
+            "downloads.playback",
+            json!({"clientId": "tv", "sourceIds": [sb]}),
+        )
+        .await;
+        t0.elapsed()
+    };
+    // `join!` polls `call` first, so the hold lands before the watch starts.
+    let (returned, yielded) = tokio::join!(call, watch);
     let dropped = |notes: &[TransferNote]| {
         notes.iter().any(|n| {
             matches!(
@@ -1467,16 +1486,21 @@ async fn mirror_yields_to_playback() {
         secs: began.elapsed().as_secs_f64(),
     };
     println!(
-        "mirror_yields_to_playback: the mirror closed {} ms after playback started; {:.1} MB/s overall",
+        "mirror_yields_to_playback: the mirror closed {} ms after the playback hold; downloads.playback returned after {} ms; {:.1} MB/s overall",
         yielded.as_millis(),
+        returned.as_millis(),
         run.mbps()
     );
 
     assert_exact(1, SIZE, &run);
+    // One tick for the coordinator to see the lower allowance, plus slack
+    // for scheduling and the panel noticing the closed connection.
+    let limit = ENGINE_TICK + Duration::from_millis(250);
     assert!(
-        yielded <= Duration::from_millis(1500),
-        "the mirror took {} ms to yield",
-        yielded.as_millis()
+        yielded <= limit,
+        "the mirror took {} ms to yield (limit {} ms)",
+        yielded.as_millis(),
+        limit.as_millis()
     );
     assert!(
         dropped(&notes),

@@ -441,9 +441,11 @@ struct Inner {
     batched: HashSet<i64>,
     /// Endpoints resolved ahead, per row.
     preresolved: HashMap<i64, spread::Pre>,
-    /// Running rows whose origin's source was removed: their run discards
-    /// the bytes it held from that copy when it ends ([`forget_source`]).
-    discard: HashSet<i64>,
+    /// Running rows whose origin's source was removed, with that origin:
+    /// their run discards the bytes it held from that copy when it ends
+    /// ([`forget_source`]). A run that holds no bytes of that copy ignores
+    /// the flag, and a run that goes back to the queue unclaimed clears it.
+    discard: HashMap<i64, CopyRef>,
     /// A note the row's next run shows: why it starts over from its own
     /// copy.
     carried: HashMap<i64, TransferNote>,
@@ -2465,7 +2467,7 @@ async fn run_task(
                     _ => {}
                 }
             }
-            let outcome = drop_origin_bytes(&state, &mgr, id, &ctl, outcome).await;
+            let outcome = drop_origin_bytes(&state, &mgr, id, &ctl, &start, outcome).await;
             back = match &outcome {
                 Outcome::Stopped {
                     reason: StopReason::Yield,
@@ -2482,7 +2484,12 @@ async fn run_task(
             persist_outcome(&state, id, outcome).await;
         }
         Ok(Claim::NotQueued) => tracing::debug!(id, "download no longer queued; skipping"),
-        Ok(Claim::Interrupted) => again = unstopped(),
+        // A run that was never claimed held no bytes: a discard flag set
+        // meanwhile ([`forget_source`]) must not reach the row's next run.
+        Ok(Claim::Interrupted) => {
+            mgr.inner.lock().discard.remove(&id);
+            again = unstopped();
+        }
         Ok(Claim::Misplaced(origin)) => {
             tracing::debug!(id, "download placed for another origin; queueing it again");
             let mut inner = mgr.inner.lock();
@@ -2491,14 +2498,19 @@ async fn run_task(
                 None => inner.origins.remove(&id),
             };
             inner.plans.remove(&id);
+            inner.discard.remove(&id);
             drop(inner);
             again = unstopped();
         }
         Ok(Claim::Stale) => {
-            mgr.inner.lock().plans.remove(&id);
+            let mut inner = mgr.inner.lock();
+            inner.plans.remove(&id);
+            inner.discard.remove(&id);
+            drop(inner);
             again = unstopped();
         }
         Err(err) => {
+            mgr.inner.lock().discard.remove(&id);
             // The row is still `queued` in the database: dropping the id
             // would leave it waiting with no task until the next launch. A
             // yield asked for meanwhile does not change that; a user's stop
@@ -2761,23 +2773,30 @@ fn discard_bytes(c: &rusqlite::Connection, id: i64) -> CoreResult<()> {
 /// Ends a run whose bytes came from a copy the row may no longer trust:
 /// a `Respread` on the row's origin (the file it adopted changed since it
 /// was checked, or is gone), or any run of a row whose origin's source was
-/// removed meanwhile ([`forget_source`]). The row discards those bytes
-/// ([`discard_bytes`]) and forgets its origin, and its next run, at the
-/// front of the queue, starts over from its own copy. A completed run, and
-/// every other one, passes unchanged.
+/// removed meanwhile ([`forget_source`]) while the run held bytes of it.
+/// The row discards those bytes ([`discard_bytes`]) and forgets its origin,
+/// and its next run, at the front of the queue, starts over from its own
+/// copy. A completed run, and every other one, passes unchanged.
 async fn drop_origin_bytes(
     state: &Arc<AppState>,
     mgr: &DownloadManager,
     id: i64,
     ctl: &TaskCtl,
+    start: &Start,
     outcome: Outcome,
 ) -> Outcome {
+    // The copy the run's bytes came from: the origin it was placed with,
+    // or the copy it adopted.
+    let held = start
+        .origin
+        .as_ref()
+        .or(ctl.copy.as_ref().filter(|_| start.adopt));
     let (changed, removed) = {
         let mut inner = mgr.inner.lock();
         let on_origin = ctl.copy.is_some() && inner.origins.get(&id) == ctl.copy.as_ref();
         (
             on_origin && matches!(outcome, Outcome::Respread { .. }),
-            inner.discard.remove(&id),
+            inner.discard.remove(&id).is_some_and(|o| held == Some(&o)),
         )
     };
     if !(changed || removed) || matches!(outcome, Outcome::Completed { .. }) {
@@ -2870,16 +2889,16 @@ pub fn forget_source(state: &AppState, source: &str) {
     let mgr = manager(state);
     {
         let mut inner = mgr.inner.lock();
-        let bound: Vec<i64> = inner
+        let bound: Vec<(i64, CopyRef)> = inner
             .origins
             .iter()
             .filter(|(_, o)| o.source_id() == source)
-            .map(|(id, _)| *id)
+            .map(|(id, o)| (*id, o.clone()))
             .collect();
-        for id in bound {
+        for (id, origin) in bound {
             match inner.active.get(&id).cloned() {
                 Some(ctl) => {
-                    inner.discard.insert(id);
+                    inner.discard.insert(id, origin);
                     ctl.request_yield();
                 }
                 None => {

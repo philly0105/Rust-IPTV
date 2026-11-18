@@ -468,3 +468,64 @@ async fn a_changed_copy_identical_to_the_origin_is_asked_once() {
     let end = c.completed(d.id).await;
     is_variant(&end, size, Variant::Differs);
 }
+
+/// A row of A holds bytes of its origin on B (an equivalent copy) and is
+/// placed on B again, but its claim is slow (a busy database) when B is
+/// removed. The flag that told the run on B to discard B's bytes must not
+/// reach the row's next run, on its own copy: a pause there keeps what it
+/// downloaded from A.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_source_removed_during_a_slow_claim_spares_the_next_run() {
+    let c = ctx().await;
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(60),
+        Duration::from_secs(120),
+    );
+    let size = 24 * MIB;
+    let (a, b) = (Panel::spawn(92).await, Panel::spawn(93).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 2 * 1024);
+    b.file_variant(1, size, 2 * 1024, Variant::Differs);
+    let (sa, sb, _) = c.copies(&a, &b, "claim", true).await;
+    let cb = CopyRef::new(movie_ref(&sb, 1), None);
+    c.play(&[&sa]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "2 MiB from B", |r| {
+        r.served_by.as_deref() == Some(sb.as_str()) && r.bytes_downloaded > 2 * MIB as i64
+    })
+    .await;
+    c.pause(d.id).await;
+    assert_eq!(
+        c.get(d.id).await.origin.as_ref(),
+        Some(&cb),
+        "B is the origin"
+    );
+    // The run placed on B fails its first two claims and retries.
+    iptv_core::downloads::fail_next_claims(&c.state, 2, Duration::from_millis(200));
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    iptv_core::sources::remove(&c.state, &sb).await.unwrap();
+    c.wait_until(d.id, "released from B", |r| {
+        r.origin.is_none() && r.bytes_downloaded == 0 && r.status == DownloadStatus::Queued
+    })
+    .await;
+    c.play(&[]).await;
+    let run = c
+        .wait_until(d.id, "3 MiB from A", |r| {
+            r.status == DownloadStatus::Downloading && r.bytes_downloaded > 3 * MIB as i64
+        })
+        .await;
+    let part = PathBuf::from(format!("{}.part", run.file_path.clone().unwrap()));
+    c.pause(d.id).await;
+    let paused = c.get(d.id).await;
+    assert!(
+        paused.bytes_downloaded > 3 * MIB as i64 && part.exists(),
+        "the pause threw away the bytes from A: {} bytes, .part exists {}",
+        paused.bytes_downloaded,
+        part.exists()
+    );
+}

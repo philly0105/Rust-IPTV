@@ -249,15 +249,17 @@ impl Ranges {
     }
 
     /// This layout for a run whose authority is `copy` (`None`: the row's
-    /// own item) with `validator`: the authority moves to `sources[0]`. A
-    /// copy the sidecar does not list joins as the authority with no
-    /// validator, and every written segment needs a comparison again. None
-    /// when the sidecar records another validator for the authority: the
-    /// file changed, and its bytes cannot be continued.
+    /// own item): the authority moves to `sources[0]`. A copy the sidecar
+    /// does not list joins as the authority with no validator, and every
+    /// written segment needs a comparison again. `validator` is the row's:
+    /// it describes the last run's authority (`sources[0]`) only, so it is
+    /// compared there alone, and None means that file changed and its
+    /// bytes cannot be continued. Another listed copy keeps the validator
+    /// it served under; the run's range requests check it (If-Range).
     pub fn adopt(mut self, copy: Option<&CopyRef>, validator: Option<&str>) -> Option<Ranges> {
         match self.sources.iter().position(|s| s.copy.as_ref() == copy) {
             Some(k) => {
-                if self.sources[k].validator.as_deref() != validator {
+                if k == 0 && self.sources[0].validator.as_deref() != validator {
                     return None;
                 }
                 if k != 0 {
@@ -657,6 +659,9 @@ pub struct Job<'a> {
     /// The authority's copy (the row's own item, or the copy the queue
     /// spread the row to).
     pub copy: CopyRef,
+    /// The row's own copy: the sidecar names it `None` whether it served
+    /// as the authority or as a mirror.
+    pub own: CopyRef,
     /// Mirrors to look for, when they apply to this transfer.
     pub mirrors: Option<MirrorPlan>,
 }
@@ -668,12 +673,17 @@ pub enum SegEnd {
     Done(i64),
     /// The transfer was asked to stop; the sidecar holds the progress.
     Stopped(i64),
-    /// An answer was not the range asked for, or the authority's bytes
-    /// changed: the partial and its sidecar are gone, and the file starts
-    /// over with one connection.
+    /// The authority is the row's own copy, and an answer was not the
+    /// range asked for or its bytes changed: the partial and its sidecar
+    /// are gone, and the file starts over with one connection.
     Changed,
     /// A segment failed; the sidecar holds the progress.
     Error { err: CoreError, bytes: i64 },
+    /// The authority is another copy than the row's own and it changed,
+    /// or its bytes contradict the row's own: the sidecar keeps the bytes
+    /// (less the authority's unchecked ones), and the row goes back to the
+    /// queue.
+    Respread(i64),
 }
 
 #[cfg(test)]
@@ -949,9 +959,13 @@ mod tests {
         // The file changed under the authority.
         assert_eq!(r.clone().adopt(None, Some("\"f\"")), None);
         assert_eq!(r.clone().adopt(None, None), None);
-        // The queue spread the row to the mirror's copy.
-        let spread = r.clone().adopt(Some(&b), Some("v-b")).unwrap();
+        // The queue spread the row to the mirror's copy. The row's
+        // validator was the authority's, not B's: B keeps the one it
+        // served under.
+        let spread = r.clone().adopt(Some(&b), Some("\"e\"")).unwrap();
+        assert_eq!(spread, r.clone().adopt(Some(&b), None).unwrap());
         assert_eq!(spread.sources[0].copy, Some(b.clone()));
+        assert_eq!(spread.sources[0].validator.as_deref(), Some("v-b"));
         assert_eq!(spread.segments[0].src, 1);
         assert_eq!(spread.segments[1].src, 0);
         assert!(spread.is_consistent());

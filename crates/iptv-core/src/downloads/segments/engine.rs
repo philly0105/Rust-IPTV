@@ -385,6 +385,10 @@ pub async fn run(
         validator: ranges.sources[0].validator.clone(),
         pinned: Mutex::new(pinned),
     }));
+    // The authority is another copy than the row's own (spread, or the
+    // row's origin): the row's bytes are the file, and a change there
+    // sends the row back to the queue instead of discarding them.
+    let elsewhere = ranges.sources[0].copy.is_some();
     let tails =
         ranges.sources[0].validator.is_none() || ranges.sources.len() > 1 || job.mirrors.is_some();
     let plan = Arc::new(Mutex::new(Plan::new(ranges)));
@@ -679,9 +683,16 @@ pub async fn run(
                         }
                         Err(WorkerError::Mismatch { other }) => {
                             let me = src as u16;
+                            let home = |k: u16| {
+                                k != 0 && plan.lock().ranges.sources[usize::from(k)].copy.is_none()
+                            };
                             if me == 0 && other == 0 {
                                 fail!(WorkerError::Changed(
                                     "overlapping bytes of two requests differ".into()
+                                ));
+                            } else if elsewhere && (me == 0 || other == 0) && (home(me) || home(other)) {
+                                fail!(WorkerError::Changed(
+                                    "the copy's bytes differ from the row's own".into()
                                 ));
                             } else {
                                 discard(cx, &mut srcs, &mut running, me, other);
@@ -942,6 +953,27 @@ pub async fn run(
     let ranges = plan.lock().ranges.clone();
     let done = ranges.done();
     let part = job.part.clone();
+    if let (Some(WorkerError::Changed(why)), true) = (&failure, elsewhere) {
+        tracing::info!(
+            id = job.id,
+            why,
+            "the copy downloaded from changed; the download goes back to the queue"
+        );
+        // Its bytes no comparison confirmed go; the row's own stay.
+        let ranges = {
+            let mut p = plan.lock();
+            for i in 0..p.ranges.segments.len() {
+                let s = p.ranges.segments[i];
+                if s.src == 0 && !s.checked && s.pos > s.start {
+                    p.reset(i);
+                }
+            }
+            p.ranges.clone()
+        };
+        let done = ranges.done();
+        settle_save(job.id, Some(spawn_save(job, ranges, None))).await;
+        return SegEnd::Respread(done);
+    }
     if let Some(WorkerError::Changed(why)) = &failure {
         tracing::info!(
             id = job.id,
@@ -1259,6 +1291,8 @@ fn attach(cx: &Cx<'_>, srcs: &mut Vec<Src>, found: Vec<Found>) -> bool {
     let mut discarded = false;
     for f in found {
         let copy = f.mirror.endpoint.copy.clone();
+        // The row's own copy has one entry, `None`, in any role.
+        let entry = (copy != cx.job.own).then(|| copy.clone());
         let id = copy.item_ref.source_id.clone();
         if id == ctl.source
             || srcs
@@ -1270,12 +1304,7 @@ fn attach(cx: &Cx<'_>, srcs: &mut Vec<Src>, found: Vec<Found>) -> bool {
         let validator = f.mirror.fingerprint.validator.clone();
         let idx = {
             let mut p = cx.plan.lock();
-            match p
-                .ranges
-                .sources
-                .iter()
-                .position(|s| s.copy.as_ref() == Some(&copy))
-            {
+            match p.ranges.sources.iter().position(|s| s.copy == entry) {
                 Some(k) if k > 0 => {
                     if p.ranges.sources[k].validator != validator {
                         // The mirror's file changed since it served these
@@ -1295,7 +1324,7 @@ fn attach(cx: &Cx<'_>, srcs: &mut Vec<Src>, found: Vec<Found>) -> bool {
                         continue;
                     }
                     p.ranges.sources.push(SegSource {
-                        copy: Some(copy.clone()),
+                        copy: entry,
                         validator: validator.clone(),
                     });
                     srcs.push(Src::new(Some(copy.clone())));

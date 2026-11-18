@@ -699,6 +699,39 @@ async fn attempt(
     match adopted {
         None => {}
         Some(Ok(ranges)) => {
+            // The row's validator follows the run's authority: it is
+            // compared with `sources[0]` when the next run adopts.
+            let validator = ranges.sources[0].validator.clone();
+            if let Some(copy) = &auth.spread {
+                let own = own_copy(row);
+                let known = Representation {
+                    total: rep.total,
+                    validator: validator.clone(),
+                    one_connection: rep.one_connection,
+                };
+                if changed_since_verified(state, &own, copy, &known, validator.is_some()).await {
+                    tracing::info!(
+                        id,
+                        source = %copy.source_id(),
+                        "the copy the download was spread to changed since it was verified; queueing it again"
+                    );
+                    mirrors::record_mismatch(state, &own, copy, false).await;
+                    return AttemptEnd::Respread {
+                        message: CHANGED_COPY.into(),
+                        bytes: ranges.done(),
+                    };
+                }
+            }
+            if validator != rep.validator {
+                rep.validator = validator.clone();
+                let total = rep.total;
+                if let Err(e) = state
+                    .db_call(move |c| store::set_representation(c, id, total, validator.as_deref()))
+                    .await
+                {
+                    return error(e, ranges.done(), ranges.done());
+                }
+            }
             let plan = if splittable {
                 mirror_plan(state, ctl, rep, &auth).await
             } else {
@@ -878,7 +911,7 @@ async fn attempt(
     }
     if let Some(copy) = &auth.spread {
         let own = own_copy(row);
-        if changed_since_verified(state, &own, copy, rep).await {
+        if changed_since_verified(state, &own, copy, rep, true).await {
             drop(resp);
             tracing::info!(
                 id,
@@ -888,7 +921,7 @@ async fn attempt(
             mirrors::record_mismatch(state, &own, copy, false).await;
             (rep.total, rep.validator) = known;
             return AttemptEnd::Respread {
-                message: "The copy on another source changed since it was checked; the download waits for its own source.".into(),
+                message: CHANGED_COPY.into(),
                 bytes: existing,
             };
         }
@@ -1215,14 +1248,20 @@ fn authority_source(auth: &Authority, rep: &Representation) -> SegSource {
     }
 }
 
+/// Why a run on another copy ended with [`AttemptEnd::Respread`].
+const CHANGED_COPY: &str = "The copy on another source changed since it was checked.";
+
 /// Whether the spread copy `copy` answered with another file than the one
 /// it was verified identical to `own` as: the total or validator its
-/// verdict recorded, or its cached fingerprint, say otherwise.
+/// verdict recorded, or its cached fingerprint, say otherwise. Without
+/// `with_validator` (a sidecar that never saw the copy's validator) the
+/// totals alone are compared.
 async fn changed_since_verified(
     state: &Arc<AppState>,
     own: &CopyRef,
     copy: &CopyRef,
     rep: &Representation,
+    with_validator: bool,
 ) -> bool {
     let Some(total) = rep.total else {
         return false;
@@ -1245,12 +1284,18 @@ async fn changed_since_verified(
                 });
             let by_verdict = entry.is_some_and(|v| {
                 v.total.is_some_and(|t| t != total)
-                    || v.validator
-                        .as_deref()
-                        .is_some_and(|x| Some(x) != validator.as_deref())
+                    || with_validator
+                        && v.validator
+                            .as_deref()
+                            .is_some_and(|x| Some(x) != validator.as_deref())
             });
-            let by_cache = mirrors::cached_fingerprint(c, &copy)?
-                .is_some_and(|fp| !mirrors::still_matches(&fp, total, validator.as_deref()));
+            let by_cache = mirrors::cached_fingerprint(c, &copy)?.is_some_and(|fp| {
+                if with_validator {
+                    !mirrors::still_matches(&fp, total, validator.as_deref())
+                } else {
+                    fp.total != total
+                }
+            });
             Ok(by_verdict || by_cache)
         })
         .await
@@ -1382,6 +1427,7 @@ async fn segmented(
         one_connection: &one_connection,
         authority: auth.endpoint.clone(),
         copy: auth.copy.clone(),
+        own: own_copy(row),
         mirrors,
     };
     let mut progress = Progress::new(start);
@@ -1395,7 +1441,10 @@ async fn segmented(
         let _ = write.await;
     }
     let bytes = match &end {
-        SegEnd::Done(b) | SegEnd::Stopped(b) | SegEnd::Error { bytes: b, .. } => *b,
+        SegEnd::Done(b)
+        | SegEnd::Stopped(b)
+        | SegEnd::Respread(b)
+        | SegEnd::Error { bytes: b, .. } => *b,
         SegEnd::Changed => 0,
     };
     if let Err(e) = state
@@ -1407,6 +1456,15 @@ async fn segmented(
     match end {
         SegEnd::Done(total) => AttemptEnd::Done(total),
         SegEnd::Stopped(bytes) => AttemptEnd::Stopped(bytes),
+        SegEnd::Respread(bytes) => {
+            if let Some(copy) = &auth.spread {
+                mirrors::record_mismatch(state, &own_copy(row), copy, false).await;
+            }
+            AttemptEnd::Respread {
+                message: CHANGED_COPY.into(),
+                bytes,
+            }
+        }
         SegEnd::Error { err, bytes } => AttemptEnd::Error {
             err,
             start,

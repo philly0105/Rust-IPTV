@@ -1211,3 +1211,132 @@ async fn a_spread_run_on_a_plain_part_starts_from_zero() {
         "B's copy is the canonical one"
     );
 }
+
+/// A row spread first to B (ETag) then home to A (no validator), paused
+/// twice: the second resume on A keeps the bytes on disk. The row's
+/// validator was B's: it says nothing about A's copy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_resume_at_home_after_a_spread_keeps_the_bytes() {
+    let c = xctx().await;
+    let size = 64 * MIB;
+    let (a, b) = (Panel::spawn(70).await, Panel::spawn(71).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.set_validators(Validators::None);
+    a.file(1, size, 2 * 1024);
+    b.file(1, size, 2 * 1024);
+    let (sa, sb, _) = c.copies(&a, &b, "home").await;
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "8 MiB on B", |d| {
+        d.served_by.as_deref() == Some(sb.as_str()) && d.bytes_downloaded >= 8 * MIB as i64
+    })
+    .await;
+    c.pause(d.id).await;
+    // Playback moves to B, so the row goes home to A.
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sb.clone()]).await;
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let before = c.get(d.id).await.bytes_downloaded;
+    c.wait_until(d.id, "more on A", |r| {
+        r.status == DownloadStatus::Downloading
+            && r.served_by.is_none()
+            && r.bytes_downloaded >= before + 8 * MIB as i64
+    })
+    .await;
+    c.pause(d.id).await;
+    let held = c.get(d.id).await.bytes_downloaded;
+    let from = a.log().len();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    until("A asked again", || a.log().len() > from).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let new: Vec<_> = a.log().into_iter().skip(from).collect();
+    let restarted = new
+        .iter()
+        .any(|l| l.range.map(|r| r.0) == Some(0) || l.range.is_none());
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    assert!(
+        !restarted,
+        "the resume on A started over from byte 0 with {held} bytes on disk: {new:?}"
+    );
+}
+
+/// Bytes the sidecar at `part` says are written.
+fn written(part: &Path) -> i64 {
+    let v = read_json(&sidecar(part));
+    v["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["pos"].as_i64().unwrap() - s["start"].as_i64().unwrap())
+        .sum()
+}
+
+/// The row got bytes at home on A (in segments), then A plays and B's copy
+/// is replaced on the provider (`total` bytes now) before the row is
+/// spread there: the bytes from A stay, the row goes back to the queue
+/// and B is no longer taken for A's copy.
+async fn a_changed_spread_copy(seeds: (u64, u64), tag: &str, total: u64) {
+    let c = xctx().await;
+    let size = 48 * MIB;
+    let (a, b) = (Panel::spawn(seeds.0).await, Panel::spawn(seeds.1).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+        p.set_validators(Validators::None);
+    }
+    a.file(1, size, 2 * 1024);
+    b.file(1, size, 2 * 1024);
+    let (sa, sb, own) = c.copies(&a, &b, tag).await;
+    // B plays, so the first run stays on A alone.
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sb.clone()]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "8 MiB on A", |r| {
+        r.served_by.is_none() && r.bytes_downloaded >= 8 * MIB as i64
+    })
+    .await;
+    let part = c.pause(d.id).await;
+    let held = written(&part);
+    assert!(held >= 8 * MIB as i64, "the sidecar holds {held} bytes");
+    // B's file is replaced; A plays now, B is free.
+    b.file_variant(1, total, 2 * 1024, Variant::Differs);
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    let from_b = b.log().len();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    until("B asked", || {
+        b.log()
+            .iter()
+            .skip(from_b)
+            .any(|l| l.route == "movie" && l.range.is_some())
+    })
+    .await;
+    c.wait_until(d.id, "the row back in the queue", |r| {
+        r.status == DownloadStatus::Queued
+    })
+    .await;
+    let kept = sidecar(&part).exists().then(|| written(&part));
+    let identical = c.identical(&own).await;
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    assert!(
+        kept.is_some_and(|k| k >= held),
+        "the {held} bytes from A were thrown away (the sidecar holds {kept:?})"
+    );
+    assert!(
+        !identical.iter().any(|c| c.source_id() == sb),
+        "B is still taken for A's copy: {identical:?}"
+    );
+}
+
+/// B answers with another total: the run sees it in the range answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_spread_copy_with_another_total_keeps_the_home_bytes() {
+    a_changed_spread_copy((76, 77), "chg", 50 * MIB).await;
+}
+
+/// B answers with the same total and other bytes: the run sees it where
+/// B's bytes meet A's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_spread_copy_with_other_bytes_keeps_the_home_bytes() {
+    a_changed_spread_copy((78, 79), "chg2", 48 * MIB).await;
+}

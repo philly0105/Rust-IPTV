@@ -1156,6 +1156,32 @@ async fn extra_connections_that_never_open_leave_the_stream_running() {
         notes.iter().all(|n| n["reason"] != "refused"),
         "blamed a refusal: {notes:?}"
     );
+    assert!(
+        notes.iter().any(|n| n["reason"] == "unreachable"),
+        "no note says why: {notes:?}"
+    );
+    // From the fall-back on, no limit is blamed (the note explains it),
+    // and an account limit never while fewer connections run than it allows.
+    let fell = stats
+        .iter()
+        .position(|s| {
+            s["notes"]
+                .as_array()
+                .is_some_and(|n| n.iter().any(|n| n["reason"] == "unreachable"))
+        })
+        .unwrap();
+    for s in &stats {
+        let held = s["connections"].as_array().map_or(0, Vec::len) as i64;
+        if s["limiting"]["kind"] == "accountLimit" {
+            assert!(
+                held >= s["limiting"]["limit"].as_i64().unwrap(),
+                "an account limit with {held} connections: {s}"
+            );
+        }
+    }
+    for s in &stats[fell..] {
+        assert!(s["limiting"].is_null(), "blamed after the fall-back: {s}");
+    }
 }
 
 /// A row's plain `.part` (written on A in one stream) and a run spread to

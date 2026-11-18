@@ -455,6 +455,9 @@ pub async fn run(
     let mut stats_received = 0i64;
     // The provider refused an extra connection: the rest goes over one.
     let mut refused = false;
+    // Extra connections could not be opened: the rest goes over one, and
+    // no limit explains the speed (the note does).
+    let mut unreachable = false;
 
     macro_rules! fail {
         ($e:expr) => {{
@@ -768,6 +771,12 @@ pub async fn run(
                             tracing::info!(id = job.id, error = %err, "extra connections could not be opened; going on with one");
                             job.one_connection.store(true, Ordering::Relaxed);
                             ctl.set_one_connection(true);
+                            if !unreachable {
+                                ctl.push_note(TransferNote::OneConnection {
+                                    reason: OneConnectionReason::Unreachable,
+                                });
+                            }
+                            unreachable = true;
                         }
                         Err(WorkerError::Refused(err))
                             if srcs[0].refusals < LAG_REFUSALS
@@ -922,7 +931,7 @@ pub async fn run(
             }
             let secs = now.duration_since(last_stats).as_secs_f64().max(0.001);
             let speed = ((received - stats_received) as f64 / secs).round().max(0.0) as i64;
-            let s = breakdown(cx, &srcs, &running, &ramp, refused, speed);
+            let s = breakdown(cx, &srcs, &running, &ramp, refused, unreachable, speed);
             stats::publish(state, ctl, s);
             last_stats = now;
             stats_received = received;
@@ -1396,6 +1405,7 @@ fn breakdown(
     running: &[Running],
     ramp: &Ramp,
     refused: bool,
+    unreachable: bool,
     speed: i64,
 ) -> TransferStats {
     let (state, ctl, mgr) = (cx.job.state, cx.job.ctl, cx.job.mgr);
@@ -1448,8 +1458,17 @@ fn breakdown(
             source_id: ctl.source.clone(),
         });
     }
-    for s in srcs.iter().filter(|s| s.usable().is_some()) {
-        found.extend(mgr.limit_reason(ctl, &s.id()));
+    for (i, s) in srcs
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.usable().is_some())
+    {
+        // An account limit explains the speed only while the source runs
+        // as many connections as it allows.
+        found.extend(mgr.limit_reason(ctl, &s.id()).filter(|l| match l {
+            Limiting::AccountLimit { limit, .. } => count(running, i) as i64 >= *limit,
+            _ => true,
+        }));
     }
     if let Some(bps) = ramp.line {
         found.push(Limiting::Line {
@@ -1463,16 +1482,20 @@ fn breakdown(
     let several = running.iter().any(|r| r.src != running[0].src);
     if (found.is_empty() || several) && !running.is_empty() && running.len() >= want.room {
         let speeds: Vec<i64> = running.iter().map(|r| r.meter.speed()).collect();
-        found.push(Limiting::PerConnection {
-            bytes_per_second: stats::median(&speeds),
-        });
+        // No speed measured yet explains nothing.
+        let median = stats::median(&speeds);
+        if median > 0 {
+            found.push(Limiting::PerConnection {
+                bytes_per_second: median,
+            });
+        }
     }
     TransferStats {
         id: cx.job.id,
         bytes_per_second: speed,
         connections,
         sources,
-        limiting: stats::first(found),
+        limiting: (!unreachable).then(|| stats::first(found)).flatten(),
         notes: ctl.recent_notes(),
     }
 }
@@ -1712,9 +1735,12 @@ async fn open(
     };
     // An address of the host that does not answer is skipped from now on,
     // and the request goes the usual way: it says nothing about the
-    // provider's limit.
+    // provider's limit. A redirect the server-mode guard blocked is not
+    // the address's fault.
     let answer = match (answer, address) {
-        (Err(WorkerError::Unreachable(err)), Some((_, a))) => {
+        (Err(WorkerError::Unreachable(err)), Some((_, a)))
+            if !matches!(err, CoreError::Invalid(_)) =>
+        {
             tracing::info!(id = cx.job.id, address = %a.ip(), error = %err, "an address of the host did not answer; skipping it");
             cx.dead.lock().push(a);
             meter.set_peer(host_of(&url), None);

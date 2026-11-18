@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "A fájl megváltozott a szolgáltatónál, egy kapcsolaton folytatódik",
   "noteOneConnectionRefused": "A szolgáltató elutasított további kapcsolatokat, egyen folytatódik",
   "noteOneConnectionNoHoles": "A letöltési mappa meghajtója nem tud felosztott fájlt tárolni, ezért egy kapcsolaton tölt",
+  "noteOneConnectionUnreachable": "További kapcsolatokat nem sikerült megnyitni, ezért egy kapcsolaton tölt",
   "noteUrlRefreshed": "A link lejárt, és megújult",
   "limitingSpeedLimit": "A {{speed}} sebességkorlátod a fék",
   "limitingNoRanges": "A szolgáltató egyben küldi ezt a fájlt, ezért egy kapcsolat",

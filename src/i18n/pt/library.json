@@ -87,6 +87,7 @@
   "noteOneConnectionChanged": "O arquivo mudou no provedor, continua com uma conexão",
   "noteOneConnectionRefused": "O provedor recusou mais conexões, continua com uma",
   "noteOneConnectionNoHoles": "A unidade da pasta de downloads não comporta um arquivo dividido, então usa uma só conexão",
+  "noteOneConnectionUnreachable": "Não foi possível abrir mais conexões, então usa uma só conexão",
   "noteUrlRefreshed": "O link expirou e foi renovado",
   "limitingSpeedLimit": "Seu limite de {{speed}} é o que segura",
   "limitingNoRanges": "O provedor envia este arquivo inteiro, então usa uma conexão",

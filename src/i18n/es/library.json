@@ -87,6 +87,7 @@
   "noteOneConnectionChanged": "El archivo cambió en el proveedor, sigue con una conexión",
   "noteOneConnectionRefused": "El proveedor rechazó más conexiones, sigue con una",
   "noteOneConnectionNoHoles": "La unidad de la carpeta de descargas no admite un archivo repartido, así que usa una sola conexión",
+  "noteOneConnectionUnreachable": "No se pudieron abrir más conexiones, así que usa una sola conexión",
   "noteUrlRefreshed": "El enlace caducó y se renovó",
   "limitingSpeedLimit": "Tu límite de {{speed}} es el freno",
   "limitingNoRanges": "El proveedor envía este archivo de una pieza, así que usa una conexión",

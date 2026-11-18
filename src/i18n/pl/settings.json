@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "Plik może się różnić od wybranego.",
   "downloadAllowEquivalentNeedsMirrors": "Wymaga włączenia „{{label}}”",
   "downloadProbeGroup": "Testy połączeń",
-  "downloadProbeHint": "Niektórzy dostawcy pozwalają na więcej połączeń, niż podaje konto. Duże pobieranie może to sprawdzić, najwyżej raz w tygodniu. Po zapomnieniu wyniku następne duże pobieranie sprawdzi to znowu. Wyłącz dla dostawcy, który tego nie akceptuje.",
+  "downloadProbeHint": "Niektórzy dostawcy pozwalają na więcej połączeń, niż podaje konto. Duże pobieranie może to sprawdzić. Ukończony test powtarza się najwyżej raz w tygodniu; przerwany jest ponawiany po 10 minutach. Po zapomnieniu wyniku następne duże pobieranie sprawdzi to znowu. Wyłącz dla dostawcy, który tego nie akceptuje.",
   "downloadProbeFor": "Testuj połączenia w {{name}}",
   "downloadProbeReported_one": "Konto podaje {{count, number}}",
   "downloadProbeReported_few": "Konto podaje {{count, number}}",

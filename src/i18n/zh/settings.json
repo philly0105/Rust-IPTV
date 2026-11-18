@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "文件可能与你选择的不同。",
   "downloadAllowEquivalentNeedsMirrors": "需要开启“{{label}}”",
   "downloadProbeGroup": "连接测试",
-  "downloadProbeHint": "有些提供商允许的连接数比账户显示的多。大文件下载可以测试这一点，每周最多一次。清除结果后，下一个大文件下载会重新测试。如果提供商反对，请关闭。",
+  "downloadProbeHint": "有些提供商允许的连接数比账户显示的多。大文件下载可以测试这一点。完成的测试每周最多重复一次；中断的测试会在 10 分钟后重试。清除结果后，下一个大文件下载会重新测试。如果提供商反对，请关闭。",
   "downloadProbeFor": "测试 {{name}} 的连接",
   "downloadProbeReported_one": "账户显示 {{count, number}}",
   "downloadProbeReported_other": "账户显示 {{count, number}}",

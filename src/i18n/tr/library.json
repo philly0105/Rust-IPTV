@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "Dosya sağlayıcıda değişti, tek bağlantıyla devam ediyor",
   "noteOneConnectionRefused": "Sağlayıcı daha fazla bağlantıyı reddetti, tek bağlantıyla devam ediyor",
   "noteOneConnectionNoHoles": "İndirme klasörünün sürücüsü bölünmüş dosya tutamıyor, bu yüzden tek bağlantıyla iniyor",
+  "noteOneConnectionUnreachable": "Ek bağlantılar açılamadı, bu yüzden tek bağlantıyla iniyor",
   "noteUrlRefreshed": "Bağlantının süresi doldu ve yenilendi",
   "limitingSpeedLimit": "Sınırlayan, {{speed}} hız sınırınız",
   "limitingNoRanges": "Sağlayıcı bu dosyayı tek parça gönderiyor, bu yüzden tek bağlantı",

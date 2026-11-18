@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "선택한 것과 다른 파일일 수 있습니다.",
   "downloadAllowEquivalentNeedsMirrors": "“{{label}}”을(를) 켜야 합니다",
   "downloadProbeGroup": "연결 테스트",
-  "downloadProbeHint": "계정에 표시된 것보다 많은 연결을 허용하는 제공자도 있습니다. 큰 다운로드에서 일주일에 한 번까지 테스트할 수 있습니다. 결과를 지우면 다음 큰 다운로드에서 다시 테스트합니다. 싫어하는 제공자라면 끄세요.",
+  "downloadProbeHint": "계정에 표시된 것보다 많은 연결을 허용하는 제공자도 있습니다. 큰 다운로드에서 이를 테스트할 수 있습니다. 끝난 테스트는 일주일에 한 번까지 반복하고, 중단된 테스트는 10분 뒤에 다시 시도합니다. 결과를 지우면 다음 큰 다운로드에서 다시 테스트합니다. 싫어하는 제공자라면 끄세요.",
   "downloadProbeFor": "{{name}} 연결 테스트",
   "downloadProbeReported_one": "계정 표시 {{count, number}}",
   "downloadProbeReported_other": "계정 표시 {{count, number}}",

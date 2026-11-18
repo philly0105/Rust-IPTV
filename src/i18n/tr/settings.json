@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "Dosya seçtiğinizden farklı olabilir.",
   "downloadAllowEquivalentNeedsMirrors": "“{{label}}” açık olmalı",
   "downloadProbeGroup": "Bağlantı testleri",
-  "downloadProbeHint": "Bazı sağlayıcılar, hesabın bildirdiğinden fazla bağlantıya izin verir. Büyük bir indirme bunu en fazla haftada bir test edebilir. Sonucu unutunca bir sonraki büyük indirme yeniden test eder. Buna itiraz eden bir sağlayıcı için kapatın.",
+  "downloadProbeHint": "Bazı sağlayıcılar, hesabın bildirdiğinden fazla bağlantıya izin verir. Büyük bir indirme bunu test edebilir. Tamamlanan bir test en fazla haftada bir tekrarlanır; yarıda kalan bir test 10 dakika sonra yeniden denenir. Sonucu unutunca bir sonraki büyük indirme yeniden test eder. Buna itiraz eden bir sağlayıcı için kapatın.",
   "downloadProbeFor": "{{name}} bağlantılarını test et",
   "downloadProbeReported_one": "Hesap {{count, number}} bildiriyor",
   "downloadProbeReported_other": "Hesap {{count, number}} bildiriyor",

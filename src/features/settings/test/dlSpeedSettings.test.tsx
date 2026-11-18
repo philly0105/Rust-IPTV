@@ -132,7 +132,7 @@ describe('Settings > General > Downloads: faster downloads', () => {
     await waitFor(() => expect(rpcMock.callsOf('downloads.resetConnectionLimit')).toEqual([{ sourceId: 's1' }]));
   });
 
-  it('turns a source test back on and keeps Test again off until something was learned', async () => {
+  it('turns a source test back on and keeps Forget result off until something was learned', async () => {
     current = settings({ downloadProbeDisabled: ['x1'] });
     limits = [{ sourceId: 'x1', reported: 1, probing: false, disabled: true }];
     renderAt(settingsRoutes, '/settings/general');

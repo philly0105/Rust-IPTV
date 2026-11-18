@@ -87,6 +87,7 @@
   "noteOneConnectionChanged": "Il file è cambiato presso il provider, prosegue con una connessione",
   "noteOneConnectionRefused": "Il provider ha rifiutato altre connessioni, prosegue con una",
   "noteOneConnectionNoHoles": "L’unità della cartella dei download non può ospitare un file diviso, quindi usa una sola connessione",
+  "noteOneConnectionUnreachable": "Non è stato possibile aprire altre connessioni, quindi usa una sola connessione",
   "noteUrlRefreshed": "Il link era scaduto ed è stato rinnovato",
   "limitingSpeedLimit": "Il tuo limite di {{speed}} è il freno",
   "limitingNoRanges": "Il provider invia questo file in un unico blocco, quindi usa una connessione",

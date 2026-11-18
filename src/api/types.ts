@@ -397,8 +397,120 @@ export interface Download {
   waiting?: DownloadWait;
   /** Connections a running transfer holds, when more than one (live). */
   connections?: number;
+  /** Sources the running transfer draws on, when more than one (live). */
+  sources?: number;
+  /** The source this run downloads from when it is not the row's own (queue spreading; live). */
+  servedBy?: string;
+  /** Live breakdown while downloading (same payload as `downloads.stats`). */
+  stats?: TransferStats;
+  /** The equivalent copy whose bytes this row holds (stored); absent = the row's own item. */
+  origin?: CopyRef;
   /** Absent follows the global default; zero is unlimited; otherwise bytes/s. */
   rateLimitBps?: number;
+}
+
+/** One copy of a title: an item on some source, plus the episode for a series. */
+export interface CopyRef {
+  ref: ItemRef;
+  episodeId?: string;
+}
+
+/** Live breakdown of one running transfer (`downloads.stats`, `Download.stats`). */
+export interface TransferStats {
+  id: number;
+  /** Total, over the same window as `downloads.progress`. */
+  bytesPerSecond: number;
+  /** Segment connections only. */
+  connections: ConnectionStat[];
+  /** The authority (the source the run downloads from) first. */
+  sources: SourceStat[];
+  limiting?: Limiting;
+  /** The last 60 s, oldest first, at most 5. */
+  notes: TransferNote[];
+}
+
+/** One open connection of a transfer. */
+export interface ConnectionStat {
+  sourceId: string;
+  /** URL host actually used (after redirect pinning). */
+  host: string;
+  /** Pinned IP address; absent when unpinned. */
+  address?: string;
+  bytesPerSecond: number;
+  /** Bytes this connection served in this run. */
+  bytes: number;
+  ageMs: number;
+}
+
+/** One source a transfer draws on. */
+export interface SourceStat {
+  sourceId: string;
+  role: SourceRole;
+  connections: number;
+  bytesPerSecond: number;
+  /** Bytes served in this run. */
+  bytes: number;
+  /** Effective account limit. */
+  limit?: number;
+  limitKind: LimitKind;
+}
+
+/** The source a run downloads from, or an identical copy it also draws on. */
+export type SourceRole = 'primary' | 'mirror';
+
+/** Where a source's connection limit comes from: the account, a probe, or neither. */
+export type LimitKind = 'reported' | 'learned' | 'unknown';
+
+/** What holds a transfer's speed back; when several apply, the first listed wins. */
+export type Limiting =
+  | { kind: 'speedLimit'; bytesPerSecond: number }
+  | { kind: 'noRanges' }
+  | { kind: 'smallFile' }
+  | { kind: 'singleConnection'; sourceId: string }
+  | { kind: 'maxConnections'; max: number }
+  | { kind: 'playback'; sourceId: string }
+  | { kind: 'otherDownloads'; sourceId: string }
+  | { kind: 'refused'; sourceId: string }
+  | { kind: 'line'; bytesPerSecond: number }
+  | { kind: 'perConnection'; bytesPerSecond: number }
+  | { kind: 'accountLimit'; sourceId: string; limit: number };
+
+/** Why a mirror stopped serving a transfer. */
+export type MirrorDropReason = 'refused' | 'failed' | 'playback' | 'queue' | 'unavailable';
+
+/** Why a split transfer fell back to one connection. */
+export type OneConnectionReason = 'changed' | 'refused' | 'noHoles' | 'unreachable';
+
+/** A quiet status line about a transfer (`TransferStats.notes`). */
+export type TransferNote =
+  | { kind: 'mirrorAdded'; sourceId: string }
+  | { kind: 'mirrorDropped'; sourceId: string; reason: MirrorDropReason }
+  | { kind: 'mirrorMismatch'; sourceId: string }
+  | { kind: 'probeAccepted'; sourceId: string; limit: number }
+  | { kind: 'probeRefused'; sourceId: string }
+  | { kind: 'probeKickedOldest'; sourceId: string }
+  | { kind: 'oneConnection'; reason: OneConnectionReason }
+  | { kind: 'urlRefreshed' };
+
+/** How a panel answered one connection too many. */
+export type ConnectionLimitMode = 'refuse' | 'kickOldest' | 'accept';
+
+/** A source's connection limit as downloads see it (`downloads.connectionLimits`). */
+export interface SourceConnectionLimit {
+  sourceId: string;
+  /** The account's `max_connections`. */
+  reported?: number;
+  /** What a probe found. */
+  learned?: number;
+  mode?: ConnectionLimitMode;
+  /** RFC 3339. */
+  probedAt?: string;
+  /** RFC 3339. */
+  nextProbeAt?: string;
+  /** A probe runs on the source now. */
+  probing: boolean;
+  /** The source is in `downloadProbeDisabled`. */
+  disabled: boolean;
 }
 
 /**
@@ -631,6 +743,14 @@ export interface Settings {
   recordingPaddingBeforeMinutes: number;
   /** downloads: sources whose downloads use one connection per file ("Connections per download: 1"); the rest are Auto. */
   downloadSingleConnection: string[];
+  /** downloads: also draw bytes from identical copies on other sources (verified byte for byte first). */
+  downloadUseMirrors: boolean;
+  /** downloads: accept a close but not identical copy (same quality and container, size within 15%) when the row's own source is busy. */
+  downloadAllowEquivalent: boolean;
+  /** downloads: sources never probed for more connections than their account reports. */
+  downloadProbeDisabled: string[];
+  /** downloads: most connections one download opens across all its sources (0 = Auto; 0..8). */
+  downloadMaxConnections: number;
   /** Minutes a scheduled recording runs past the programme end (0..120). */
   recordingPaddingAfterMinutes: number;
   /** Guide reminders fire while the app runs. */
@@ -743,6 +863,10 @@ export const DEFAULT_SETTINGS: Settings = {
   recordingPaddingBeforeMinutes: 1,
   // downloads:
   downloadSingleConnection: [],
+  downloadUseMirrors: true,
+  downloadAllowEquivalent: false,
+  downloadProbeDisabled: [],
+  downloadMaxConnections: 0,
   recordingPaddingAfterMinutes: 5,
   remindersEnabled: true,
   reminderLeadMinutes: 2,
@@ -1049,6 +1173,10 @@ export interface DownloadProgressEvent {
   bytesDownloaded: number;
   totalBytes?: number;
   bytesPerSecond: number;
+  /** Connections the transfer holds, sent only when more than one. */
+  connections?: number;
+  /** Sources the transfer draws on, sent only when more than one. */
+  sources?: number;
 }
 
 export interface RemoteCommandEvent {
@@ -1108,6 +1236,8 @@ export interface AppEventMap {
   'epg.changed': EpgChangedEvent;
   'downloads.update': EmptyEvent;
   'downloads.progress': DownloadProgressEvent;
+  /** Live breakdown of a downloading row, at most once per second per row. */
+  'downloads.stats': TransferStats;
   'remote.command': RemoteCommandEvent;
   'mpv.state': MpvState;
   /** Left click on the embedded mpv video. */

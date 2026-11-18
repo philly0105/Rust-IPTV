@@ -9,7 +9,9 @@
 //! `parental.changed` (payload `ParentalStatus`), `watchlist.changed`
 //! (payload `{}`), `lists.changed` (payload `{}`, after every custom-list
 //! write and when a source removal cascades list items away),
-//! `channels.changed` (payload `{ sourceId }`, after every channel edit).
+//! `channels.changed` (payload `{ sourceId }`, after every channel edit),
+//! `downloads.stats` (payload `TransferStats`, the live breakdown of a
+//! running download).
 
 use serde::{Deserialize, Serialize};
 

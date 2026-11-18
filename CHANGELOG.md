@@ -6,8 +6,21 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 
 ## [Unreleased]
 
+### Added
+
+- Faster movie and episode downloads. A file can now get close to your line's speed instead of one provider connection's:
+  - When another of your sources has a byte-identical copy of the movie or episode, the download draws on both accounts at once. Copies are checked by exact size and by comparing three samples of their bytes, and every place where two connections' bytes meet is compared again while the file downloads, so a finished file never mixes two versions.
+  - A provider that sends no ETag or Last-Modified can now be split over several connections. Before, those files always downloaded on one connection.
+  - The app tests, only during a large download with nothing playing from that source, whether the panel really allows more connections than the account reports, and uses what it learns. A finished test is repeated at most once a week per source, an interrupted one after 10 minutes, and a learned number the provider later refuses is lowered at once. The test only opens connections, never downloads anything over them, and skips downloads under a speed limit or on a source set to one connection.
+  - When a queued episode's source is busy, the next one starts on another account that has an identical copy, so a season downloads several episodes at a time.
+  - Up to 8 connections per file (it was 4). A connection is added only while it still raises the total speed, and one that falls far behind the others is replaced.
+- Each running download shows how many connections and sources it uses ("4 connections · 3 sources"), and a Speed details button opens a breakdown: speed per source and per connection, each source's connection limit, one sentence saying what limits the speed (for example "Provider caps each connection at about 6.1 MB/s"), and recent changes such as a source leaving the download or a fall back to one connection. The Downloads header shows the total speed over the last minute.
+- Settings > General > Downloads gains Max connections per file (Auto, or 1 to 8), Use other sources to speed up downloads (on), Allow equivalent copies (off: lets a busy download start from another source's copy with the same quality and format, which may be a different file from the one you picked), and Connection tests: a switch per Xtream and Stalker source, what the last test found (the tested number when it beats the account's, the account reports none, or the test reached the cap), and Forget result. Turning Use other sources off applies to running downloads at once, and disables and unticks Allow equivalent copies until it is back on, keeping your choice.
+
 ### Changed
 
+- Downloads write to disk in 1 MiB blocks through one writer instead of each connection writing on its own.
+- A split download starts its extra connections as soon as the provider's first answer shows that ranges work, instead of a second later, and the next queued download's link is fetched while the current one runs.
 - Faster channel changes in the built-in player: MPEG-TS and HLS streams reuse a ready worker instead of starting a new one on each zap.
 - The All channels list of a large source opens faster: its total comes from the stored group counts instead of counting every channel on each page.
 - Guide search is much faster on large libraries, also right after a guide update: it reads only the channels its hits belong to and stops once the page of results is settled. The search index is rebuilt once at the first start after updating; until a rebuild finishes, searches still answer, more slowly.

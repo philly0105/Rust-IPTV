@@ -835,6 +835,9 @@ fn every_c4_download_command_is_registered() {
         "downloads.prioritize",
         "downloads.playback",
         "downloads.setRateLimit",
+        "downloads.stats",
+        "downloads.connectionLimits",
+        "downloads.resetConnectionLimit",
         "myvideos.list",
         "myvideos.playSource",
     ];

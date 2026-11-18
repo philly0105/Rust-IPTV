@@ -1,7 +1,7 @@
 /** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
-import { ArrowUpToLine, Download as DownloadIcon, FolderOpen, Gauge, Library, MonitorPlay, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
+import { Activity, ArrowUpToLine, Download as DownloadIcon, FolderOpen, Gauge, Library, MonitorPlay, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -14,8 +14,9 @@ import { dateTimeFormat, intlLocale } from '@/lib/intl';
 
 import { Badge, Button, IconButton, Menu, Poster, PosterCellWidthContext, useBusyButtons, useMediaQuery, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
 import { etaSeconds, formatBytes, formatDuration, formatSpeed, formatSpeedLimit, percentOf } from '../lib/format';
-import { useLiveProgress } from '../lib/progress';
+import { useLiveProgress, useLiveStats } from '../lib/progress';
 import { downloadNames, type QueueAction } from '../lib/queue';
+import { countsText, latestNote, noteText, servedByOf, type NameOf } from '../lib/transferText';
 import { SourceBadge, StatusBadge } from './bits';
 import { REVEAL_ON_FINE } from './EntryRow';
 
@@ -63,6 +64,10 @@ export interface DownloadRowProps {
   onAction: (action: QueueAction, d: Download) => void;
   onPlayCatchup?: (d: Download) => void;
   onSpeedLimit?: (d: Download) => void;
+  /** Opens the speed details for a downloading row. */
+  onDetails?: (d: Download) => void;
+  /** A source's name by id, for "From <source>" and the note line (mirrors are other sources). */
+  nameOf?: NameOf;
   globalRateLimitBps?: number;
 }
 
@@ -157,9 +162,10 @@ export const SM_QUERY = '(min-width: 40rem)';
 /** Rows still moving bytes or waiting to: the ones a speed limit applies to. */
 const TRANSFER = new Set<Download['status']>(['downloading', 'queued', 'paused']);
 
-function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, globalRateLimitBps = 0 }: DownloadRowProps) {
+function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, onDetails, nameOf, globalRateLimitBps = 0 }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
+  const stats = useLiveStats(d);
   const busyButton = useBusyButtons(busy);
   const lang = i18n.language;
   const pct = percentOf(progress.bytesDownloaded, progress.totalBytes);
@@ -182,17 +188,24 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(wide ? ART_SM_PX : ART_PX, true));
 
+  const nameFor: NameOf = nameOf ?? ((id) => (id === d.ref.sourceId && source ? source.name : t('sourceRemoved')));
   let detail: string;
+  // The transfer's latest note (a mirror dropped, a probe refused): status in a quieter tone, never an error.
+  let note = '';
   if (d.status === 'downloading') {
+    const servedBy = servedByOf(d, stats);
     detail = progress.bytesPerSecond
       ? [
           formatSpeed(progress.bytesPerSecond, lang),
           eta !== undefined ? t('etaLeft', { time: formatDuration(eta, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) }) : '',
-          d.connections ? t('connectionsInUse', { n: d.connections }) : '',
+          countsText(t, progress.connections, progress.sources),
+          servedBy ? t('transferServedBy', { name: nameFor(servedBy) }) : '',
         ]
           .filter(Boolean)
           .join('   ')
       : t('stalled');
+    const latest = latestNote(stats);
+    note = latest ? noteText(t, latest, nameFor) : '';
   } else if (d.status === 'queued') detail = waitingDetail(d, t, lang);
   else if (d.status === 'paused') detail = t('pausedHint');
   else if (d.status === 'failed') detail = d.errorMessage ?? t('failedHint');
@@ -202,6 +215,7 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
 
   const watchLabel = t('actionWatchCatchupAria', { title: names.title });
   const speedAria = t('speedEditAria', { title: names.title, speed: speedLabel });
+  const canDetails = onDetails !== undefined && isActive;
   const iconFor = (a: QueueAction) => {
     const Icon = ICONS[a];
     return <Icon size={16} aria-hidden />;
@@ -223,6 +237,18 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
           />
         )}
         {/* Before the queue actions, so Pause and Cancel keep their places at the end of the row. */}
+        {canDetails && (
+          <IconButton
+            size="sm"
+            label={t('detailsActionAria', { title: names.title })}
+            tooltip={t('detailsAction')}
+            icon={<Activity size={16} aria-hidden />}
+            tabIndex={tabbable ? 0 : -1}
+            aria-haspopup="dialog"
+            data-action="details"
+            onClick={() => onDetails(d)}
+          />
+        )}
         {canLimit && (
           <IconButton
             size="sm"
@@ -258,6 +284,7 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
       ...(canPlayCatchup && onPlayCatchup
         ? [{ id: 'watch', label: t('actionWatchCatchup'), icon: <MonitorPlay size={16} aria-hidden />, disabled: busy, onSelect: () => onPlayCatchup(d) }]
         : []),
+      ...(canDetails ? [{ id: 'details', label: t('detailsAction'), icon: <Activity size={16} aria-hidden />, onSelect: () => onDetails(d) }] : []),
       ...rest.map((a) => ({
         id: a,
         label: t(k('action', a)),
@@ -337,10 +364,16 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
           {sizeText && <span className="hidden shrink-0 tabular-nums sm:inline">{sizeText}</span>}
           <span
             className={cn('min-w-0', twoLines ? 'line-clamp-2 whitespace-pre-wrap' : 'truncate whitespace-pre', d.status === 'failed' && 'text-danger')}
-            title={detail}
+            title={note ? `${detail}   ${note}` : detail}
             data-testid="download-detail"
           >
             {detail}
+            {note && (
+              <span className="text-fg-subtle" data-testid="download-note">
+                {'   '}
+                {note}
+              </span>
+            )}
           </span>
           {/* A limit of its own is worth saying; the default, on every row, was not. */}
           {canLimit && wide && d.rateLimitBps !== undefined && (

@@ -811,6 +811,21 @@ pub struct Download {
     /// Connections a running transfer holds, when more than one (live).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connections: Option<usize>,
+    /// Sources the running transfer draws on, when more than one (live).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<usize>,
+    /// The source this run downloads from when it is not the row's own
+    /// (queue spreading; live).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_by: Option<String>,
+    /// Live breakdown while downloading (live; same payload as
+    /// `downloads.stats`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats: Option<TransferStats>,
+    /// Persisted (`origin_json`): the equivalent copy whose bytes this row
+    /// holds; `None` = the row's own item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<CopyRef>,
     /// None inherits the global default; Some(0) is unlimited; otherwise bytes/s.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit_bps: Option<u64>,
@@ -836,6 +851,247 @@ pub enum WaitReason {
     Connection,
     /// The source could not be reached; it is tried again at `until`.
     Provider,
+}
+
+/// One copy of a title: an item on some source, plus the episode for a
+/// series. Downloads use it for mirrors (identical copies on other sources)
+/// and for queue spreading.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyRef {
+    #[serde(rename = "ref")]
+    pub item_ref: ItemRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
+}
+
+impl CopyRef {
+    pub fn new(item_ref: ItemRef, episode_id: Option<String>) -> Self {
+        Self {
+            item_ref,
+            episode_id,
+        }
+    }
+
+    /// The source the copy lives on.
+    pub fn source_id(&self) -> &str {
+        &self.item_ref.source_id
+    }
+}
+
+/// Live breakdown of one running transfer (`downloads.stats`, and
+/// `Download.stats` while it runs). Integers only, so `Download` keeps `Eq`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferStats {
+    pub id: i64,
+    /// Total, over the same window as `downloads.progress`.
+    pub bytes_per_second: i64,
+    /// Segment connections only.
+    pub connections: Vec<ConnectionStat>,
+    /// The authority (the source the run downloads from) first.
+    pub sources: Vec<SourceStat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limiting: Option<Limiting>,
+    /// The last 60 s, oldest first, at most 5.
+    #[serde(default)]
+    pub notes: Vec<TransferNote>,
+}
+
+/// One open connection of a transfer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionStat {
+    pub source_id: String,
+    /// URL host actually used (after redirect pinning).
+    pub host: String,
+    /// Pinned IP address; `None` when unpinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    pub bytes_per_second: i64,
+    /// Bytes this connection served in this run.
+    pub bytes: i64,
+    pub age_ms: i64,
+}
+
+/// One source a transfer draws on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceStat {
+    pub source_id: String,
+    pub role: SourceRole,
+    pub connections: i64,
+    pub bytes_per_second: i64,
+    /// Bytes served in this run.
+    pub bytes: i64,
+    /// Effective account limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+    pub limit_kind: LimitKind,
+}
+
+/// Whether a source is the one a run downloads from or an identical copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceRole {
+    Primary,
+    Mirror,
+}
+
+/// Where a source's connection limit comes from: the account's report, a
+/// probe, or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LimitKind {
+    Reported,
+    Learned,
+    Unknown,
+}
+
+/// What holds a transfer's speed back. When several apply, the first in
+/// this order wins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Limiting {
+    /// The user's rate limit (mirrors and splitting are off under it).
+    SpeedLimit {
+        bytes_per_second: i64,
+    },
+    /// The provider answers 200 to a Range request.
+    NoRanges,
+    /// Less than two minimum segments left.
+    SmallFile,
+    /// `downloadSingleConnection` names the source.
+    SingleConnection {
+        source_id: String,
+    },
+    /// `downloadMaxConnections` (or the engine's cap) is reached.
+    MaxConnections {
+        max: i64,
+    },
+    Playback {
+        source_id: String,
+    },
+    OtherDownloads {
+        source_id: String,
+    },
+    Refused {
+        source_id: String,
+    },
+    /// The last added connection gained less than 10%.
+    Line {
+        bytes_per_second: i64,
+    },
+    /// Every usable source is at its allowance; the median per-connection
+    /// speed.
+    PerConnection {
+        bytes_per_second: i64,
+    },
+    AccountLimit {
+        source_id: String,
+        limit: i64,
+    },
+}
+
+/// A quiet status line about a transfer (`TransferStats.notes`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TransferNote {
+    MirrorAdded {
+        source_id: String,
+    },
+    MirrorDropped {
+        source_id: String,
+        reason: MirrorDropReason,
+    },
+    MirrorMismatch {
+        source_id: String,
+    },
+    ProbeAccepted {
+        source_id: String,
+        limit: i64,
+    },
+    ProbeRefused {
+        source_id: String,
+    },
+    ProbeKickedOldest {
+        source_id: String,
+    },
+    OneConnection {
+        reason: OneConnectionReason,
+    },
+    UrlRefreshed,
+}
+
+/// Why a mirror stopped serving a transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MirrorDropReason {
+    Refused,
+    Failed,
+    Playback,
+    Queue,
+    Unavailable,
+}
+
+/// Why a split transfer fell back to one connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OneConnectionReason {
+    /// The file changed under the transfer (or its bytes did not match).
+    Changed,
+    /// The provider refused the extra connection.
+    Refused,
+    /// The downloads folder cannot leave holes (FAT, exFAT).
+    NoHoles,
+    /// Extra connections could not be opened (no answer) while one ran.
+    Unreachable,
+}
+
+/// How a panel answered one connection too many.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionLimitMode {
+    /// It refused the new connection.
+    Refuse,
+    /// It accepted the new connection and ended the oldest one.
+    KickOldest,
+    /// It accepted every connection tried.
+    Accept,
+}
+
+/// A source's connection limit as downloads see it
+/// (`downloads.connectionLimits`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceConnectionLimit {
+    pub source_id: String,
+    /// The account's `max_connections`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported: Option<i64>,
+    /// What a probe found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learned: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ConnectionLimitMode>,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probed_at: Option<String>,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_probe_at: Option<String>,
+    /// A probe runs on the source now.
+    pub probing: bool,
+    /// The source is in `downloadProbeDisabled`.
+    pub disabled: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1232,6 +1488,20 @@ pub struct Settings {
     /// Sources whose downloads use one connection per file ("Connections
     /// per download: 1"); every other source is Auto.
     pub download_single_connection: Vec<String>,
+    /// Use identical copies on other sources, both inside one file (more
+    /// connections) and for queue spreading.
+    pub download_use_mirrors: bool,
+    /// Queue spreading may use an equivalent copy (same quality tag and
+    /// container, size within 15%). The file may differ from the one asked
+    /// for, so it is off by default.
+    pub download_allow_equivalent: bool,
+    /// Sources that are never probed for a second connection and whose
+    /// learned limit is ignored.
+    pub download_probe_disabled: Vec<String>,
+    /// Cap on connections per file across all sources, in
+    /// [`crate::settings::DOWNLOAD_MAX_CONNECTIONS_RANGE`]; 0 = Auto (the
+    /// engine's cap).
+    pub download_max_connections: u8,
     /// Minutes a scheduled recording runs past the programme end (0..=120).
     pub recording_padding_after_minutes: u32,
     /// Guide reminders fire while the app runs.
@@ -1338,7 +1608,12 @@ impl Default for Settings {
             epg_short_fallback: true,
             // recording:
             recording_padding_before_minutes: 1,
+            // downloads:
             download_single_connection: Vec::new(),
+            download_use_mirrors: true,
+            download_allow_equivalent: false,
+            download_probe_disabled: Vec::new(),
+            download_max_connections: 0,
             recording_padding_after_minutes: 5,
             reminders_enabled: true,
             reminder_lead_minutes: 2,
@@ -2477,5 +2752,423 @@ mod tests {
         let v = serde_json::to_value(&m).unwrap();
         assert_eq!(v["title"], "X");
         assert_eq!(v["mediaType"], "movie");
+    }
+
+    // -----------------------------------------------------------------------
+    // dl-speed: transfer breakdown, copies and connection limits
+    // -----------------------------------------------------------------------
+
+    fn every_limiting() -> Vec<Limiting> {
+        vec![
+            Limiting::SpeedLimit {
+                bytes_per_second: 1_000_000,
+            },
+            Limiting::NoRanges,
+            Limiting::SmallFile,
+            Limiting::SingleConnection {
+                source_id: "a".into(),
+            },
+            Limiting::MaxConnections { max: 8 },
+            Limiting::Playback {
+                source_id: "a".into(),
+            },
+            Limiting::OtherDownloads {
+                source_id: "a".into(),
+            },
+            Limiting::Refused {
+                source_id: "a".into(),
+            },
+            Limiting::Line {
+                bytes_per_second: 22_000_000,
+            },
+            Limiting::PerConnection {
+                bytes_per_second: 6_000_000,
+            },
+            Limiting::AccountLimit {
+                source_id: "a".into(),
+                limit: 1,
+            },
+        ]
+    }
+
+    fn every_note() -> Vec<TransferNote> {
+        vec![
+            TransferNote::MirrorAdded {
+                source_id: "b".into(),
+            },
+            TransferNote::MirrorDropped {
+                source_id: "b".into(),
+                reason: MirrorDropReason::Playback,
+            },
+            TransferNote::MirrorMismatch {
+                source_id: "b".into(),
+            },
+            TransferNote::ProbeAccepted {
+                source_id: "a".into(),
+                limit: 3,
+            },
+            TransferNote::ProbeRefused {
+                source_id: "a".into(),
+            },
+            TransferNote::ProbeKickedOldest {
+                source_id: "a".into(),
+            },
+            TransferNote::OneConnection {
+                reason: OneConnectionReason::NoHoles,
+            },
+            TransferNote::UrlRefreshed,
+        ]
+    }
+
+    #[test]
+    fn limiting_is_tagged_by_kind_in_camel_case() {
+        let v = serde_json::to_value(Limiting::SpeedLimit {
+            bytes_per_second: 5,
+        })
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"kind": "speedLimit", "bytesPerSecond": 5})
+        );
+        let v = serde_json::to_value(Limiting::AccountLimit {
+            source_id: "xt-a".into(),
+            limit: 1,
+        })
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"kind": "accountLimit", "sourceId": "xt-a", "limit": 1})
+        );
+        assert_eq!(
+            serde_json::to_value(Limiting::NoRanges).unwrap(),
+            serde_json::json!({"kind": "noRanges"})
+        );
+        for l in every_limiting() {
+            let v = serde_json::to_value(&l).unwrap();
+            assert!(v["kind"].is_string(), "{v}");
+            assert_eq!(serde_json::from_value::<Limiting>(v).unwrap(), l);
+        }
+        assert!(serde_json::from_value::<Limiting>(serde_json::json!({"kind": "warp"})).is_err());
+    }
+
+    #[test]
+    fn transfer_notes_are_tagged_by_kind_in_camel_case() {
+        assert_eq!(
+            serde_json::to_value(TransferNote::MirrorDropped {
+                source_id: "xt-b".into(),
+                reason: MirrorDropReason::Refused,
+            })
+            .unwrap(),
+            serde_json::json!({"kind": "mirrorDropped", "sourceId": "xt-b", "reason": "refused"})
+        );
+        assert_eq!(
+            serde_json::to_value(TransferNote::OneConnection {
+                reason: OneConnectionReason::NoHoles,
+            })
+            .unwrap(),
+            serde_json::json!({"kind": "oneConnection", "reason": "noHoles"})
+        );
+        assert_eq!(
+            serde_json::to_value(TransferNote::OneConnection {
+                reason: OneConnectionReason::Unreachable,
+            })
+            .unwrap(),
+            serde_json::json!({"kind": "oneConnection", "reason": "unreachable"})
+        );
+        assert_eq!(
+            serde_json::to_value(TransferNote::ProbeKickedOldest {
+                source_id: "a".into()
+            })
+            .unwrap(),
+            serde_json::json!({"kind": "probeKickedOldest", "sourceId": "a"})
+        );
+        assert_eq!(
+            serde_json::to_value(TransferNote::UrlRefreshed).unwrap(),
+            serde_json::json!({"kind": "urlRefreshed"})
+        );
+        for n in every_note() {
+            let v = serde_json::to_value(&n).unwrap();
+            assert_eq!(serde_json::from_value::<TransferNote>(v).unwrap(), n);
+        }
+    }
+
+    fn full_stats() -> TransferStats {
+        TransferStats {
+            id: 7,
+            bytes_per_second: 18_000_000,
+            connections: vec![ConnectionStat {
+                source_id: "a".into(),
+                host: "edge.example".into(),
+                address: Some("10.0.0.1".into()),
+                bytes_per_second: 6_000_000,
+                bytes: 12_345,
+                age_ms: 4_000,
+            }],
+            sources: vec![
+                SourceStat {
+                    source_id: "a".into(),
+                    role: SourceRole::Primary,
+                    connections: 1,
+                    bytes_per_second: 6_000_000,
+                    bytes: 12_345,
+                    limit: Some(1),
+                    limit_kind: LimitKind::Reported,
+                },
+                SourceStat {
+                    source_id: "b".into(),
+                    role: SourceRole::Mirror,
+                    connections: 2,
+                    bytes_per_second: 12_000_000,
+                    bytes: 99,
+                    limit: None,
+                    limit_kind: LimitKind::Unknown,
+                },
+            ],
+            limiting: Some(Limiting::PerConnection {
+                bytes_per_second: 6_000_000,
+            }),
+            notes: every_note(),
+        }
+    }
+
+    #[test]
+    fn transfer_stats_round_trip() {
+        let s = full_stats();
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["bytesPerSecond"], 18_000_000);
+        assert_eq!(v["connections"][0]["ageMs"], 4_000);
+        assert_eq!(v["connections"][0]["address"], "10.0.0.1");
+        assert_eq!(v["sources"][0]["role"], "primary");
+        assert_eq!(v["sources"][0]["limitKind"], "reported");
+        assert_eq!(v["sources"][1]["role"], "mirror");
+        assert!(v["sources"][1].get("limit").is_none());
+        assert_eq!(v["limiting"]["kind"], "perConnection");
+        assert_eq!(serde_json::from_value::<TransferStats>(v).unwrap(), s);
+        // A payload without notes or limiting still reads.
+        let bare: TransferStats = serde_json::from_value(
+            serde_json::json!({"id": 1, "bytesPerSecond": 0, "connections": [], "sources": []}),
+        )
+        .unwrap();
+        assert!(bare.notes.is_empty() && bare.limiting.is_none());
+    }
+
+    #[test]
+    fn copy_ref_uses_the_ref_key() {
+        let movie = CopyRef::new(ItemRef::new("xt-b", ContentType::Movie, "77"), None);
+        let v = serde_json::to_value(&movie).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"ref": {"sourceId": "xt-b", "contentType": "movie", "itemId": "77"}})
+        );
+        assert_eq!(serde_json::from_value::<CopyRef>(v).unwrap(), movie);
+        assert_eq!(movie.source_id(), "xt-b");
+        let ep = CopyRef::new(
+            ItemRef::new("xt-b", ContentType::Series, "9"),
+            Some("901".into()),
+        );
+        let v = serde_json::to_value(&ep).unwrap();
+        assert_eq!(v["episodeId"], "901");
+        assert_eq!(serde_json::from_value::<CopyRef>(v).unwrap(), ep);
+    }
+
+    #[test]
+    fn source_connection_limit_round_trip() {
+        let full = SourceConnectionLimit {
+            source_id: "xt-a".into(),
+            reported: Some(1),
+            learned: Some(3),
+            mode: Some(ConnectionLimitMode::KickOldest),
+            probed_at: Some("2026-11-17T08:00:00Z".into()),
+            next_probe_at: Some("2026-11-24T08:00:00Z".into()),
+            probing: false,
+            disabled: true,
+        };
+        let v = serde_json::to_value(&full).unwrap();
+        assert_eq!(v["mode"], "kickOldest");
+        assert_eq!(v["nextProbeAt"], "2026-11-24T08:00:00Z");
+        assert_eq!(v["disabled"], true);
+        assert_eq!(
+            serde_json::from_value::<SourceConnectionLimit>(v).unwrap(),
+            full
+        );
+        let bare = SourceConnectionLimit {
+            source_id: "m3u".into(),
+            reported: None,
+            learned: None,
+            mode: None,
+            probed_at: None,
+            next_probe_at: None,
+            probing: true,
+            disabled: false,
+        };
+        let v = serde_json::to_value(&bare).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"sourceId": "m3u", "probing": true, "disabled": false})
+        );
+        assert_eq!(
+            serde_json::from_value::<SourceConnectionLimit>(v).unwrap(),
+            bare
+        );
+        for (m, s) in [
+            (ConnectionLimitMode::Refuse, "refuse"),
+            (ConnectionLimitMode::KickOldest, "kickOldest"),
+            (ConnectionLimitMode::Accept, "accept"),
+        ] {
+            assert_eq!(serde_json::to_value(m).unwrap(), s);
+        }
+    }
+
+    fn full_download() -> Download {
+        Download {
+            id: 7,
+            item_ref: ItemRef::new("xt-a", ContentType::Movie, "1"),
+            episode_id: Some("e".into()),
+            title: "T".into(),
+            subtitle: Some("S".into()),
+            url: "http://h/x.mp4".into(),
+            file_name: Some("x.mp4".into()),
+            file_path: Some("C:/x.mp4".into()),
+            poster_url: Some("http://h/p.jpg".into()),
+            status: DownloadStatus::Downloading,
+            bytes_downloaded: 1,
+            total_bytes: Some(2),
+            error_message: Some("e".into()),
+            created_at: "2026-11-17T08:00:00Z".into(),
+            updated_at: "2026-11-17T08:00:00Z".into(),
+            completed_at: Some("2026-11-17T08:00:00Z".into()),
+            file_available: Some(true),
+            position_seconds: 0,
+            duration_seconds: Some(60),
+            waiting: Some(DownloadWait {
+                reason: WaitReason::Playback,
+                until: Some("2026-11-17T08:00:00Z".into()),
+            }),
+            connections: Some(4),
+            sources: Some(3),
+            served_by: Some("xt-b".into()),
+            stats: Some(full_stats()),
+            origin: Some(CopyRef::new(
+                ItemRef::new("xt-c", ContentType::Movie, "5"),
+                None,
+            )),
+            rate_limit_bps: Some(0),
+        }
+    }
+
+    #[test]
+    fn download_live_fields_are_omitted_when_unset() {
+        let d = full_download();
+        let mut bare = d.clone();
+        bare.sources = None;
+        bare.served_by = None;
+        bare.stats = None;
+        bare.origin = None;
+        let v = serde_json::to_value(&bare).unwrap();
+        for k in ["sources", "servedBy", "stats", "origin"] {
+            assert!(v.get(k).is_none(), "{k} must be omitted when unset");
+        }
+        let v = serde_json::to_value(&d).unwrap();
+        assert_eq!(v["sources"], 3);
+        assert_eq!(v["servedBy"], "xt-b");
+        assert_eq!(v["stats"]["id"], 7);
+        assert_eq!(v["origin"]["ref"]["sourceId"], "xt-c");
+        assert_eq!(serde_json::from_value::<Download>(v).unwrap(), d);
+    }
+
+    /// Variants of a TS union written one per line as
+    /// `| { kind: 'x'; field: T; other?: U }`: kind -> property names.
+    fn ts_union_variants(
+        text: &str,
+        name: &str,
+    ) -> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+        let start = text
+            .find(&format!("export type {name} =\n"))
+            .unwrap_or_else(|| panic!("type {name} not found"));
+        let mut out = std::collections::BTreeMap::new();
+        for line in text[start..].lines().skip(1) {
+            let line = line.trim();
+            let Some(body) = line.strip_prefix("| {") else {
+                break;
+            };
+            let last = body.ends_with(';');
+            let body = body.trim_end_matches(';').trim_end_matches('}').trim();
+            let mut kind = None;
+            let mut keys = std::collections::BTreeSet::new();
+            for prop in body.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+                let (key, value) = prop.split_once(':').expect("key: type");
+                let key = key.trim().trim_end_matches('?').to_string();
+                if key == "kind" {
+                    kind = Some(value.trim().trim_matches('\'').to_string());
+                }
+                keys.insert(key);
+            }
+            out.insert(kind.expect("kind"), keys);
+            if last {
+                break;
+            }
+        }
+        out
+    }
+
+    fn rust_variants<T: Serialize>(
+        all: &[T],
+    ) -> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+        all.iter()
+            .map(|x| {
+                let v = serde_json::to_value(x).unwrap();
+                (v["kind"].as_str().unwrap().to_string(), json_keys(&v))
+            })
+            .collect()
+    }
+
+    /// The TS mirror of the dl-speed types names exactly what Rust sends.
+    #[test]
+    fn ts_transfer_types_match_rust() {
+        let text = types_ts();
+        let v = serde_json::to_value(full_stats()).unwrap();
+        assert_eq!(ts_interface_keys(&text, "TransferStats"), json_keys(&v));
+        assert_eq!(
+            ts_interface_keys(&text, "ConnectionStat"),
+            json_keys(&v["connections"][0])
+        );
+        assert_eq!(
+            ts_interface_keys(&text, "SourceStat"),
+            json_keys(&v["sources"][0])
+        );
+        let ep = CopyRef::new(
+            ItemRef::new("a", ContentType::Series, "1"),
+            Some("e".into()),
+        );
+        assert_eq!(
+            ts_interface_keys(&text, "CopyRef"),
+            json_keys(&serde_json::to_value(ep).unwrap())
+        );
+        let limit = SourceConnectionLimit {
+            source_id: "a".into(),
+            reported: Some(1),
+            learned: Some(2),
+            mode: Some(ConnectionLimitMode::Accept),
+            probed_at: Some("x".into()),
+            next_probe_at: Some("y".into()),
+            probing: false,
+            disabled: false,
+        };
+        assert_eq!(
+            ts_interface_keys(&text, "SourceConnectionLimit"),
+            json_keys(&serde_json::to_value(limit).unwrap())
+        );
+        assert_eq!(
+            ts_interface_keys(&text, "Download"),
+            json_keys(&serde_json::to_value(full_download()).unwrap())
+        );
+        assert_eq!(
+            ts_union_variants(&text, "Limiting"),
+            rust_variants(&every_limiting())
+        );
+        assert_eq!(
+            ts_union_variants(&text, "TransferNote"),
+            rust_variants(&every_note())
+        );
     }
 }

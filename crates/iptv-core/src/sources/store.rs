@@ -419,6 +419,23 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
         "DELETE FROM app_state WHERE key = 'm3u_staged:' || ?1",
         [id],
     )?;
+    // downloads: the learned connection limit.
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'dl_conn_limit:' || ?1",
+        [id],
+    )?;
+    // downloads: fingerprints and mirror verdicts of the source's copies.
+    // A prefix compare, not LIKE: ids may hold `_` or `%`.
+    tx.execute(
+        "DELETE FROM app_state \
+         WHERE substr(key, 1, length('dl_mirror:' || ?1 || ':')) = 'dl_mirror:' || ?1 || ':'",
+        [id],
+    )?;
+    // downloads: verdicts other copies' records hold on the source's copies.
+    crate::downloads::mirrors::forget_source(&tx, id)?;
+    // downloads: rows holding bytes of a copy on the source start over from
+    // their own (running ones in `downloads::manager::forget_source`).
+    crate::downloads::manager::release_origins(&tx, id)?;
     tx.commit()?;
     Ok(())
 }

@@ -1,47 +1,59 @@
-//! Segmented transfers: one file over several Range connections.
+//! Segmented transfers: one file over several Range connections, possibly
+//! from several sources.
 //!
 //! A provider that caps each connection's speed delivers a file N times
 //! faster over N connections. A transfer splits the rest of its file into
-//! segments only when the first answer is a `206` with a known total and a
-//! strong validator, the source's "Connections per download" is Auto, and
-//! the source's budget has connections no queued download or playback needs
-//! (`DownloadManager::connection_allowance`). Each segment is fetched with
-//! `Range` and `If-Range` and written at its place in the `.part` through its
-//! own file handle. A sidecar next to the `.part` (`<name>.part.ranges`)
-//! records each segment's start, end and how far it got, so a stopped
+//! segments when the first answer is a `206` with a known total, the
+//! source's "Connections per download" is Auto, and the source's budget has
+//! connections no queued download or playback needs
+//! (`DownloadManager::allowance_on`), or identical copies on other sources
+//! (mirrors) can serve part of it. Each segment is fetched with `Range` (and
+//! `If-Range` when the source has a validator), and a dedicated writer
+//! (`segments/writer.rs`) puts its bytes at their place in the `.part`. A
+//! sidecar next to the `.part` (`<name>.part.ranges`, version 2) records
+//! each segment's start, end, how far it got, which source served it and
+//! whether its bytes were compared with another source's, so a stopped
 //! transfer resumes every segment where it was; while it exists, the
-//! `.part`'s length means nothing. Any answer that is not the exact range
-//! asked for (the file changed, ranges no longer work) drops the partial and
-//! restarts the file with one connection. A segment request the provider
-//! refuses while another connection works drops the transfer to one.
+//! `.part`'s length means nothing.
+//!
+//! Bytes are never stitched from two versions of a file. An answer that is
+//! not the exact range asked for, or overlapping bytes of the authority (the
+//! source the run downloads from) that differ, drop the partial and restart
+//! the file with one connection. Bytes of a mirror that differ from what
+//! they overlap are discarded, and the mirror leaves the transfer. A file
+//! completes only once every segment's bytes were compared with another
+//! request (`checked`), or came from the authority under its validator.
 
 use super::manager::{DownloadManager, TaskCtl};
+use super::shared::{Endpoint, Fingerprint};
 use crate::error::CoreError;
-use crate::model::RequestHeaders;
+use crate::model::{CopyRef, RequestHeaders};
 use crate::state::AppState;
-use bytes::Bytes;
-use futures::stream::{BoxStream, FuturesUnordered, StreamExt};
-use parking_lot::Mutex;
-use reqwest::header::{ACCEPT_ENCODING, CONTENT_RANGE, IF_RANGE, RANGE};
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio_util::sync::CancellationToken;
+use std::time::Duration;
+
+mod engine;
+pub(super) mod stats;
+mod writer;
+
+pub use engine::run;
 
 /// Suffix of the sidecar after the `.part` path.
 pub const RANGES_SUFFIX: &str = ".ranges";
-/// Most connections one file uses.
-pub const MAX_CONNECTIONS: usize = 4;
+/// The sidecar format this build writes.
+pub const VERSION: u32 = 2;
+/// Most connections one file uses, over all its sources.
+pub const MAX_CONNECTIONS: usize = 8;
 /// Smallest segment worth its own connection: splitting stops below twice
 /// this, so the last few seconds of a file never open new connections.
 pub const MIN_SEGMENT: i64 = 4 * 1024 * 1024;
-/// Bytes a segment buffers before writing at its place in the `.part`.
-const WRITE_CHUNK: usize = 256 * 1024;
+/// A connection-limit probe runs only with this much of the file left. A
+/// transfer on one connection enters the engine for a due probe only then.
+pub const PROBE_MIN_LEFT: i64 = 32 * 1024 * 1024;
 /// How often the coordinator saves the sidecar, reports progress and
 /// re-reads how many connections it may hold.
 const TICK: Duration = Duration::from_millis(250);
@@ -60,43 +72,100 @@ pub struct Seg {
     pub start: i64,
     pub end: i64,
     pub pos: i64,
+    /// Index in [`Ranges::sources`] of the source that wrote `start..pos`.
+    #[serde(default)]
+    pub src: u16,
+    /// `start..pos` was compared with bytes of another request (or came
+    /// from the authority under its validator).
+    #[serde(default)]
+    pub checked: bool,
 }
 
-impl Seg {
-    fn left(&self) -> i64 {
-        self.end - self.pos
-    }
+/// A source the segments of a sidecar name. Never a URL: Xtream URLs carry
+/// the account's credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SegSource {
+    /// `None`: the download row's own item.
+    pub copy: Option<CopyRef>,
+    pub validator: Option<String>,
 }
 
-/// The sidecar: what the segments cover and how far each got.
+/// The sidecar: what the segments cover, how far each got and who served
+/// it. `sources[0]` is the authority of the run that wrote it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Ranges {
+    pub version: u32,
     pub total: i64,
-    pub validator: String,
+    pub sources: Vec<SegSource>,
     pub segments: Vec<Seg>,
 }
 
-impl Ranges {
-    /// A plan for a file whose first `offset` bytes are already written.
-    pub fn new(total: i64, validator: String, offset: i64) -> Self {
-        let mut segments = Vec::new();
-        if offset > 0 {
-            segments.push(Seg {
-                start: 0,
-                end: offset,
-                pos: offset,
-            });
-        }
-        segments.push(Seg {
-            start: offset,
-            end: total,
-            pos: offset,
-        });
+/// The sidecar older builds wrote: one source with a validator, every
+/// segment from it.
+#[derive(Deserialize)]
+struct V1 {
+    total: i64,
+    validator: String,
+    segments: Vec<V1Seg>,
+}
+
+#[derive(Deserialize)]
+struct V1Seg {
+    start: i64,
+    end: i64,
+    pos: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum OnDisk {
+    V2(Ranges),
+    V1(V1),
+}
+
+impl From<V1> for Ranges {
+    fn from(v: V1) -> Self {
         Self {
+            version: VERSION,
+            total: v.total,
+            sources: vec![SegSource {
+                copy: None,
+                validator: Some(v.validator),
+            }],
+            // Every request of a v1 transfer carried the validator.
+            segments: v
+                .segments
+                .into_iter()
+                .map(|s| Seg {
+                    start: s.start,
+                    end: s.end,
+                    pos: s.pos,
+                    src: 0,
+                    checked: true,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl Ranges {
+    /// A plan for a file whose first `offset` bytes the authority already
+    /// wrote (in one piece, from the answer the transfer goes on reading).
+    pub fn new(total: i64, authority: SegSource, offset: i64) -> Self {
+        let checked = authority.validator.is_some();
+        Self {
+            version: VERSION,
             total,
-            validator,
-            segments,
+            sources: vec![authority],
+            segments: vec![Seg {
+                start: 0,
+                end: total,
+                pos: offset,
+                src: 0,
+                checked,
+            }],
         }
     }
 
@@ -109,11 +178,25 @@ impl Ranges {
         self.segments.iter().all(|s| s.pos >= s.end)
     }
 
+    /// Complete, and every written segment compared or under the
+    /// authority's validator: the `.part` holds the file.
+    pub fn verified(&self) -> bool {
+        self.complete() && self.segments.iter().all(|s| s.checked || s.pos == s.start)
+    }
+
     /// Covers `0..total` without gaps or overlaps, every `pos` in its
-    /// segment: a sidecar that is not is ignored. An emptied segment (a
-    /// refused one handed back to the segment before it) covers nothing and
-    /// stays in the plan, since workers address segments by index.
+    /// segment, every `src` a listed source: a sidecar that is not is
+    /// ignored. An emptied segment (a refused one handed back to the
+    /// segment before it) covers nothing and stays in the plan, since
+    /// workers address segments by index.
     pub fn is_consistent(&self) -> bool {
+        if self
+            .segments
+            .iter()
+            .any(|s| usize::from(s.src) >= self.sources.len())
+        {
+            return false;
+        }
         let mut segs: Vec<Seg> = self
             .segments
             .iter()
@@ -133,24 +216,199 @@ impl Ranges {
 
     /// Splits the unfinished segment with the most left in two, when both
     /// halves get at least [`MIN_SEGMENT`]. Returns the new segment's index.
-    fn split(&mut self) -> Option<usize> {
-        let (i, seg) = self
+    pub fn split(&mut self) -> Option<usize> {
+        self.split_by(|_, s| s.pos)
+    }
+
+    /// [`Ranges::split`] where `front` says how far each segment's bytes
+    /// already got (written, or on their way to the writer).
+    fn split_by(&mut self, front: impl Fn(usize, &Seg) -> i64) -> Option<usize> {
+        let (i, from, left) = self
             .segments
             .iter()
             .enumerate()
-            .max_by_key(|(_, s)| s.left())?;
-        if seg.left() < 2 * MIN_SEGMENT {
+            .map(|(i, s)| {
+                let from = front(i, s).clamp(s.pos, s.end);
+                (i, from, s.end - from)
+            })
+            .max_by_key(|(_, _, left)| *left)?;
+        if left < 2 * MIN_SEGMENT {
             return None;
         }
-        let mid = seg.pos + seg.left() / 2;
+        let mid = from + left / 2;
         let tail = Seg {
             start: mid,
-            end: seg.end,
+            end: self.segments[i].end,
             pos: mid,
+            src: 0,
+            checked: false,
         };
         self.segments[i].end = mid;
         self.segments.push(tail);
         Some(self.segments.len() - 1)
+    }
+
+    /// This layout for a run whose authority is `copy` (`None`: the row's
+    /// own item): the authority moves to `sources[0]`. `checked` means
+    /// compared with the current authority's file: every segment the new
+    /// authority did not write needs a comparison again (all of them when
+    /// the sidecar does not list it, and it joins with no validator). `validator` is the row's:
+    /// it describes the last run's authority (`sources[0]`) only, so it is
+    /// compared there alone, and None means that file changed and its
+    /// bytes cannot be continued. Another listed copy keeps the validator
+    /// it served under; the run's range requests check it (If-Range).
+    pub fn adopt(mut self, copy: Option<&CopyRef>, validator: Option<&str>) -> Option<Ranges> {
+        match self.sources.iter().position(|s| s.copy.as_ref() == copy) {
+            Some(k) => {
+                if k == 0 && self.sources[0].validator.as_deref() != validator {
+                    return None;
+                }
+                if k != 0 {
+                    self.sources.swap(0, k);
+                    let k = k as u16;
+                    for s in &mut self.segments {
+                        if s.src == k {
+                            s.src = 0;
+                        } else {
+                            if s.src == 0 {
+                                s.src = k;
+                            }
+                            s.checked = false;
+                        }
+                    }
+                }
+            }
+            None => {
+                self.sources.insert(
+                    0,
+                    SegSource {
+                        copy: copy.cloned(),
+                        validator: None,
+                    },
+                );
+                for s in &mut self.segments {
+                    s.src += 1;
+                    s.checked = false;
+                }
+            }
+        }
+        Some(self)
+    }
+}
+
+/// The plan the coordinator, the workers and the writer share.
+struct Plan {
+    ranges: Ranges,
+    /// Segment indexes a worker is on.
+    taken: Vec<bool>,
+    /// Bumped when a segment's bytes are discarded: blocks queued for it
+    /// before then are dropped by the writer.
+    epoch: Vec<u64>,
+    /// How far each segment's bytes have been handed to the writer (ahead
+    /// of `pos` while they wait in its queue).
+    queued: Vec<i64>,
+}
+
+impl Plan {
+    fn new(ranges: Ranges) -> Self {
+        let n = ranges.segments.len();
+        Self {
+            queued: ranges.segments.iter().map(|s| s.pos).collect(),
+            taken: vec![false; n],
+            epoch: vec![0; n],
+            ranges,
+        }
+    }
+
+    fn push(&mut self, seg: Seg) -> usize {
+        self.ranges.segments.push(seg);
+        self.taken.push(false);
+        self.epoch.push(0);
+        self.queued.push(seg.pos);
+        self.ranges.segments.len() - 1
+    }
+
+    /// Splits the segment with the most left past what its worker already
+    /// handed to the writer.
+    fn split(&mut self) -> Option<usize> {
+        let queued = &self.queued;
+        self.ranges.split_by(|i, s| queued[i].max(s.pos))?;
+        let seg = self.ranges.segments.pop().expect("the split's tail");
+        Some(self.push(seg))
+    }
+
+    /// Discards segment `i`'s bytes: it starts over from the authority.
+    fn reset(&mut self, i: usize) {
+        let s = &mut self.ranges.segments[i];
+        s.pos = s.start;
+        s.src = 0;
+        s.checked = false;
+        self.epoch[i] += 1;
+        self.queued[i] = s.start;
+    }
+
+    /// A free segment for a new worker on source `src`, taken for it: an
+    /// untouched one, one `src` already wrote part of, the rest of one
+    /// another source wrote part of (cut off into a segment of its own),
+    /// or the second half of the one with the most left.
+    ///
+    /// A segment whose worker ended can still have blocks in the writer's
+    /// queue (`queued` ahead of `pos`). Those land later, so the segment
+    /// keeps everything up to `queued`: a cut there, never at `pos`, keeps
+    /// every `pos` within its `end`, and bytes one source handed are never
+    /// recorded as another's.
+    fn pick(&mut self, src: u16, validated: bool) -> Option<usize> {
+        let free = |p: &Plan, want: &dyn Fn(&Seg, i64) -> bool| {
+            p.ranges
+                .segments
+                .iter()
+                .enumerate()
+                .find(|(i, s)| {
+                    let front = p.queued[*i].max(s.pos);
+                    !p.taken[*i] && front < s.end && want(s, front)
+                })
+                .map(|(i, _)| i)
+        };
+        let i = if let Some(i) = free(self, &|s, front| front == s.start) {
+            i
+        } else if let Some(i) = free(self, &|s, front| s.src == src && front == s.pos) {
+            i
+        } else if let Some(i) = free(self, &|_, _| true) {
+            let s = self.ranges.segments[i];
+            let front = self.queued[i].max(s.pos);
+            self.ranges.segments[i].end = front;
+            self.push(Seg {
+                start: front,
+                end: s.end,
+                pos: front,
+                src,
+                checked: false,
+            })
+        } else {
+            self.split()?
+        };
+        let s = &mut self.ranges.segments[i];
+        if s.pos == s.start {
+            s.src = src;
+            s.checked = validated;
+        }
+        self.taken[i] = true;
+        Some(i)
+    }
+
+    /// Whether another connection could get a segment.
+    fn can_grow(&self) -> bool {
+        self.ranges
+            .segments
+            .iter()
+            .enumerate()
+            .any(|(i, s)| !self.taken[i] && self.queued[i].max(s.pos) < s.end)
+            || self
+                .ranges
+                .segments
+                .iter()
+                .enumerate()
+                .any(|(i, s)| s.end - self.queued[i].max(s.pos) >= 2 * MIN_SEGMENT)
     }
 }
 
@@ -174,6 +432,14 @@ pub enum Sidecar {
     Invalid,
 }
 
+/// A sidecar's contents: version 2, or version 1 read as one source.
+fn parse(raw: &[u8]) -> Option<Ranges> {
+    match serde_json::from_slice::<OnDisk>(raw).ok()? {
+        OnDisk::V2(r) => (r.version == VERSION).then_some(r),
+        OnDisk::V1(v) => Some(v.into()),
+    }
+}
+
 /// The sidecar of `part`.
 pub fn load(part: &Path) -> Sidecar {
     let raw = match std::fs::read(ranges_path(part)) {
@@ -181,10 +447,7 @@ pub fn load(part: &Path) -> Sidecar {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Sidecar::None,
         Err(_) => return Sidecar::Invalid,
     };
-    let Some(ranges) = serde_json::from_slice::<Ranges>(&raw)
-        .ok()
-        .filter(Ranges::is_consistent)
-    else {
+    let Some(ranges) = parse(&raw).filter(Ranges::is_consistent) else {
         return Sidecar::Invalid;
     };
     // A segment's bytes reach the `.part` before its `pos` is recorded, so
@@ -363,11 +626,25 @@ pub fn make_sparse(_part: &Path) -> bool {
     true
 }
 
+/// Identical copies a segmented attempt may draw on (`mirrors`).
+pub struct MirrorPlan {
+    /// The authority's copy, the one mirrors must equal.
+    pub item: CopyRef,
+    /// The authority's fingerprint. `None`: the cached one no longer
+    /// matches the file, and the attempt reads it again over a held
+    /// connection before it looks for mirrors.
+    pub fingerprint: Option<Fingerprint>,
+}
+
 /// What a segmented attempt needs from its transfer.
 pub struct Job<'a> {
     pub id: i64,
+    /// The authority's client, URL and headers.
     pub client: reqwest::Client,
     pub url: String,
+    /// Where the first answer came from after redirects, when not `url`:
+    /// segment requests go there first.
+    pub pinned: Option<String>,
     pub headers: RequestHeaders,
     pub part: PathBuf,
     pub ctl: &'a TaskCtl,
@@ -376,657 +653,349 @@ pub struct Job<'a> {
     pub idle_limit: Duration,
     pub host: String,
     /// Its settings ("Connections per download"), read every tick.
-    pub state: &'a AppState,
+    pub state: &'a Arc<AppState>,
     /// The rest of the run uses one connection: set here when the provider
     /// refuses an extra segment, read back by the transfer.
     pub one_connection: &'a AtomicBool,
+    /// The authority as a resolved copy: what probes ask and mismatches
+    /// name. `None` when the source's kind is unknown (removed).
+    pub authority: Option<Endpoint>,
+    /// The authority's copy (the row's own item, or the copy the queue
+    /// spread the row to).
+    pub copy: CopyRef,
+    /// The row's own copy: the sidecar names it `None` whether it served
+    /// as the authority or as a mirror.
+    pub own: CopyRef,
+    /// The sidecar entry of the copy the row's bytes are: its origin, or
+    /// `None` (its own copy).
+    pub base: Option<CopyRef>,
+    /// Mirrors to look for, when they apply to this transfer.
+    pub mirrors: Option<MirrorPlan>,
 }
 
 /// How a segmented attempt ended.
 pub enum SegEnd {
-    /// Every segment is written; the `.part` holds the whole file.
+    /// Every segment is written and checked; the `.part` holds the whole
+    /// file.
     Done(i64),
     /// The transfer was asked to stop; the sidecar holds the progress.
     Stopped(i64),
-    /// An answer was not the range asked for: the partial and its sidecar
+    /// The authority is the row's own copy, and an answer was not the
+    /// range asked for or its bytes changed: the partial and its sidecar
     /// are gone, and the file starts over with one connection.
     Changed,
     /// A segment failed; the sidecar holds the progress.
     Error { err: CoreError, bytes: i64 },
-}
-
-/// The plan the workers share.
-struct Plan {
-    ranges: Ranges,
-    /// Segment indexes a worker is on.
-    taken: Vec<bool>,
-}
-
-enum WorkerEnd {
-    /// Its segment is written.
-    Finished,
-    /// Asked to give its connection back, or its stream stopped short of an
-    /// end that moved on; its segment is free again.
-    Retired,
-}
-
-enum WorkerError {
-    Failed(CoreError),
-    /// The request for the segment got no body: a refusal, a server error,
-    /// no connection.
-    Refused(CoreError),
-    /// The answer was not the range asked for.
-    Changed(String),
-}
-
-/// Runs `ranges` to completion over as many connections as the transfer may
-/// hold, re-read every [`TICK`]. `first` is the open answer of the attempt
-/// and the offset it serves from.
-pub async fn run(
-    job: Job<'_>,
-    ranges: Ranges,
-    first: Option<(BoxStream<'static, reqwest::Result<Bytes>>, i64)>,
-    mut progress: impl FnMut(i64, i64),
-) -> SegEnd {
-    let total = ranges.total;
-    let validator = ranges.validator.clone();
-    let taken = vec![false; ranges.segments.len()];
-    let plan = Arc::new(Mutex::new(Plan { ranges, taken }));
-    let job = &job;
-    let mut workers = FuturesUnordered::new();
-    // Per worker: its segment and the token that retires it, newest last.
-    let mut running: Vec<(usize, CancellationToken)> = Vec::new();
-    let all = CancellationToken::new();
-
-    let spawn = |seg: usize,
-                 stream: Option<BoxStream<'static, reqwest::Result<Bytes>>>,
-                 wait: Duration,
-                 running: &mut Vec<(usize, CancellationToken)>| {
-        let retire = all.child_token();
-        running.push((seg, retire.clone()));
-        let plan = Arc::clone(&plan);
-        let validator = validator.clone();
-        async move {
-            let end = worker(job, &plan, seg, total, &validator, stream, wait, &retire).await;
-            plan.lock().taken[seg] = false;
-            (seg, end)
-        }
-    };
-    // Connections the transfer may hold now. "Connections per download: 1",
-    // a speed cap and a refused segment keep one (resuming a split file one
-    // segment after another).
-    let allowance = || {
-        let one = job.one_connection.load(Ordering::Relaxed);
-        let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.ctl, one) {
-            MAX_CONNECTIONS
-        } else {
-            1
-        };
-        job.mgr
-            .connection_allowance(job.ctl)
-            .min(cap)
-            .clamp(1, MAX_CONNECTIONS)
-    };
-
-    let mut first = first.and_then(|(stream, at)| {
-        let mut p = plan.lock();
-        let i = p
-            .ranges
-            .segments
-            .iter()
-            .position(|s| s.pos == at && s.pos < s.end)?;
-        p.taken[i] = true;
-        Some((i, stream))
-    });
-    // The segment the attempt's open answer serves: it reads on past its
-    // end when the segment after it is given back.
-    let mut open_ended = first.as_ref().map(|(i, _)| *i);
-    // When a connection of the transfer last closed.
-    let mut closed_at: Option<Instant> = None;
-    // The plan is on disk before any segment writes past what the `.part`
-    // already holds: a `.part` with holes and no sidecar would resume from
-    // its length.
-    let mut saved_plan = 0;
-
-    let mut last_save = Instant::now();
-    // The save in flight. Its sync can take a while on a slow disk, and the
-    // workers only run while this loop polls them, so the loop never waits
-    // for it: a periodic save is skipped meanwhile, and the next save starts
-    // once it lands (two would share the temporary file).
-    let mut saving: Option<tokio::task::JoinHandle<io::Result<()>>> = None;
-    // Segments that start once the plan save in flight lands. Meanwhile the
-    // loop goes on retiring workers and watching the stop token.
-    let mut pending: Vec<(usize, Option<BoxStream<'static, reqwest::Result<Bytes>>>)> = Vec::new();
-    let began = plan.lock().ranges.done();
-    let mut reported = false;
-    let mut failure: Option<WorkerError> = None;
-    let mut stopping = false;
-    loop {
-        if !stopping {
-            // As many connections as the transfer may hold: start free
-            // segments (splitting the largest when none is free), or retire
-            // the newest workers.
-            let allowed = allowance();
-            // Nothing new starts while a plan save is in flight.
-            let mut starting: Vec<(usize, Option<BoxStream<'static, reqwest::Result<Bytes>>>)> =
-                Vec::new();
-            if pending.is_empty() {
-                starting.extend(first.take().map(|(i, s)| (i, Some(s))));
-            }
-            while pending.is_empty() && running.len() + starting.len() < allowed {
-                let next = {
-                    let mut p = plan.lock();
-                    let free = p
-                        .ranges
-                        .segments
-                        .iter()
-                        .enumerate()
-                        .find(|(i, s)| !p.taken[*i] && s.pos < s.end)
-                        .map(|(i, _)| i);
-                    let next = free.or_else(|| {
-                        let i = p.ranges.split()?;
-                        p.taken.push(false);
-                        Some(i)
-                    });
-                    if let Some(i) = next {
-                        p.taken[i] = true;
-                    }
-                    next
-                };
-                let Some(seg) = next else { break };
-                starting.push((seg, None));
-            }
-            let segments = plan.lock().ranges.segments.len();
-            if !starting.is_empty() && segments != saved_plan {
-                saved_plan = segments;
-                let snapshot = plan.lock().ranges.clone();
-                saving = Some(spawn_save(job, snapshot, saving.take()));
-                pending = std::mem::take(&mut starting);
-            }
-            let wait =
-                closed_at.map_or(Duration::ZERO, |t| CLOSE_GRACE.saturating_sub(t.elapsed()));
-            for (seg, stream) in starting {
-                workers.push(spawn(seg, stream, wait, &mut running));
-            }
-            while running.len() > allowed {
-                let (_, retire) = running.pop().expect("more running than allowed");
-                retire.cancel();
-            }
-            let held = running.len().max(1);
-            if job.ctl.connections.swap(held, Ordering::Relaxed) > held {
-                // Another download of the source may be waiting for it.
-                job.mgr.released();
-            }
-        }
-
-        tokio::select! {
-            biased;
-            _ = job.ctl.token.cancelled(), if !stopping => {
-                stopping = true;
-                all.cancel();
-                pending.clear();
-            }
-            saved = async { saving.as_mut().expect("a plan save in flight").await },
-                if !pending.is_empty() =>
-            {
-                saving = None;
-                match saved.map_err(io::Error::other).and_then(|r| r) {
-                    Ok(()) => {
-                        // What the transfer may hold now: playback may have
-                        // asked for connections meanwhile.
-                        let room = allowance().saturating_sub(running.len());
-                        let wait = closed_at.map_or(Duration::ZERO, |t| {
-                            CLOSE_GRACE.saturating_sub(t.elapsed())
-                        });
-                        let starting = std::mem::take(&mut pending);
-                        for (n, (seg, stream)) in starting.into_iter().enumerate() {
-                            if n < room {
-                                workers.push(spawn(seg, stream, wait, &mut running));
-                            } else {
-                                plan.lock().taken[seg] = false;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        // Without the sidecar a split `.part` could not
-                        // resume: end the attempt before anything writes.
-                        pending.clear();
-                        plan.lock().taken.iter_mut().for_each(|t| *t = false);
-                        failure = Some(WorkerError::Failed(CoreError::Io(e)));
-                        stopping = true;
-                        all.cancel();
-                    }
-                }
-            }
-            // With no worker left, an empty set would answer at once.
-            ended = workers.next(), if !workers.is_empty() || pending.is_empty() => match ended {
-                Some((seg, end)) => {
-                    running.retain(|(s, _)| *s != seg);
-                    closed_at = Some(Instant::now());
-                    if open_ended == Some(seg) {
-                        open_ended = None;
-                    }
-                    match end {
-                        Ok(WorkerEnd::Finished | WorkerEnd::Retired) => {}
-                        Err(WorkerError::Refused(err)) if !running.is_empty() => {
-                            // The account has fewer free connections than
-                            // its limit says (another device holds one):
-                            // the rest goes over one connection. A refused
-                            // segment that follows the open answer's goes
-                            // back to it, so that stream reads on and no
-                            // new request is needed.
-                            tracing::info!(id = job.id, error = %err, "the provider refused another connection; going on with one");
-                            job.one_connection.store(true, Ordering::Relaxed);
-                            let mut p = plan.lock();
-                            let refused = p.ranges.segments[seg];
-                            if let Some(o) = open_ended.filter(|o| {
-                                refused.pos == refused.start
-                                    && p.ranges.segments[*o].end == refused.start
-                            }) {
-                                p.ranges.segments[o].end = refused.end;
-                                p.ranges.segments[seg].end = refused.start;
-                            }
-                        }
-                        Err(e) => {
-                            if failure.is_none() {
-                                failure = Some(e);
-                            }
-                            stopping = true;
-                            all.cancel();
-                            pending.clear();
-                        }
-                    }
-                }
-                None => {
-                    if stopping || plan.lock().ranges.complete() {
-                        break;
-                    }
-                }
-            },
-            _ = tokio::time::sleep(if reported { TICK } else { FIRST_TICK }) => {}
-        }
-
-        let (done, snapshot) = {
-            let p = plan.lock();
-            (p.ranges.done(), p.ranges.clone())
-        };
-        job.ctl.bytes.store(done, Ordering::Relaxed);
-        progress(done, total);
-        reported |= done > began;
-        if pending.is_empty()
-            && last_save.elapsed() >= SAVE_EVERY
-            && saving.as_ref().is_none_or(|s| s.is_finished())
-        {
-            last_save = Instant::now();
-            saving = Some(spawn_save(job, snapshot, saving.take()));
-        }
-        if stopping && workers.is_empty() {
-            break;
-        }
-    }
-    job.ctl.connections.store(1, Ordering::Relaxed);
-    // Before the sidecar is removed or saved for the last time, so an older
-    // snapshot never lands after it.
-    settle_save(job.id, saving.take()).await;
-
-    let ranges = plan.lock().ranges.clone();
-    let done = ranges.done();
-    let part = job.part.clone();
-    if let Some(WorkerError::Changed(why)) = &failure {
-        tracing::info!(
-            id = job.id,
-            why,
-            "segment answer did not match; restarting with one connection"
-        );
-        let _ = tokio::task::spawn_blocking(move || {
-            // The sidecar goes only once the `.part` is empty.
-            std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&part)?;
-            remove(&part);
-            Ok::<_, io::Error>(())
-        })
-        .await;
-        return SegEnd::Changed;
-    }
-    if ranges.complete() {
-        let _ = tokio::task::spawn_blocking(move || remove(&part)).await;
-        return SegEnd::Done(total);
-    }
-    settle_save(job.id, Some(spawn_save(job, ranges, None))).await;
-    match failure {
-        Some(WorkerError::Failed(err) | WorkerError::Refused(err)) => {
-            SegEnd::Error { err, bytes: done }
-        }
-        _ => SegEnd::Stopped(done),
-    }
-}
-
-/// Saves `ranges` with [`save_synced`] once `before` (the save in flight,
-/// if any) has landed.
-fn spawn_save(
-    job: &Job<'_>,
-    ranges: Ranges,
-    before: Option<tokio::task::JoinHandle<io::Result<()>>>,
-) -> tokio::task::JoinHandle<io::Result<()>> {
-    let (id, part, slow) = (job.id, job.part.clone(), job.mgr.slow_sync());
-    tokio::spawn(async move {
-        settle_save(id, before).await;
-        tokio::task::spawn_blocking(move || {
-            if !slow.is_zero() {
-                std::thread::sleep(slow);
-            }
-            save_synced(&part, &ranges)
-        })
-        .await
-        .map_err(io::Error::other)?
-    })
-}
-
-/// Waits for a save in flight, if any, and logs its failure.
-async fn settle_save(id: i64, saving: Option<tokio::task::JoinHandle<io::Result<()>>>) {
-    let Some(saving) = saving else { return };
-    if let Ok(Err(e)) | Err(e) = saving.await.map_err(io::Error::other) {
-        tracing::warn!(id, error = %e, "could not save download ranges");
-    }
-}
-
-/// Fetches segment `seg` (from `stream` when given, else with its own
-/// request, sent after `wait`) until it is written, the worker is retired,
-/// or it fails.
-#[allow(clippy::too_many_arguments)]
-async fn worker(
-    job: &Job<'_>,
-    plan: &Mutex<Plan>,
-    seg: usize,
-    total: i64,
-    validator: &str,
-    stream: Option<BoxStream<'static, reqwest::Result<Bytes>>>,
-    wait: Duration,
-    retire: &CancellationToken,
-) -> Result<WorkerEnd, WorkerError> {
-    let (mut pos, end) = {
-        let p = plan.lock();
-        let s = p.ranges.segments[seg];
-        (s.pos, s.end)
-    };
-    if pos >= end {
-        return Ok(WorkerEnd::Finished);
-    }
-    let mut stream = match stream {
-        Some(s) => s,
-        None => {
-            if !wait.is_zero() {
-                tokio::select! {
-                    _ = retire.cancelled() => return Ok(WorkerEnd::Retired),
-                    _ = tokio::time::sleep(wait) => {}
-                }
-            }
-            let req = crate::http::apply_source_headers(job.client.get(&job.url), &job.headers)
-                .header(ACCEPT_ENCODING, "identity")
-                .header(RANGE, format!("bytes={pos}-{}", end - 1))
-                .header(IF_RANGE, validator);
-            let resp = tokio::select! {
-                _ = retire.cancelled() => return Ok(WorkerEnd::Retired),
-                r = crate::http::send_within(req, job.head_limit) => r.map_err(WorkerError::Refused)?,
-            };
-            check_range(&resp, pos, total)?;
-            resp.bytes_stream().boxed()
-        }
-    };
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .open(&job.part)
-        .await
-        .map_err(|e| WorkerError::Failed(CoreError::Io(e)))?;
-    file.seek(std::io::SeekFrom::Start(pos as u64))
-        .await
-        .map_err(|e| WorkerError::Failed(CoreError::Io(e)))?;
-    let mut buf: Vec<u8> = Vec::with_capacity(WRITE_CHUNK);
-    let mut outcome = Ok(WorkerEnd::Finished);
-    // A speed cap set in flight applies at once, shared by the workers until
-    // the extra ones are retired.
-    let share = || {
-        let workers = job.ctl.connections.load(Ordering::Relaxed).max(1) as u64;
-        job.ctl
-            .rate_limit(job.state.settings.read().download_rate_limit_bps)
-            .map(|bps| (bps / workers).max(1))
-    };
-    let mut pace = super::transfer::Pace::new(share(), pos);
-    loop {
-        // A split may have moved this segment's end closer.
-        let end = plan.lock().ranges.segments[seg].end;
-        if pos + buf.len() as i64 >= end {
-            break;
-        }
-        let next = tokio::select! {
-            biased;
-            _ = retire.cancelled() => {
-                outcome = Ok(WorkerEnd::Retired);
-                break;
-            }
-            n = tokio::time::timeout(job.idle_limit, stream.next()) => n,
-        };
-        match next {
-            Ok(Some(Ok(chunk))) => {
-                let room = (end - pos - buf.len() as i64).max(0) as usize;
-                buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
-                if chunk.len() > room {
-                    // Bytes past the end were dropped, so the stream's next
-                    // byte no longer belongs where the next write would put
-                    // it: this stream is done even if the end has moved on
-                    // meanwhile (a refused segment handed back), and what
-                    // is left gets its own request.
-                    outcome = Ok(WorkerEnd::Retired);
-                    break;
-                }
-                if buf.len() >= WRITE_CHUNK {
-                    if let Err(e) = write_at(&mut file, &mut buf, &mut pos, plan, seg).await {
-                        outcome = Err(WorkerError::Failed(CoreError::Io(e)));
-                        break;
-                    }
-                }
-                let at = pos + buf.len() as i64;
-                let mut retired = false;
-                while let Some(wait) = pace.delay(share(), at, Instant::now()) {
-                    tokio::select! {
-                        biased;
-                        _ = retire.cancelled() => {
-                            retired = true;
-                            break;
-                        }
-                        _ = tokio::time::sleep(wait.min(super::transfer::THROTTLE_SLICE)) => {}
-                    }
-                }
-                if retired {
-                    outcome = Ok(WorkerEnd::Retired);
-                    break;
-                }
-            }
-            Ok(Some(Err(e))) => {
-                outcome = Err(WorkerError::Failed(crate::http::transport_error(
-                    &job.host, e,
-                )));
-                break;
-            }
-            Ok(None) => {
-                outcome = Err(WorkerError::Failed(CoreError::Network(
-                    "Transfer ended before the advertised size".into(),
-                )));
-                break;
-            }
-            Err(_) => {
-                outcome = Err(WorkerError::Failed(CoreError::Timeout(format!(
-                    "{} stopped sending data in the middle of the download (nothing for {} s). Check that the server is online, then try again.",
-                    job.host,
-                    job.idle_limit.as_secs()
-                ))));
-                break;
-            }
-        }
-    }
-    // The connection closes before the last write and the sync, which a
-    // slow disk can hold up while playback waits for it.
-    drop(stream);
-    let flushed = async {
-        write_at(&mut file, &mut buf, &mut pos, plan, seg).await?;
-        file.sync_data().await
-    }
-    .await;
-    if let Err(e) = flushed {
-        return Err(WorkerError::Failed(CoreError::Io(e)));
-    }
-    if matches!(outcome, Ok(WorkerEnd::Finished)) && pos < plan.lock().ranges.segments[seg].end {
-        // A refused segment was handed back after this stream reached the
-        // old end: the rest is free for its own request.
-        return Ok(WorkerEnd::Retired);
-    }
-    outcome
-}
-
-/// Writes `buf` at `pos` and records the new position in the plan. A write
-/// that fails drops `buf`: it may have stored part of it and moved the
-/// file's position past `pos`, so writing it again would land it shifted.
-/// None of it was recorded, so the next attempt fetches it again.
-async fn write_at<W: tokio::io::AsyncWrite + Unpin>(
-    file: &mut W,
-    buf: &mut Vec<u8>,
-    pos: &mut i64,
-    plan: &Mutex<Plan>,
-    seg: usize,
-) -> io::Result<()> {
-    if buf.is_empty() {
-        return Ok(());
-    }
-    // tokio hands the write to a blocking thread; flushing waits for it, so
-    // the position recorded below is on disk (in the OS's cache) when the
-    // sidecar says so.
-    let written = async {
-        file.write_all(buf).await?;
-        file.flush().await
-    }
-    .await;
-    let len = buf.len() as i64;
-    buf.clear();
-    written?;
-    *pos += len;
-    plan.lock().ranges.segments[seg].pos = *pos;
-    Ok(())
-}
-
-/// A segment answer must be a `206` for exactly `pos..` of a file of
-/// `total` bytes; anything else (a `200` because If-Range saw a change or
-/// ranges stopped working, another start or total) is not what the plan
-/// holds.
-fn check_range(resp: &reqwest::Response, pos: i64, total: i64) -> Result<(), WorkerError> {
-    let status = resp.status();
-    if status == StatusCode::PARTIAL_CONTENT {
-        let range = resp
-            .headers()
-            .get(CONTENT_RANGE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(super::transfer::parse_content_range);
-        return match range {
-            Some((start, Some(t))) if start == pos && t == total => Ok(()),
-            other => Err(WorkerError::Changed(format!(
-                "asked for byte {pos} of {total}, got {other:?}"
-            ))),
-        };
-    }
-    if status.is_success() || status == StatusCode::RANGE_NOT_SATISFIABLE {
-        return Err(WorkerError::Changed(format!(
-            "answered {status} to a range"
-        )));
-    }
-    Err(WorkerError::Refused(super::transfer::http_status_error(
-        status,
-    )))
+    /// The authority is another copy than the row's own and it changed,
+    /// or its bytes contradict the row's own: the sidecar keeps the bytes
+    /// (less the authority's unchecked ones), and the row goes back to the
+    /// queue.
+    Respread(i64),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{ContentType, ItemRef};
 
     const MIB: i64 = 1024 * 1024;
 
+    fn etag() -> SegSource {
+        SegSource {
+            copy: None,
+            validator: Some("\"e\"".into()),
+        }
+    }
+
+    fn seg(start: i64, end: i64, pos: i64) -> Seg {
+        Seg {
+            start,
+            end,
+            pos,
+            src: 0,
+            checked: false,
+        }
+    }
+
     #[test]
     fn a_plan_splits_the_largest_remainder_while_halves_stay_large() {
-        let mut r = Ranges::new(40 * MIB, "\"e\"".into(), 8 * MIB);
+        let mut r = Ranges::new(40 * MIB, etag(), 8 * MIB);
         assert_eq!(r.done(), 8 * MIB);
         assert!(r.is_consistent());
+        assert!(r.segments[0].checked, "under the validator");
         // 32 MiB left in one segment: 16 + 16, then 8 + 8 of one half.
+        assert_eq!(r.split(), Some(1));
+        assert_eq!(r.segments[0].end, 24 * MIB);
+        assert_eq!(r.segments[1], seg(24 * MIB, 40 * MIB, 24 * MIB));
         assert_eq!(r.split(), Some(2));
-        assert_eq!(r.segments[1].end, 24 * MIB);
-        assert_eq!(
-            r.segments[2],
-            Seg {
-                start: 24 * MIB,
-                end: 40 * MIB,
-                pos: 24 * MIB
-            }
-        );
-        assert_eq!(r.split(), Some(3));
-        assert_eq!(r.segments[2].end, 32 * MIB);
-        assert_eq!(
-            r.segments[3],
-            Seg {
-                start: 32 * MIB,
-                end: 40 * MIB,
-                pos: 32 * MIB
-            }
-        );
+        assert_eq!(r.segments[1].end, 32 * MIB);
+        assert_eq!(r.segments[2], seg(32 * MIB, 40 * MIB, 32 * MIB));
         assert!(r.is_consistent());
         // Only what is left is halved, and never below 4 MiB a half.
-        r.segments[1].pos = 17 * MIB;
-        r.segments[2].pos = 31 * MIB;
-        r.segments[3].pos = 39 * MIB;
+        r.segments[0].pos = 17 * MIB;
+        r.segments[1].pos = 31 * MIB;
+        r.segments[2].pos = 39 * MIB;
         assert_eq!(r.split(), None, "no remainder of 8 MiB or more");
-        r.segments[1].pos = 12 * MIB;
-        assert_eq!(r.split(), Some(4));
-        assert_eq!(r.segments[1].end, 18 * MIB);
+        r.segments[0].pos = 12 * MIB;
+        assert_eq!(r.split(), Some(3));
+        assert_eq!(r.segments[0].end, 18 * MIB);
         assert!(r.is_consistent());
         assert!(!r.complete());
     }
 
     #[test]
+    fn a_split_leaves_alone_what_waits_for_the_writer() {
+        let mut p = Plan::new(Ranges::new(40 * MIB, etag(), 0));
+        // 8 MiB written, 8 more queued: the half of the 24 MiB beyond.
+        p.ranges.segments[0].pos = 8 * MIB;
+        p.queued[0] = 16 * MIB;
+        assert_eq!(p.split(), Some(1));
+        assert_eq!(p.ranges.segments[0].end, 28 * MIB);
+        assert_eq!(p.queued[1], 28 * MIB);
+        assert_eq!(p.epoch.len(), 2);
+    }
+
+    #[test]
+    fn a_new_worker_takes_fresh_bytes_then_its_own_then_cuts_off_another_sources() {
+        let total = 64 * MIB;
+        let mut r = Ranges::new(total, etag(), 0);
+        r.sources.push(SegSource {
+            copy: Some(CopyRef::new(
+                ItemRef::new("b", ContentType::Movie, "7"),
+                None,
+            )),
+            validator: None,
+        });
+        r.segments = vec![
+            Seg {
+                src: 0,
+                checked: true,
+                ..seg(0, 16 * MIB, 4 * MIB)
+            },
+            Seg {
+                src: 1,
+                ..seg(16 * MIB, 32 * MIB, 20 * MIB)
+            },
+            seg(32 * MIB, 64 * MIB, 32 * MIB),
+        ];
+        assert!(r.is_consistent());
+        let mut p = Plan::new(r);
+        // Untouched bytes first, taken for the mirror without a check.
+        assert_eq!(p.pick(1, false), Some(2));
+        assert_eq!(p.ranges.segments[2].src, 1);
+        assert!(!p.ranges.segments[2].checked);
+        // Then the mirror's own partial segment.
+        assert_eq!(p.pick(1, false), Some(1));
+        // The authority cuts off the rest of the mirror's segment.
+        p.taken[1] = false;
+        p.taken[0] = true;
+        assert_eq!(p.pick(0, true), Some(3));
+        assert_eq!(p.ranges.segments[1].end, 20 * MIB);
+        assert_eq!(
+            p.ranges.segments[3],
+            Seg {
+                src: 0,
+                checked: true,
+                ..seg(20 * MIB, 32 * MIB, 20 * MIB)
+            }
+        );
+        assert!(p.ranges.is_consistent());
+        // A discarded segment starts over from the authority.
+        p.reset(1);
+        assert_eq!(p.ranges.segments[1], seg(16 * MIB, 20 * MIB, 16 * MIB));
+        assert_eq!(p.epoch[1], 1);
+    }
+
+    /// A sink that, while the writer is mid-write (the plan unlocked), lets
+    /// the authority pick: the moment a multi-source run cut another
+    /// source's segment at its recorded `pos`, so the block then recorded
+    /// past the new end and the next split panicked (`min > max`).
+    struct PickDuringWrite<'a> {
+        plan: &'a parking_lot::Mutex<Plan>,
+        picked: Option<usize>,
+    }
+
+    impl writer::Sink for PickDuringWrite<'_> {
+        fn write_at(&mut self, _buf: &[u8], _at: u64) -> io::Result<()> {
+            self.picked = self.plan.lock().pick(0, true);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_cut_keeps_what_waits_for_the_writer_so_no_segment_passes_its_end() {
+        let total = 64 * MIB;
+        let mut r = Ranges::new(total, etag(), 0);
+        r.sources.push(SegSource {
+            copy: Some(CopyRef::new(
+                ItemRef::new("b", ContentType::Movie, "7"),
+                None,
+            )),
+            validator: None,
+        });
+        // The mirror's worker ended at 12 MiB; 10 MiB are recorded and the
+        // last 2 wait in the writer's queue. The authority's segment is busy.
+        r.segments = vec![
+            Seg {
+                src: 0,
+                checked: true,
+                ..seg(0, 8 * MIB, 4 * MIB)
+            },
+            Seg {
+                src: 1,
+                ..seg(8 * MIB, total, 10 * MIB)
+            },
+        ];
+        let mut p = Plan::new(r);
+        p.taken[0] = true;
+        p.queued[1] = 12 * MIB;
+        let plan = parking_lot::Mutex::new(p);
+        let mut sink = PickDuringWrite {
+            plan: &plan,
+            picked: None,
+        };
+        let block = writer::Block {
+            seg: 1,
+            at: 10 * MIB,
+            epoch: 0,
+            data: vec![0; 2 * MIB as usize],
+        };
+        writer::apply(&mut sink, &plan, &block).unwrap();
+        let mut p = plan.lock();
+        assert_eq!(sink.picked, Some(2));
+        assert_eq!(p.ranges.segments[1].end, 12 * MIB, "cut after the queue");
+        assert_eq!(p.ranges.segments[1].pos, 12 * MIB);
+        assert_eq!(p.ranges.segments[1].src, 1, "the mirror's bytes stay its");
+        assert_eq!(
+            p.ranges.segments[2],
+            Seg {
+                src: 0,
+                checked: true,
+                ..seg(12 * MIB, total, 12 * MIB)
+            }
+        );
+        assert!(p.ranges.is_consistent());
+        // The split that panicked on a `pos` past its `end`.
+        p.taken[2] = true;
+        assert!(p.split().is_some());
+        assert!(p.ranges.is_consistent());
+    }
+
+    #[test]
+    fn a_segment_whose_bytes_all_wait_for_the_writer_is_not_free() {
+        let mut p = Plan::new(Ranges::new(40 * MIB, etag(), 0));
+        p.ranges.segments[0].end = 8 * MIB;
+        p.queued[0] = 8 * MIB;
+        let tail = p.push(seg(8 * MIB, 40 * MIB, 8 * MIB));
+        p.taken[tail] = true;
+        // Segment 0 is not untouched (its bytes are queued) and has nothing
+        // past them to fetch: the new worker splits the busy tail instead.
+        assert_eq!(p.pick(0, true), Some(2));
+        assert_eq!(p.ranges.segments[0].end, 8 * MIB);
+        assert_eq!(p.ranges.segments[0].src, 0);
+    }
+
+    #[test]
     fn an_inconsistent_sidecar_is_ignored() {
-        let mut small = Ranges::new(7 * MIB, "\"e\"".into(), 0);
+        let mut small = Ranges::new(7 * MIB, etag(), 0);
         assert_eq!(small.split(), None, "no two halves of 4 MiB");
-        let r = Ranges {
-            total: 10,
-            validator: "v".into(),
-            segments: vec![
-                Seg {
-                    start: 0,
-                    end: 4,
-                    pos: 4,
-                },
-                Seg {
-                    start: 5,
-                    end: 10,
-                    pos: 5,
-                },
-            ],
-        };
+        let mut r = Ranges::new(10, etag(), 0);
+        r.segments = vec![seg(0, 4, 4), seg(5, 10, 5)];
         assert!(!r.is_consistent(), "a gap");
-        let r = Ranges {
-            total: 10,
-            validator: "v".into(),
-            segments: vec![Seg {
-                start: 0,
-                end: 10,
-                pos: 11,
-            }],
-        };
+        r.segments = vec![seg(0, 10, 11)];
         assert!(!r.is_consistent(), "pos past the end");
+        r.segments = vec![Seg {
+            src: 1,
+            ..seg(0, 10, 3)
+        }];
+        assert!(!r.is_consistent(), "a source the sidecar does not list");
+    }
+
+    #[test]
+    fn a_version_1_sidecar_loads_as_one_checked_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("Movie.mp4.part");
+        std::fs::write(
+            ranges_path(&part),
+            br#"{"total":20,"validator":"\"e\"","segments":[{"start":0,"end":10,"pos":4},{"start":10,"end":20,"pos":12}]}"#,
+        )
+        .unwrap();
+        std::fs::write(&part, [0u8; 12]).unwrap();
+        let Sidecar::Valid(r) = load(&part) else {
+            panic!("a v1 sidecar loads");
+        };
+        assert_eq!(r.version, VERSION);
+        assert_eq!(r.sources, vec![etag()]);
+        assert!(r.segments.iter().all(|s| s.src == 0 && s.checked));
+        assert_eq!(r.done(), 6);
+        // Written back as version 2 only.
+        save(&part, &r).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(ranges_path(&part)).unwrap()).unwrap();
+        assert_eq!(raw["version"], 2);
+        assert!(raw.get("validator").is_none());
+        assert_eq!(raw["sources"][0]["copy"], serde_json::Value::Null);
+        assert_eq!(load(&part), Sidecar::Valid(r));
+        // A version this build does not know is not this file's layout.
+        let mut raw = raw;
+        raw["version"] = 3.into();
+        std::fs::write(ranges_path(&part), raw.to_string()).unwrap();
+        assert_eq!(load(&part), Sidecar::Invalid);
+    }
+
+    #[test]
+    fn a_resumed_layout_puts_the_runs_authority_first() {
+        let b = CopyRef::new(ItemRef::new("b", ContentType::Movie, "7"), None);
+        let mut r = Ranges::new(32 * MIB, etag(), 0);
+        r.sources.push(SegSource {
+            copy: Some(b.clone()),
+            validator: Some("v-b".into()),
+        });
+        r.segments = vec![
+            Seg {
+                checked: true,
+                ..seg(0, 16 * MIB, MIB)
+            },
+            Seg {
+                src: 1,
+                checked: true,
+                ..seg(16 * MIB, 32 * MIB, 17 * MIB)
+            },
+        ];
+        // The row's own item, validator unchanged: as it was.
+        assert_eq!(r.clone().adopt(None, Some("\"e\"")), Some(r.clone()));
+        // The file changed under the authority.
+        assert_eq!(r.clone().adopt(None, Some("\"f\"")), None);
+        assert_eq!(r.clone().adopt(None, None), None);
+        // The queue spread the row to the mirror's copy. The row's
+        // validator was the authority's, not B's: B keeps the one it
+        // served under.
+        let spread = r.clone().adopt(Some(&b), Some("\"e\"")).unwrap();
+        assert_eq!(spread, r.clone().adopt(Some(&b), None).unwrap());
+        assert_eq!(spread.sources[0].copy, Some(b.clone()));
+        assert_eq!(spread.sources[0].validator.as_deref(), Some("v-b"));
+        assert_eq!(spread.segments[0].src, 1);
+        assert_eq!(spread.segments[1].src, 0);
+        // The old authority's bytes were checked against its own file,
+        // not B's: they are compared again. B's own stay checked.
+        assert!(!spread.segments[0].checked);
+        assert!(spread.segments[1].checked);
+        assert!(spread.is_consistent());
+        // A copy the sidecar does not list.
+        let c = CopyRef::new(ItemRef::new("c", ContentType::Movie, "9"), None);
+        let other = r.adopt(Some(&c), Some("v-c")).unwrap();
+        assert_eq!(other.sources.len(), 3);
+        assert_eq!(other.sources[0].validator, None);
+        assert!(other.segments.iter().all(|s| s.src > 0 && !s.checked));
+        assert!(other.is_consistent());
+        assert!(!other.verified());
     }
 
     #[test]
     fn a_plan_with_a_refused_segment_handed_back_stays_consistent() {
         let dir = tempfile::tempdir().unwrap();
         let part = dir.path().join("Movie.mp4.part");
-        let mut r = Ranges::new(32 * MIB, "\"e\"".into(), 0);
+        let mut r = Ranges::new(32 * MIB, etag(), 0);
         let tail = r.split().unwrap();
         // The tail was refused untouched: the open answer's segment takes
         // its range and the tail is left empty at its old start.
@@ -1088,7 +1057,7 @@ mod tests {
         let part = dir.path().join("Movie.mp4.part");
         assert!(ranges_path(&part).ends_with("Movie.mp4.part.ranges"));
         assert_eq!(load(&part), Sidecar::None);
-        let mut r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        let mut r = Ranges::new(20 * MIB, etag(), 0);
         r.split();
         save(&part, &r).unwrap();
         assert_eq!(load(&part), Sidecar::Valid(r));
@@ -1097,87 +1066,11 @@ mod tests {
         remove(&part);
     }
 
-    /// A file that stores `short` bytes of the first write and then fails,
-    /// the way write(2) does on a disk that fills up mid-call, and takes
-    /// every write after that. Records where each byte landed.
-    struct ShortThenOk {
-        short: usize,
-        failed: bool,
-        at: usize,
-        data: Vec<u8>,
-    }
-
-    impl tokio::io::AsyncWrite for ShortThenOk {
-        fn poll_write(
-            mut self: std::pin::Pin<&mut Self>,
-            _: &mut std::task::Context<'_>,
-            buf: &[u8],
-        ) -> std::task::Poll<io::Result<usize>> {
-            let n = if self.failed {
-                buf.len()
-            } else if self.at < self.short {
-                buf.len().min(self.short - self.at)
-            } else {
-                self.failed = true;
-                return std::task::Poll::Ready(Err(io::ErrorKind::StorageFull.into()));
-            };
-            let at = self.at;
-            if self.data.len() < at + n {
-                self.data.resize(at + n, 0);
-            }
-            self.data[at..at + n].copy_from_slice(&buf[..n]);
-            self.at += n;
-            std::task::Poll::Ready(Ok(n))
-        }
-
-        fn poll_flush(
-            self: std::pin::Pin<&mut Self>,
-            _: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<io::Result<()>> {
-            std::task::Poll::Ready(Ok(()))
-        }
-
-        fn poll_shutdown(
-            self: std::pin::Pin<&mut Self>,
-            _: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<io::Result<()>> {
-            std::task::Poll::Ready(Ok(()))
-        }
-    }
-
-    #[tokio::test]
-    async fn a_write_that_failed_part_way_is_not_written_again_shifted() {
-        let ranges = Ranges::new(1024, "\"e\"".into(), 0);
-        let plan = Mutex::new(Plan {
-            taken: vec![true],
-            ranges,
-        });
-        let mut file = ShortThenOk {
-            short: 100,
-            failed: false,
-            at: 0,
-            data: Vec::new(),
-        };
-        let mut buf: Vec<u8> = (0..=255).collect();
-        let mut pos = 0;
-        assert!(write_at(&mut file, &mut buf, &mut pos, &plan, 0)
-            .await
-            .is_err());
-        // The worker's last write after the loop, with whatever is left in
-        // its buffer: nothing, since none of it was recorded.
-        write_at(&mut file, &mut buf, &mut pos, &plan, 0)
-            .await
-            .unwrap();
-        assert_eq!(pos, 0);
-        assert_eq!(plan.lock().ranges.segments[0].pos, 0, "nothing recorded");
-        assert_eq!(file.data.len(), 100, "nothing written past the short write");
-    }
-
     #[test]
     fn a_synced_save_goes_through_the_part() {
         let dir = tempfile::tempdir().unwrap();
         let part = dir.path().join("Movie.mp4.part");
-        let r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        let r = Ranges::new(20 * MIB, etag(), 0);
         // The `.part` is synced before the sidecar records its bytes: with
         // no `.part` to sync, no sidecar is written.
         assert!(save_synced(&part, &r).is_err());
@@ -1191,7 +1084,7 @@ mod tests {
     fn a_sidecar_the_part_does_not_back_is_invalid() {
         let dir = tempfile::tempdir().unwrap();
         let part = dir.path().join("Movie.mp4.part");
-        let mut r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        let mut r = Ranges::new(20 * MIB, etag(), 0);
         r.split();
         r.segments[0].pos = 3 * MIB;
         r.segments[1].pos = 12 * MIB;
@@ -1220,7 +1113,7 @@ mod tests {
     fn a_part_that_cannot_be_deleted_keeps_its_sidecar() {
         let dir = tempfile::tempdir().unwrap();
         let part = dir.path().join("Movie.mp4.part");
-        let r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        let r = Ranges::new(20 * MIB, etag(), 0);
         // Something that is not a regular file sits at the `.part` path, so
         // deleting it fails (as a locked file does on Windows).
         std::fs::create_dir(&part).unwrap();

@@ -447,6 +447,10 @@ struct Inner {
     /// A note the row's next run shows: why it starts over from its own
     /// copy.
     carried: HashMap<i64, TransferNote>,
+    /// Copies a row's run ended on with a `Respread`: the row is never
+    /// placed on them again this session, whatever the verdicts say. Kept
+    /// until the row completes, is canceled or is removed.
+    respread: HashSet<(i64, CopyRef)>,
 }
 
 /// A source's connection limit as the runtime knows it.
@@ -781,7 +785,7 @@ impl Inner {
             .chain(equivalent.iter().map(|c| (c, true)));
         for (copy, adopt) in tries {
             let source = copy.source_id();
-            if source == home {
+            if source == home || self.braked(id, copy) {
                 continue;
             }
             self.request_load(source, loads);
@@ -891,6 +895,12 @@ impl Inner {
         }
         self.wake_at = Some(next);
         Some(next)
+    }
+
+    /// True when row `id` must not be placed on `copy` again
+    /// ([`Inner::respread`]).
+    fn braked(&self, id: i64, copy: &CopyRef) -> bool {
+        self.respread.contains(&(id, copy.clone()))
     }
 
     /// Drops what the runtime keeps about a row only while it is tracked.
@@ -1756,6 +1766,9 @@ impl DownloadManager {
     /// issued after a timed-out pause still ends `canceled`.
     pub fn stop(&self, id: i64, reason: StopReason) -> Stopped {
         let mut inner = self.inner.lock();
+        if matches!(reason, StopReason::Cancel | StopReason::Detach) {
+            inner.respread.retain(|(r, _)| *r != id);
+        }
         if let Some(ctl) = inner.active.get(&id) {
             {
                 let mut current = ctl.reason.lock();
@@ -2314,6 +2327,15 @@ async fn claim(
     ctl: &Arc<TaskCtl>,
     start: &Start,
 ) -> CoreResult<Claim> {
+    if let Some(copy) = ctl
+        .copy
+        .as_ref()
+        .filter(|c| Some(*c) != start.origin.as_ref())
+    {
+        if mgr.inner.lock().braked(id, copy) {
+            return Ok(Claim::Stale);
+        }
+    }
     let mut attempt = 0;
     loop {
         let simulated = take_one(&mgr.failing_claims);
@@ -2433,6 +2455,16 @@ async fn run_task(
                 *reason = ctl.reason();
             }
             let outcome = mgr.settle(id, &ctl.source, outcome);
+            {
+                let mut inner = mgr.inner.lock();
+                match (&outcome, &ctl.copy) {
+                    (Outcome::Respread { .. }, Some(copy)) => {
+                        inner.respread.insert((id, copy.clone()));
+                    }
+                    (Outcome::Completed { .. }, _) => inner.respread.retain(|(r, _)| *r != id),
+                    _ => {}
+                }
+            }
             let outcome = drop_origin_bytes(&state, &mgr, id, &ctl, outcome).await;
             back = match &outcome {
                 Outcome::Stopped {
@@ -2657,8 +2689,9 @@ async fn part_of(state: &Arc<AppState>, id: i64) -> Option<std::path::PathBuf> {
 /// Resolves the copy a run on another source downloads (a spread copy, or
 /// the row's origin) before its transfer starts, unless it was resolved
 /// ahead. A copy that is gone (its source removed, or the title gone from
-/// that catalog) is final for that copy: the pair's verdict is retired and
-/// the run ends as a `Respread`, so the row goes back at once instead of
+/// that catalog) is final for that copy: the verdict between it and the
+/// row's base (its origin, else its own copy) is retired and the run ends
+/// as a `Respread`, so the row goes back at once instead of
 /// waiting for a source that will never have it. Any other failure is left
 /// to the transfer, which resolves again and waits for the source.
 async fn copy_gone(
@@ -2698,8 +2731,11 @@ async fn copy_gone(
                 .await
                 .ok()?
                 .download;
+            // The run compared the copy with the row's base: its origin,
+            // else its own copy.
             let own = CopyRef::new(d.item_ref, d.episode_id);
-            super::mirrors::record_mismatch(state, &own, copy, false).await;
+            let base = d.origin.filter(|o| o != copy).unwrap_or(own);
+            super::mirrors::record_mismatch(state, &base, copy, false).await;
             Some(Outcome::Respread {
                 message: format!("The copy on another source is gone: {why}."),
                 bytes: d.bytes_downloaded,

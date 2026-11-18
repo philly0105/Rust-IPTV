@@ -206,6 +206,27 @@ pub(super) fn drop_verdict(
     Ok(true)
 }
 
+/// Drops every Identical and Equivalent verdict between `copy` and another
+/// copy, under both records (a match is recorded on both sides). Differs
+/// and Unavailable verdicts stay.
+pub(super) fn drop_matches(conn: &Connection, copy: &CopyRef) -> CoreResult<()> {
+    let Some(rec) = load(conn, copy)? else {
+        return Ok(());
+    };
+    let matched = rec
+        .verdicts
+        .iter()
+        .filter(|e| matches!(e.verdict, Verdict::Identical | Verdict::Equivalent))
+        .map(|e| e.copy.clone());
+    for other in matched {
+        for verdict in [Verdict::Identical, Verdict::Equivalent] {
+            drop_verdict(conn, &other, copy, verdict)?;
+            drop_verdict(conn, copy, &other, verdict)?;
+        }
+    }
+    Ok(())
+}
+
 /// `rec`'s verdict on `copy`, when it still stands. `other` is `copy`'s own
 /// cached fingerprint, if any: an Identical or Equivalent verdict stands
 /// only while that still shows the total (and validator) compared, and an

@@ -244,6 +244,16 @@ fn own_copy(row: &DownloadRow) -> CopyRef {
     )
 }
 
+/// The copy whose verdict made `copy` a place to run the row: its origin's
+/// (the bytes it holds), or its own for a run on the origin itself or a
+/// row without one. A respread retires that pair.
+fn verified_against(row: &DownloadRow, copy: &CopyRef) -> CopyRef {
+    match &row.download.origin {
+        Some(origin) if origin != copy => origin.clone(),
+        _ => own_copy(row),
+    }
+}
+
 /// The copy the queue spread the row to, when the run downloads from
 /// another copy than the row's own.
 fn spread_copy(row: &DownloadRow, ctl: &TaskCtl) -> Option<CopyRef> {
@@ -703,7 +713,7 @@ async fn attempt(
             // compared with `sources[0]` when the next run adopts.
             let validator = ranges.sources[0].validator.clone();
             if let Some(copy) = &auth.spread {
-                let own = own_copy(row);
+                let own = verified_against(row, copy);
                 let known = Representation {
                     total: rep.total,
                     validator: validator.clone(),
@@ -910,7 +920,7 @@ async fn attempt(
         return error(http_status_error(status), resume_from, resume_from);
     }
     if let Some(copy) = &auth.spread {
-        let own = own_copy(row);
+        let own = verified_against(row, copy);
         if changed_since_verified(state, &own, copy, rep, true).await {
             drop(resp);
             tracing::info!(
@@ -1428,6 +1438,7 @@ async fn segmented(
         authority: auth.endpoint.clone(),
         copy: auth.copy.clone(),
         own: own_copy(row),
+        base: row.download.origin.clone(),
         mirrors,
     };
     let mut progress = Progress::new(start);
@@ -1458,7 +1469,7 @@ async fn segmented(
         SegEnd::Stopped(bytes) => AttemptEnd::Stopped(bytes),
         SegEnd::Respread(bytes) => {
             if let Some(copy) = &auth.spread {
-                mirrors::record_mismatch(state, &own_copy(row), copy, false).await;
+                mirrors::record_mismatch(state, &verified_against(row, copy), copy, false).await;
             }
             AttemptEnd::Respread {
                 message: CHANGED_COPY.into(),

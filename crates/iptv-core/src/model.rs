@@ -1052,6 +1052,8 @@ pub enum OneConnectionReason {
     Refused,
     /// The downloads folder cannot leave holes (FAT, exFAT).
     NoHoles,
+    /// Extra connections could not be opened (no answer) while one ran.
+    Unreachable,
 }
 
 /// How a panel answered one connection too many.
@@ -2865,6 +2867,13 @@ mod tests {
             })
             .unwrap(),
             serde_json::json!({"kind": "oneConnection", "reason": "noHoles"})
+        );
+        assert_eq!(
+            serde_json::to_value(TransferNote::OneConnection {
+                reason: OneConnectionReason::Unreachable,
+            })
+            .unwrap(),
+            serde_json::json!({"kind": "oneConnection", "reason": "unreachable"})
         );
         assert_eq!(
             serde_json::to_value(TransferNote::ProbeKickedOldest {

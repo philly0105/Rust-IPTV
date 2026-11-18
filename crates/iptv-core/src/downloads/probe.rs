@@ -2,7 +2,8 @@
 //! allows, beyond what the account reports.
 //!
 //! A round runs beside a transfer that holds everything its source gives
-//! it. It opens extra Range requests near the file's end one at a time,
+//! it, once every one of those connections has its answer and none is
+//! being replaced: the round counts from them. It opens extra Range requests near the file's end one at a time,
 //! holds each for [`ProbeTiming::step`](super::manager::ProbeTiming) with
 //! its body unread, and stops at the first refusal (any answer but a 2xx),
 //! at a kick (the panel ended the oldest connection, the transfer's own, to
@@ -17,10 +18,13 @@
 //! the source or the transfer stops, and it closes every connection it
 //! opened before it returns. After an aborted round the source is not
 //! probed for [`super::manager::PROBE_ABORT_BACKOFF`]. A round whose
-//! transfer ends (done or failed) keeps what it proved: connections held
-//! for a full step above the known limit are recorded as a learned limit,
+//! transfer ends (done or failed), or one of whose transfer's connections
+//! to the source ends, is refused or fails to open (the count it started
+//! from no longer holds), keeps what it proved: connections held for a
+//! full step above the known limit are recorded as a learned limit,
 //! retested after [`super::manager::PROBE_ABORT_BACKOFF`]; with none, the
-//! round counts as aborted.
+//! round counts as aborted. So a recorded count never exceeds the
+//! connections that were answered and open at the same moment.
 
 use super::manager::{self, Policy, TaskCtl};
 use super::segments::MAX_CONNECTIONS;
@@ -30,7 +34,9 @@ use super::shared::{
 };
 use super::DownloadManager;
 use crate::error::CoreResult;
-use crate::model::{ConnectionLimitMode, SourceConnectionLimit, SourceKind, TransferNote};
+use crate::model::{
+    ConnectionLimitMode, LimitKind, SourceConnectionLimit, SourceKind, TransferNote,
+};
 use crate::state::AppState;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
@@ -70,7 +76,9 @@ enum End {
     Cap,
     /// The transfer stopped, or playback or a recording started.
     Abort,
-    /// The transfer ended (done or failed) before the climb did.
+    /// The transfer ended (done or failed), or one of its connections to
+    /// the source ended, was refused or failed to open, before the climb
+    /// did.
     Ended,
 }
 
@@ -83,18 +91,20 @@ pub async fn probe(
     ep: &Endpoint,
     total: i64,
 ) -> Option<ProbeOutcome> {
-    probe_until(state, mgr, ctl, ep, total, &CancellationToken::new()).await
+    probe_until(state, mgr, ctl, ep, total, CancellationToken::new()).await
 }
 
-/// [`probe`], ended early once `end` is cancelled (the transfer ended):
-/// the round then keeps what it proved.
+/// [`probe`], ended early once `end` is cancelled: the transfer ended, or
+/// one of its connections to the source ended, was refused or failed to
+/// open, so the count the round started from no longer holds. The round
+/// then keeps the steps it held in full before that.
 pub async fn probe_until(
     state: &Arc<AppState>,
     mgr: &DownloadManager,
     ctl: &TaskCtl,
     ep: &Endpoint,
     total: i64,
-    end: &CancellationToken,
+    end: CancellationToken,
 ) -> Option<ProbeOutcome> {
     let source = ep.copy.source_id().to_string();
     mgr.load_now(state, &source).await;
@@ -151,6 +161,11 @@ pub async fn probe_until(
                 }
             }
         };
+        // The transfer's side changed while the request was out: the
+        // answer says nothing about the count the round started from.
+        if let Some(e) = stop() {
+            break e;
+        }
         match answer {
             Ok(Ok(resp)) if resp.status().is_success() => {
                 open.push(resp);
@@ -260,6 +275,73 @@ pub async fn probe_until(
     });
     mgr.repump();
     Some(outcome)
+}
+
+/// The panel really refused a transfer's extra connection on `source`
+/// (not its lag) while `open` of the transfer's connections there had
+/// their answer. When the source's limit is a learned one above `open`,
+/// the panel takes fewer than the record says (another device holds one,
+/// or the panel changed): the record falls to `open` when that is still
+/// above the reported limit, and is forgotten otherwise; either way the
+/// source is retested after [`manager::PROBE_ABORT_BACKOFF`], not in a
+/// week. Sync: the manager sees the change at once, the database a moment
+/// later.
+pub(crate) fn refused(state: &Arc<AppState>, mgr: &DownloadManager, source: &str, open: usize) {
+    let (Some(limit), LimitKind::Learned) = mgr.effective_limit(source) else {
+        return;
+    };
+    let Some(prior) = mgr.record(source) else {
+        return;
+    };
+    let open = i64::try_from(open).unwrap_or(i64::MAX);
+    if open >= limit {
+        return;
+    }
+    let reported = mgr.reported_limit(source);
+    let now = chrono::Utc::now();
+    let next = now
+        + chrono::Duration::from_std(manager::PROBE_ABORT_BACKOFF)
+            .unwrap_or(chrono::Duration::minutes(10));
+    let record = (open > reported.unwrap_or(0)).then(|| {
+        let mut history = prior.history;
+        history.push(ProbeStep {
+            at: rfc3339(now),
+            connections: open + 1,
+            outcome: ProbeOutcome::Refused,
+        });
+        let cut = history.len().saturating_sub(HISTORY);
+        history.drain(..cut);
+        LimitRecord {
+            version: 1,
+            limit: open,
+            reported,
+            mode: ConnectionLimitMode::Refuse,
+            probed_at: rfc3339(now),
+            next_probe_at: rfc3339(next),
+            history,
+        }
+    });
+    tracing::info!(
+        source,
+        learned = limit,
+        open,
+        "the panel took fewer connections than learned"
+    );
+    mgr.set_record(source, record.clone());
+    mgr.probe_aborted(source);
+    let (state, sid) = (Arc::clone(state), source.to_string());
+    tokio::spawn(async move {
+        let key = limit_key(&sid);
+        let saved = state
+            .db_write(move |c| match &record {
+                Some(r) => write_record(c, &key, r),
+                None => delete_record(c, &key),
+            })
+            .await;
+        if let Err(err) = saved {
+            tracing::warn!(source = sid, error = %err, "could not correct the learned connection limit");
+        }
+    });
 }
 
 fn rfc3339(t: chrono::DateTime<chrono::Utc>) -> String {

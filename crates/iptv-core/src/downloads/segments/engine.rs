@@ -55,10 +55,16 @@ const RECYCLE_MIN_AGE: Duration = Duration::from_secs(5);
 const RECYCLE_EVERY: Duration = Duration::from_secs(30);
 /// A refusal this soon after one of the transfer's own connections to the
 /// source closed, or a probe's, is the panel still counting it, not the
-/// account's limit: the connection is asked for again.
+/// account's limit: the connection is asked for again. Measured to the
+/// first refusal of a streak; the streak's later ones are the same lag.
 const AFTER_CLOSE: Duration = Duration::from_secs(3);
-/// Refusals in a row taken for the panel's lag before the rest of the run
-/// keeps one connection.
+/// Refusals in a row taken for the panel's lag (a streak) before the rest
+/// of the run keeps one connection. Requests sent before the streak's last
+/// counted refusal belong to its wave: the same lag, not counted again.
+/// The retries wait [`RETRY_BASE`] doubled each time, so a real refusal
+/// falls to one connection within 1 + 2 + 4 s of the streak's first, after
+/// `LAG_REFUSALS + 1` waves of refused requests (one request each when one
+/// connection is missing).
 const LAG_REFUSALS: u32 = 3;
 /// Bytes a comparison involving a mirror needs outside the sample windows
 /// (inside them the mirror was already compared).
@@ -112,8 +118,12 @@ struct Src {
     /// Its allowance fell to zero and the note says so.
     fell: bool,
     failures: u32,
-    /// Refusals in a row taken for the panel's lag ([`LAG_REFUSALS`]).
+    /// Refusals in a row taken for the panel's lag ([`LAG_REFUSALS`]). The
+    /// streak ends once a connection opened after its last refusal has
+    /// its answer.
     refusals: u32,
+    /// When the streak's last counted refusal came.
+    refused_at: Option<Instant>,
     /// When one of its connections last ended well (a segment's end, a
     /// recycle or a retire).
     closed: Option<Instant>,
@@ -139,6 +149,7 @@ impl Src {
             fell: false,
             failures: 0,
             refusals: 0,
+            refused_at: None,
             closed: None,
             retry_at: None,
             cursor: 1,
@@ -446,15 +457,20 @@ pub async fn run(
         job.mirrors.as_ref().map(|m| find_mirrors(cx, m).boxed());
     // When the last mirror search ended.
     let mut searched = Instant::now();
-    // Ends a probe round when the transfer ends: the round keeps what it
-    // proved, or backs off (a dropped round would do neither).
-    let probe_end = CancellationToken::new();
+    // Ends a probe round when the transfer ends, or when one of the
+    // authority's connections ends, is refused or fails to open (the count
+    // the round started from no longer holds): the round keeps the steps
+    // it held in full, or backs off (a dropped round would do neither).
+    let mut probe_end = CancellationToken::new();
     let mut probing: Option<BoxFuture<'_, ()>> = None;
     let mut probe_ended: Option<Instant> = None;
     let mut last_stats = Instant::now();
     let mut stats_received = 0i64;
     // The provider refused an extra connection: the rest goes over one.
     let mut refused = false;
+    // Extra connections could not be opened: the rest goes over one, and
+    // no limit explains the speed (the note does).
+    let mut unreachable = false;
 
     macro_rules! fail {
         ($e:expr) => {{
@@ -660,6 +676,28 @@ pub async fn run(
                         .map(|k| running.remove(k));
                     srcs[src].bytes += meter.bytes();
                     closed_at = Some(Instant::now());
+                    // A drop while a probe runs is the kick it watches for.
+                    if src == 0 && !matches!(result, Err(WorkerError::Dropped(_))) {
+                        probe_end.cancel();
+                    }
+                    let opened = opened_at(&meter);
+                    // A connection asked for after the streak's last
+                    // refusal has its answer: the panel's lag is over.
+                    if src == 0 && matches!(result, Err(WorkerError::Refused(_))) {
+                        let s = &mut srcs[0];
+                        let over = s.refused_at.is_some_and(|t| {
+                            running.iter().any(|r| {
+                                r.src == 0 && r.meter.bytes() > 0 && opened_at(&r.meter) >= t
+                            })
+                        });
+                        if over {
+                            s.refusals = 0;
+                        }
+                    }
+                    // Sent before the streak's last counted refusal: one
+                    // of that wave, the same lag.
+                    let same_wave =
+                        srcs[0].refusals > 0 && srcs[0].refused_at.is_some_and(|t| opened < t);
                     if open_ended == Some(seg) {
                         open_ended = None;
                     }
@@ -674,17 +712,19 @@ pub async fn run(
                             let now = Instant::now();
                             // Opens fail in a row until one opened after
                             // the last failure ends well.
-                            let opened = now.checked_sub(meter.age()).unwrap_or(now);
                             if s.retry_at.is_none_or(|t| opened >= t) {
                                 s.failures = 0;
                             }
-                            s.refusals = 0;
+                            if meter.bytes() > 0 && s.refused_at.is_none_or(|t| opened >= t) {
+                                s.refusals = 0;
+                            }
                             s.closed = Some(now);
                         }
                         Err(WorkerError::Mismatch { other }) => {
                             let me = src as u16;
+                            // The entry of the copy the row's bytes are.
                             let home = |k: u16| {
-                                k != 0 && plan.lock().ranges.sources[usize::from(k)].copy.is_none()
+                                k != 0 && plan.lock().ranges.sources[usize::from(k)].copy == job.base
                             };
                             if me == 0 && other == 0 {
                                 fail!(WorkerError::Changed(
@@ -767,20 +807,31 @@ pub async fn run(
                             tracing::info!(id = job.id, error = %err, "extra connections could not be opened; going on with one");
                             job.one_connection.store(true, Ordering::Relaxed);
                             ctl.set_one_connection(true);
+                            if !unreachable {
+                                ctl.push_note(TransferNote::OneConnection {
+                                    reason: OneConnectionReason::Unreachable,
+                                });
+                            }
+                            unreachable = true;
                         }
                         Err(WorkerError::Refused(err))
-                            if srcs[0].refusals < LAG_REFUSALS
-                                && (probing.is_some()
-                                    || [probe_ended, srcs[0].closed]
-                                        .into_iter()
-                                        .flatten()
-                                        .any(|t| t.elapsed() <= AFTER_CLOSE)) =>
+                            if same_wave
+                                || (srcs[0].refusals < LAG_REFUSALS
+                                    && (srcs[0].refusals > 0
+                                        || probing.is_some()
+                                        || [probe_ended, srcs[0].closed]
+                                            .into_iter()
+                                            .flatten()
+                                            .any(|t| t.elapsed() <= AFTER_CLOSE))) =>
                         {
                             // The panel still counts a connection that just
                             // closed (the transfer's own or a probe's): the
                             // segment is asked for again a little later.
                             let s = &mut srcs[0];
-                            s.refusals += 1;
+                            if !same_wave {
+                                s.refusals += 1;
+                                s.refused_at = Some(Instant::now());
+                            }
                             let delay = RETRY_BASE * 2u32.pow(s.refusals - 1);
                             s.retry_at = Some(Instant::now() + delay);
                             tracing::info!(id = job.id, error = %err, ?delay, "a connection was refused right after another closed; asking again");
@@ -800,6 +851,13 @@ pub async fn run(
                             }
                             ctl.set_one_connection(true);
                             refused = true;
+                            // A learned limit this run did not reach is
+                            // more than the panel takes now: corrected.
+                            let open = running
+                                .iter()
+                                .filter(|r| r.src == 0 && r.meter.bytes() > 0)
+                                .count();
+                            probe::refused(state, mgr, &srcs[0].id(), open);
                             let mut p = plan.lock();
                             let gone = p.ranges.segments[seg];
                             if let Some(o) = open_ended.filter(|o| {
@@ -892,13 +950,16 @@ pub async fn run(
             if !stopping
                 && may
                 && probing.is_none()
+                && pending.is_empty()
+                && settled(&running)
                 && ramp.gained != Some(false)
                 && total - done >= PROBE_MIN_LEFT
             {
                 if let Some(ep) = &job.authority {
                     if probe::probe_due(state, mgr, ctl, &ctl.source) {
+                        probe_end = CancellationToken::new();
                         probing = Some(
-                            probe::probe_until(state, mgr, ctl, ep, total, &probe_end)
+                            probe::probe_until(state, mgr, ctl, ep, total, probe_end.clone())
                                 .map(|_| ())
                                 .boxed(),
                         );
@@ -921,7 +982,7 @@ pub async fn run(
             }
             let secs = now.duration_since(last_stats).as_secs_f64().max(0.001);
             let speed = ((received - stats_received) as f64 / secs).round().max(0.0) as i64;
-            let s = breakdown(cx, &srcs, &running, &ramp, refused, speed);
+            let s = breakdown(cx, &srcs, &running, &ramp, refused, unreachable, speed);
             stats::publish(state, ctl, s);
             last_stats = now;
             stats_received = received;
@@ -1023,6 +1084,23 @@ pub async fn run(
 /// Workers of source `src` that run.
 fn count(running: &[Running], src: usize) -> usize {
     running.iter().filter(|r| r.src == src).count()
+}
+
+/// True when every connection of the authority has its answer (bytes
+/// came) and none is being replaced: the panel counts each of them, so a
+/// probe round may start from that count. A request still waiting (the
+/// close grace, the panel's answer) is not open yet.
+fn settled(running: &[Running]) -> bool {
+    running
+        .iter()
+        .filter(|r| r.src == 0)
+        .all(|r| !r.recycle && r.meter.bytes() > 0)
+}
+
+/// When the worker `meter` measures opened its connection (its start).
+fn opened_at(meter: &Meter) -> Instant {
+    let now = Instant::now();
+    now.checked_sub(meter.age()).unwrap_or(now)
 }
 
 /// How long a new request waits after a connection closed.
@@ -1395,6 +1473,7 @@ fn breakdown(
     running: &[Running],
     ramp: &Ramp,
     refused: bool,
+    unreachable: bool,
     speed: i64,
 ) -> TransferStats {
     let (state, ctl, mgr) = (cx.job.state, cx.job.ctl, cx.job.mgr);
@@ -1447,8 +1526,19 @@ fn breakdown(
             source_id: ctl.source.clone(),
         });
     }
-    for s in srcs.iter().filter(|s| s.usable().is_some()) {
-        found.extend(mgr.limit_reason(ctl, &s.id()));
+    for (i, s) in srcs
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.usable().is_some())
+    {
+        // An account limit explains the speed only while the source runs
+        // as many connections as it gives this transfer (a reported limit
+        // keeps one free).
+        let allowed = mgr.allowance_on(ctl, &s.id());
+        found.extend(mgr.limit_reason(ctl, &s.id()).filter(|l| match l {
+            Limiting::AccountLimit { .. } => count(running, i) >= allowed,
+            _ => true,
+        }));
     }
     if let Some(bps) = ramp.line {
         found.push(Limiting::Line {
@@ -1462,16 +1552,20 @@ fn breakdown(
     let several = running.iter().any(|r| r.src != running[0].src);
     if (found.is_empty() || several) && !running.is_empty() && running.len() >= want.room {
         let speeds: Vec<i64> = running.iter().map(|r| r.meter.speed()).collect();
-        found.push(Limiting::PerConnection {
-            bytes_per_second: stats::median(&speeds),
-        });
+        // No speed measured yet explains nothing.
+        let median = stats::median(&speeds);
+        if median > 0 {
+            found.push(Limiting::PerConnection {
+                bytes_per_second: median,
+            });
+        }
     }
     TransferStats {
         id: cx.job.id,
         bytes_per_second: speed,
         connections,
         sources,
-        limiting: stats::first(found),
+        limiting: (!unreachable).then(|| stats::first(found)).flatten(),
         notes: ctl.recent_notes(),
     }
 }
@@ -1711,9 +1805,12 @@ async fn open(
     };
     // An address of the host that does not answer is skipped from now on,
     // and the request goes the usual way: it says nothing about the
-    // provider's limit.
+    // provider's limit. A redirect the server-mode guard blocked is not
+    // the address's fault.
     let answer = match (answer, address) {
-        (Err(WorkerError::Unreachable(err)), Some((_, a))) => {
+        (Err(WorkerError::Unreachable(err)), Some((_, a)))
+            if !matches!(err, CoreError::Invalid(_)) =>
+        {
             tracing::info!(id = cx.job.id, address = %a.ip(), error = %err, "an address of the host did not answer; skipping it");
             cx.dead.lock().push(a);
             meter.set_peer(host_of(&url), None);

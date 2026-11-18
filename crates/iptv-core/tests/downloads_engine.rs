@@ -1859,3 +1859,69 @@ async fn a_retest_near_a_segment_end_never_records_more_than_the_panel_holds() {
         "a round recorded more than the panel's 3: {all:?}"
     );
 }
+
+/// A learned limit of 4 on a panel that now takes 3 (its retest a week
+/// away): the first download's fourth connection is refused, which lowers
+/// the record to the 3 that were open and retests it soon; the next
+/// download holds 3 connections with no refusal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refusal_below_a_learned_limit_lowers_it() {
+    let c = xctx().await;
+    let panel = Panel::spawn(101).await;
+    panel.set_reported(1);
+    panel.set_enforced(3);
+    let size = 48 * MIB;
+    for f in 1..=2 {
+        panel.file(f, size, 2048);
+    }
+    let s = add_xtream_source(&c.state, "stale", &panel).await;
+    for f in 1..=2 {
+        add_movie(&c.state, &s, f, &format!("Movie {f}"), None, "mp4").await;
+    }
+    learned_limit(&c, &s, 4, 1).await;
+    let d = c.start_movie(&s, 1, &panel.movie_url(1)).await;
+    let path = c.completed(d.id).await;
+    dl_panel::is_exact(1, size, &path).unwrap();
+    assert!(panel.counts().get("refused").copied().unwrap_or(0) >= 1);
+    let l = limit_of(&c, &s).await;
+    assert_eq!(l.learned, Some(3), "the record was not lowered");
+    let next = chrono::DateTime::parse_from_rfc3339(&l.next_probe_at.unwrap()).unwrap();
+    let left = next.with_timezone(&chrono::Utc) - chrono::Utc::now();
+    assert!(left <= chrono::Duration::minutes(11), "retested in {left}");
+
+    let refused = panel.counts().get("refused").copied().unwrap_or(0);
+    let d = c.start_movie(&s, 2, &panel.movie_url(2)).await;
+    until("three connections", || panel.open() == 3).await;
+    let stats = stats_until_done(&c, d.id).await;
+    let path = PathBuf::from(c.get(d.id).await.file_path.unwrap());
+    dl_panel::is_exact(2, size, &path).unwrap();
+    assert_eq!(
+        panel.counts().get("refused").copied().unwrap_or(0),
+        refused,
+        "the next download was refused"
+    );
+    let notes = one_connection_notes(&stats);
+    assert!(notes.is_empty(), "fell to one connection: {notes:?}");
+}
+
+/// A learned limit of 3 on a panel that takes only the 2 it reports: the
+/// refusal of the third connection forgets the record, and the source is
+/// not probed again for a while.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refusal_at_the_reported_limit_forgets_the_learned_one() {
+    let c = xctx().await;
+    let panel = Panel::spawn(102).await;
+    panel.set_reported(2);
+    panel.set_enforced(2);
+    let size = 48 * MIB;
+    panel.file(1, size, 2048);
+    let s = add_xtream_source(&c.state, "gone", &panel).await;
+    add_movie(&c.state, &s, 1, "Movie 1", None, "mp4").await;
+    learned_limit(&c, &s, 3, 2).await;
+    let d = c.start_movie(&s, 1, &panel.movie_url(1)).await;
+    let path = c.completed(d.id).await;
+    dl_panel::is_exact(1, size, &path).unwrap();
+    assert!(panel.counts().get("refused").copied().unwrap_or(0) >= 1);
+    assert_eq!(limit_of(&c, &s).await.learned, None, "the record was kept");
+    assert!(!due(&c, &s), "no backoff after the correction");
+}

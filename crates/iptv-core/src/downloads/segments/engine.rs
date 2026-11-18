@@ -816,6 +816,13 @@ pub async fn run(
                             }
                             ctl.set_one_connection(true);
                             refused = true;
+                            // A learned limit this run did not reach is
+                            // more than the panel takes now: corrected.
+                            let open = running
+                                .iter()
+                                .filter(|r| r.src == 0 && r.meter.bytes() > 0)
+                                .count();
+                            probe::refused(state, mgr, &srcs[0].id(), open);
                             let mut p = plan.lock();
                             let gone = p.ranges.segments[seg];
                             if let Some(o) = open_ended.filter(|o| {

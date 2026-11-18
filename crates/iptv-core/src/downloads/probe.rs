@@ -34,7 +34,9 @@ use super::shared::{
 };
 use super::DownloadManager;
 use crate::error::CoreResult;
-use crate::model::{ConnectionLimitMode, SourceConnectionLimit, SourceKind, TransferNote};
+use crate::model::{
+    ConnectionLimitMode, LimitKind, SourceConnectionLimit, SourceKind, TransferNote,
+};
 use crate::state::AppState;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
@@ -273,6 +275,73 @@ pub async fn probe_until(
     });
     mgr.repump();
     Some(outcome)
+}
+
+/// The panel really refused a transfer's extra connection on `source`
+/// (not its lag) while `open` of the transfer's connections there had
+/// their answer. When the source's limit is a learned one above `open`,
+/// the panel takes fewer than the record says (another device holds one,
+/// or the panel changed): the record falls to `open` when that is still
+/// above the reported limit, and is forgotten otherwise; either way the
+/// source is retested after [`manager::PROBE_ABORT_BACKOFF`], not in a
+/// week. Sync: the manager sees the change at once, the database a moment
+/// later.
+pub(crate) fn refused(state: &Arc<AppState>, mgr: &DownloadManager, source: &str, open: usize) {
+    let (Some(limit), LimitKind::Learned) = mgr.effective_limit(source) else {
+        return;
+    };
+    let Some(prior) = mgr.record(source) else {
+        return;
+    };
+    let open = i64::try_from(open).unwrap_or(i64::MAX);
+    if open >= limit {
+        return;
+    }
+    let reported = mgr.reported_limit(source);
+    let now = chrono::Utc::now();
+    let next = now
+        + chrono::Duration::from_std(manager::PROBE_ABORT_BACKOFF)
+            .unwrap_or(chrono::Duration::minutes(10));
+    let record = (open > reported.unwrap_or(0)).then(|| {
+        let mut history = prior.history;
+        history.push(ProbeStep {
+            at: rfc3339(now),
+            connections: open + 1,
+            outcome: ProbeOutcome::Refused,
+        });
+        let cut = history.len().saturating_sub(HISTORY);
+        history.drain(..cut);
+        LimitRecord {
+            version: 1,
+            limit: open,
+            reported,
+            mode: ConnectionLimitMode::Refuse,
+            probed_at: rfc3339(now),
+            next_probe_at: rfc3339(next),
+            history,
+        }
+    });
+    tracing::info!(
+        source,
+        learned = limit,
+        open,
+        "the panel took fewer connections than learned"
+    );
+    mgr.set_record(source, record.clone());
+    mgr.probe_aborted(source);
+    let (state, sid) = (Arc::clone(state), source.to_string());
+    tokio::spawn(async move {
+        let key = limit_key(&sid);
+        let saved = state
+            .db_write(move |c| match &record {
+                Some(r) => write_record(c, &key, r),
+                None => delete_record(c, &key),
+            })
+            .await;
+        if let Err(err) = saved {
+            tracing::warn!(source = sid, error = %err, "could not correct the learned connection limit");
+        }
+    });
 }
 
 fn rfc3339(t: chrono::DateTime<chrono::Utc>) -> String {

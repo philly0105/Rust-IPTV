@@ -53,9 +53,13 @@ const LINE_HOLD: Duration = Duration::from_secs(30);
 const RECYCLE_MIN_AGE: Duration = Duration::from_secs(5);
 /// Nor more often than this.
 const RECYCLE_EVERY: Duration = Duration::from_secs(30);
-/// A refusal this soon after a probe closed its connections is the panel
-/// still counting them, not the account's limit.
-const AFTER_PROBE: Duration = Duration::from_secs(3);
+/// A refusal this soon after one of the transfer's own connections to the
+/// source closed, or a probe's, is the panel still counting it, not the
+/// account's limit: the connection is asked for again.
+const AFTER_CLOSE: Duration = Duration::from_secs(3);
+/// Refusals in a row taken for the panel's lag before the rest of the run
+/// keeps one connection.
+const LAG_REFUSALS: u32 = 3;
 /// Bytes a comparison involving a mirror needs outside the sample windows
 /// (inside them the mirror was already compared).
 const MIN_OUTSIDE: i64 = 4 * 1024;
@@ -65,8 +69,8 @@ const MIRROR_FAILURES: u32 = 3;
 /// connection, no answer in time) is asked for again after this, doubled
 /// for each failure in a row.
 const RETRY_BASE: Duration = Duration::from_secs(1);
-/// Failures in a row to open one, after which the attempt ends and its
-/// run retries it.
+/// Failures in a row to open one, after which the rest of the run keeps
+/// the connections that run (one, when none runs: the attempt ends).
 const OPEN_FAILURES: u32 = 4;
 /// How often a transfer that may use mirrors and has none looks again.
 const FIND_EVERY: Duration = Duration::from_secs(60);
@@ -108,6 +112,11 @@ struct Src {
     /// Its allowance fell to zero and the note says so.
     fell: bool,
     failures: u32,
+    /// Refusals in a row taken for the panel's lag ([`LAG_REFUSALS`]).
+    refusals: u32,
+    /// When one of its connections last ended well (a segment's end, a
+    /// recycle or a retire).
+    closed: Option<Instant>,
     /// No new connection before this: the last could not be opened.
     retry_at: Option<Instant>,
     /// Next address of the host to reopen a slow connection on.
@@ -129,6 +138,8 @@ impl Src {
             used: false,
             fell: false,
             failures: 0,
+            refusals: 0,
+            closed: None,
             retry_at: None,
             cursor: 1,
             reopen: Vec::new(),
@@ -211,7 +222,8 @@ enum WorkerError {
     Dropped(CoreError),
     /// The server refused the request (an HTTP error status).
     Refused(CoreError),
-    /// The request got no answer: no connection, or no headers in time.
+    /// The request got no answer: no connection, no headers in time, or a
+    /// redirect the server-mode guard blocked.
     Unreachable(CoreError),
     /// The answer was not the range asked for.
     Changed(String),
@@ -373,6 +385,10 @@ pub async fn run(
         validator: ranges.sources[0].validator.clone(),
         pinned: Mutex::new(pinned),
     }));
+    // The authority is another copy than the row's own (spread, or the
+    // row's origin): the row's bytes are the file, and a change there
+    // sends the row back to the queue instead of discarding them.
+    let elsewhere = ranges.sources[0].copy.is_some();
     let tails =
         ranges.sources[0].validator.is_none() || ranges.sources.len() > 1 || job.mirrors.is_some();
     let plan = Arc::new(Mutex::new(Plan::new(ranges)));
@@ -430,6 +446,9 @@ pub async fn run(
         job.mirrors.as_ref().map(|m| find_mirrors(cx, m).boxed());
     // When the last mirror search ended.
     let mut searched = Instant::now();
+    // Ends a probe round when the transfer ends: the round keeps what it
+    // proved, or backs off (a dropped round would do neither).
+    let probe_end = CancellationToken::new();
     let mut probing: Option<BoxFuture<'_, ()>> = None;
     let mut probe_ended: Option<Instant> = None;
     let mut last_stats = Instant::now();
@@ -446,7 +465,7 @@ pub async fn run(
             all.cancel();
             pending.clear();
             finding = None;
-            probing = None;
+            probe_end.cancel();
         }};
     }
 
@@ -597,7 +616,7 @@ pub async fn run(
                 all.cancel();
                 pending.clear();
                 finding = None;
-                probing = None;
+                probe_end.cancel();
             }
             saved = async { saving.as_mut().expect("a plan save in flight").await },
                 if !pending.is_empty() =>
@@ -651,13 +670,29 @@ pub async fn run(
                                 s.reopen.push((s.cursor, Instant::now()));
                                 s.cursor += 1;
                             }
-                            srcs[src].failures = 0;
+                            let s = &mut srcs[src];
+                            let now = Instant::now();
+                            // Opens fail in a row until one opened after
+                            // the last failure ends well.
+                            let opened = now.checked_sub(meter.age()).unwrap_or(now);
+                            if s.retry_at.is_none_or(|t| opened >= t) {
+                                s.failures = 0;
+                            }
+                            s.refusals = 0;
+                            s.closed = Some(now);
                         }
                         Err(WorkerError::Mismatch { other }) => {
                             let me = src as u16;
+                            let home = |k: u16| {
+                                k != 0 && plan.lock().ranges.sources[usize::from(k)].copy.is_none()
+                            };
                             if me == 0 && other == 0 {
                                 fail!(WorkerError::Changed(
                                     "overlapping bytes of two requests differ".into()
+                                ));
+                            } else if elsewhere && (me == 0 || other == 0) && (home(me) || home(other)) {
+                                fail!(WorkerError::Changed(
+                                    "the copy's bytes differ from the row's own".into()
                                 ));
                             } else {
                                 discard(cx, &mut srcs, &mut running, me, other);
@@ -725,12 +760,30 @@ pub async fn run(
                             s.retry_at = Some(Instant::now() + delay);
                             tracing::info!(id = job.id, error = %err, ?delay, "a connection could not be opened; asking again");
                         }
+                        Err(WorkerError::Unreachable(err)) if !running.is_empty() => {
+                            // Extra connections keep failing to open: the
+                            // rest of the run keeps the ones that run, and
+                            // the working stream goes on.
+                            tracing::info!(id = job.id, error = %err, "extra connections could not be opened; going on with one");
+                            job.one_connection.store(true, Ordering::Relaxed);
+                            ctl.set_one_connection(true);
+                        }
                         Err(WorkerError::Refused(err))
-                            if probe_ended.is_some_and(|t| t.elapsed() <= AFTER_PROBE) =>
+                            if srcs[0].refusals < LAG_REFUSALS
+                                && (probing.is_some()
+                                    || [probe_ended, srcs[0].closed]
+                                        .into_iter()
+                                        .flatten()
+                                        .any(|t| t.elapsed() <= AFTER_CLOSE)) =>
                         {
-                            // The panel still counts the probe's connections:
-                            // the segment is asked for again after the grace.
-                            tracing::info!(id = job.id, error = %err, "a connection was refused right after a probe; trying again");
+                            // The panel still counts a connection that just
+                            // closed (the transfer's own or a probe's): the
+                            // segment is asked for again a little later.
+                            let s = &mut srcs[0];
+                            s.refusals += 1;
+                            let delay = RETRY_BASE * 2u32.pow(s.refusals - 1);
+                            s.retry_at = Some(Instant::now() + delay);
+                            tracing::info!(id = job.id, error = %err, ?delay, "a connection was refused right after another closed; asking again");
                         }
                         Err(WorkerError::Refused(err)) if !running.is_empty() => {
                             // The account has fewer free connections than
@@ -844,8 +897,11 @@ pub async fn run(
             {
                 if let Some(ep) = &job.authority {
                     if probe::probe_due(state, mgr, ctl, &ctl.source) {
-                        probing =
-                            Some(probe::probe(state, mgr, ctl, ep, total).map(|_| ()).boxed());
+                        probing = Some(
+                            probe::probe_until(state, mgr, ctl, ep, total, &probe_end)
+                                .map(|_| ())
+                                .boxed(),
+                        );
                     }
                 }
             }
@@ -875,7 +931,10 @@ pub async fn run(
         }
     }
     drop(finding);
-    drop(probing);
+    if let Some(round) = probing.take() {
+        probe_end.cancel();
+        round.await;
+    }
     // The transfer holds its one connection again.
     for s in &srcs {
         if let Some(c) = &s.conn {
@@ -894,6 +953,27 @@ pub async fn run(
     let ranges = plan.lock().ranges.clone();
     let done = ranges.done();
     let part = job.part.clone();
+    if let (Some(WorkerError::Changed(why)), true) = (&failure, elsewhere) {
+        tracing::info!(
+            id = job.id,
+            why,
+            "the copy downloaded from changed; the download goes back to the queue"
+        );
+        // Its bytes no comparison confirmed go; the row's own stay.
+        let ranges = {
+            let mut p = plan.lock();
+            for i in 0..p.ranges.segments.len() {
+                let s = p.ranges.segments[i];
+                if s.src == 0 && !s.checked && s.pos > s.start {
+                    p.reset(i);
+                }
+            }
+            p.ranges.clone()
+        };
+        let done = ranges.done();
+        settle_save(job.id, Some(spawn_save(job, ranges, None))).await;
+        return SegEnd::Respread(done);
+    }
     if let Some(WorkerError::Changed(why)) = &failure {
         tracing::info!(
             id = job.id,
@@ -1211,6 +1291,8 @@ fn attach(cx: &Cx<'_>, srcs: &mut Vec<Src>, found: Vec<Found>) -> bool {
     let mut discarded = false;
     for f in found {
         let copy = f.mirror.endpoint.copy.clone();
+        // The row's own copy has one entry, `None`, in any role.
+        let entry = (copy != cx.job.own).then(|| copy.clone());
         let id = copy.item_ref.source_id.clone();
         if id == ctl.source
             || srcs
@@ -1222,12 +1304,7 @@ fn attach(cx: &Cx<'_>, srcs: &mut Vec<Src>, found: Vec<Found>) -> bool {
         let validator = f.mirror.fingerprint.validator.clone();
         let idx = {
             let mut p = cx.plan.lock();
-            match p
-                .ranges
-                .sources
-                .iter()
-                .position(|s| s.copy.as_ref() == Some(&copy))
-            {
+            match p.ranges.sources.iter().position(|s| s.copy == entry) {
                 Some(k) if k > 0 => {
                     if p.ranges.sources[k].validator != validator {
                         // The mirror's file changed since it served these
@@ -1247,7 +1324,7 @@ fn attach(cx: &Cx<'_>, srcs: &mut Vec<Src>, found: Vec<Found>) -> bool {
                         continue;
                     }
                     p.ranges.sources.push(SegSource {
-                        copy: Some(copy.clone()),
+                        copy: entry,
                         validator: validator.clone(),
                     });
                     srcs.push(Src::new(Some(copy.clone())));
@@ -1700,13 +1777,11 @@ async fn request(
         req = req.header(IF_RANGE, v.as_str());
     }
     // No answer is not a refusal: only an HTTP status says the provider
-    // turned the connection down.
+    // turned the connection down. A redirect the server-mode guard blocked
+    // is not the provider's either.
     let resp = crate::http::send_within(req, cx.job.head_limit)
         .await
-        .map_err(|e| match e {
-            CoreError::Invalid(_) => WorkerError::Refused(e),
-            e => WorkerError::Unreachable(e),
-        })?;
+        .map_err(WorkerError::Unreachable)?;
     check_range(&resp, from, cx.total)?;
     Ok(resp)
 }

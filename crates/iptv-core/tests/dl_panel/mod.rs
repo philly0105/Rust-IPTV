@@ -13,7 +13,8 @@
 //! - **Validators** ([`Validators`]): ETag (the default), Last-Modified,
 //!   both, or none at all, in which case `If-Range` is ignored.
 //! - **Limit mode** ([`LimitMode`]): past `set_enforced`, refuse with 403
-//!   (the default) or accept and end the oldest open body (kick-oldest).
+//!   (the default), accept and end the oldest open body (kick-oldest), or
+//!   never answer.
 //! - **Copies** ([`Variant`]): a file may differ from the canonical bytes
 //!   everywhere, or only outside the three fingerprint windows.
 //! - **Redirects** ([`Redirect`]): `/movie/` and `/series/` answer 302 to
@@ -169,6 +170,9 @@ pub enum LimitMode {
     /// already sent, then an error. Bodies inside their close lag are not
     /// open any more, so a request that finds only those is still refused.
     KickOldest,
+    /// Never answers it: no status, no headers (`hung` counts them). The
+    /// request waits until the client gives up or the panel shuts down.
+    Hang,
 }
 
 /// How a panel sends `/movie/` and `/series/` requests to where the bytes are.
@@ -879,6 +883,15 @@ async fn answer(
         return status(StatusCode::SERVICE_UNAVAILABLE, s, "unavailable");
     }
     let Some(slot) = Slot::take(s) else {
+        if *s.limit_mode.lock() == LimitMode::Hang {
+            s.count("hung");
+            let stop = s.shutdown.clone();
+            tokio::select! {
+                _ = stop.cancelled() => {}
+                _ = tokio::time::sleep(Duration::from_secs(120)) => {}
+            }
+            return status(StatusCode::SERVICE_UNAVAILABLE, s, "unavailable");
+        }
         return status(StatusCode::FORBIDDEN, s, "refused");
     };
     let len = last + 1 - start;

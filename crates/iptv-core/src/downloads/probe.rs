@@ -16,7 +16,11 @@
 //! aborts, recording nothing, as soon as playback or a recording starts on
 //! the source or the transfer stops, and it closes every connection it
 //! opened before it returns. After an aborted round the source is not
-//! probed for [`super::manager::PROBE_ABORT_BACKOFF`].
+//! probed for [`super::manager::PROBE_ABORT_BACKOFF`]. A round whose
+//! transfer ends (done or failed) keeps what it proved: connections held
+//! for a full step above the known limit are recorded as a learned limit,
+//! retested after [`super::manager::PROBE_ABORT_BACKOFF`]; with none, the
+//! round counts as aborted.
 
 use super::manager::{self, Policy, TaskCtl};
 use super::segments::MAX_CONNECTIONS;
@@ -32,6 +36,7 @@ use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 /// How far before the file's end probe requests start. Their bodies are
 /// never read.
@@ -65,6 +70,8 @@ enum End {
     Cap,
     /// The transfer stopped, or playback or a recording started.
     Abort,
+    /// The transfer ended (done or failed) before the climb did.
+    Ended,
 }
 
 /// Runs one probe round for `ctl` on `ep` (a file of `total` bytes) and
@@ -75,6 +82,19 @@ pub async fn probe(
     ctl: &TaskCtl,
     ep: &Endpoint,
     total: i64,
+) -> Option<ProbeOutcome> {
+    probe_until(state, mgr, ctl, ep, total, &CancellationToken::new()).await
+}
+
+/// [`probe`], ended early once `end` is cancelled (the transfer ended):
+/// the round then keeps what it proved.
+pub async fn probe_until(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    ctl: &TaskCtl,
+    ep: &Endpoint,
+    total: i64,
+    end: &CancellationToken,
 ) -> Option<ProbeOutcome> {
     let source = ep.copy.source_id().to_string();
     mgr.load_now(state, &source).await;
@@ -89,6 +109,17 @@ pub async fn probe(
     let drops_before = ctl.drops(&source);
     let mut open: Vec<reqwest::Response> = Vec::new();
     let mut steps: Vec<ProbeStep> = Vec::new();
+    // Connections held open for a full step.
+    let mut accepted = 0usize;
+    let stop = || {
+        if mgr.probe_interrupted(ctl, &source) {
+            Some(End::Abort)
+        } else if end.is_cancelled() {
+            Some(End::Ended)
+        } else {
+            None
+        }
+    };
     let step = |connections: usize, outcome: ProbeOutcome| ProbeStep {
         at: now_rfc3339(),
         connections: i64::try_from(connections).unwrap_or(i64::MAX),
@@ -99,8 +130,8 @@ pub async fn probe(
         if trying > MAX_CONNECTIONS + 1 {
             break End::Cap;
         }
-        if mgr.probe_interrupted(ctl, &source) {
-            break End::Abort;
+        if let Some(e) = stop() {
+            break e;
         }
         let req = crate::http::apply_source_headers(
             client
@@ -114,8 +145,8 @@ pub async fn probe(
             tokio::select! {
                 answer = &mut send => break answer,
                 _ = tokio::time::sleep(POLL) => {
-                    if mgr.probe_interrupted(ctl, &source) {
-                        break 'climb End::Abort;
+                    if let Some(e) = stop() {
+                        break 'climb e;
                     }
                 }
             }
@@ -142,8 +173,8 @@ pub async fn probe(
         // stay unread, so the end of a probe's range never looks like one.
         let until = tokio::time::Instant::now() + timing.step;
         loop {
-            if mgr.probe_interrupted(ctl, &source) {
-                break 'climb End::Abort;
+            if let Some(e) = stop() {
+                break 'climb e;
             }
             if ctl.drops(&source) > drops_before {
                 steps.push(step(trying, ProbeOutcome::KickedOldest));
@@ -156,18 +187,31 @@ pub async fn probe(
             tokio::time::sleep(POLL.min(until - now)).await;
         }
         steps.push(step(trying, ProbeOutcome::Accepted));
+        accepted += 1;
     };
     let kept = round.base + open.len();
     // Every probe connection closes before the round ends.
     drop(open);
     round.open.store(0, Ordering::Relaxed);
+    let proved = round.base + accepted;
     drop(round);
+    let reported = mgr.reported_limit(&source);
+    let prior = mgr.record(&source);
+    let before = prior.as_ref().map(|r| r.limit).or(reported).unwrap_or(1);
+    let short = |n: usize| i64::try_from(n).unwrap_or(i64::MAX) <= before;
     let (limit, mode, outcome) = match end {
         End::Abort => {
             mgr.probe_aborted(&source);
             mgr.repump();
             return Some(ProbeOutcome::Aborted);
         }
+        End::Ended if short(proved) => {
+            mgr.probe_aborted(&source);
+            mgr.repump();
+            return Some(ProbeOutcome::Aborted);
+        }
+        // A lower bound: the climb goes on from it at the next retest.
+        End::Ended => (proved, ConnectionLimitMode::Accept, ProbeOutcome::Accepted),
         End::Refused => (kept, ConnectionLimitMode::Refuse, ProbeOutcome::Refused),
         End::Kicked => (
             kept.saturating_sub(1).max(1),
@@ -177,12 +221,13 @@ pub async fn probe(
         End::Cap => (kept, ConnectionLimitMode::Accept, ProbeOutcome::Accepted),
     };
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-    let reported = mgr.reported_limit(&source);
-    let prior = mgr.record(&source);
-    let before = prior.as_ref().map(|r| r.limit).or(reported).unwrap_or(1);
     let now = chrono::Utc::now();
-    let next =
-        now + chrono::Duration::from_std(timing.retest_after).unwrap_or(chrono::Duration::days(7));
+    let retest = if matches!(end, End::Ended) {
+        manager::PROBE_ABORT_BACKOFF
+    } else {
+        timing.retest_after
+    };
+    let next = now + chrono::Duration::from_std(retest).unwrap_or(chrono::Duration::days(7));
     let mut history = prior.map(|r| r.history).unwrap_or_default();
     history.extend(steps);
     let cut = history.len().saturating_sub(HISTORY);
@@ -279,6 +324,7 @@ pub async fn reset(state: &Arc<AppState>, source_id: &str) -> CoreResult<()> {
         .await?;
     let mgr = manager::manager(state);
     mgr.set_record(source_id, None);
+    mgr.clear_probe_backoff(source_id);
     mgr.repump();
     Ok(())
 }

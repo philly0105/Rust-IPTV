@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "Het bestand kan afwijken van het bestand dat je koos.",
   "downloadAllowEquivalentNeedsMirrors": "Vereist dat „{{label}}” aan staat",
   "downloadProbeGroup": "Verbindingstests",
-  "downloadProbeHint": "Sommige aanbieders staan meer verbindingen toe dan het account meldt. Een grote download kan dat testen, hooguit eens per week. Na Resultaat vergeten test de volgende grote download opnieuw. Zet het uit voor een aanbieder die er bezwaar tegen heeft.",
+  "downloadProbeHint": "Sommige aanbieders staan meer verbindingen toe dan het account meldt. Een grote download kan dat testen. Een afgeronde test wordt hooguit eens per week herhaald; een onderbroken test wordt na 10 minuten opnieuw geprobeerd. Na Resultaat vergeten test de volgende grote download opnieuw. Zet het uit voor een aanbieder die er bezwaar tegen heeft.",
   "downloadProbeFor": "Verbindingen testen op {{name}}",
   "downloadProbeReported_one": "Account meldt {{count, number}}",
   "downloadProbeReported_other": "Account meldt {{count, number}}",

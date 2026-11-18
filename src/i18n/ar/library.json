@@ -114,6 +114,7 @@
   "noteOneConnectionChanged": "تغيّر الملف لدى المزوّد، فيستمر باتصال واحد",
   "noteOneConnectionRefused": "رفض المزوّد اتصالات إضافية، فيستمر باتصال واحد",
   "noteOneConnectionNoHoles": "قرص مجلد التنزيلات لا يقبل ملفًا مقسّمًا، لذا يتم التنزيل باتصال واحد",
+  "noteOneConnectionUnreachable": "تعذّر فتح اتصالات إضافية، لذا يتم التنزيل باتصال واحد",
   "noteUrlRefreshed": "انتهت صلاحية الرابط وتم تجديده",
   "limitingSpeedLimit": "حد السرعة الذي اخترته ({{speed}}) هو القيد",
   "limitingNoRanges": "يرسل المزوّد هذا الملف دفعة واحدة، لذا يستخدم اتصالًا واحدًا",

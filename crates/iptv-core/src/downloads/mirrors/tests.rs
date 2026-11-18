@@ -441,6 +441,44 @@ fn drop_verdict_removes_only_the_named_kind() {
 }
 
 #[test]
+fn drop_matches_removes_every_match_of_the_copy_both_ways() {
+    let conn = db();
+    let (a, b, c, d) = (movie("a"), movie("b"), movie("c"), movie("d"));
+    let total = Some(MIN_MIRROR_TOTAL);
+    store_fingerprint(&conn, &a, &fp(MIN_MIRROR_TOTAL, None, "x")).unwrap();
+    for (owner, copy, verdict) in [
+        (&a, &b, Verdict::Identical),
+        (&b, &a, Verdict::Identical),
+        (&a, &c, Verdict::Equivalent),
+        (&c, &a, Verdict::Equivalent),
+        (&b, &c, Verdict::Identical),
+        (&c, &b, Verdict::Identical),
+    ] {
+        cache::record_verdict(&conn, owner, entry(copy, verdict, total, Span::zero())).unwrap();
+    }
+    cache::record_verdict(&conn, &a, entry(&d, Verdict::Differs, None, Span::zero())).unwrap();
+    cache::drop_matches(&conn, &a).unwrap();
+    let names = |owner: &CopyRef, copy: &CopyRef| {
+        cache::load(&conn, owner)
+            .unwrap()
+            .is_some_and(|r| r.verdicts.iter().any(|e| e.copy == *copy))
+    };
+    for other in [&b, &c] {
+        assert!(!names(&a, other) && !names(other, &a), "{other:?}");
+    }
+    // A Differs verdict stays, and so do the matches between the others.
+    assert!(names(&a, &d));
+    assert_eq!(cached_identical(&conn, &b).unwrap(), vec![c.clone()]);
+    assert_eq!(cached_identical(&conn, &c).unwrap(), vec![b.clone()]);
+    // The fingerprint is the caller's to forget (`record_mismatch` does it
+    // next); with it gone, no match of the copy comes back.
+    assert!(cached_fingerprint(&conn, &a).unwrap().is_some());
+    cache::forget_fingerprint(&conn, &a).unwrap();
+    assert_eq!(cached_fingerprint(&conn, &a).unwrap(), None);
+    assert!(cached_identical(&conn, &a).unwrap().is_empty());
+}
+
+#[test]
 fn records_of_another_version_or_copy_read_as_absent() {
     let conn = db();
     let a = movie("a");

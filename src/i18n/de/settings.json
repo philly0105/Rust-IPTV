@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "Die Datei kann von der gewählten abweichen.",
   "downloadAllowEquivalentNeedsMirrors": "Erfordert „{{label}}“ eingeschaltet",
   "downloadProbeGroup": "Verbindungstests",
-  "downloadProbeHint": "Manche Anbieter erlauben mehr Verbindungen, als das Konto meldet. Ein großer Download kann das testen, höchstens einmal pro Woche. Nach „Ergebnis vergessen“ testet der nächste große Download erneut. Schalten Sie es für Anbieter aus, die das nicht mögen.",
+  "downloadProbeHint": "Manche Anbieter erlauben mehr Verbindungen, als das Konto meldet. Ein großer Download kann das testen. Ein abgeschlossener Test wird höchstens einmal pro Woche wiederholt, ein unterbrochener nach 10 Minuten erneut versucht. Nach „Ergebnis vergessen“ testet der nächste große Download erneut. Schalten Sie es für Anbieter aus, die das nicht mögen.",
   "downloadProbeFor": "Verbindungen testen bei {{name}}",
   "downloadProbeReported_one": "Konto meldet {{count, number}}",
   "downloadProbeReported_other": "Konto meldet {{count, number}}",

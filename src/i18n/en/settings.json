@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "The file may differ from the one you picked.",
   "downloadAllowEquivalentNeedsMirrors": "Needs “{{label}}” on",
   "downloadProbeGroup": "Connection tests",
-  "downloadProbeHint": "Some providers allow more connections than the account reports. A large download can test this, at most once a week. Forget result makes the next large download test again. Turn it off for a provider that objects.",
+  "downloadProbeHint": "Some providers allow more connections than the account reports. A large download can test this. A finished test is repeated at most once a week; an interrupted one is tried again after 10 minutes. Forget result makes the next large download test again. Turn it off for a provider that objects.",
   "downloadProbeFor": "Test connections on {{name}}",
   "downloadProbeReported_one": "Account reports {{count, number}}",
   "downloadProbeReported_other": "Account reports {{count, number}}",

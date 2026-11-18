@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "The file changed on the provider, so it continues on one connection",
   "noteOneConnectionRefused": "The provider refused more connections, so it continues on one",
   "noteOneConnectionNoHoles": "The downloads folder's drive can't hold a split file, so it downloads on one connection",
+  "noteOneConnectionUnreachable": "Extra connections could not be opened, so it downloads on one connection",
   "noteUrlRefreshed": "The link expired and was renewed",
   "limitingSpeedLimit": "Your speed limit of {{speed}} is the limit",
   "limitingNoRanges": "The provider sends this file in one piece, so it uses one connection",

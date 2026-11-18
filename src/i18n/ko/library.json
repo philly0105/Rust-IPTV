@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "제공자 쪽 파일이 바뀌어 연결 하나로 계속합니다",
   "noteOneConnectionRefused": "제공자가 추가 연결을 거부해 하나로 계속합니다",
   "noteOneConnectionNoHoles": "다운로드 폴더의 드라이브가 나눈 파일을 담을 수 없어 연결 하나로 받습니다",
+  "noteOneConnectionUnreachable": "추가 연결을 열 수 없어 연결 하나로 받습니다",
   "noteUrlRefreshed": "링크가 만료되어 새로 받았습니다",
   "limitingSpeedLimit": "{{speed}} 속도 제한이 한계입니다",
   "limitingNoRanges": "제공자가 이 파일을 통째로 보내므로 연결 하나를 씁니다",

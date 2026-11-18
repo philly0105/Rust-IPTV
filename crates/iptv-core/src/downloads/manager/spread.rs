@@ -213,13 +213,16 @@ pub(super) async fn load_plans(state: Arc<AppState>, mgr: Arc<DownloadManager>, 
         for (id, found) in read {
             let tracked = inner.queued_from.contains_key(&id) || inner.active.contains_key(&id);
             let plan = match found {
-                Some((origin, plan)) => {
+                Some((origin, mut plan)) => {
                     if tracked {
                         match origin {
                             Some(o) => inner.origins.insert(id, o),
                             None => inner.origins.remove(&id),
                         };
                     }
+                    // Copies the row respread from stay out of its plan.
+                    plan.identical.retain(|c| !inner.braked(id, c));
+                    plan.equivalent.retain(|c| !inner.braked(id, c));
                     plan
                 }
                 None => Plan::empty(),

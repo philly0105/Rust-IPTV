@@ -1,7 +1,8 @@
 //! Queue spreading against `dl_panel` when a copy lets the row down (review
-//! round 2): an adopted copy that changed, an origin on a source the user
-//! removes (paused or running), and a spread copy that changed, which must
-//! never make its source wait.
+//! rounds 2 and 3): an adopted copy that changed, an origin on a source the
+//! user removes (paused or running), a spread copy that changed, which must
+//! never make its source wait, and a copy identical to the row's origin
+//! that changed, which is asked once and never again.
 
 mod dl_panel;
 
@@ -128,16 +129,34 @@ impl Ctx {
             settings.download_allow_equivalent = equivalent;
         }
         let own = CopyRef::new(movie_ref(&sa, 1), None);
-        let ep = shared::resolve(&self.state, &own).await.unwrap();
+        self.verify(&own).await;
+        (sa, sb, own)
+    }
+
+    /// Adds a source `name` for `panel` with movie 1 under the title of
+    /// [`Ctx::copies`], probes off.
+    async fn add_source(&self, panel: &Panel, name: &str) -> String {
+        let s = add_xtream_source(&self.state, name, panel).await;
+        add_movie(&self.state, &s, 1, "Two Copies (2022)", Some(2022), "mp4").await;
+        self.state
+            .settings
+            .write()
+            .download_probe_disabled
+            .push(s.clone());
+        s
+    }
+
+    /// Fingerprints `copy` and checks it against the other sources.
+    async fn verify(&self, copy: &CopyRef) {
+        let ep = shared::resolve(&self.state, copy).await.unwrap();
         let fp = mirrors::fingerprint(&self.state, &ep).await.unwrap();
-        let (k, f) = (own.clone(), fp.clone());
+        let (k, f) = (copy.clone(), fp.clone());
         self.state
             .db_call(move |c| mirrors::store_fingerprint(c, &k, &f))
             .await
             .unwrap();
         let mgr = iptv_core::downloads::manager::manager(&self.state);
-        mirrors::identical_copies(&self.state, &mgr, &own, &fp, &[]).await;
-        (sa, sb, own)
+        mirrors::identical_copies(&self.state, &mgr, copy, &fp, &[]).await;
     }
 
     async fn identical(&self, own: &CopyRef) -> Vec<CopyRef> {
@@ -175,6 +194,16 @@ fn movie_requests(panel: &Panel, from: usize) -> usize {
 fn is_exact(d: &Download, size: u64) {
     let path = PathBuf::from(d.file_path.clone().unwrap());
     dl_panel::is_exact(1, size, &path).unwrap();
+}
+
+/// The completed file of `d` is `variant` of file 1, byte for byte.
+fn is_variant(d: &Download, size: u64, variant: Variant) {
+    let got = std::fs::read(d.file_path.clone().unwrap()).unwrap();
+    assert!(
+        got == dl_panel::variant_content(1, variant, size, 0, size as usize),
+        "the file is not the {variant:?} copy ({} bytes)",
+        got.len()
+    );
 }
 
 /// A fresh row adopted the equivalent copy on B (B became its origin), and
@@ -365,4 +394,138 @@ async fn a_respread_never_makes_its_source_wait() {
     c.play(&[]).await;
     let end = c.completed(first.id).await;
     is_exact(&end, size);
+}
+
+/// A row of A holds bytes of its origin on B (an equivalent copy). C was
+/// verified identical to B, then C's file was replaced by one with another
+/// total. A and B are busy when the row is resumed: it is spread to C once,
+/// finds the change, and then waits for B instead of asking C again and
+/// again. It ends with B's copy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_changed_copy_identical_to_the_origin_is_asked_once() {
+    let c = ctx().await;
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(60),
+        Duration::from_secs(120),
+    );
+    let size = 24 * MIB;
+    let (a, b, cc) = (
+        Panel::spawn(88).await,
+        Panel::spawn(89).await,
+        Panel::spawn(90).await,
+    );
+    for p in [&a, &b, &cc] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 2 * 1024);
+    b.file_variant(1, size, 2 * 1024, Variant::Differs);
+    cc.file_variant(1, size, 2 * 1024, Variant::Differs);
+    let (sa, sb, _) = c.copies(&a, &b, "third", true).await;
+    let cb = CopyRef::new(movie_ref(&sb, 1), None);
+    c.play(&[&sa]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "2 MiB from B", |r| {
+        r.served_by.as_deref() == Some(sb.as_str()) && r.bytes_downloaded > 2 * MIB as i64
+    })
+    .await;
+    c.pause(d.id).await;
+    assert_eq!(
+        c.get(d.id).await.origin.as_ref(),
+        Some(&cb),
+        "B is the origin"
+    );
+    let sc = c.add_source(&cc, "third-c").await;
+    c.verify(&cb).await;
+    assert!(
+        c.identical(&cb).await.iter().any(|x| x.source_id() == sc),
+        "C is verified identical to the origin"
+    );
+    // C's file is replaced; A and B are busy.
+    cc.file_variant(1, 30 * MIB, 2 * 1024, Variant::Differs);
+    c.play(&[&sa, &sb]).await;
+    let from_c = cc.log().len();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    // One placement: a fingerprint (three samples) and one range.
+    let asked = movie_requests(&cc, from_c);
+    let ranges = cc
+        .log()
+        .iter()
+        .skip(from_c)
+        .filter(|l| l.route == "movie" && l.file == 1)
+        .filter(|l| l.range.is_none_or(|(s, e)| e != Some(s + 64 * 1024 - 1)))
+        .count();
+    assert!(
+        ranges <= 1 && asked <= 4,
+        "C was asked {asked} times ({ranges} ranges) in 10 s"
+    );
+    let row = c.get(d.id).await;
+    assert_eq!(row.status, DownloadStatus::Queued, "{row:?}");
+    assert_eq!(row.origin.as_ref(), Some(&cb), "{row:?}");
+    c.play(&[]).await;
+    let end = c.completed(d.id).await;
+    is_variant(&end, size, Variant::Differs);
+}
+
+/// A row of A holds bytes of its origin on B (an equivalent copy) and is
+/// placed on B again, but its claim is slow (a busy database) when B is
+/// removed. The flag that told the run on B to discard B's bytes must not
+/// reach the row's next run, on its own copy: a pause there keeps what it
+/// downloaded from A.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_source_removed_during_a_slow_claim_spares_the_next_run() {
+    let c = ctx().await;
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(60),
+        Duration::from_secs(120),
+    );
+    let size = 24 * MIB;
+    let (a, b) = (Panel::spawn(92).await, Panel::spawn(93).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 2 * 1024);
+    b.file_variant(1, size, 2 * 1024, Variant::Differs);
+    let (sa, sb, _) = c.copies(&a, &b, "claim", true).await;
+    let cb = CopyRef::new(movie_ref(&sb, 1), None);
+    c.play(&[&sa]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "2 MiB from B", |r| {
+        r.served_by.as_deref() == Some(sb.as_str()) && r.bytes_downloaded > 2 * MIB as i64
+    })
+    .await;
+    c.pause(d.id).await;
+    assert_eq!(
+        c.get(d.id).await.origin.as_ref(),
+        Some(&cb),
+        "B is the origin"
+    );
+    // The run placed on B fails its first two claims and retries.
+    iptv_core::downloads::fail_next_claims(&c.state, 2, Duration::from_millis(200));
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    iptv_core::sources::remove(&c.state, &sb).await.unwrap();
+    c.wait_until(d.id, "released from B", |r| {
+        r.origin.is_none() && r.bytes_downloaded == 0 && r.status == DownloadStatus::Queued
+    })
+    .await;
+    c.play(&[]).await;
+    let run = c
+        .wait_until(d.id, "3 MiB from A", |r| {
+            r.status == DownloadStatus::Downloading && r.bytes_downloaded > 3 * MIB as i64
+        })
+        .await;
+    let part = PathBuf::from(format!("{}.part", run.file_path.clone().unwrap()));
+    c.pause(d.id).await;
+    let paused = c.get(d.id).await;
+    assert!(
+        paused.bytes_downloaded > 3 * MIB as i64 && part.exists(),
+        "the pause threw away the bytes from A: {} bytes, .part exists {}",
+        paused.bytes_downloaded,
+        part.exists()
+    );
 }

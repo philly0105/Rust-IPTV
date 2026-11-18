@@ -479,7 +479,7 @@ export type Limiting =
 export type MirrorDropReason = 'refused' | 'failed' | 'playback' | 'queue' | 'unavailable';
 
 /** Why a split transfer fell back to one connection. */
-export type OneConnectionReason = 'changed' | 'refused' | 'noHoles';
+export type OneConnectionReason = 'changed' | 'refused' | 'noHoles' | 'unreachable';
 
 /** A quiet status line about a transfer (`TransferStats.notes`). */
 export type TransferNote =

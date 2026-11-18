@@ -385,6 +385,11 @@ pub(super) async fn record_mismatch(
                     cache::record_verdict(c, &item, entry(&mirror, theirs))?;
                     cache::record_verdict(c, &mirror, entry(&item, ours))?;
                 }
+                // The mirror's other matches were compared with the
+                // fingerprint that goes now, and a match stands while the
+                // copy's fingerprint is unknown (`cache::fresh_verdict`):
+                // they go too.
+                cache::drop_matches(c, &mirror)?;
                 cache::forget_fingerprint(c, &mirror)?;
                 return Ok(());
             }

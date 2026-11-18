@@ -218,8 +218,8 @@ describe('Speed details dialog', () => {
     expect(connections[2]!.textContent).toContain('Backup portal');
     expect(connections[2]!.textContent).toContain(formatSpeed(3 * MB, 'en'));
 
-    expect(within(dialog).getByTestId('details-limiting').textContent).toBe(`Provider caps each connection at about ${formatSpeed(6.1 * MB, 'en')}`);
-    expect(formatSpeed(6.1 * MB, 'en')).toBe('6.1 MB/s');
+    expect(within(dialog).getByTestId('details-limiting').textContent).toBe(`Provider caps each connection at about ${formatSpeedLimit(6.1 * MB, 'en')}`);
+    expect(formatSpeedLimit(6.1 * MB, 'en')).toBe('6.1 MB/s');
 
     // Recent notes, newest first, in a quiet tone.
     const notes = within(dialog).getByTestId('details-notes');
@@ -231,7 +231,7 @@ describe('Speed details dialog', () => {
     renderDetails(makeDownload({ id: 7, status: 'downloading', bytesDownloaded: 0, totalBytes: 1000 * MB, stats: BIG }));
     await screen.findByTestId('download-details');
     act(() => statsStore.ingest(makeStats(7, { bytesPerSecond: 2 * MB, limiting: { kind: 'line', bytesPerSecond: 2 * MB } })));
-    expect(screen.getByTestId('details-limiting').textContent).toBe('Your internet connection is the limit');
+    expect(screen.getByTestId('details-limiting').textContent).toBe('More connections no longer add speed');
     expect(screen.getByTestId('details-total').textContent).toBe(formatSpeed(2 * MB, 'en'));
   });
 
@@ -258,9 +258,11 @@ describe('Speed details dialog', () => {
       [{ kind: 'playback', sourceId: 'src1' }, t('limitingPlayback', { name: 'Home portal' })],
       [{ kind: 'otherDownloads', sourceId: 'src2' }, t('limitingOtherDownloads', { name: 'Backup portal' })],
       [{ kind: 'refused', sourceId: 'src2' }, t('limitingRefused', { name: 'Backup portal' })],
-      [{ kind: 'line', bytesPerSecond: 9 * MB }, 'Your internet connection is the limit'],
+      [{ kind: 'line', bytesPerSecond: 9 * MB }, 'More connections no longer add speed'],
       [{ kind: 'perConnection', bytesPerSecond: 6.1 * MB }, 'Provider caps each connection at about 6.1 MB/s'],
-      [{ kind: 'accountLimit', sourceId: 'src1', limit: 2 }, t('limitingAccountLimit', { name: 'Home portal', count: 2 })],
+      // A round figure reads as one, in the speed limit's units.
+      [{ kind: 'perConnection', bytesPerSecond: 6 * MB }, 'Provider caps each connection at about 6 MB/s'],
+      [{ kind: 'accountLimit', sourceId: 'src1', limit: 2 }, 'Home portal allows 2 connections at once'],
     ];
     const seen = new Set<string>();
     for (const [limiting, expected] of cases) {

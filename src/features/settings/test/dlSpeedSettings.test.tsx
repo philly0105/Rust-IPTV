@@ -77,15 +77,26 @@ describe('Settings > General > Downloads: faster downloads', () => {
     await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadUseMirrors: false } }));
   });
 
-  it('turns equivalent copies off while other sources are not used', async () => {
+  it('shows equivalent copies off, and why, while other sources are not used', async () => {
     current = settings({ downloadUseMirrors: false, downloadAllowEquivalent: true });
     renderAt(settingsRoutes, '/settings/general');
     const equivalent = (await screen.findByTestId('toggle-downloadAllowEquivalent')) as HTMLButtonElement;
     expect(equivalent.disabled).toBe(true);
+    // Unchecked while it does nothing, though the stored choice stays on.
+    expect(equivalent.getAttribute('aria-checked')).toBe('false');
+    expect(current.downloadAllowEquivalent).toBe(true);
+    expect(screen.getByTestId('equivalent-needs-mirrors').textContent).toBe('Needs “Use other sources to speed up downloads” on');
+    expect(screen.getByTestId('equivalent-warning').querySelector('svg')!.getAttribute('class')).not.toContain('text-warning');
     expect(screen.getByText(/lets a season or queue spread across your accounts/)).toBeTruthy();
+
     fireEvent.click(screen.getByTestId('toggle-downloadUseMirrors'));
     await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadUseMirrors: true } }));
+    // No patch touched it: the stored choice comes back with mirrors.
+    expect(rpcMock.callsOf('settings.update').some((c) => 'downloadAllowEquivalent' in (c as { patch: object }).patch)).toBe(false);
     await waitFor(() => expect((screen.getByTestId('toggle-downloadAllowEquivalent') as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByTestId('toggle-downloadAllowEquivalent').getAttribute('aria-checked')).toBe('true');
+    expect(screen.queryByTestId('equivalent-needs-mirrors')).toBeNull();
+    expect(screen.getByTestId('equivalent-warning').querySelector('svg')!.getAttribute('class')).toContain('text-warning');
   });
 
   it('warns that an equivalent copy may be a different file', async () => {
@@ -117,7 +128,7 @@ describe('Settings > General > Downloads: faster downloads', () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(lastPatch()).toEqual({ patch: { downloadProbeDisabled: ['x1'] } }));
 
-    fireEvent.click(within(screen.getByTestId('probe-row-s1')).getByRole('button', { name: 'Forget the test result for Harbor' }));
+    fireEvent.click(within(screen.getByTestId('probe-row-s1')).getByRole('button', { name: 'Forget result for Harbor' }));
     await waitFor(() => expect(rpcMock.callsOf('downloads.resetConnectionLimit')).toEqual([{ sourceId: 's1' }]));
   });
 

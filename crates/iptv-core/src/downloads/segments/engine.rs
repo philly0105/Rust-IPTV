@@ -1532,9 +1532,11 @@ fn breakdown(
         .filter(|(_, s)| s.usable().is_some())
     {
         // An account limit explains the speed only while the source runs
-        // as many connections as it allows.
+        // as many connections as it gives this transfer (a reported limit
+        // keeps one free).
+        let allowed = mgr.allowance_on(ctl, &s.id());
         found.extend(mgr.limit_reason(ctl, &s.id()).filter(|l| match l {
-            Limiting::AccountLimit { limit, .. } => count(running, i) as i64 >= *limit,
+            Limiting::AccountLimit { .. } => count(running, i) >= allowed,
             _ => true,
         }));
     }

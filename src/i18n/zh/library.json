@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "提供商处的文件已更改，改用一个连接继续",
   "noteOneConnectionRefused": "提供商拒绝了更多连接，改用一个继续",
   "noteOneConnectionNoHoles": "下载文件夹所在的磁盘无法存放拆分的文件，因此用一个连接下载",
+  "noteOneConnectionUnreachable": "无法打开更多连接，因此用一个连接下载",
   "noteUrlRefreshed": "链接已过期并已更新",
   "limitingSpeedLimit": "受限于你设置的 {{speed}} 速度上限",
   "limitingNoRanges": "提供商整体发送此文件，因此只用一个连接",

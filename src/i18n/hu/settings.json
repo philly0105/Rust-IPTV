@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "A fájl eltérhet attól, amelyet választottál.",
   "downloadAllowEquivalentNeedsMirrors": "Ehhez be kell kapcsolni: „{{label}}”",
   "downloadProbeGroup": "Kapcsolattesztek",
-  "downloadProbeHint": "Egyes szolgáltatók több kapcsolatot engednek, mint amennyit a fiók jelez. Egy nagy letöltés ezt tesztelheti, legfeljebb hetente egyszer. Az Eredmény elfelejtése után a következő nagy letöltés újra tesztel. Kapcsold ki olyan szolgáltatónál, amely ezt kifogásolja.",
+  "downloadProbeHint": "Egyes szolgáltatók több kapcsolatot engednek, mint amennyit a fiók jelez. Egy nagy letöltés ezt tesztelheti. Egy befejezett teszt legfeljebb hetente egyszer ismétlődik, egy megszakított 10 perc múlva újra próbálkozik. Az Eredmény elfelejtése után a következő nagy letöltés újra tesztel. Kapcsold ki olyan szolgáltatónál, amely ezt kifogásolja.",
   "downloadProbeFor": "Kapcsolatok tesztelése: {{name}}",
   "downloadProbeReported_one": "A fiók szerint {{count, number}}",
   "downloadProbeReported_other": "A fiók szerint {{count, number}}",

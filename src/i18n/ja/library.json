@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "プロバイダー側でファイルが変わったため、1接続で続けます",
   "noteOneConnectionRefused": "プロバイダーが追加の接続を拒否したため、1接続で続けます",
   "noteOneConnectionNoHoles": "ダウンロードフォルダーのドライブが分割ファイルに対応していないため、1接続でダウンロードします",
+  "noteOneConnectionUnreachable": "追加の接続を開けなかったため、1接続でダウンロードします",
   "noteUrlRefreshed": "リンクの期限が切れたため更新しました",
   "limitingSpeedLimit": "{{speed}}の速度制限が上限です",
   "limitingNoRanges": "プロバイダーがこのファイルを一括で送るため、1接続です",

@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "Het bestand is bij de aanbieder veranderd, verder met één verbinding",
   "noteOneConnectionRefused": "De aanbieder weigerde meer verbindingen, verder met één",
   "noteOneConnectionNoHoles": "De schijf van de downloadmap kan geen gesplitst bestand bevatten, dus het gaat via één verbinding",
+  "noteOneConnectionUnreachable": "Extra verbindingen konden niet worden geopend, dus het gaat via één verbinding",
   "noteUrlRefreshed": "De link was verlopen en is vernieuwd",
   "limitingSpeedLimit": "Je snelheidslimiet van {{speed}} remt",
   "limitingNoRanges": "De aanbieder stuurt dit bestand in één stuk, dus één verbinding",

@@ -96,6 +96,7 @@
   "noteOneConnectionChanged": "Plik zmienił się u dostawcy, dalej jedno połączenie",
   "noteOneConnectionRefused": "Dostawca odrzucił kolejne połączenia, dalej jedno",
   "noteOneConnectionNoHoles": "Dysk folderu pobierania nie pomieści podzielonego pliku, więc pobiera jednym połączeniem",
+  "noteOneConnectionUnreachable": "Nie udało się otworzyć kolejnych połączeń, więc pobiera jednym połączeniem",
   "noteUrlRefreshed": "Link wygasł i został odnowiony",
   "limitingSpeedLimit": "Hamuje Twój limit {{speed}}",
   "limitingNoRanges": "Dostawca wysyła ten plik w całości, więc jedno połączenie",

@@ -19,7 +19,7 @@ import { SpeedSparkline, speedHistory } from '../components/SpeedSparkline';
 import { formatBytes, formatSpeed, formatSpeedLimit } from '../lib/format';
 import { STALE_MS, progressStore, statsStore } from '../lib/progress';
 import { hasActivity, SpeedHistory } from '../lib/speedHistory';
-import { countsText, limitingText, limitText } from '../lib/transferText';
+import { countsText, limitingText, limitText, noteText } from '../lib/transferText';
 import { DownloadsPage } from '../pages/DownloadsPage';
 import { makeDownload, makeStats } from './fixtures';
 import { i18n, installDomStubs, renderAt } from './harness';
@@ -242,6 +242,22 @@ describe('Speed details dialog', () => {
     expect(rpc.callsOf('downloads.stats')).toContainEqual({ id: 8 });
   });
 
+  it('hides the limiting line when a per-connection cap has no figure', async () => {
+    renderDetails(makeDownload({ id: 10, status: 'downloading', bytesDownloaded: 0, totalBytes: 100 * MB, stats: makeStats(10, { bytesPerSecond: MB, limiting: { kind: 'perConnection', bytesPerSecond: 0 } }) }));
+    await screen.findByTestId('details-total');
+    expect(screen.queryByTestId('details-limiting')).toBeNull();
+  });
+
+  it('notes a fall-back to one connection when extra ones cannot be opened', async () => {
+    expect(noteText(t, { kind: 'oneConnection', reason: 'unreachable' }, nameOf)).toBe('Extra connections could not be opened, so it downloads on one connection');
+    const stats = makeStats(11, { bytesPerSecond: MB, notes: [{ kind: 'oneConnection', reason: 'unreachable' }] });
+    renderRow(makeDownload({ id: 11, status: 'downloading', bytesDownloaded: 0, totalBytes: 100 * MB, stats }), { nameOf });
+    act(() => progressStore.ingest({ id: 11, bytesDownloaded: MB, totalBytes: 100 * MB, bytesPerSecond: MB }));
+    const note = screen.getByTestId('download-note');
+    expect(note.textContent?.trim()).toBe('Extra connections could not be opened, so it downloads on one connection');
+    expect(note.className).not.toMatch(/danger|error/);
+  });
+
   it('says so when the download is not running', async () => {
     renderDetails(makeDownload({ id: 9, status: 'paused' }));
     expect((await screen.findByTestId('details-idle')).textContent).toBe(t('detailsNotRunning'));
@@ -272,6 +288,8 @@ describe('Speed details dialog', () => {
       seen.add(text);
     }
     expect(seen.size).toBe(cases.length);
+    // A zero per-connection figure says nothing rather than a sentence with no number.
+    expect(limitingText(t, { kind: 'perConnection', bytesPerSecond: 0 }, nameOf, 'en')).toBe('');
     expect(limitingText(t, { kind: 'maxConnections', max: 4 }, nameOf, 'en')).toContain('4');
     expect(limitingText(t, { kind: 'singleConnection', sourceId: 'gone' }, nameOf, 'en')).toContain(t('sourceRemoved'));
   });

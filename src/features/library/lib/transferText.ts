@@ -51,6 +51,7 @@ const ONE_CONNECTION_KEYS: Record<OneConnectionReason, string> = {
   changed: 'noteOneConnectionChanged',
   refused: 'noteOneConnectionRefused',
   noHoles: 'noteOneConnectionNoHoles',
+  unreachable: 'noteOneConnectionUnreachable',
 };
 
 /**
@@ -102,8 +103,11 @@ export function limitingText(t: TFunction<'library'>, limiting: Limiting, nameOf
       return t('limitingRefused', { name: nameOf(limiting.sourceId) });
     case 'line':
       return t('limitingLine');
-    case 'perConnection':
-      return t('limitingPerConnection', { speed: formatSpeedLimit(limiting.bytesPerSecond, lang) });
+    case 'perConnection': {
+      // A zero figure (most connections stalled for a second) has nothing to say.
+      const speed = formatSpeedLimit(limiting.bytesPerSecond, lang);
+      return speed ? t('limitingPerConnection', { speed }) : '';
+    }
     case 'accountLimit':
       return t('limitingAccountLimit', { name: nameOf(limiting.sourceId), count: limiting.limit });
     default:

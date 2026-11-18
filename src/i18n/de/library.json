@@ -78,6 +78,7 @@
   "noteOneConnectionChanged": "Die Datei hat sich beim Anbieter geändert, es geht mit einer Verbindung weiter",
   "noteOneConnectionRefused": "Der Anbieter hat weitere Verbindungen abgelehnt, es geht mit einer weiter",
   "noteOneConnectionNoHoles": "Das Laufwerk des Download-Ordners kann keine geteilte Datei aufnehmen, daher nur eine Verbindung",
+  "noteOneConnectionUnreachable": "Weitere Verbindungen ließen sich nicht öffnen, daher nur eine Verbindung",
   "noteUrlRefreshed": "Der Link war abgelaufen und wurde erneuert",
   "limitingSpeedLimit": "Ihr Tempolimit von {{speed}} bremst",
   "limitingNoRanges": "Der Anbieter liefert diese Datei am Stück, daher nur eine Verbindung",

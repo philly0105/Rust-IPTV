@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "檔案可能與你選擇的不同。",
   "downloadAllowEquivalentNeedsMirrors": "需要開啟「{{label}}」",
   "downloadProbeGroup": "連線測試",
-  "downloadProbeHint": "有些供應商允許的連線數比帳號顯示的多。大型下載可以測試這一點，每週最多一次。清除結果後，下一個大型下載會重新測試。如果供應商反對，請關閉。",
+  "downloadProbeHint": "有些供應商允許的連線數比帳號顯示的多。大型下載可以測試這一點。完成的測試每週最多重複一次；中斷的測試會在 10 分鐘後重試。清除結果後，下一個大型下載會重新測試。如果供應商反對，請關閉。",
   "downloadProbeFor": "測試 {{name}} 的連線",
   "downloadProbeReported_one": "帳號顯示 {{count, number}}",
   "downloadProbeReported_other": "帳號顯示 {{count, number}}",

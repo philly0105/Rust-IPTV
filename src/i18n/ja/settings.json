@@ -61,7 +61,7 @@
   "downloadAllowEquivalentWarning": "選んだものとは異なるファイルになる場合があります。",
   "downloadAllowEquivalentNeedsMirrors": "「{{label}}」をオンにする必要があります",
   "downloadProbeGroup": "接続テスト",
-  "downloadProbeHint": "アカウントの表示より多くの接続を許すプロバイダーもあります。大きなダウンロードで週に1回まで確認できます。「結果を消去」すると次の大きなダウンロードで再テストします。嫌がるプロバイダーではオフにしてください。",
+  "downloadProbeHint": "アカウントの表示より多くの接続を許すプロバイダーもあります。大きなダウンロードでこれを確認できます。完了したテストは週に1回まで繰り返し、中断したテストは10分後に再試行します。「結果を消去」すると次の大きなダウンロードで再テストします。嫌がるプロバイダーではオフにしてください。",
   "downloadProbeFor": "{{name}}の接続をテスト",
   "downloadProbeReported_one": "アカウント表示 {{count, number}}",
   "downloadProbeReported_other": "アカウント表示 {{count, number}}",

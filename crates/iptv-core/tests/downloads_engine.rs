@@ -1925,3 +1925,98 @@ async fn a_refusal_at_the_reported_limit_forgets_the_learned_one() {
     assert_eq!(limit_of(&c, &s).await.learned, None, "the record was kept");
     assert!(!due(&c, &s), "no backoff after the correction");
 }
+
+/// What [`lag_run`] saw.
+struct LagRun {
+    panel: Panel,
+    /// Seconds from the first refused request to the first one-connection
+    /// note, when both came.
+    fell_after: Option<f64>,
+    notes: Vec<Value>,
+}
+
+/// A learned limit of 3 on a panel that enforces 3 and counts a closed
+/// body for `lag` more, its 64 MiB at 1 MiB/s per connection. With
+/// `lower`, the transfer's third connection is fast (it ends long before
+/// the other two), and once it is open the panel takes only 2 (another
+/// device took one). Runs the download to completion.
+async fn lag_run(seed: u64, tag: &str, lag: Duration, lower: bool) -> LagRun {
+    let c = xctx().await;
+    let panel = Panel::spawn(seed).await;
+    panel.set_reported(1);
+    panel.set_enforced(3);
+    panel.set_lag(lag);
+    let size = 64 * MIB;
+    panel.file(1, size, 1024);
+    let s = add_xtream_source(&c.state, tag, &panel).await;
+    add_movie(&c.state, &s, 1, "Movie 1", None, "mp4").await;
+    learned_limit(&c, &s, 3, 1).await;
+    let d = c.start_movie(&s, 1, &panel.movie_url(1)).await;
+    if lower {
+        until("two connections", || panel.open() == 2).await;
+        panel.set_speed(1, 16 * 1024);
+        until("three connections", || panel.open() == 3).await;
+        panel.set_enforced(2);
+    }
+    let t0 = Instant::now();
+    let deadline = t0 + Duration::from_secs(300);
+    let (mut first_refusal, mut fell) = (None, None);
+    let mut stats = Vec::new();
+    loop {
+        let got = c
+            .collect("downloads.stats", d.id, Duration::from_millis(100))
+            .await;
+        let now = t0.elapsed().as_secs_f64();
+        if first_refusal.is_none() && panel.counts().get("refused").copied().unwrap_or(0) > 0 {
+            first_refusal = Some(now);
+        }
+        if fell.is_none() && !one_connection_notes(&got).is_empty() {
+            fell = Some(now);
+        }
+        stats.extend(got);
+        match c.get(d.id).await.status {
+            DownloadStatus::Completed => break,
+            DownloadStatus::Failed | DownloadStatus::Canceled => panic!("the download ended"),
+            _ => {}
+        }
+        assert!(Instant::now() < deadline, "the download never ended");
+    }
+    let path = PathBuf::from(c.get(d.id).await.file_path.unwrap());
+    dl_panel::is_exact(1, size, &path).unwrap();
+    LagRun {
+        panel,
+        fell_after: first_refusal.zip(fell).map(|(r, f)| f - r),
+        notes: one_connection_notes(&stats),
+    }
+}
+
+/// A panel that counts a closed body for 5 s, longer than AFTER_CLOSE:
+/// the retries of a streak that began right after a close are the same
+/// lag, so the run keeps its three connections.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_long_close_lag_keeps_the_three_connections() {
+    let r = lag_run(103, "lag5", Duration::from_secs(5), false).await;
+    let refused = r.panel.counts().get("refused").copied().unwrap_or(0);
+    assert!(refused >= 1, "the panel's lag never refused a connection");
+    assert!(r.notes.is_empty(), "fell to one connection: {:?}", r.notes);
+    assert_eq!(r.panel.peak(), 3);
+}
+
+/// The panel takes 2 instead of 3 mid-run (another device took one). The
+/// third connection is fast and ends long before the other two, so its
+/// replacement is refused right after a close: the streak ends as a real
+/// refusal, and the run falls to one connection within the retry waits
+/// (1 + 2 + 4 s, plus the requests) of the first refused request, having
+/// sent at most LAG_REFUSALS + 1 = 4 refused ones.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_limit_lowered_mid_run_falls_to_one_connection_in_bounded_time() {
+    let r = lag_run(104, "low2", Duration::ZERO, true).await;
+    let refused = r.panel.counts().get("refused").copied().unwrap_or(0);
+    assert!(!r.notes.is_empty(), "never fell to one connection");
+    let fell = r.fell_after.expect("a refusal before the note");
+    assert!(
+        fell <= 10.0,
+        "fell to one connection {fell:.1} s after the first refusal"
+    );
+    assert!(refused <= 4, "{refused} refused requests");
+}

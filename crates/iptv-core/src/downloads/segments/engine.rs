@@ -55,10 +55,16 @@ const RECYCLE_MIN_AGE: Duration = Duration::from_secs(5);
 const RECYCLE_EVERY: Duration = Duration::from_secs(30);
 /// A refusal this soon after one of the transfer's own connections to the
 /// source closed, or a probe's, is the panel still counting it, not the
-/// account's limit: the connection is asked for again.
+/// account's limit: the connection is asked for again. Measured to the
+/// first refusal of a streak; the streak's later ones are the same lag.
 const AFTER_CLOSE: Duration = Duration::from_secs(3);
-/// Refusals in a row taken for the panel's lag before the rest of the run
-/// keeps one connection.
+/// Refusals in a row taken for the panel's lag (a streak) before the rest
+/// of the run keeps one connection. Requests sent before the streak's last
+/// counted refusal belong to its wave: the same lag, not counted again.
+/// The retries wait [`RETRY_BASE`] doubled each time, so a real refusal
+/// falls to one connection within 1 + 2 + 4 s of the streak's first, after
+/// `LAG_REFUSALS + 1` waves of refused requests (one request each when one
+/// connection is missing).
 const LAG_REFUSALS: u32 = 3;
 /// Bytes a comparison involving a mirror needs outside the sample windows
 /// (inside them the mirror was already compared).
@@ -112,8 +118,12 @@ struct Src {
     /// Its allowance fell to zero and the note says so.
     fell: bool,
     failures: u32,
-    /// Refusals in a row taken for the panel's lag ([`LAG_REFUSALS`]).
+    /// Refusals in a row taken for the panel's lag ([`LAG_REFUSALS`]). The
+    /// streak ends once a connection opened after its last refusal has
+    /// its answer.
     refusals: u32,
+    /// When the streak's last counted refusal came.
+    refused_at: Option<Instant>,
     /// When one of its connections last ended well (a segment's end, a
     /// recycle or a retire).
     closed: Option<Instant>,
@@ -139,6 +149,7 @@ impl Src {
             fell: false,
             failures: 0,
             refusals: 0,
+            refused_at: None,
             closed: None,
             retry_at: None,
             cursor: 1,
@@ -669,6 +680,24 @@ pub async fn run(
                     if src == 0 && !matches!(result, Err(WorkerError::Dropped(_))) {
                         probe_end.cancel();
                     }
+                    let opened = opened_at(&meter);
+                    // A connection asked for after the streak's last
+                    // refusal has its answer: the panel's lag is over.
+                    if src == 0 && matches!(result, Err(WorkerError::Refused(_))) {
+                        let s = &mut srcs[0];
+                        let over = s.refused_at.is_some_and(|t| {
+                            running.iter().any(|r| {
+                                r.src == 0 && r.meter.bytes() > 0 && opened_at(&r.meter) >= t
+                            })
+                        });
+                        if over {
+                            s.refusals = 0;
+                        }
+                    }
+                    // Sent before the streak's last counted refusal: one
+                    // of that wave, the same lag.
+                    let same_wave =
+                        srcs[0].refusals > 0 && srcs[0].refused_at.is_some_and(|t| opened < t);
                     if open_ended == Some(seg) {
                         open_ended = None;
                     }
@@ -683,11 +712,12 @@ pub async fn run(
                             let now = Instant::now();
                             // Opens fail in a row until one opened after
                             // the last failure ends well.
-                            let opened = now.checked_sub(meter.age()).unwrap_or(now);
                             if s.retry_at.is_none_or(|t| opened >= t) {
                                 s.failures = 0;
                             }
-                            s.refusals = 0;
+                            if meter.bytes() > 0 && s.refused_at.is_none_or(|t| opened >= t) {
+                                s.refusals = 0;
+                            }
                             s.closed = Some(now);
                         }
                         Err(WorkerError::Mismatch { other }) => {
@@ -785,18 +815,23 @@ pub async fn run(
                             unreachable = true;
                         }
                         Err(WorkerError::Refused(err))
-                            if srcs[0].refusals < LAG_REFUSALS
-                                && (probing.is_some()
-                                    || [probe_ended, srcs[0].closed]
-                                        .into_iter()
-                                        .flatten()
-                                        .any(|t| t.elapsed() <= AFTER_CLOSE)) =>
+                            if same_wave
+                                || (srcs[0].refusals < LAG_REFUSALS
+                                    && (srcs[0].refusals > 0
+                                        || probing.is_some()
+                                        || [probe_ended, srcs[0].closed]
+                                            .into_iter()
+                                            .flatten()
+                                            .any(|t| t.elapsed() <= AFTER_CLOSE))) =>
                         {
                             // The panel still counts a connection that just
                             // closed (the transfer's own or a probe's): the
                             // segment is asked for again a little later.
                             let s = &mut srcs[0];
-                            s.refusals += 1;
+                            if !same_wave {
+                                s.refusals += 1;
+                                s.refused_at = Some(Instant::now());
+                            }
                             let delay = RETRY_BASE * 2u32.pow(s.refusals - 1);
                             s.retry_at = Some(Instant::now() + delay);
                             tracing::info!(id = job.id, error = %err, ?delay, "a connection was refused right after another closed; asking again");
@@ -1060,6 +1095,12 @@ fn settled(running: &[Running]) -> bool {
         .iter()
         .filter(|r| r.src == 0)
         .all(|r| !r.recycle && r.meter.bytes() > 0)
+}
+
+/// When the worker `meter` measures opened its connection (its start).
+fn opened_at(meter: &Meter) -> Instant {
+    let now = Instant::now();
+    now.checked_sub(meter.age()).unwrap_or(now)
 }
 
 /// How long a new request waits after a connection closed.

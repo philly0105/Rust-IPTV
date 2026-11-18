@@ -1340,3 +1340,164 @@ async fn a_spread_copy_with_another_total_keeps_the_home_bytes() {
 async fn a_spread_copy_with_other_bytes_keeps_the_home_bytes() {
     a_changed_spread_copy((78, 79), "chg2", 48 * MIB).await;
 }
+
+/// Waits until B (sidecar entry 1) wrote bytes into the `.part` of row
+/// `id` as a mirror. Returns the `.part`.
+async fn mirror_wrote(c: &Ctx, id: i64) -> PathBuf {
+    let row = c
+        .wait_until(id, "has a destination", |r| r.file_path.is_some())
+        .await;
+    let part = PathBuf::from(format!("{}.part", row.file_path.unwrap()));
+    until("B wrote as a mirror", || {
+        std::fs::read(sidecar(&part))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .is_some_and(|v| {
+                v["sources"].as_array().is_some_and(|s| s.len() == 2)
+                    && v["segments"].as_array().is_some_and(|segs| {
+                        segs.iter().any(|s| {
+                            s["src"] == 1
+                                && s["pos"].as_i64().unwrap() > s["start"].as_i64().unwrap()
+                        })
+                    })
+            })
+    })
+    .await;
+    part
+}
+
+/// Ends row `id`: once B is no longer taken for A's copy, A is freed and
+/// the row completes there. Returns the file and whether B was dropped.
+async fn complete_freeing_a(c: &Ctx, id: i64, own: &CopyRef, sb: &str) -> (PathBuf, bool) {
+    let deadline = Instant::now() + WAIT;
+    let mut dropped = false;
+    loop {
+        let r = c.get(id).await;
+        if r.status == DownloadStatus::Completed {
+            iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+            return (PathBuf::from(r.file_path.unwrap()), dropped);
+        }
+        assert!(
+            r.status != DownloadStatus::Failed && Instant::now() < deadline,
+            "never completed: {r:?}"
+        );
+        if !dropped && !c.identical(own).await.iter().any(|x| x.source_id() == sb) {
+            dropped = true;
+            iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A (own copy) and B both send ETags; B passes the samples and differs
+/// elsewhere. B wrote as a mirror and the run paused before any overlap
+/// check saw its bytes; A plays, and the row is spread to B. A's bytes
+/// were checked against A's file, not B's: the run on B compares them,
+/// ends as a respread with the pair's verdict gone, and the file is A's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_mirror_that_becomes_the_authority_compares_the_old_bytes() {
+    let c = xctx().await;
+    let size = 48 * MIB;
+    let (a, b) = (Panel::spawn(80).await, Panel::spawn(81).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 1024);
+    b.file_variant(1, size, 1024, Variant::DiffersOutsideSamples);
+    let (sa, sb, own) = c.copies(&a, &b, "m2a").await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    mirror_wrote(&c, d.id).await;
+    c.pause(d.id).await;
+    assert_eq!(
+        c.identical(&own).await.len(),
+        1,
+        "no check saw B's bytes yet"
+    );
+    a.set_speed(1, 8 * 1024);
+    b.set_speed(1, 8 * 1024);
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let (path, dropped) = complete_freeing_a(&c, d.id, &own, &sb).await;
+    assert!(dropped, "B is still taken for A's copy");
+    dl_panel::is_exact(1, size, &path).expect("the file is A's copy throughout");
+}
+
+/// The reverse order: the row's bytes come from a spread run on B (ETag),
+/// which passes the samples and differs elsewhere, then the row goes home
+/// to A (ETag). B's bytes were checked against B's file: the run on A
+/// compares them, drops them with B's verdict, and the file is A's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_spread_runs_bytes_are_compared_again_at_home() {
+    let c = xctx().await;
+    let size = 48 * MIB;
+    let (a, b) = (Panel::spawn(82).await, Panel::spawn(83).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 2 * 1024);
+    b.file_variant(1, size, 2 * 1024, Variant::DiffersOutsideSamples);
+    let (sa, sb, own) = c.copies(&a, &b, "a2m").await;
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "8 MiB on B", |r| {
+        r.served_by.as_deref() == Some(sb.as_str()) && r.bytes_downloaded >= 8 * MIB as i64
+    })
+    .await;
+    c.pause(d.id).await;
+    a.set_speed(1, 8 * 1024);
+    // B plays now: the row goes home to A, with no mirror.
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sb.clone()]).await;
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let end = c
+        .wait_until(d.id, "completed", |r| {
+            matches!(r.status, DownloadStatus::Completed | DownloadStatus::Failed)
+        })
+        .await;
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    assert_eq!(end.status, DownloadStatus::Completed, "{end:?}");
+    dl_panel::is_exact(1, size, Path::new(&end.file_path.unwrap()))
+        .expect("the file is A's copy throughout");
+    assert!(
+        !c.identical(&own).await.iter().any(|x| x.source_id() == sb),
+        "B is still taken for A's copy"
+    );
+}
+
+/// The control: B is A's copy (both with ETags). The mirror becomes the
+/// authority, the comparisons pass, and the file completes on B.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn an_identical_mirror_that_becomes_the_authority_completes() {
+    let c = xctx().await;
+    let size = 48 * MIB;
+    let (a, b) = (Panel::spawn(84).await, Panel::spawn(85).await);
+    for p in [&a, &b] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file(1, size, 1024);
+    b.file(1, size, 1024);
+    let (sa, sb, own) = c.copies(&a, &b, "same").await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    mirror_wrote(&c, d.id).await;
+    c.pause(d.id).await;
+    a.set_speed(1, 8 * 1024);
+    b.set_speed(1, 8 * 1024);
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    let from_b = b.log().len();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let end = c
+        .wait_until(d.id, "completed", |r| {
+            matches!(r.status, DownloadStatus::Completed | DownloadStatus::Failed)
+        })
+        .await;
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    assert_eq!(end.status, DownloadStatus::Completed, "{end:?}");
+    assert!(
+        b.log().iter().skip(from_b).any(|l| l.route == "movie"),
+        "the run went on B"
+    );
+    dl_panel::is_exact(1, size, Path::new(&end.file_path.unwrap())).unwrap();
+    assert!(c.identical(&own).await.iter().any(|x| x.source_id() == sb));
+}

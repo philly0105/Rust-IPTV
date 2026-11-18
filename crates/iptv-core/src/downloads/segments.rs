@@ -249,9 +249,10 @@ impl Ranges {
     }
 
     /// This layout for a run whose authority is `copy` (`None`: the row's
-    /// own item): the authority moves to `sources[0]`. A copy the sidecar
-    /// does not list joins as the authority with no validator, and every
-    /// written segment needs a comparison again. `validator` is the row's:
+    /// own item): the authority moves to `sources[0]`. `checked` means
+    /// compared with the current authority's file: every segment the new
+    /// authority did not write needs a comparison again (all of them when
+    /// the sidecar does not list it, and it joins with no validator). `validator` is the row's:
     /// it describes the last run's authority (`sources[0]`) only, so it is
     /// compared there alone, and None means that file changed and its
     /// bytes cannot be continued. Another listed copy keeps the validator
@@ -268,8 +269,11 @@ impl Ranges {
                     for s in &mut self.segments {
                         if s.src == k {
                             s.src = 0;
-                        } else if s.src == 0 {
-                            s.src = k;
+                        } else {
+                            if s.src == 0 {
+                                s.src = k;
+                            }
+                            s.checked = false;
                         }
                     }
                 }
@@ -951,6 +955,7 @@ mod tests {
             },
             Seg {
                 src: 1,
+                checked: true,
                 ..seg(16 * MIB, 32 * MIB, 17 * MIB)
             },
         ];
@@ -968,6 +973,10 @@ mod tests {
         assert_eq!(spread.sources[0].validator.as_deref(), Some("v-b"));
         assert_eq!(spread.segments[0].src, 1);
         assert_eq!(spread.segments[1].src, 0);
+        // The old authority's bytes were checked against its own file,
+        // not B's: they are compared again. B's own stay checked.
+        assert!(!spread.segments[0].checked);
+        assert!(spread.segments[1].checked);
         assert!(spread.is_consistent());
         // A copy the sidecar does not list.
         let c = CopyRef::new(ItemRef::new("c", ContentType::Movie, "9"), None);

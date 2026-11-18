@@ -1501,3 +1501,210 @@ async fn an_identical_mirror_that_becomes_the_authority_completes() {
     dl_panel::is_exact(1, size, Path::new(&end.file_path.unwrap())).unwrap();
     assert!(c.identical(&own).await.iter().any(|x| x.source_id() == sb));
 }
+
+/// Fingerprints `copy` and checks it against every other source. Returns
+/// how many copies are identical to it.
+async fn verify_copy(c: &Ctx, copy: &CopyRef) -> usize {
+    let ep = shared::resolve(&c.state, copy).await.unwrap();
+    let fp = mirrors::fingerprint(&c.state, &ep).await.unwrap();
+    let (k, f) = (copy.clone(), fp.clone());
+    c.state
+        .db_call(move |c| mirrors::store_fingerprint(c, &k, &f))
+        .await
+        .unwrap();
+    let mgr = iptv_core::downloads::manager::manager(&c.state);
+    mirrors::identical_copies(&c.state, &mgr, copy, &fp, &[])
+        .await
+        .len()
+}
+
+/// Sources for `panels`, movie 1 under one title on each, probes off and
+/// equivalent copies allowed.
+async fn equivalent_sources(c: &Ctx, panels: &[&Panel], tag: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    for (i, p) in panels.iter().enumerate() {
+        let s = add_xtream_source(&c.state, &format!("{tag}-{i}"), p).await;
+        add_movie(&c.state, &s, 1, "Two Copies (2022)", Some(2022), "mp4").await;
+        ids.push(s);
+    }
+    let mut settings = c.state.settings.write();
+    settings.download_probe_disabled = ids.clone();
+    settings.download_allow_equivalent = true;
+    ids
+}
+
+fn movie_requests(panel: &Panel, from: usize) -> usize {
+    panel
+        .log()
+        .iter()
+        .skip(from)
+        .filter(|l| l.route == "movie" && l.file == 1)
+        .count()
+}
+
+/// A row of A holds bytes from its equivalent origin B (two sources of
+/// three; the third, C, is added once the origin is set).
+struct OriginRow {
+    a: Panel,
+    b: Panel,
+    cc: Panel,
+    sa: String,
+    sb: String,
+    sc: String,
+    cb: CopyRef,
+    id: i64,
+    part: PathBuf,
+    held: i64,
+}
+
+async fn origin_row(c: &Ctx, seed: u64, tag: &str, own: Variant, third: Variant) -> OriginRow {
+    let size = 24 * MIB;
+    let (a, b, cc) = (
+        Panel::spawn(seed).await,
+        Panel::spawn(seed + 1).await,
+        Panel::spawn(seed + 2).await,
+    );
+    for p in [&a, &b, &cc] {
+        p.set_reported(1);
+        p.set_enforced(1);
+    }
+    a.file_variant(1, size, 2 * 1024, own);
+    b.file(1, size, 2 * 1024);
+    cc.file_variant(1, size, 2 * 1024, third);
+    let ids = equivalent_sources(c, &[&a, &b], tag).await;
+    let (sa, sb) = (ids[0].clone(), ids[1].clone());
+    let own = CopyRef::new(movie_ref(&sa, 1), None);
+    let cb = CopyRef::new(movie_ref(&sb, 1), None);
+    assert_eq!(verify_copy(c, &own).await, 0, "B is only equivalent");
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![sa.clone()]).await;
+    let d = c.start_movie(&sa, 1, &a.movie_url(1)).await;
+    c.wait_until(d.id, "4 MiB from B", |r| {
+        r.served_by.as_deref() == Some(sb.as_str()) && r.bytes_downloaded > 4 * MIB as i64
+    })
+    .await;
+    let part = c.pause(d.id).await;
+    let row = c.get(d.id).await;
+    assert_eq!(row.origin.as_ref(), Some(&cb), "B is the origin");
+    let sc = add_xtream_source(&c.state, &format!("{tag}-2"), &cc).await;
+    add_movie(&c.state, &sc, 1, "Two Copies (2022)", Some(2022), "mp4").await;
+    c.state
+        .settings
+        .write()
+        .download_probe_disabled
+        .push(sc.clone());
+    verify_copy(c, &cb).await;
+    assert!(
+        c.identical(&cb).await.iter().any(|x| x.source_id() == sc),
+        "C passes the origin's samples"
+    );
+    OriginRow {
+        a,
+        b,
+        cc,
+        sa,
+        sb,
+        sc,
+        cb,
+        id: d.id,
+        part,
+        held: row.bytes_downloaded,
+    }
+}
+
+/// A row with an origin on B is spread to C, verified identical to B, and
+/// C's file was replaced meanwhile. The respread retires C's verdict
+/// against the origin (the pair that made C a target), so the row is not
+/// placed on C again while A and B stay busy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn an_origin_row_spread_to_a_changed_copy_leaves_it() {
+    let c = xctx().await;
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(60),
+        Duration::from_secs(120),
+    );
+    let r = origin_row(&c, 86, "o-chg", Variant::Differs, Variant::Same).await;
+    r.cc.file_variant(1, 30 * MIB, 2 * 1024, Variant::Same);
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![r.sa.clone(), r.sb.clone()]).await;
+    let from_c = r.cc.log().len();
+    c.ok("downloads.resume", json!({"id": r.id})).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let asked = movie_requests(&r.cc, from_c);
+    let still = c.identical(&r.cb).await;
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    c.ok("downloads.cancel", json!({"id": r.id})).await;
+    assert!(
+        !still.iter().any(|x| x.source_id() == r.sc),
+        "C is still taken for the origin's copy: {still:?}"
+    );
+    let log: Vec<_> = r.cc.log().into_iter().skip(from_c).collect();
+    // One placement: C's fingerprint (three samples) and one range.
+    assert!(asked <= 4, "C was asked {asked} times in 10 s: {log:?}");
+}
+
+/// A row with an origin on B is spread to C, which passes B's samples and
+/// differs elsewhere: the bytes from B stay, the row goes back to the
+/// queue, and once B is free the file is B's throughout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn an_origin_row_spread_to_another_file_keeps_the_origin_bytes() {
+    let c = xctx().await;
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(60),
+        Duration::from_secs(120),
+    );
+    let r = origin_row(
+        &c,
+        89,
+        "o-oth",
+        Variant::Differs,
+        Variant::DiffersOutsideSamples,
+    )
+    .await;
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![r.sa.clone(), r.sb.clone()]).await;
+    let from_c = r.cc.log().len();
+    c.ok("downloads.resume", json!({"id": r.id})).await;
+    until("C asked", || movie_requests(&r.cc, from_c) > 0).await;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let row = loop {
+        let row = c.get(r.id).await;
+        if row.status == DownloadStatus::Queued || Instant::now() > deadline {
+            break row;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    let kept = std::fs::read(sidecar(&r.part))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .map(|v| {
+            v["segments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|s| {
+                    let k = s["src"].as_u64().unwrap() as usize;
+                    v["sources"][k]["copy"]["ref"]["sourceId"] == r.sb.as_str()
+                })
+                .map(|s| s["pos"].as_i64().unwrap() - s["start"].as_i64().unwrap())
+                .sum::<i64>()
+        });
+    assert_eq!(row.status, DownloadStatus::Queued, "{row:?}");
+    assert!(
+        kept.is_some_and(|k| k >= r.held),
+        "the {} bytes from the origin were thrown away (kept {kept:?})",
+        r.held
+    );
+    // B is free: the row ends there.
+    r.b.set_speed(1, 16 * 1024);
+    r.a.set_speed(1, 16 * 1024);
+    iptv_core::downloads::set_playback(&c.state, "tv", vec![r.sa.clone()]).await;
+    let end = c
+        .wait_until(r.id, "ended", |d| {
+            matches!(d.status, DownloadStatus::Completed | DownloadStatus::Failed)
+        })
+        .await;
+    iptv_core::downloads::set_playback(&c.state, "tv", Vec::new()).await;
+    assert_eq!(end.status, DownloadStatus::Completed, "{end:?}");
+    dl_panel::is_exact(1, 24 * MIB, Path::new(&end.file_path.unwrap()))
+        .expect("the file is the origin's copy throughout");
+}

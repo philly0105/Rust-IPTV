@@ -683,8 +683,9 @@ pub async fn run(
                         }
                         Err(WorkerError::Mismatch { other }) => {
                             let me = src as u16;
+                            // The entry of the copy the row's bytes are.
                             let home = |k: u16| {
-                                k != 0 && plan.lock().ranges.sources[usize::from(k)].copy.is_none()
+                                k != 0 && plan.lock().ranges.sources[usize::from(k)].copy == job.base
                             };
                             if me == 0 && other == 0 {
                                 fail!(WorkerError::Changed(

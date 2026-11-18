@@ -666,6 +666,9 @@ pub struct Job<'a> {
     /// The row's own copy: the sidecar names it `None` whether it served
     /// as the authority or as a mirror.
     pub own: CopyRef,
+    /// The sidecar entry of the copy the row's bytes are: its origin, or
+    /// `None` (its own copy).
+    pub base: Option<CopyRef>,
     /// Mirrors to look for, when they apply to this transfer.
     pub mirrors: Option<MirrorPlan>,
 }

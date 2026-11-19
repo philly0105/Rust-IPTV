@@ -11,6 +11,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { PlayerSource } from '@/api/types';
 import { TS_MAX_RESTARTS, tsRestartDelay } from '@/features/player/engines';
 
+import { STALL_TIMEOUT_MS } from '../useTilePlayback';
+
 import type { MultiviewChannelInput } from '../types';
 import { useTilePlayback, type TilePlaybackOptions } from '../useTilePlayback';
 import { input, installMediaStubs } from './harness';
@@ -20,6 +22,8 @@ const h = vi.hoisted(() => ({
   created: [] as string[],
   /** What the channel resolves to. */
   url: 'http://panel/live/u/p/1.ts',
+  /** Every rpc call: [command, args]. */
+  rpcs: [] as Array<[string, unknown]>,
 }));
 
 vi.mock('mpegts.js', () => {
@@ -50,6 +54,7 @@ vi.mock('mpegts.js', () => {
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
   proxiedUrl: (s: PlayerSource) => s.url,
+  rpc: async (cmd: string, args?: unknown) => void h.rpcs.push([cmd, args]),
 }));
 
 vi.mock('../stream', () => ({
@@ -60,7 +65,7 @@ vi.mock('../stream', () => ({
 function Probe({ ch, opts }: { ch: MultiviewChannelInput; opts: TilePlaybackOptions }) {
   const p = useTilePlayback(ch, opts);
   return (
-    <div data-testid="tile" data-phase={p.phase} data-message={p.fault?.message ?? ''}>
+    <div data-testid="tile" data-phase={p.phase} data-message={p.fault?.message ?? ''} data-buffering={String(p.buffering)}>
       <video ref={p.videoRef} />
     </div>
   );
@@ -75,6 +80,7 @@ beforeAll(() => {
   (window as unknown as { MediaSource?: unknown }).MediaSource = function MediaSource() {};
 });
 beforeEach(() => {
+  h.rpcs.length = 0;
   h.created.length = 0;
   h.url = 'http://panel/live/u/p/1.ts';
 });
@@ -119,5 +125,30 @@ describe('the end of a live stream on a tile (seam-1)', () => {
     expect(tile().dataset['phase']).toBe('error');
     expect(tile().dataset['message']).toBe('The stream ended');
     expect(h.created).toEqual([]);
+  });
+});
+
+describe('the cushion of a live MPEG-TS tile', () => {
+  it('shows the hold as waiting, keeps its stall timeout through the pause, and logs the stall', async () => {
+    render(<Probe ch={input(3, 'srcA')} opts={OPTS} />);
+    await waitFor(() => expect(h.created).toHaveLength(1));
+    await act(async () => undefined);
+    vi.useFakeTimers();
+
+    // Nothing buffered yet: the tile holds for the cushion.
+    fire('playing');
+    expect(tile().dataset['phase']).toBe('playing');
+    expect(tile().dataset['buffering']).toBe('true');
+    // The hold's own pause fires timeupdate; that is not progress.
+    fire('timeupdate');
+    expect(tile().dataset['buffering']).toBe('true');
+
+    // A stream that never sends anything still fails at the tile's stall timeout.
+    act(() => void vi.advanceTimersByTime(STALL_TIMEOUT_MS));
+    expect(tile().dataset['phase']).toBe('error');
+    expect(tile().dataset['message']).toBe('The stream stopped sending data');
+    expect(h.rpcs.filter(([cmd]) => cmd === 'player.reportStall')).toEqual([
+      ['player.reportStall', expect.objectContaining({ sourceId: 'srcA', outcome: 'abandoned', startup: true, durationMs: STALL_TIMEOUT_MS })],
+    ]);
   });
 });

@@ -27,6 +27,8 @@ pub const COMMANDS: &[&str] = &[
     "mpv.stats",
     // subtitles: external subtitle files in embedded mpv (Run 2 C6).
     "mpv.addSubtitle",
+    // multiview: a live tile's stall, written to the log.
+    "player.reportStall",
 ];
 
 /// External and embedded players run on the user's machine, so only the
@@ -109,6 +111,32 @@ struct SetPropertyArgs {
 #[serde(rename_all = "camelCase")]
 struct AddSubtitleArgs {
     path: String,
+}
+
+/// How a tile's stall ended.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StallOutcome {
+    /// The cushion refilled and the tile played on.
+    Resumed,
+    /// The cushion never refilled; the tile played on with what it had.
+    TimedOut,
+    /// The tile failed or was closed while still waiting.
+    Abandoned,
+}
+
+/// `player.reportStall` args: one stall of a live multiview tile. Numbers
+/// only, never a stream URL, so the log stays free of credentials.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StallReportArgs {
+    source_id: String,
+    outcome: StallOutcome,
+    /// The hold before the tile's first motion, not a stall mid-stream.
+    startup: bool,
+    duration_ms: u64,
+    ahead_at_stall_ms: u64,
+    ahead_at_resume_ms: u64,
 }
 
 /// Registers this module's commands.
@@ -212,6 +240,21 @@ pub fn register(r: &mut RpcRouter) {
     r.add("mpv.addSubtitle", |state, a: AddSubtitleArgs| async move {
         ensure_desktop(&state)?;
         embedded::add_subtitle(&state, &a.path).await?;
+        Ok::<_, RpcError>(())
+    });
+
+    // multiview: tiles play in the page, so their stalls reach the log only through here.
+    r.add("player.reportStall", |_state, a: StallReportArgs| async move {
+        let source_id: String = a.source_id.chars().take(64).collect();
+        tracing::info!(
+            %source_id,
+            outcome = ?a.outcome,
+            startup = a.startup,
+            duration_ms = a.duration_ms,
+            ahead_at_stall_ms = a.ahead_at_stall_ms,
+            ahead_at_resume_ms = a.ahead_at_resume_ms,
+            "multiview tile stalled"
+        );
         Ok::<_, RpcError>(())
     });
 }

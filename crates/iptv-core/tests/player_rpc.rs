@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 
-const EXPECTED: [&str; 15] = [
+const EXPECTED: [&str; 16] = [
     "mpv.addSubtitle",
     "mpv.attach",
     "mpv.command",
@@ -30,6 +30,7 @@ const EXPECTED: [&str; 15] = [
     "player.capabilities",
     "player.detect",
     "player.openExternal",
+    "player.reportStall",
     "player.stopExternal",
 ];
 

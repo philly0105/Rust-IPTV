@@ -303,6 +303,18 @@ export interface BackupImportResult {
 /** Value accepted in an mpv JSON IPC command array. */
 export type MpvArg = string | number | boolean;
 
+/** `player.reportStall`: one stall of a live multiview tile. Whole milliseconds. */
+export interface StallReport {
+  sourceId: string;
+  /** resumed: the cushion refilled; timedOut: played on with less; abandoned: failed or closed while waiting. */
+  outcome: 'resumed' | 'timedOut' | 'abandoned';
+  /** The hold before the tile's first motion, not a stall mid-stream. */
+  startup: boolean;
+  durationMs: number;
+  aheadAtStallMs: number;
+  aheadAtResumeMs: number;
+}
+
 /** `catalog.movies` / `catalog.series` args. */
 export interface VodListArgs {
   sourceId: string;
@@ -635,6 +647,8 @@ export interface RpcMap {
    * extension srt/vtt/ass/ssa, <= 5 MB, else invalid. Runs `sub-add <path> select` on the IPC client.
    */
   'mpv.addSubtitle': Cmd<{ path: string }, void>;
+  /** Writes one live multiview tile stall to the app log (numbers only, never a URL). */
+  'player.reportStall': Cmd<StallReport, void>;
   // failover: the same live channel on other sources, best first.
   'live.alternates': Cmd<{ ref: ItemRef }, LiveAlternates>;
 
@@ -942,6 +956,7 @@ export const RPC_COMMANDS = [
   'mpv.record',
   'mpv.stats',
   'mpv.addSubtitle',
+  'player.reportStall',
   'live.alternates',
   'account.status',
   'account.statusAll',

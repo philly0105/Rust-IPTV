@@ -4,6 +4,9 @@
  * error, element error, start or stall timeout, stream end) stops only itself and shows
  * why; the others keep playing. Retry rebuilds only this tile.
  *
+ * A live MPEG-TS tile holds for a few seconds of buffer at its start and after each stall
+ * (`liveCushion.ts`), and each hold goes to the app log (`player.reportStall`).
+ *
  * Sound: the element is muted unless this tile has the wall's sound. Browsers refuse sound
  * before the first user gesture on the page (a reload straight into the wall): the tile then
  * plays muted, reports `soundBlocked`, and turns its sound on at the next click or key.
@@ -16,7 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { itemKey, type PlayerSource } from '@/api/types';
-import { proxiedUrl } from '@/api/transport';
+import { proxiedUrl, rpc } from '@/api/transport';
 import { rpcErrorCode } from '@/features/player/errors';
 
 import {
@@ -29,6 +32,7 @@ import {
   type Engine,
 } from './engine';
 import type { TileFault } from './errors';
+import { attachLiveCushion, type CushionStall, type LiveCushion } from './liveCushion';
 import { resolveTileSource } from './stream';
 import type { MultiviewChannelInput } from './types';
 import { tilePlaying, tileStopped, wallReportAnswered } from './wallReport';
@@ -86,6 +90,11 @@ function errorText(err: unknown): string {
 function hadGesture(): boolean {
   const ua = (typeof navigator !== 'undefined' ? (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation : undefined);
   return ua ? ua.hasBeenActive : true;
+}
+
+/** A live tile's stall goes to the app log, where freezes can be lined up with what else ran. */
+function reportStall(sourceId: string, stall: CushionStall): void {
+  void rpc('player.reportStall', { sourceId, ...stall }).catch(() => undefined);
 }
 
 const INITIAL: TilePlaybackState = { phase: 'resolving', fault: null, buffering: false, soundBlocked: false };
@@ -150,12 +159,16 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
     let startTimer: ReturnType<typeof setTimeout> | undefined;
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
     let beginTimer: ReturnType<typeof setTimeout> | undefined;
+    /** Live MPEG-TS only (`liveCushion.ts`). */
+    let cushion: LiveCushion | null = null;
     const clearTimers = (): void => {
       clearTimeout(startTimer);
       clearTimeout(stallTimer);
     };
 
     const release = (): void => {
+      cushion?.destroy();
+      cushion = null;
       engineRef.current?.destroy();
       engineRef.current = null;
       try {
@@ -190,7 +203,8 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
       stallTimer = setTimeout(() => fail({ code: 'timeout', message: 'The stream stopped sending data' }), STALL_TIMEOUT_MS);
     };
     const onProgress = (): void => {
-      if (!isCurrent()) return;
+      // A cushion hold pauses the element, which fires timeupdate: not progress.
+      if (!isCurrent() || cushion?.holding()) return;
       clearTimeout(stallTimer);
       setState((s) => (s.buffering ? { ...s, buffering: false } : s));
     };
@@ -268,6 +282,14 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
             return;
           }
           engineRef.current = engine;
+          if (src.isLive && engine.kind === 'mpegts') {
+            const sourceId = chRef.current.ref.sourceId;
+            cushion = attachLiveCushion(el, {
+              play: () => startPlay(el, isCurrent),
+              onHold: onWaiting,
+              onStall: (stall) => reportStall(sourceId, stall),
+            });
+          }
           startPlay(el, isCurrent);
         })
         .catch((err: unknown) => {

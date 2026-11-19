@@ -113,7 +113,7 @@ test.describe.serial('first-run tour and What\'s new', () => {
     await expect(page.getByTestId('tour-spotlight')).toBeVisible();
 
     await showAround(page);
-    await expect(card.getByRole('heading', { name: 'Your sources' })).toBeVisible();
+    await expect(card.getByRole('heading', { name: 'Live TV', exact: true })).toBeVisible();
     await expect(page.getByTestId('tour-next')).toBeFocused();
 
     // A visible anchor gets the spotlight; without one the card is centred.
@@ -237,7 +237,8 @@ test.describe.serial('first-run tour and What\'s new', () => {
     await expect(dialog).toContainText(`Version ${version}`);
     expect(await dialog.getByTestId('whats-new-item').count()).toBeGreaterThan(0);
     await expect(dialog.getByTestId('whats-new-item').first().locator('svg')).toBeVisible();
-    await expect(dialog.getByTestId('whats-new-close')).toBeFocused();
+    // Automatic updates focus the notes; Got it takes focus when opened by hand.
+    await expect(dialog.locator('[data-autofocus]')).toBeFocused();
 
     await dialog.getByTestId('whats-new-close').click();
     await expect(dialog).toHaveCount(0);
@@ -294,6 +295,10 @@ test.describe.serial('first-run tour and What\'s new', () => {
         await tourCard(page).getByTestId('tour-next').click();
       }
 
+      // The accessibility walk outlasts the startup window for automatic release notes.
+      // Completing the tour leaves them unseen until the next launch.
+      await expect.poll(async () => (await markers(request)).tourCompleted).toBe(true);
+      await page.reload();
       const dialog = page.getByTestId('whats-new');
       await expect(dialog).toBeVisible(SHOW);
       await settle(page, 300);

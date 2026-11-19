@@ -169,7 +169,7 @@ test('main flow (Run 2): rename and hide, a two-source list, guide search and a 
   const second = (await rpc<CustomListEntry[]>(request, 'lists.items', { id: list!.id }))[1]!;
 
   // Zap through the list: Page Down goes on to the playlist's channel, Page Up comes back.
-  await page.getByTestId('lists-section').getByRole('link', { name: /Main flow/ }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Channel lists', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/lists/${list!.id}$`));
   const listRows = page.getByTestId('list-page').getByTestId('channel-list').locator('button[data-row-index]');
   await expect(listRows).toHaveCount(2);

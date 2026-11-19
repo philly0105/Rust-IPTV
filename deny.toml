@@ -27,7 +27,12 @@ all-features = false
 unmaintained = "workspace"
 unsound = "workspace"
 yanked = "deny"
-ignore = []
+ignore = [
+    # Chrono has no patched release. Keep its existing date/time API for now;
+    # replacing it across the core and mock is a separate migration. This
+    # exception covers only the maintenance notice, not vulnerabilities.
+    { id = "RUSTSEC-2026-0543", reason = "Chrono migration deferred; no patched release exists" },
+]
 
 [licenses]
 # Every licence found in Cargo.lock for the targets above, as of 0.2.0. All of

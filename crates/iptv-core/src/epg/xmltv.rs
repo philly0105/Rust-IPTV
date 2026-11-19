@@ -386,6 +386,14 @@ pub fn parse_with_limits<R: BufRead>(
                     cap.push(&unescape_lenient(&decoded));
                 }
             }
+            // quick-xml emits references separately from text since 0.38.
+            // Keep the parser's lenient handling of named and numeric entities.
+            Event::GeneralRef(r) => {
+                if let Some(cap) = p.capture.as_mut() {
+                    let decoded = decode(&r, p.latin1);
+                    cap.push(&unescape_lenient(&format!("&{decoded};")));
+                }
+            }
             Event::CData(t) => {
                 if let Some(cap) = p.capture.as_mut() {
                     cap.push(&decode(&t, p.latin1));
@@ -452,6 +460,8 @@ pub fn parse_with_limits<R: BufRead>(
 fn xml_reader<R: BufRead>(inner: R) -> Reader<R> {
     let mut xml = Reader::from_reader(inner);
     let cfg = xml.config_mut();
+    // Provider titles often contain bare ampersands.
+    cfg.allow_dangling_amp = true;
     cfg.trim_text(false);
     cfg.check_end_names = false;
     cfg.allow_unmatched_ends = true;

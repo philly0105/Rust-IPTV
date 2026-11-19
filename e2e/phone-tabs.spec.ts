@@ -46,11 +46,11 @@ test.describe.serial('phone tab bar at 390x844', () => {
     await expect(tabBar(page)).toBeVisible();
     await expectCurrent(page, 'Home');
     await tab(page, 'Live TV').click();
-    await expect(page).toHaveURL(/\/sources$/);
+    await expect(page).toHaveURL(/\/sources\?for=live$/);
     await expect(page.getByTestId('sources-page')).toBeVisible();
-    // Sources lives in the More sheet, so More is the current tab.
-    await expect(moreButton(page)).toHaveAttribute('aria-current', 'true');
-    await expect(tab(page, 'Live TV')).not.toHaveAttribute('aria-current');
+    // The tab stays current on the source setup page it opened.
+    await expectCurrent(page, 'Live TV');
+    await expect(moreButton(page)).not.toHaveAttribute('aria-current');
   });
 
   test('each tab opens its page and is the one marked current', async ({ page, request }) => {
@@ -79,9 +79,9 @@ test.describe.serial('phone tab bar at 390x844', () => {
     const sheet = page.getByRole('dialog', { name: 'More' });
     await expect(sheet).toBeVisible();
     await expect(more).toHaveAttribute('aria-expanded', 'true');
-    // Library, the source with what it holds, and the pages below them.
-    await expect(sheet.getByRole('list', { name: NAME }).getByRole('link', { name: 'Movies', exact: true })).toBeVisible();
-    await expect(sheet.getByRole('link', { name: 'Manage sources', exact: true })).toBeVisible();
+    // Watch links, Library, and the source management link.
+    await expect(sheet.getByRole('region', { name: 'Watch', exact: true }).getByRole('link', { name: 'Movies', exact: true })).toBeVisible();
+    await expect(sheet.getByRole('region', { name: 'Sources', exact: true }).getByRole('link', { name: `${NAME}, Manage sources`, exact: true })).toBeVisible();
 
     await sheet.getByRole('link', { name: 'Favorites', exact: true }).click();
     await expect(page).toHaveURL(/\/favorites$/);

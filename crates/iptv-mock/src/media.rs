@@ -415,10 +415,41 @@ pub fn live_segment(n: u64) -> Vec<u8> {
     retime_ts(LIVE_SEGMENTS[(n % LOOP_SEGMENTS) as usize], offset)
 }
 
-/// One pass of the loop (32 s) as a single MPEG-TS body, for archive
-/// (`timeshift`) `.ts` URLs.
+/// One pass of the loop (32 s) as a single MPEG-TS body.
 pub fn live_loop_ts() -> Vec<u8> {
     LIVE_SEGMENTS.concat()
+}
+
+/// A finite archive with the requested duration and continuous timestamps.
+/// Generate only the requested byte range, so long programmes stay cheap.
+pub fn archive_ts(headers: &HeaderMap, minutes: u32) -> Response {
+    let segments = u64::from(minutes) * 60 / SEGMENT_SECONDS as u64;
+    let clip = Bytes::from(live_loop_ts());
+    let loop_len = clip.len() as u64;
+    let tail_len: u64 = LIVE_SEGMENTS
+        .iter()
+        .take((segments % LOOP_SEGMENTS) as usize)
+        .map(|s| s.len() as u64)
+        .sum();
+    let len = segments / LOOP_SEGMENTS * loop_len + tail_len;
+    let producer: Producer = Box::new(move |mut offset, count| {
+        let mut out = Vec::with_capacity(count);
+        while out.len() < count {
+            let pass = offset / loop_len;
+            let within = (offset % loop_len) as usize;
+            let shifted = retime_ts(&clip, pass * LOOP_TICKS);
+            let take = (count - out.len()).min(shifted.len() - within);
+            out.extend_from_slice(&shifted[within..within + take]);
+            offset += take as u64;
+        }
+        Bytes::from(out)
+    });
+    serve_bytes(
+        headers,
+        len,
+        producer,
+        ServeOpts::new("video/mp2t").etag(format!("\"archive-{minutes}\"")),
+    )
 }
 
 /// Serves an owned buffer with Range support.

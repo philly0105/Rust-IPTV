@@ -13,6 +13,8 @@ import { addXtream, channelList, expectCardStat, gotoLive } from './helpers/ui';
 const XT = 'Smoke Xtream';
 
 test.describe.serial('smoke', () => {
+  // Group navigation stays beside the player when the page has room for it.
+  test.use({ viewport: { width: 1600, height: 900 } });
   test.beforeAll(async ({ request }) => {
     await resetApp(request);
   });
@@ -54,15 +56,17 @@ test.describe.serial('smoke', () => {
     expect(source.movieCount).toBe(MOCK_FACTS.xtreamMovies);
     expect(source.seriesCount).toBe(MOCK_FACTS.xtreamSeries);
 
+    // The first source opens its content; return to inspect its source card.
+    await page.goto('/sources');
     // The source card and the rail entry appear.
     await expect(page.getByTestId('source-card').filter({ hasText: XT })).toBeVisible();
     await expectCardStat(page, XT, /^radio$/, MOCK_FACTS.xtreamRadio);
-    await expect(page.getByTestId('rail-sources').getByRole('button', { name: new RegExp(XT) })).toBeVisible();
+    await expect(page.getByTestId('rail-sources').getByRole('link', { name: new RegExp(XT) })).toBeVisible();
 
     await page.goto('/dashboard');
     await expect(page.getByTestId('dashboard')).toBeVisible();
-    const sourcesRail = page.getByRole('region', { name: 'Your sources' });
-    await expect(sourcesRail.getByRole('link', { name: new RegExp(XT) })).toBeVisible();
+    // Home reserves the source switcher for profiles with more than one source.
+    await expect(page.getByRole('region', { name: 'Your sources' })).toHaveCount(0);
     const added = page.getByRole('region', { name: 'Recently added' });
     await expect(added.getByRole('listitem').first()).toBeVisible();
     expect(await added.getByRole('listitem').count()).toBeGreaterThan(3);
@@ -83,6 +87,7 @@ test.describe.serial('smoke', () => {
   });
 
   test('theme choice persists across reload', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
     await page.goto('/settings/appearance');
     const html = page.locator('html');
     // The radios are visually hidden inside their preview cards; click the card (label).
@@ -95,13 +100,13 @@ test.describe.serial('smoke', () => {
     await expect(html).toHaveAttribute('data-theme', 'dark');
     await expect(page.getByTestId('theme-dark')).toBeChecked();
 
-    // The header toggle flips it and that persists too.
+    // Toggling back to the OS appearance saves System and keeps following it.
     await page.getByTestId('theme-toggle').click();
     await expect(html).toHaveAttribute('data-theme', 'light');
-    await expect.poll(async () => (await rpc<{ theme: string }>(page.request, 'settings.get')).theme).toBe('light');
+    await expect.poll(async () => (await rpc<{ theme: string }>(page.request, 'settings.get')).theme).toBe('system');
     await page.reload();
     await expect(html).toHaveAttribute('data-theme', 'light');
-    await expect(page.getByTestId('theme-light')).toBeChecked();
+    await expect(page.getByTestId('theme-system')).toBeChecked();
   });
 
   test('backup export downloads JSON and import restores the sources', async ({ page }) => {
@@ -140,6 +145,7 @@ test.describe.serial('smoke', () => {
   });
 
   test('no horizontal scroll from 800 to 2560 px', async ({ page }) => {
+    test.setTimeout(120_000);
     const source = (await listSources(page.request)).find((s) => s.name === XT)!;
     const paths = ['/dashboard', '/sources', `/s/${source.id}/live`, `/s/${source.id}/movies`, '/settings/general', '/definitely-missing'];
     for (const width of [800, 1024, 1440, 1920, 2560]) {

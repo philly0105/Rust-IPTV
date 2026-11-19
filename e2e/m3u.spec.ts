@@ -56,6 +56,8 @@ function sourceCard(page: Page, name: string) {
 }
 
 test.describe.serial('m3u flow', () => {
+  // Group navigation stays beside the player when the page has room for it.
+  test.use({ viewport: { width: 1600, height: 900 } });
   let source: Source;
 
   test.beforeAll(async ({ request }) => {
@@ -69,6 +71,8 @@ test.describe.serial('m3u flow', () => {
     expect(source.radioCount).toBe(MOCK_FACTS.m3uRadio);
     // The playlist header's url-tvg becomes a detected EPG url.
     expect(source.epg.detectedUrls.some((u) => u.includes('/xmltv/sample.xml'))).toBe(true);
+    // The first source opens its content; return to inspect its source card.
+    await page.goto('/sources');
     await expectCardStat(page, URL_NAME, /^channels$/, MOCK_FACTS.m3uChannels);
     await expectCardStat(page, URL_NAME, /^radio$/, MOCK_FACTS.m3uRadio);
 
@@ -115,12 +119,12 @@ test.describe.serial('m3u flow', () => {
 
     const ribbon = page.getByTestId('epg-ribbon');
     await expect(ribbon).toBeVisible();
-    const now = ribbon.getByRole('button', { name: /, on now(, start over available)?$/ });
+    const now = ribbon.getByRole('button', { name: /, on now(, playing)?(, start over available)?$/ });
     await expect(now).toHaveCount(1);
     // The programme after "now" is in the timeline too.
     const blocks = ribbon.getByRole('group', { name: 'Timeline' }).getByRole('button');
     const labels = await blocks.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? e.textContent ?? ''));
-    const nowIndex = labels.findIndex((l) => /, on now(, start over available)?$/.test(l));
+    const nowIndex = labels.findIndex((l) => /, on now(, playing)?(, start over available)?$/.test(l));
     expect(nowIndex).toBeGreaterThanOrEqual(0);
     expect(labels.length, 'a next programme follows the current one').toBeGreaterThan(nowIndex + 1);
 
@@ -145,8 +149,10 @@ test.describe.serial('m3u flow', () => {
   test('favorite a channel and find it in /favorites', async ({ page }) => {
     await gotoLive(page, source.id);
     const row = channelRow(page, 'BBC News');
-    await row.getByRole('button', { name: 'Add to favorites' }).click();
-    await expect(row.getByRole('button', { name: 'Remove from favorites' })).toBeVisible();
+    const favorite = row.getByRole('button', { name: 'Favorite', exact: true });
+    await expect(favorite).toHaveAttribute('aria-pressed', 'false');
+    await favorite.click();
+    await expect(favorite).toHaveAttribute('aria-pressed', 'true');
     await expect.poll(async () => (await favorites(page.request)).map((f) => f.snapshot.title)).toContain('BBC News');
 
     await page.goto('/favorites');
@@ -190,7 +196,7 @@ test.describe.serial('m3u flow', () => {
 
     // Edit: new text replaces the channels of the same source.
     await card.getByRole('button', { name: `Edit ${TEXT_NAME}`, exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: `Edit ${TEXT_NAME}` });
+    const dialog = page.getByRole('dialog', { name: 'Edit source', exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId('m3u-text-origin-note')).toBeVisible();
     const text = dialog.getByTestId('m3u-replace-text');

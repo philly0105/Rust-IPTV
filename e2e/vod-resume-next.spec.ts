@@ -58,13 +58,11 @@ test.describe.serial('vod: resume offer and next episode', () => {
     await page.evaluate(() => sessionStorage.clear());
     await page.goto(detailUrl);
     const detail = page.getByTestId('vod-movie-detail');
-    const resume = detail.getByRole('button', { name: /^Resume from 0:[2-5]\d$/ });
+    const actions = detail.getByTestId('vod-hero-actions');
+    const resume = actions.getByRole('button', { name: /^Resume from 0:[2-5]\d$/ });
     await expect(resume).toBeVisible({ timeout: 20_000 });
-    // Start over waits in the hero's More menu, beside Resume.
-    await detail.getByRole('button', { name: 'More actions', exact: true }).click();
-    await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Start over', exact: true })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('menu')).toHaveCount(0);
+    // Start over is available beside Resume in the hero.
+    await expect(actions.getByRole('button', { name: 'Start over', exact: true })).toBeVisible();
     expect(await resumeRecord(page)).toBeNull();
 
     await resume.click();

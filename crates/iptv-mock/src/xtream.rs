@@ -747,12 +747,7 @@ fn timeshift_body(base: &str, headers: &HeaderMap, file: &str, dur: &str) -> Res
         Some((_, "m3u8")) => {
             media::m3u8_response(media::vod_playlist(base, (minutes * 30).min(1_800)))
         }
-        Some((_, "ts")) | Some((_, "")) => media::serve_owned(
-            headers,
-            media::live_loop_ts(),
-            "video/mp2t",
-            "\"live-loop\"".to_string(),
-        ),
+        Some((_, "ts")) | Some((_, "")) => media::archive_ts(headers, minutes),
         _ => (StatusCode::NOT_FOUND, "unknown archive").into_response(),
     }
 }

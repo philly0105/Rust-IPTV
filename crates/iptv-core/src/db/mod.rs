@@ -868,10 +868,10 @@ fn open_and_migrate_with(
 /// after a large write (a catalog import) grew it. Never blocks: when a
 /// reader or writer is busy the checkpoint does what it can and the WAL is
 /// truncated by a later one. Errors are logged, never returned.
-pub fn checkpoint_truncate(conn: &Connection) {
+pub fn checkpoint_truncate(conn: &mut Connection) {
     // Without a busy handler a busy reader or writer makes the checkpoint
     // fall back to a passive one (busy = 1) instead of waiting for it.
-    if conn.busy_handler(None).is_err() {
+    if conn.busy_handler(None::<fn(i32) -> bool>).is_err() {
         return;
     }
     match conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {

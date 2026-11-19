@@ -27,6 +27,8 @@ test.describe.serial('xtream flow', () => {
     expect(source.seriesCount).toBe(MOCK_FACTS.xtreamSeries);
     // Sync records the portal's XMLTV endpoint as a detected guide.
     expect(source.epg.detectedUrls.some((u) => u.includes('/xtream/xmltv.php'))).toBe(true);
+    // The first source opens its content; return to inspect its source card.
+    await page.goto('/sources');
     await expectCardStat(page, NAME, /^channels$/, MOCK_FACTS.xtreamLive);
     await expectCardStat(page, NAME, /^radio$/, MOCK_FACTS.xtreamRadio);
   });

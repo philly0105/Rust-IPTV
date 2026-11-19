@@ -35,7 +35,7 @@ test.describe.serial('keyboard shortcuts', () => {
     await expect(overlay).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
     for (const combo of C16) {
-      const row = overlay.locator(`[data-combo="${combo}"]`).first();
+      const row = overlay.locator(`[data-combos~="${combo}"]`).first();
       await expect(row, `overlay lists ${combo}`).toBeVisible();
       await expect(row.locator('dt')).not.toBeEmpty();
     }
@@ -87,6 +87,8 @@ test.describe.serial('keyboard shortcuts', () => {
   });
 
   test('mod+b toggles the live groups sidebar', async ({ page }) => {
+    // Leave room for the groups column beside the shell rail and player.
+    await page.setViewportSize({ width: 1600, height: 900 });
     await gotoLive(page, sourceId);
     const groups = page.getByRole('navigation', { name: 'Groups' });
     await expect(groups).toBeVisible();

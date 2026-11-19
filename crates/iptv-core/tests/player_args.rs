@@ -108,6 +108,8 @@ fn mpv_external_minimal() {
             "--title=News HD",
             "--force-media-title=News HD",
             "--demuxer-lavf-analyzeduration=2",
+            "--cache-pause-initial=yes",
+            "--cache-pause-wait=3",
             "--",
             "http://h/live.m3u8"
         ])
@@ -134,6 +136,8 @@ fn mpv_external_with_headers_and_user_args() {
             "--http-header-fields=Origin:http://origin.example",
             "--force-media-title=Sports 1",
             "--demuxer-lavf-analyzeduration=2",
+            "--cache-pause-initial=yes",
+            "--cache-pause-wait=3",
             "--fs",
             "--profile=low latency",
             "--",
@@ -147,7 +151,13 @@ fn mpv_external_skips_blank_headers_and_title() {
     let src = source("http://h/a.ts", "  ", headers(Some(""), Some("   "), None));
     assert_eq!(
         mpv_external_args(&src, ""),
-        s(&["--demuxer-lavf-analyzeduration=2", "--", "http://h/a.ts"])
+        s(&[
+            "--demuxer-lavf-analyzeduration=2",
+            "--cache-pause-initial=yes",
+            "--cache-pause-wait=3",
+            "--",
+            "http://h/a.ts"
+        ])
     );
 }
 
@@ -521,9 +531,11 @@ fn live_loads_shorten_stream_analysis_unless_the_user_set_it() {
     // A profile applies where it stands, so it comes after the flag too.
     let ext = mpv_external_args(&src, "--profile=low-latency");
     assert_eq!(
-        &ext[ext.len() - 4..],
+        &ext[ext.len() - 6..],
         [
             "--demuxer-lavf-analyzeduration=2",
+            "--cache-pause-initial=yes",
+            "--cache-pause-wait=3",
             "--profile=low-latency",
             "--",
             "http://h/live/1.ts"

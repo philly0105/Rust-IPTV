@@ -44,6 +44,7 @@ Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://ke
 
 ### Fixed
 
+- Live channels in mpv (embedded or external) freeze far less often. mpv now keeps about 3 seconds of the stream buffered, before it starts and after a stall, instead of playing right at the live edge, where every delivery hiccup froze the picture. A live stream that is refilling that buffer is no longer reloaded after 5 seconds, which threw away what had arrived.
 - The search box no longer drops letters typed quickly on a slow machine.
 
 ## [0.3.0] - 2026-10-29

@@ -205,6 +205,7 @@ pub fn mpv_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> 
         args.push(format!(
             "--demuxer-lavf-analyzeduration={LIVE_ANALYZE_SECONDS}"
         ));
+        args.extend(LIVE_CUSHION_OPTIONS.iter().map(|(k, v)| format!("--{k}={v}")));
     }
     args.extend(split_shell_args(user_args));
     args.push("--".to_string());
@@ -306,6 +307,17 @@ pub const LIVE_TIMESHIFT_OPTIONS: &[(&str, &str)] = &[
     ("demuxer-seekable-cache", "yes"),
     ("force-seekable", "yes"),
 ];
+
+/// Per-file mpv options that keep a few seconds of a live stream buffered.
+/// By default mpv starts on the first decoded frame and resumes after a stall
+/// once 1 s is cached, so the playhead sits at the live edge and every
+/// delivery hiccup freezes the picture, often several times in a row. Here it
+/// waits for 3 s of stream before it starts and after each stall; the cushion
+/// then stays as a short delay behind the edge and absorbs the next hiccup.
+/// The start costs little: the stream analysis ([`LIVE_PROBE_OPTIONS`])
+/// already read about 2 s of it.
+pub const LIVE_CUSHION_OPTIONS: &[(&str, &str)] =
+    &[("cache-pause-initial", "yes"), ("cache-pause-wait", "3")];
 
 /// Seconds of a live stream FFmpeg analyzes before playback (see
 /// [`LIVE_PROBE_OPTIONS`]).
@@ -420,7 +432,7 @@ pub fn loadfile_options(
         // Timeshift: keep what was watched in the cache and let mpv seek in it,
         // so live TV can rewind (about 20 minutes of a 6 Mbit/s stream) and
         // jump back to the live edge.
-        for (k, v) in LIVE_TIMESHIFT_OPTIONS {
+        for (k, v) in LIVE_TIMESHIFT_OPTIONS.iter().chain(LIVE_CUSHION_OPTIONS) {
             opts.insert((*k).into(), Value::String((*v).to_string()));
         }
         for (k, v) in LIVE_PROBE_OPTIONS {
@@ -488,6 +500,15 @@ mod loadfile_tests {
     fn vod_items_buffer_ahead_and_live_items_do_not() {
         assert_eq!(options(false)["cache-pause-wait"], json!("5"));
         assert_eq!(options(false)["demuxer-readahead-secs"], json!("120"));
-        assert!(!options(true).contains_key("cache-pause-wait"));
+        assert!(!options(true).contains_key("demuxer-readahead-secs"));
+    }
+
+    /// Live starts and resumes only with a few seconds cached, so a delivery
+    /// hiccup is absorbed instead of freezing the picture.
+    #[test]
+    fn live_items_keep_a_cushion() {
+        assert_eq!(options(true)["cache-pause-initial"], json!("yes"));
+        assert_eq!(options(true)["cache-pause-wait"], json!("3"));
+        assert!(!options(false).contains_key("cache-pause-initial"));
     }
 }

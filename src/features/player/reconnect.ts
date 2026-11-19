@@ -78,9 +78,9 @@ export const CATCHUP_STALL_MS = 60_000;
  */
 export const LIVE_STALL_MS = 5_000;
 /**
- * A live stream whose engine received bytes this recently (`bytesLoaded`, hls.js) is still
- * downloading its next segment: it gets STALL_MS instead of LIVE_STALL_MS. A rebuild would throw
- * the nearly finished segment away and start behind the edge again.
+ * A live stream whose engine received data this recently (hls.js `bytesLoaded`, embedded mpv's
+ * cache growing) is still downloading its next segment or refilling its cushion: it gets STALL_MS
+ * instead of LIVE_STALL_MS. A rebuild would throw that data away and start behind the edge again.
  */
 export const LIVE_DATA_GRACE_MS = 2_000;
 /** Playback this long without a failure restores the full retry budget. */
@@ -428,10 +428,15 @@ function heldUntil(position: number): number {
   return end;
 }
 
-/** A live stream's engine bytes (`MediaCommands.bytesLoaded`); -1 for VOD or an engine that doesn't say. */
+/**
+ * How much of a live stream has arrived, in any unit that grows with it: the engine's bytes
+ * (`MediaCommands.bytesLoaded`), else where embedded mpv's cache ends (it refills a few seconds
+ * after a stall before it plays on: `LIVE_CUSHION_OPTIONS`). -1 for VOD or when neither says.
+ */
 function liveBytes(isLive: boolean): number {
   if (!isLive) return -1;
-  return useMediaStore.getState().commands?.bytesLoaded?.() ?? -1;
+  const m = useMediaStore.getState();
+  return m.commands?.bytesLoaded?.() ?? m.mpv?.seekable?.end ?? -1;
 }
 
 /**

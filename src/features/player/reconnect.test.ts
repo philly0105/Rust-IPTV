@@ -303,6 +303,37 @@ describe('smart reconnect', () => {
     expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1 });
   });
 
+  it('waits on embedded mpv refilling a live cushion, at most STALL_MS', () => {
+    const { LIVE_STALL_MS } = reconnect;
+    usePlayerStore.setState({ source: live, mode: 'embedded-mpv', status: 'playing', positionSeconds: 10 });
+    const mpv = (end: number): MpvState => ({
+      attached: true,
+      loaded: true,
+      paused: false,
+      timePos: 10,
+      volume: 100,
+      muted: false,
+      tracks: [],
+      fullscreen: false,
+      recording: false,
+      recordPath: null,
+      buffering: true,
+      seekable: { start: 0, end },
+    });
+    // paused-for-cache while the cache fills slower than real time.
+    media.useMediaStore.setState({ waiting: true, mpv: mpv(10) });
+    const t0 = Date.now();
+    let s = 0;
+    while (Date.now() - t0 < STALL_MS - 1000) {
+      vi.advanceTimersByTime(1000);
+      media.useMediaStore.setState({ mpv: mpv(10 + ++s / 2) });
+    }
+    expect(Date.now() - t0).toBeGreaterThan(LIVE_STALL_MS);
+    expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(1000);
+    expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1 });
+  });
+
   it('keeps STALL_MS for a live stream that is not buffering, and for VOD that is', () => {
     const { LIVE_STALL_MS } = reconnect;
     start(live, 10);

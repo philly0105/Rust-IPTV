@@ -53,7 +53,7 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 flate2 = "1"
 memchr = "2"
 regex = "1"
-base64 = "0.22"
+base64 = "0.23"
 # imagecache: downscaled poster/logo variants (JPEG and PNG only).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 hex = "0.4"
